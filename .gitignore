@@ -1,0 +1,20 @@
+# macOS
+.DS_Store
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Backend
+backend/bin/
+backend/obj/
+
+# IDE and tooling
+.idea/
+.vscode/
