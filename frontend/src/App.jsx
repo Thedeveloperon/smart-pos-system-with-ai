@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   buildStatusCounts,
   clearSyncErrors,
@@ -31,6 +31,25 @@ const EMPTY_SYNC_COUNTS = {
   conflict: 0,
   rejected: 0,
 }
+
+const BUTTON_BASE =
+  'inline-flex items-center justify-center rounded-lg font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60'
+const BUTTON_SM = 'h-8 px-3 text-xs'
+const BUTTON_MD = 'h-10 px-4 text-sm'
+const BUTTON_LG = 'h-11 px-4 text-sm'
+const BUTTON_PRIMARY = 'bg-brand-700 text-white hover:bg-brand-600'
+const BUTTON_SECONDARY = 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-100'
+const BUTTON_DARK = 'bg-slate-900 text-white hover:bg-slate-700'
+const BUTTON_DANGER = 'border border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100'
+const BUTTON_SUCCESS = 'bg-emerald-700 text-white hover:bg-emerald-600'
+const BUTTON_WARNING = 'border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
+const RECENT_SALES_PAGE_SIZE = 15
+const ADMIN_SECTIONS = [
+  { key: 'operations', label: 'Operations', inventoryOnly: false },
+  { key: 'inventory', label: 'Inventory', inventoryOnly: true },
+  { key: 'reports', label: 'Reports', inventoryOnly: true },
+  { key: 'sync', label: 'Sync', inventoryOnly: false },
+]
 
 function readOnboardingDismissed() {
   if (typeof window === 'undefined') {
@@ -175,6 +194,11 @@ function App() {
   const [payments, setPayments] = useState([emptyPayment('cash')])
   const [heldBills, setHeldBills] = useState([])
   const [recentSales, setRecentSales] = useState([])
+  const [isRecentSalesLoading, setIsRecentSalesLoading] = useState(false)
+  const [recentSalesTake, setRecentSalesTake] = useState(RECENT_SALES_PAGE_SIZE)
+  const [recentSalesStatusFilter, setRecentSalesStatusFilter] = useState('all')
+  const [recentSalesPaymentFilter, setRecentSalesPaymentFilter] = useState('all')
+  const [recentSalesDateFilter, setRecentSalesDateFilter] = useState('all')
   const [refundDraft, setRefundDraft] = useState(null)
   const [isRefundSubmitting, setIsRefundSubmitting] = useState(false)
   const [currentSaleId, setCurrentSaleId] = useState(null)
@@ -217,6 +241,11 @@ function App() {
   const [message, setMessage] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [activeAdminSection, setActiveAdminSection] = useState('operations')
+  const [lastDashboardUpdatedAt, setLastDashboardUpdatedAt] = useState(() =>
+    new Date().toISOString(),
+  )
+  const searchInputRef = useRef(null)
 
   const roleConfig = useMemo(
     () => ROLE_OPTIONS.find((option) => option.value === role) ?? ROLE_OPTIONS[2],
@@ -321,8 +350,144 @@ function App() {
   }, [refundDraft, refundSaleItemsById])
 
   const lowStockAlertCount = reports.lowStock?.items?.length ?? 0
+  const negativeStockCount = useMemo(
+    () =>
+      productCatalog.reduce(
+        (count, product) => (Number(product.stock_quantity ?? 0) < 0 ? count + 1 : count),
+        0,
+      ),
+    [productCatalog],
+  )
+  const failedSyncCount = Number(syncCounts.conflict || 0) + Number(syncCounts.rejected || 0)
+  const recentSalesStatusOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(recentSales.map((sale) => String(sale.status ?? 'unknown').toLowerCase())),
+      ).sort(),
+    [recentSales],
+  )
+  const recentSalesPaymentOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          recentSales.map((sale) =>
+            String(sale.payment_breakdown?.[0]?.method ?? 'mixed').toLowerCase(),
+          ),
+        ),
+      ).sort(),
+    [recentSales],
+  )
+  const filteredRecentSales = useMemo(() => {
+    const now = new Date()
+    const today = now.toDateString()
+    const last7Ms = now.getTime() - 7 * 24 * 60 * 60 * 1000
+
+    return recentSales.filter((sale) => {
+      const status = String(sale.status ?? 'unknown').toLowerCase()
+      const paymentMethod = String(sale.payment_breakdown?.[0]?.method ?? 'mixed').toLowerCase()
+      const timestamp = new Date(
+        sale.completed_at ?? sale.timestamp ?? sale.created_at ?? Date.now(),
+      )
+      const saleTimeMs = timestamp.getTime()
+
+      if (recentSalesStatusFilter !== 'all' && status !== recentSalesStatusFilter) {
+        return false
+      }
+
+      if (recentSalesPaymentFilter !== 'all' && paymentMethod !== recentSalesPaymentFilter) {
+        return false
+      }
+
+      if (!Number.isFinite(saleTimeMs)) {
+        return recentSalesDateFilter === 'all'
+      }
+
+      if (recentSalesDateFilter === 'today' && timestamp.toDateString() !== today) {
+        return false
+      }
+
+      if (recentSalesDateFilter === 'last7' && saleTimeMs < last7Ms) {
+        return false
+      }
+
+      return true
+    })
+  }, [
+    recentSales,
+    recentSalesDateFilter,
+    recentSalesPaymentFilter,
+    recentSalesStatusFilter,
+  ])
+  const canLoadMoreRecentSales = recentSales.length >= recentSalesTake
+  const todaySalesNet = Number(reports.daily?.net_sales_total ?? 0)
+  const todayRefundCount = useMemo(
+    () =>
+      (reports.daily?.items ?? []).reduce(
+        (sum, item) => sum + Number(item.refund_count ?? 0),
+        0,
+      ),
+    [reports.daily],
+  )
   const canManageInventory =
     currentSession?.role === 'owner' || currentSession?.role === 'manager'
+  const availableAdminSections = useMemo(
+    () =>
+      ADMIN_SECTIONS.filter(
+        (section) => !section.inventoryOnly || canManageInventory,
+      ),
+    [canManageInventory],
+  )
+  const showAdminCheckoutTools = false
+  const cancelActionLabel = currentSaleId ? 'Void Held Bill' : 'Cancel Draft'
+  const completeSaleDisabledReason = useMemo(() => {
+    if (cartItems.length === 0) {
+      return 'Add items to cart before completing sale.'
+    }
+
+    if (!discountValid) {
+      return `Discount must be ${roleConfig.discountLimit}% or below for ${roleConfig.label}.`
+    }
+
+    if (dueAmount > 0) {
+      return `Add LKR ${toMoney(dueAmount)} more payment to complete sale.`
+    }
+
+    return ''
+  }, [
+    cartItems.length,
+    discountValid,
+    dueAmount,
+    roleConfig.discountLimit,
+    roleConfig.label,
+  ])
+  const isCompleteSaleDisabled = isSubmitting || Boolean(completeSaleDisabledReason)
+  const canCompleteByShortcut = !isCompleteSaleDisabled
+  const paymentStatusTone = dueAmount > 0 ? 'warning' : changeAmount > 0 ? 'change' : 'settled'
+  const paymentStatusMessage = useMemo(() => {
+    if (cartItems.length === 0) {
+      return 'Add items to start payment.'
+    }
+
+    if (!discountValid) {
+      return `Adjust discount to ${roleConfig.discountLimit}% or below.`
+    }
+
+    if (dueAmount > 0) {
+      return `Add LKR ${toMoney(dueAmount)} more payment to complete sale.`
+    }
+
+    if (changeAmount > 0) {
+      return `Ready to complete. Return LKR ${toMoney(changeAmount)} change.`
+    }
+
+    return 'Payment complete. Ready to complete sale.'
+  }, [
+    cartItems.length,
+    changeAmount,
+    discountValid,
+    dueAmount,
+    roleConfig.discountLimit,
+  ])
 
   const loadCurrentSession = useCallback(async () => {
     setIsSessionLoading(true)
@@ -347,10 +512,29 @@ function App() {
     setHeldBills(bills)
   }, [])
 
-  const loadRecentSales = useCallback(async () => {
-    const sales = await posApi.getSalesHistory(15)
-    setRecentSales(sales)
-  }, [])
+  const loadRecentSales = useCallback(
+    async (takeOverride = null) => {
+      const nextTake = Math.max(
+        RECENT_SALES_PAGE_SIZE,
+        Number(takeOverride ?? recentSalesTake) || RECENT_SALES_PAGE_SIZE,
+      )
+      setIsRecentSalesLoading(true)
+      try {
+        const sales = await posApi.getSalesHistory(nextTake)
+        setRecentSales(sales)
+        setRecentSalesTake(nextTake)
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : 'Failed to load recent sales.')
+      } finally {
+        setIsRecentSalesLoading(false)
+      }
+    },
+    [recentSalesTake],
+  )
+
+  const handleLoadMoreRecentSales = useCallback(async () => {
+    await loadRecentSales(recentSalesTake + RECENT_SALES_PAGE_SIZE)
+  }, [loadRecentSales, recentSalesTake])
 
   const loadReports = useCallback(async () => {
     setIsReportsLoading(true)
@@ -376,6 +560,7 @@ function App() {
         topItems,
         lowStock,
       })
+      setLastDashboardUpdatedAt(new Date().toISOString())
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to load reports.')
     } finally {
@@ -426,6 +611,7 @@ function App() {
       const [events, errors] = await Promise.all([getAllEvents(), getSyncErrors()])
       setSyncCounts(buildStatusCounts(events))
       setSyncErrors(errors.slice(0, 8))
+      setLastDashboardUpdatedAt(new Date().toISOString())
     } catch (error) {
       setSyncDiagnosticsError(
         error instanceof Error ? error.message : 'Failed to read offline sync status.',
@@ -582,6 +768,32 @@ function App() {
     }
   }, [])
 
+  useEffect(() => {
+    if (availableAdminSections.some((section) => section.key === activeAdminSection)) {
+      return
+    }
+
+    setActiveAdminSection(availableAdminSections[0]?.key ?? 'operations')
+  }, [activeAdminSection, availableAdminSections])
+
+  const focusSearchInput = useCallback((selectText = false) => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    window.requestAnimationFrame(() => {
+      const input = searchInputRef.current
+      if (!input) {
+        return
+      }
+
+      input.focus()
+      if (selectText) {
+        input.select()
+      }
+    })
+  }, [])
+
   const handleSearch = async () => {
     setErrorMessage('')
     setIsSearching(true)
@@ -592,6 +804,7 @@ function App() {
       setErrorMessage(error instanceof Error ? error.message : 'Search failed.')
     } finally {
       setIsSearching(false)
+      focusSearchInput(false)
     }
   }
 
@@ -618,6 +831,7 @@ function App() {
         },
       ]
     })
+    focusSearchInput(true)
   }
 
   const setItemQuantity = (productId, quantity) => {
@@ -739,17 +953,13 @@ function App() {
     })
   }
 
-  const completeSale = async () => {
-    if (cartItems.length === 0) {
-      setErrorMessage('Cart is empty.')
+  const completeSale = useCallback(async () => {
+    if (isSubmitting) {
       return
     }
-    if (!discountValid) {
-      setErrorMessage(`Discount exceeds ${roleConfig.discountLimit}% for ${role}.`)
-      return
-    }
-    if (dueAmount > 0) {
-      setErrorMessage('Payment is not enough to complete this sale.')
+
+    if (completeSaleDisabledReason) {
+      setErrorMessage(completeSaleDisabledReason)
       return
     }
 
@@ -790,7 +1000,46 @@ function App() {
     } finally {
       setIsSubmitting(false)
     }
-  }
+  }, [
+    cartItems,
+    completeSaleDisabledReason,
+    currentSaleId,
+    discount,
+    isSubmitting,
+    loadHeldBills,
+    loadRecentSales,
+    payments,
+    role,
+  ])
+
+  useEffect(() => {
+    const handleGlobalShortcuts = (event) => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) {
+        return
+      }
+
+      const key = event.key.toLowerCase()
+      if (key === 'f2') {
+        event.preventDefault()
+        focusSearchInput(true)
+        return
+      }
+
+      if (key === 'f9') {
+        if (!canCompleteByShortcut) {
+          return
+        }
+
+        event.preventDefault()
+        void completeSale()
+      }
+    }
+
+    window.addEventListener('keydown', handleGlobalShortcuts)
+    return () => {
+      window.removeEventListener('keydown', handleGlobalShortcuts)
+    }
+  }, [canCompleteByShortcut, completeSale, focusSearchInput])
 
   const handlePrintReceipt = async (saleId) => {
     setErrorMessage('')
@@ -1171,6 +1420,71 @@ function App() {
     }
   }
 
+  const handleAdminHeaderRefresh = useCallback(async () => {
+    setErrorMessage('')
+    setMessage('')
+
+    const refreshTasks = [loadHeldBills(), loadRecentSales(), loadSyncDiagnostics()]
+    if (canManageInventory) {
+      refreshTasks.push(loadReports(), loadCategories(), loadProductCatalog(catalogQuery))
+    }
+
+    const results = await Promise.allSettled(refreshTasks)
+    const hasFailures = results.some((result) => result.status === 'rejected')
+    if (hasFailures) {
+      setErrorMessage('Some dashboard sections failed to refresh. Review section-level messages.')
+      return
+    }
+    setMessage('Admin dashboard refreshed.')
+  }, [
+    canManageInventory,
+    catalogQuery,
+    loadCategories,
+    loadHeldBills,
+    loadProductCatalog,
+    loadRecentSales,
+    loadReports,
+    loadSyncDiagnostics,
+  ])
+
+  const isAdminHeaderRefreshing =
+    isRecentSalesLoading ||
+    isSyncStatusLoading ||
+    isReportsLoading ||
+    isCategoriesLoading ||
+    isCatalogLoading
+
+  const headerStatus = (() => {
+    if (errorMessage) {
+      return {
+        className: 'mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700',
+        text: errorMessage,
+      }
+    }
+    if (message) {
+      return {
+        className:
+          'mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800',
+        text: message,
+      }
+    }
+    if (syncDiagnosticsError) {
+      return {
+        className: 'mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700',
+        text: syncDiagnosticsError,
+      }
+    }
+    if (lowStockAlertCount > 0) {
+      return {
+        className:
+          'mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900',
+        text: `Low stock alert: ${lowStockAlertCount} product${lowStockAlertCount === 1 ? '' : 's'} at or below alert level.`,
+        testId: 'low-stock-alert-banner',
+      }
+    }
+    return null
+  })()
+
   if (isSessionLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-slate-100 via-white to-brand-50/40 px-4 py-10 text-slate-900">
@@ -1237,95 +1551,274 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-100 via-white to-brand-50/40 px-4 py-6 text-slate-900 sm:px-6">
+    <div className="min-h-screen bg-gradient-to-b from-slate-100 via-white to-brand-50/40 px-4 pt-6 pb-10 text-slate-900 sm:px-6 sm:py-6">
       <div className="mx-auto max-w-7xl space-y-4">
-        <header className="rounded-2xl border border-brand-100 bg-white p-5 shadow-sm">
-          <p className="text-sm font-semibold uppercase tracking-wide text-brand-700">
+        <header className="rounded-2xl border border-brand-100 bg-white p-4 shadow-sm sm:p-5">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-brand-700">
             SmartPOS Lanka
           </p>
-          <h1 className="mt-1 text-2xl font-bold sm:text-3xl">
-            One-Screen Checkout
-          </h1>
-          <p className="mt-2 text-sm text-slate-600">
-            Search products, bill fast, hold/resume, complete split payments,
-            then print thermal receipts or share through WhatsApp.
-          </p>
-
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-700">
-            <p>
-              Signed in as <strong>{currentSession.full_name}</strong> (
-              {currentSession.role}) on device {currentSession.device_code}.
-            </p>
-            <button
-              type="button"
-              onClick={() => void handleLogout()}
-              disabled={isLoggingOut}
-              className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium hover:bg-slate-200 disabled:opacity-60"
-            >
-              {isLoggingOut ? 'Signing Out...' : 'Sign Out'}
-            </button>
-          </div>
-
-          <div className="mt-3 grid gap-2 sm:grid-cols-3">
-            <label className="text-sm sm:col-span-2">
-              <span className="mb-1 block font-medium text-slate-700">
-                Customer WhatsApp (optional)
+          <div className="mt-1 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-bold sm:text-3xl">One-Screen Checkout</h1>
+              <p className="mt-1 text-sm text-slate-600">
+                Admin Console for operations, inventory, reports, and sync health.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
+                <span>
+                  Signed in as <strong>{currentSession.full_name}</strong>
+                </span>
+                <span className="text-slate-300">|</span>
+                <span>Device {currentSession.device_code}</span>
+                <span className="text-slate-300">|</span>
+                <span>
+                  Last refresh:{' '}
+                  {new Date(lastDashboardUpdatedAt).toLocaleString('en-LK', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    day: '2-digit',
+                    month: 'short',
+                  })}
+                </span>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-brand-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-brand-800">
+                {currentSession.role}
               </span>
-              <input
-                type="text"
-                value={receiptPhone}
-                onChange={(event) => setReceiptPhone(event.target.value)}
-                placeholder="94771234567"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-brand-700"
-              />
-            </label>
-            <div className="flex items-end">
-              {lastCompletedSale ? (
-                <div className="flex w-full flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void handlePrintReceipt(lastCompletedSale.sale_id)}
-                    className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700"
-                  >
-                    Print Latest
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleShareReceipt(lastCompletedSale.sale_id)}
-                    className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-600"
-                  >
-                    WhatsApp Latest
-                  </button>
-                </div>
-              ) : null}
+              <button
+                type="button"
+                onClick={() => void handleAdminHeaderRefresh()}
+                disabled={isAdminHeaderRefreshing}
+                className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium hover:bg-slate-100 disabled:opacity-60"
+              >
+                {isAdminHeaderRefreshing ? 'Refreshing...' : 'Refresh'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleLogout()}
+                disabled={isLoggingOut}
+                className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium hover:bg-slate-200 disabled:opacity-60"
+              >
+                {isLoggingOut ? 'Signing Out...' : 'Sign Out'}
+              </button>
             </div>
           </div>
-
-          {message ? (
-            <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-              {message}
-            </p>
-          ) : null}
-          {errorMessage ? (
-            <p className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
-              {errorMessage}
-            </p>
-          ) : null}
-          {lowStockAlertCount > 0 ? (
-            <p
-              data-testid="low-stock-alert-banner"
-              className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900"
-            >
-              Low stock alert: {lowStockAlertCount} product
-              {lowStockAlertCount === 1 ? '' : 's'} at or below alert level.
+          {headerStatus ? (
+            <p data-testid={headerStatus.testId} className={headerStatus.className}>
+              {headerStatus.text}
             </p>
           ) : null}
         </header>
 
-        <div className="grid gap-4 xl:grid-cols-3">
+        <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="flex flex-wrap gap-2">
+            {availableAdminSections.map((section) => {
+              const isActive = activeAdminSection === section.key
+              return (
+                <button
+                  key={section.key}
+                  data-testid={`admin-tab-${section.key}`}
+                  type="button"
+                  onClick={() => setActiveAdminSection(section.key)}
+                  className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                    isActive
+                      ? 'bg-slate-900 text-white'
+                      : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  {section.label}
+                </button>
+              )
+            })}
+          </div>
+        </section>
+
+        <section
+          data-testid="admin-kpi-row"
+          className="sticky top-3 z-30 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur md:top-4"
+        >
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <article className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Today Sales
+              </p>
+              <p className="mt-1 text-lg font-bold text-slate-900">
+                {canManageInventory ? `LKR ${toMoney(todaySalesNet)}` : 'N/A'}
+              </p>
+            </article>
+            <article className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+                Pending Sync
+              </p>
+              <p className="mt-1 text-lg font-bold text-amber-900">{syncCounts.pending}</p>
+            </article>
+            <article className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">
+                Low Stock
+              </p>
+              <p className="mt-1 text-lg font-bold text-rose-900">
+                {canManageInventory ? lowStockAlertCount : 'N/A'}
+              </p>
+            </article>
+            <article className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+                Refunds
+              </p>
+              <p className="mt-1 text-lg font-bold text-emerald-900">
+                {canManageInventory ? todayRefundCount : 'N/A'}
+              </p>
+            </article>
+          </div>
+
+          <div
+            data-testid="admin-action-bar"
+            className="mt-3 border-t border-slate-200 pt-3"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3 md:flex-nowrap md:items-end">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Quick Actions
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  Sticky controls for frequent admin tasks in the active section.
+                </p>
+              </div>
+
+              <div className="flex w-full flex-wrap items-end gap-2 md:w-auto md:justify-end">
+                {activeAdminSection === 'operations' ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void Promise.all([loadHeldBills(), loadRecentSales()])
+                      }}
+                      className={`${BUTTON_BASE} ${BUTTON_SM} ${BUTTON_SECONDARY}`}
+                    >
+                      Quick Refresh Ops
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => window.location.assign('/launch101')}
+                      className={`${BUTTON_BASE} ${BUTTON_SM} ${BUTTON_PRIMARY}`}
+                    >
+                      Open POS Checkout
+                    </button>
+                  </>
+                ) : null}
+
+                {activeAdminSection === 'inventory' && canManageInventory ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void Promise.all([loadCategories(), loadProductCatalog(catalogQuery)])
+                      }}
+                      className={`${BUTTON_BASE} ${BUTTON_SM} ${BUTTON_SECONDARY}`}
+                    >
+                      Quick Refresh Catalog
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        resetCategoryEditor()
+                        resetProductEditor()
+                      }}
+                      className={`${BUTTON_BASE} ${BUTTON_SM} ${BUTTON_DANGER}`}
+                    >
+                      Clear Draft Forms
+                    </button>
+                  </>
+                ) : null}
+
+                {activeAdminSection === 'reports' && canManageInventory ? (
+                  <>
+                    <label className="text-[11px] text-slate-600">
+                      Quick From
+                      <input
+                        type="date"
+                        value={reportFrom}
+                        onChange={(event) => setReportFrom(event.target.value)}
+                        className="mt-1 block rounded-lg border border-slate-300 px-2 py-1 text-xs"
+                      />
+                    </label>
+                    <label className="text-[11px] text-slate-600">
+                      Quick To
+                      <input
+                        type="date"
+                        value={reportTo}
+                        onChange={(event) => setReportTo(event.target.value)}
+                        className="mt-1 block rounded-lg border border-slate-300 px-2 py-1 text-xs"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => void loadReports()}
+                      disabled={isReportsLoading}
+                      className={`${BUTTON_BASE} ${BUTTON_SM} ${BUTTON_PRIMARY}`}
+                    >
+                      {isReportsLoading ? 'Loading...' : 'Quick Refresh Reports'}
+                    </button>
+                  </>
+                ) : null}
+
+                {activeAdminSection === 'sync' ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void loadSyncDiagnostics()}
+                      disabled={isSyncStatusLoading}
+                      className={`${BUTTON_BASE} ${BUTTON_SM} ${BUTTON_SECONDARY}`}
+                    >
+                      {isSyncStatusLoading ? 'Refreshing...' : 'Quick Refresh Sync'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleSyncNow()}
+                      disabled={isSyncingNow || !isOnline}
+                      className={`${BUTTON_BASE} ${BUTTON_SM} ${BUTTON_PRIMARY}`}
+                    >
+                      {isSyncingNow ? 'Syncing...' : 'Quick Sync Now'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleClearSyncErrors()}
+                      className={`${BUTTON_BASE} ${BUTTON_SM} ${BUTTON_DANGER}`}
+                    >
+                      Quick Clear Errors
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {failedSyncCount > 0 || (canManageInventory && negativeStockCount > 0) ? (
+          <section className="rounded-2xl border border-amber-200 bg-amber-50 p-3 shadow-sm">
+            <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+              {failedSyncCount > 0 ? (
+                <span className="rounded-full border border-rose-300 bg-rose-100 px-2.5 py-1 text-rose-800">
+                  Failed Sync Signals: {failedSyncCount}
+                </span>
+              ) : null}
+              {canManageInventory && negativeStockCount > 0 ? (
+                <span className="rounded-full border border-rose-300 bg-rose-100 px-2.5 py-1 text-rose-800">
+                  Negative Stock Products: {negativeStockCount}
+                </span>
+              ) : null}
+              <span className="text-amber-900">
+                Review `Sync` and `Inventory` tabs to resolve critical issues.
+              </span>
+            </div>
+          </section>
+        ) : null}
+
+        {activeAdminSection === 'sync' ? (
+        <div className="grid gap-4 lg:grid-cols-3">
           <section
             data-testid="offline-sync-panel"
-            className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-2"
+            className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:col-span-2"
           >
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
@@ -1346,7 +1839,7 @@ function App() {
               </span>
             </div>
 
-            <div className="mt-3 grid gap-2 sm:grid-cols-5">
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
               <article className="rounded-xl bg-slate-100 p-2">
                 <p className="text-[11px] text-slate-600">Total</p>
                 <p className="text-lg font-semibold">{syncCounts.total}</p>
@@ -1482,12 +1975,17 @@ function App() {
             </section>
           )}
         </div>
+        ) : null}
 
+        {activeAdminSection === 'operations' ? (
+        <>
+        {showAdminCheckoutTools ? (
         <div className="grid gap-4 lg:grid-cols-12">
           <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:col-span-5">
             <h2 className="text-lg font-semibold">Product Search</h2>
             <div className="mt-3 flex gap-2">
               <input
+                ref={searchInputRef}
                 value={searchTerm}
                 onChange={(event) => setSearchTerm(event.target.value)}
                 onKeyDown={(event) => {
@@ -1502,33 +2000,44 @@ function App() {
               <button
                 type="button"
                 onClick={() => void handleSearch()}
-                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
+                className={`${BUTTON_BASE} ${BUTTON_MD} ${BUTTON_DARK}`}
               >
                 {isSearching ? '...' : 'Search'}
               </button>
             </div>
+            <p className="mt-2 text-[11px] text-slate-500">
+              Shortcuts:
+              <span className="mx-1 rounded border border-slate-300 bg-white px-1.5 py-0.5 font-semibold text-slate-700">
+                F2
+              </span>
+              search focus
+              <span className="mx-1 rounded border border-slate-300 bg-white px-1.5 py-0.5 font-semibold text-slate-700">
+                F9
+              </span>
+              complete sale when due is zero.
+            </p>
 
-            <div className="mt-3 max-h-[28rem] space-y-2 overflow-auto pr-1">
+            <div className="mt-3 max-h-[28rem] space-y-3 overflow-auto pr-1">
               {searchResults.map((product) => (
                 <article
                   key={product.id}
-                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2"
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div>
-                      <p className="text-sm font-medium">{product.name}</p>
-                      <p className="text-xs text-slate-500">
+                      <p className="text-base font-semibold leading-5">{product.name}</p>
+                      <p className="mt-1 text-sm leading-5 text-slate-600">
                         {product.barcode ?? '-'} | stock {product.stockQuantity}
                       </p>
                     </div>
                     <div className="text-right">
-                      <p className="text-sm font-semibold">
+                      <p className="text-base font-semibold">
                         LKR {toMoney(product.unitPrice)}
                       </p>
                       <button
                         type="button"
                         onClick={() => addToCart(product)}
-                        className="mt-1 rounded-lg bg-brand-700 px-3 py-1 text-xs font-medium text-white hover:bg-brand-600"
+                        className={`mt-2 ${BUTTON_BASE} ${BUTTON_SM} ${BUTTON_PRIMARY}`}
                       >
                         Add
                       </button>
@@ -1589,12 +2098,12 @@ function App() {
               {cartItems.map((item) => (
                 <article
                   key={item.product_id}
-                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2"
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <p className="text-sm font-medium">{item.name}</p>
-                      <p className="text-xs text-slate-500">
+                      <p className="text-sm font-semibold leading-5">{item.name}</p>
+                      <p className="text-sm text-slate-600">
                         LKR {toMoney(item.unit_price)}
                       </p>
                     </div>
@@ -1604,7 +2113,7 @@ function App() {
                         onClick={() =>
                           setItemQuantity(item.product_id, item.quantity - 1)
                         }
-                        className="rounded border border-slate-300 px-2 py-1 text-sm"
+                        className={`${BUTTON_BASE} ${BUTTON_SM} ${BUTTON_SECONDARY} w-8 px-0`}
                       >
                         -
                       </button>
@@ -1616,21 +2125,21 @@ function App() {
                         onChange={(event) =>
                           setItemQuantity(item.product_id, event.target.value)
                         }
-                        className="w-16 rounded border border-slate-300 px-2 py-1 text-center text-sm"
+                        className="h-8 w-16 rounded-lg border border-slate-300 px-2 py-1 text-center text-sm"
                       />
                       <button
                         type="button"
                         onClick={() =>
                           setItemQuantity(item.product_id, item.quantity + 1)
                         }
-                        className="rounded border border-slate-300 px-2 py-1 text-sm"
+                        className={`${BUTTON_BASE} ${BUTTON_SM} ${BUTTON_SECONDARY} w-8 px-0`}
                       >
                         +
                       </button>
                       <button
                         type="button"
                         onClick={() => removeItem(item.product_id)}
-                        className="rounded border border-rose-300 px-2 py-1 text-sm text-rose-700"
+                        className={`${BUTTON_BASE} ${BUTTON_SM} ${BUTTON_DANGER}`}
                       >
                         Remove
                       </button>
@@ -1669,7 +2178,7 @@ function App() {
                 <button
                   type="button"
                   onClick={() => setPayments((current) => [...current, emptyPayment()])}
-                  className="rounded-lg border border-slate-300 px-2 py-1 text-xs font-medium hover:bg-slate-100"
+                  className={`${BUTTON_BASE} ${BUTTON_SM} ${BUTTON_SECONDARY}`}
                 >
                   Add Payment
                 </button>
@@ -1714,7 +2223,7 @@ function App() {
                     <button
                       type="button"
                       onClick={() => removePayment(payment.id)}
-                      className="rounded-lg border border-rose-300 px-2 py-2 text-xs font-medium text-rose-700 sm:col-span-1"
+                      className={`${BUTTON_BASE} ${BUTTON_SM} ${BUTTON_DANGER} sm:col-span-1`}
                     >
                       X
                     </button>
@@ -1722,19 +2231,58 @@ function App() {
                 ))}
               </div>
 
-              <div className="mt-3 grid gap-1 text-xs text-slate-600">
-                <p>Paid: LKR {toMoney(paidTotal)}</p>
-                <p>Due: LKR {toMoney(dueAmount)}</p>
-                <p>Change: LKR {toMoney(changeAmount)}</p>
+              <p
+                className={`mt-3 rounded-lg border px-2 py-1.5 text-xs font-medium ${
+                  paymentStatusTone === 'warning'
+                    ? 'border-amber-300 bg-amber-50 text-amber-900'
+                    : paymentStatusTone === 'change'
+                      ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                      : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                }`}
+              >
+                {paymentStatusMessage}
+              </p>
+
+              <div className="mt-3 grid gap-2 text-xs sm:grid-cols-3">
+                <article
+                  className={`rounded-lg border px-2 py-2 ${
+                    dueAmount > 0
+                      ? 'border-amber-200 bg-amber-50 text-amber-900'
+                      : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                  }`}
+                >
+                  <p className="text-[11px] font-medium uppercase tracking-wide">Paid</p>
+                  <p className="mt-0.5 text-sm font-semibold">LKR {toMoney(paidTotal)}</p>
+                </article>
+                <article
+                  className={`rounded-lg border px-2 py-2 ${
+                    dueAmount > 0
+                      ? 'border-rose-200 bg-rose-50 text-rose-800'
+                      : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                  }`}
+                >
+                  <p className="text-[11px] font-medium uppercase tracking-wide">Due</p>
+                  <p className="mt-0.5 text-sm font-semibold">LKR {toMoney(dueAmount)}</p>
+                </article>
+                <article
+                  className={`rounded-lg border px-2 py-2 ${
+                    changeAmount > 0
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                      : 'border-slate-200 bg-slate-50 text-slate-700'
+                  }`}
+                >
+                  <p className="text-[11px] font-medium uppercase tracking-wide">Change</p>
+                  <p className="mt-0.5 text-sm font-semibold">LKR {toMoney(changeAmount)}</p>
+                </article>
               </div>
             </div>
 
-            <div className="mt-4 flex flex-wrap gap-2">
+            <div className="mt-4 hidden flex-wrap gap-2 sm:flex">
               <button
                 type="button"
                 onClick={() => void holdBill()}
                 disabled={isSubmitting}
-                className="rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-60"
+                className={`${BUTTON_BASE} ${BUTTON_LG} ${BUTTON_DARK}`}
               >
                 Hold Bill
               </button>
@@ -1742,51 +2290,100 @@ function App() {
                 type="button"
                 onClick={() => void voidOrCancel()}
                 disabled={isSubmitting}
-                className="rounded-lg border border-rose-300 px-4 py-2 text-sm font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-60"
+                className={`${BUTTON_BASE} ${BUTTON_LG} ${BUTTON_DANGER}`}
               >
-                {currentSaleId ? 'Void Held Bill' : 'Cancel Draft'}
+                {cancelActionLabel}
               </button>
               <button
                 type="button"
                 onClick={() => void completeSale()}
-                disabled={isSubmitting}
-                className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-60"
+                disabled={isCompleteSaleDisabled}
+                title={completeSaleDisabledReason || undefined}
+                className={`${BUTTON_BASE} ${BUTTON_LG} ${BUTTON_PRIMARY}`}
               >
                 Complete Sale
               </button>
             </div>
+            {isCompleteSaleDisabled && !isSubmitting ? (
+              <p className="mt-2 text-xs font-medium text-amber-800">
+                {completeSaleDisabledReason}
+              </p>
+            ) : null}
           </section>
         </div>
+        ) : (
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold">Operations Console</h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  Checkout is intentionally separated from admin. Use POS screen for billing and
+                  payment flows.
+                </p>
+              </div>
+              <button
+                data-testid="open-pos-checkout-button"
+                type="button"
+                onClick={() => window.location.assign('/launch101')}
+                className={`${BUTTON_BASE} ${BUTTON_MD} ${BUTTON_PRIMARY}`}
+              >
+                Open POS Checkout
+              </button>
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+              <article className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Held Bills
+                </p>
+                <p className="mt-1 text-lg font-bold text-slate-900">{heldBills.length}</p>
+              </article>
+              <article className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Loaded Sales
+                </p>
+                <p className="mt-1 text-lg font-bold text-slate-900">{recentSales.length}</p>
+              </article>
+              <article className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Filtered Sales
+                </p>
+                <p className="mt-1 text-lg font-bold text-slate-900">
+                  {filteredRecentSales.length}
+                </p>
+              </article>
+            </div>
+          </section>
+        )}
 
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid gap-4 md:grid-cols-2">
           <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">Held Bills</h2>
               <button
                 type="button"
                 onClick={() => void loadHeldBills()}
-                className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium hover:bg-slate-100"
+                className={`${BUTTON_BASE} ${BUTTON_SM} ${BUTTON_SECONDARY}`}
               >
                 Refresh
               </button>
             </div>
-            <div className="mt-3 grid gap-2">
+            <div className="mt-3 max-h-[30rem] space-y-3 overflow-auto pr-1">
               {heldBills.map((bill) => (
                 <article
                   key={bill.sale_id}
                   className="rounded-xl border border-slate-200 bg-slate-50 p-3"
                 >
-                  <p className="text-sm font-semibold">{bill.sale_number}</p>
-                  <p className="mt-1 text-xs text-slate-500">
+                  <p className="text-base font-semibold leading-5">{bill.sale_number}</p>
+                  <p className="mt-1 text-sm text-slate-600">
                     Items: {bill.item_count}
                   </p>
-                  <p className="text-xs text-slate-500">
+                  <p className="text-sm text-slate-600">
                     Total: LKR {toMoney(bill.grand_total)}
                   </p>
                   <button
                     type="button"
                     onClick={() => void resumeHeldBill(bill.sale_id)}
-                    className="mt-2 rounded-lg bg-brand-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600"
+                    className={`mt-2 ${BUTTON_BASE} ${BUTTON_SM} ${BUTTON_PRIMARY}`}
                   >
                     Resume
                   </button>
@@ -1804,25 +2401,108 @@ function App() {
               <button
                 type="button"
                 onClick={() => void loadRecentSales()}
-                className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium hover:bg-slate-100"
+                className={`${BUTTON_BASE} ${BUTTON_SM} ${BUTTON_SECONDARY}`}
               >
-                Refresh
+                {isRecentSalesLoading ? 'Loading...' : 'Refresh'}
               </button>
             </div>
-            <div className="mt-3 grid gap-2">
-              {recentSales.map((sale) => (
+
+            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+              <label className="text-xs text-slate-600 sm:col-span-2">
+                Receipt WhatsApp Number (optional)
+                <input
+                  type="text"
+                  value={receiptPhone}
+                  onChange={(event) => setReceiptPhone(event.target.value)}
+                  placeholder="94771234567"
+                  className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-700"
+                />
+              </label>
+              <div className="flex items-end">
+                {lastCompletedSale ? (
+                  <div className="flex w-full flex-wrap gap-2 sm:justify-end">
+                    <button
+                      type="button"
+                      onClick={() => void handlePrintReceipt(lastCompletedSale.sale_id)}
+                      className={`${BUTTON_BASE} ${BUTTON_SM} ${BUTTON_DARK}`}
+                    >
+                      Print Latest
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleShareReceipt(lastCompletedSale.sale_id)}
+                      className={`${BUTTON_BASE} ${BUTTON_SM} ${BUTTON_SUCCESS}`}
+                    >
+                      WhatsApp Latest
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500">Complete a sale to enable latest receipt actions.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-2 grid gap-2 sm:grid-cols-3">
+              <label className="text-xs text-slate-600">
+                Status
+                <select
+                  value={recentSalesStatusFilter}
+                  onChange={(event) => setRecentSalesStatusFilter(event.target.value)}
+                  className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                >
+                  <option value="all">All statuses</option>
+                  {recentSalesStatusOptions.map((status) => (
+                    <option key={status} value={status}>
+                      {status}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="text-xs text-slate-600">
+                Payment
+                <select
+                  value={recentSalesPaymentFilter}
+                  onChange={(event) => setRecentSalesPaymentFilter(event.target.value)}
+                  className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                >
+                  <option value="all">All payments</option>
+                  {recentSalesPaymentOptions.map((method) => (
+                    <option key={method} value={method}>
+                      {paymentMethodLabel(method)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="text-xs text-slate-600">
+                Date
+                <select
+                  value={recentSalesDateFilter}
+                  onChange={(event) => setRecentSalesDateFilter(event.target.value)}
+                  className="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                >
+                  <option value="all">All dates</option>
+                  <option value="today">Today</option>
+                  <option value="last7">Last 7 days</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="mt-3 max-h-[30rem] space-y-3 overflow-auto pr-1 lg:max-h-[34rem]">
+              {filteredRecentSales.map((sale) => (
                 <article
                   key={sale.sale_id}
                   className="rounded-xl border border-slate-200 bg-slate-50 p-3"
                 >
-                  <p className="text-sm font-semibold">{sale.sale_number}</p>
-                  <p className="mt-1 text-xs text-slate-500">
+                  <p className="text-base font-semibold leading-5">{sale.sale_number}</p>
+                  <p className="mt-1 text-sm text-slate-600">
                     {sale.status} | LKR {toMoney(sale.grand_total)}
                   </p>
                   {sale.payment_breakdown?.length ? (
-                    <div className="mt-1 space-y-0.5">
+                    <div className="mt-1 space-y-1">
                       {sale.payment_breakdown.map((payment) => (
-                        <p key={`${sale.sale_id}-${payment.method}`} className="text-[11px] text-slate-600">
+                        <p key={`${sale.sale_id}-${payment.method}`} className="text-xs leading-5 text-slate-600">
                           {paymentMethodLabel(payment.method)}: net LKR{' '}
                           {toMoney(payment.net_amount)}
                           {Number(payment.reversed_amount) > 0 ? (
@@ -1836,14 +2516,14 @@ function App() {
                     <button
                       type="button"
                       onClick={() => void handlePrintReceipt(sale.sale_id)}
-                      className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700"
+                      className={`${BUTTON_BASE} ${BUTTON_SM} ${BUTTON_DARK}`}
                     >
                       Reprint
                     </button>
                     <button
                       type="button"
                       onClick={() => void handleShareReceipt(sale.sale_id)}
-                      className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-600"
+                      className={`${BUTTON_BASE} ${BUTTON_SM} ${BUTTON_SUCCESS}`}
                     >
                       WhatsApp
                     </button>
@@ -1851,7 +2531,7 @@ function App() {
                       <button
                         type="button"
                         onClick={() => void openRefundDraft(sale.sale_id)}
-                        className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100"
+                        className={`${BUTTON_BASE} ${BUTTON_SM} ${BUTTON_WARNING}`}
                       >
                         Refund
                       </button>
@@ -1862,22 +2542,50 @@ function App() {
               {recentSales.length === 0 ? (
                 <p className="text-sm text-slate-500">No completed/voided sales yet.</p>
               ) : null}
+              {recentSales.length > 0 && filteredRecentSales.length === 0 ? (
+                <p className="text-sm text-slate-500">No sales match selected filters.</p>
+              ) : null}
             </div>
+
+            {canLoadMoreRecentSales ? (
+              <div className="mt-3 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => void handleLoadMoreRecentSales()}
+                  disabled={isRecentSalesLoading}
+                  className={`${BUTTON_BASE} ${BUTTON_SM} ${BUTTON_SECONDARY}`}
+                >
+                  {isRecentSalesLoading
+                    ? 'Loading...'
+                    : `Load More (${recentSalesTake + RECENT_SALES_PAGE_SIZE})`}
+                </button>
+              </div>
+            ) : null}
           </section>
         </div>
+        </>
+        ) : null}
 
-        {canManageInventory ? (
+        {activeAdminSection === 'inventory' && canManageInventory ? (
           <section
             data-testid="product-inventory-panel"
-            className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+            className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
           >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h2 className="text-lg font-semibold">Product & Inventory</h2>
-              <p className="text-xs text-slate-500">
-                Manage categories, product details, barcode data, and manual stock
-                adjustments.
+              <p className="mt-1 text-sm text-slate-600">
+                Manage categories, product details, pricing, and stock controls with clearer
+                grouped forms.
               </p>
+              <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-semibold">
+                <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-amber-900">
+                  Low stock: {lowStockAlertCount}
+                </span>
+                <span className="rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-rose-800">
+                  Negative stock: {negativeStockCount}
+                </span>
+              </div>
             </div>
             <button
               type="button"
@@ -1891,8 +2599,8 @@ function App() {
             </button>
           </div>
 
-          <div className="mt-4 grid gap-4 xl:grid-cols-12">
-            <article className="rounded-xl border border-slate-200 p-3 xl:col-span-4">
+          <div className="mt-4 grid gap-4 lg:grid-cols-12">
+            <article className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 lg:col-span-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold">Categories</h3>
                 {isCategoriesLoading ? (
@@ -1931,8 +2639,8 @@ function App() {
                 ) : null}
               </div>
 
-              <div className="mt-3 rounded-lg border border-slate-200 p-2">
-                <h4 className="text-xs font-semibold">
+              <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3">
+                <h4 className="text-sm font-semibold">
                   {editingCategoryId ? 'Edit Category' : 'Create Category'}
                 </h4>
                 <label className="mt-2 block text-xs text-slate-600">
@@ -1998,7 +2706,7 @@ function App() {
               </div>
             </article>
 
-            <article className="rounded-xl border border-slate-200 p-3 xl:col-span-8">
+            <article className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 lg:col-span-8">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="text-sm font-semibold">Catalog & Stock Controls</h3>
                 <div className="flex gap-2">
@@ -2030,10 +2738,10 @@ function App() {
                 {productCatalog.map((product) => (
                   <div
                     key={product.product_id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-2 py-2"
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5"
                   >
                     <div>
-                      <p className="text-xs font-medium">
+                      <p className="text-sm font-semibold text-slate-800">
                         {product.name}{' '}
                         {!product.is_active ? (
                           <span className="text-rose-700">(inactive)</span>
@@ -2052,6 +2760,11 @@ function App() {
                       {product.is_low_stock ? (
                         <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-900">
                           Low stock
+                        </span>
+                      ) : null}
+                      {Number(product.stock_quantity ?? 0) < 0 ? (
+                        <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-800">
+                          Negative stock
                         </span>
                       ) : null}
                       <button
@@ -2073,166 +2786,186 @@ function App() {
                 <h4 className="text-sm font-semibold">
                   {editingProductId ? 'Edit Product' : 'Create Product'}
                 </h4>
-                <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                  <label className="text-xs text-slate-600">
-                    Product Name
-                    <input
-                      type="text"
-                      value={productDraft.name}
-                      onChange={(event) =>
-                        setProductDraft((current) => ({
-                          ...current,
-                          name: event.target.value,
-                        }))
-                      }
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-                    />
-                  </label>
-                  <label className="text-xs text-slate-600">
-                    Category
-                    <select
-                      value={productDraft.category_id}
-                      onChange={(event) =>
-                        setProductDraft((current) => ({
-                          ...current,
-                          category_id: event.target.value,
-                        }))
-                      }
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-                    >
-                      <option value="">No category</option>
-                      {categories
-                        .filter((category) => category.is_active || category.category_id === productDraft.category_id)
-                        .map((category) => (
-                          <option key={category.category_id} value={category.category_id}>
-                            {category.name}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
-                  <label className="text-xs text-slate-600">
-                    SKU
-                    <input
-                      type="text"
-                      value={productDraft.sku}
-                      onChange={(event) =>
-                        setProductDraft((current) => ({
-                          ...current,
-                          sku: event.target.value,
-                        }))
-                      }
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-                    />
-                  </label>
-                  <label className="text-xs text-slate-600">
-                    Barcode
-                    <input
-                      type="text"
-                      value={productDraft.barcode}
-                      onChange={(event) =>
-                        setProductDraft((current) => ({
-                          ...current,
-                          barcode: event.target.value,
-                        }))
-                      }
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-                    />
-                  </label>
-                  <label className="text-xs text-slate-600">
-                    Unit Price
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={productDraft.unit_price}
-                      onChange={(event) =>
-                        setProductDraft((current) => ({
-                          ...current,
-                          unit_price: event.target.value,
-                        }))
-                      }
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-                    />
-                  </label>
-                  <label className="text-xs text-slate-600">
-                    Cost Price
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={productDraft.cost_price}
-                      onChange={(event) =>
-                        setProductDraft((current) => ({
-                          ...current,
-                          cost_price: event.target.value,
-                        }))
-                      }
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-                    />
-                  </label>
-                  {!editingProductId ? (
-                    <label className="text-xs text-slate-600">
-                      Initial Stock
+                <div className="mt-3 space-y-3">
+                  <div className="rounded-lg border border-slate-200 bg-white p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Identity
+                    </p>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                      <label className="text-xs text-slate-600">
+                        Product Name
+                        <input
+                          type="text"
+                          value={productDraft.name}
+                          onChange={(event) =>
+                            setProductDraft((current) => ({
+                              ...current,
+                              name: event.target.value,
+                            }))
+                          }
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                        />
+                      </label>
+                      <label className="text-xs text-slate-600">
+                        Category
+                        <select
+                          value={productDraft.category_id}
+                          onChange={(event) =>
+                            setProductDraft((current) => ({
+                              ...current,
+                              category_id: event.target.value,
+                            }))
+                          }
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                        >
+                          <option value="">No category</option>
+                          {categories
+                            .filter((category) => category.is_active || category.category_id === productDraft.category_id)
+                            .map((category) => (
+                              <option key={category.category_id} value={category.category_id}>
+                                {category.name}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                      <label className="text-xs text-slate-600">
+                        SKU
+                        <input
+                          type="text"
+                          value={productDraft.sku}
+                          onChange={(event) =>
+                            setProductDraft((current) => ({
+                              ...current,
+                              sku: event.target.value,
+                            }))
+                          }
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                        />
+                      </label>
+                      <label className="text-xs text-slate-600">
+                        Barcode
+                        <input
+                          type="text"
+                          value={productDraft.barcode}
+                          onChange={(event) =>
+                            setProductDraft((current) => ({
+                              ...current,
+                              barcode: event.target.value,
+                            }))
+                          }
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-slate-200 bg-white p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Pricing & Stock Baseline
+                    </p>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                      <label className="text-xs text-slate-600">
+                        Unit Price
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={productDraft.unit_price}
+                          onChange={(event) =>
+                            setProductDraft((current) => ({
+                              ...current,
+                              unit_price: event.target.value,
+                            }))
+                          }
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                        />
+                      </label>
+                      <label className="text-xs text-slate-600">
+                        Cost Price
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={productDraft.cost_price}
+                          onChange={(event) =>
+                            setProductDraft((current) => ({
+                              ...current,
+                              cost_price: event.target.value,
+                            }))
+                          }
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                        />
+                      </label>
+                      {!editingProductId ? (
+                        <label className="text-xs text-slate-600">
+                          Initial Stock
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.001"
+                            value={productDraft.initial_stock_quantity}
+                            onChange={(event) =>
+                              setProductDraft((current) => ({
+                                ...current,
+                                initial_stock_quantity: event.target.value,
+                              }))
+                            }
+                            className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                          />
+                        </label>
+                      ) : null}
+                      <label className="text-xs text-slate-600">
+                        Reorder Level
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.001"
+                          value={productDraft.reorder_level}
+                          onChange={(event) =>
+                            setProductDraft((current) => ({
+                              ...current,
+                              reorder_level: event.target.value,
+                            }))
+                          }
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Stock Policy
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-4">
+                    <label className="flex items-center gap-2 text-xs text-slate-600">
                       <input
-                        type="number"
-                        min="0"
-                        step="0.001"
-                        value={productDraft.initial_stock_quantity}
+                        type="checkbox"
+                        checked={productDraft.allow_negative_stock}
                         onChange={(event) =>
                           setProductDraft((current) => ({
                             ...current,
-                            initial_stock_quantity: event.target.value,
+                            allow_negative_stock: event.target.checked,
                           }))
                         }
-                        className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
                       />
+                      Allow negative stock
                     </label>
-                  ) : null}
-                  <label className="text-xs text-slate-600">
-                    Reorder Level
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.001"
-                      value={productDraft.reorder_level}
-                      onChange={(event) =>
-                        setProductDraft((current) => ({
-                          ...current,
-                          reorder_level: event.target.value,
-                        }))
-                      }
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-                    />
-                  </label>
-                </div>
-
-                <div className="mt-2 flex flex-wrap gap-4">
-                  <label className="flex items-center gap-2 text-xs text-slate-600">
-                    <input
-                      type="checkbox"
-                      checked={productDraft.allow_negative_stock}
-                      onChange={(event) =>
-                        setProductDraft((current) => ({
-                          ...current,
-                          allow_negative_stock: event.target.checked,
-                        }))
-                      }
-                    />
-                    Allow negative stock
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-slate-600">
-                    <input
-                      type="checkbox"
-                      checked={productDraft.is_active}
-                      onChange={(event) =>
-                        setProductDraft((current) => ({
-                          ...current,
-                          is_active: event.target.checked,
-                        }))
-                      }
-                    />
-                    Product active
-                  </label>
+                    <label className="flex items-center gap-2 text-xs text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={productDraft.is_active}
+                        onChange={(event) =>
+                          setProductDraft((current) => ({
+                            ...current,
+                            is_active: event.target.checked,
+                          }))
+                        }
+                      />
+                      Product active
+                    </label>
+                  </div>
                 </div>
 
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -2304,7 +3037,7 @@ function App() {
           </section>
         ) : null}
 
-        {refundDraft ? (
+        {activeAdminSection === 'operations' && refundDraft ? (
           <section className="rounded-2xl border border-amber-200 bg-white p-4 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
@@ -2450,12 +3183,12 @@ function App() {
           </section>
         ) : null}
 
-        {canManageInventory ? (
-          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        {activeAdminSection === 'reports' && canManageInventory ? (
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold">MVP Reports</h2>
-              <p className="text-xs text-slate-500">
+              <p className="mt-1 text-sm text-slate-600">
                 Daily sales, transactions, payment breakdown, top items, and low
                 stock.
               </p>
@@ -2490,9 +3223,9 @@ function App() {
             </div>
           </div>
 
-          <div className="mt-4 grid gap-4 xl:grid-cols-2">
-            <article className="rounded-xl border border-slate-200 p-3">
-              <h3 className="text-sm font-semibold">Daily Sales</h3>
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <article className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 shadow-sm">
+              <h3 className="text-base font-semibold">Daily Sales</h3>
               <div className="mt-2 space-y-1 text-xs">
                 {(reports.daily?.items ?? []).map((item) => (
                   <p key={item.date} className="flex justify-between gap-2">
@@ -2511,8 +3244,8 @@ function App() {
               </p>
             </article>
 
-            <article className="rounded-xl border border-slate-200 p-3">
-              <h3 className="text-sm font-semibold">Payment Breakdown</h3>
+            <article className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 shadow-sm">
+              <h3 className="text-base font-semibold">Payment Breakdown</h3>
               <div className="mt-2 space-y-1 text-xs">
                 {(reports.paymentBreakdown?.items ?? []).map((item) => (
                   <p key={item.method} className="flex justify-between gap-2">
@@ -2532,8 +3265,8 @@ function App() {
               </p>
             </article>
 
-            <article className="rounded-xl border border-slate-200 p-3">
-              <h3 className="text-sm font-semibold">Top Items</h3>
+            <article className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 shadow-sm">
+              <h3 className="text-base font-semibold">Top Items</h3>
               <div className="mt-2 space-y-1 text-xs">
                 {(reports.topItems?.items ?? []).map((item) => (
                   <p key={item.product_id} className="flex justify-between gap-2">
@@ -2549,8 +3282,8 @@ function App() {
               </div>
             </article>
 
-            <article className="rounded-xl border border-slate-200 p-3">
-              <h3 className="text-sm font-semibold">Low Stock</h3>
+            <article className="rounded-xl border border-amber-200 bg-amber-50/40 p-4 shadow-sm">
+              <h3 className="text-base font-semibold text-amber-900">Low Stock</h3>
               <div className="mt-2 space-y-1 text-xs">
                 {(reports.lowStock?.items ?? []).map((item) => (
                   <p key={item.product_id} className="flex justify-between gap-2">
@@ -2569,7 +3302,7 @@ function App() {
 
           <article className="mt-4 rounded-xl border border-slate-200 p-3">
             <h3 className="text-sm font-semibold">Transactions</h3>
-            <div className="mt-2 space-y-1 text-xs">
+            <div className="mt-2 max-h-72 space-y-1 overflow-auto pr-1 text-xs">
               {(reports.transactions?.items ?? []).map((item) => (
                 <p key={item.sale_id}>
                   {item.sale_number} | {item.status} | {new Date(item.timestamp).toLocaleString('en-LK')} | LKR{' '}
@@ -2587,6 +3320,46 @@ function App() {
             </div>
           </article>
           </section>
+        ) : null}
+
+        {showAdminCheckoutTools && activeAdminSection === 'operations' ? (
+          <div
+            className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-3 py-2 shadow-[0_-8px_20px_rgba(15,23,42,0.08)] backdrop-blur sm:hidden"
+            style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.5rem)' }}
+          >
+            <div className="mx-auto grid max-w-7xl grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => void holdBill()}
+                disabled={isSubmitting}
+                className="h-11 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              >
+                Hold Bill
+              </button>
+              <button
+                type="button"
+                onClick={() => void voidOrCancel()}
+                disabled={isSubmitting}
+                className="h-11 rounded-lg border border-rose-200 bg-rose-50 px-3 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+              >
+                {cancelActionLabel}
+              </button>
+              <button
+                type="button"
+                onClick={() => void completeSale()}
+                disabled={isCompleteSaleDisabled}
+                title={completeSaleDisabledReason || undefined}
+                className="h-11 rounded-lg bg-brand-700 px-3 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Complete Sale
+              </button>
+            </div>
+            {isCompleteSaleDisabled && !isSubmitting ? (
+              <p className="mt-2 text-center text-[11px] font-medium text-amber-800">
+                {completeSaleDisabledReason}
+              </p>
+            ) : null}
+          </div>
         ) : null}
       </div>
     </div>
