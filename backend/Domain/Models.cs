@@ -21,6 +21,7 @@ public sealed class Product
     public required string Name { get; set; }
     public string? Sku { get; set; }
     public string? Barcode { get; set; }
+    public string? ImageUrl { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal CostPrice { get; set; }
     public bool IsActive { get; set; } = true;

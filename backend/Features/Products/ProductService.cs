@@ -35,6 +35,7 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
                 Name = x.Name,
                 Sku = x.Sku,
                 Barcode = x.Barcode,
+                ImageUrl = x.ImageUrl,
                 UnitPrice = x.UnitPrice,
                 StockQuantity = x.Inventory != null ? x.Inventory.QuantityOnHand : 0m
             })
@@ -93,6 +94,7 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
         var normalizedName = NormalizeRequired(request.Name, "Product name is required.");
         var normalizedSku = NormalizeOptional(request.Sku);
         var normalizedBarcode = NormalizeOptional(request.Barcode);
+        var normalizedImageUrl = NormalizeOptional(request.ImageUrl);
 
         ValidateMoneyValue(request.UnitPrice, "Unit price cannot be negative.");
         ValidateMoneyValue(request.CostPrice, "Cost price cannot be negative.");
@@ -109,6 +111,7 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
             Name = normalizedName,
             Sku = normalizedSku,
             Barcode = normalizedBarcode,
+            ImageUrl = normalizedImageUrl,
             CategoryId = request.CategoryId,
             UnitPrice = RoundMoney(request.UnitPrice),
             CostPrice = RoundMoney(request.CostPrice),
@@ -137,6 +140,7 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
                 product.Name,
                 product.Sku,
                 product.Barcode,
+                product.ImageUrl,
                 product.UnitPrice,
                 product.CostPrice,
                 inventory.QuantityOnHand,
@@ -162,6 +166,7 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
         var normalizedName = NormalizeRequired(request.Name, "Product name is required.");
         var normalizedSku = NormalizeOptional(request.Sku);
         var normalizedBarcode = NormalizeOptional(request.Barcode);
+        var normalizedImageUrl = NormalizeOptional(request.ImageUrl);
 
         ValidateMoneyValue(request.UnitPrice, "Unit price cannot be negative.");
         ValidateMoneyValue(request.CostPrice, "Cost price cannot be negative.");
@@ -177,6 +182,7 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
             product.Name,
             product.Sku,
             product.Barcode,
+            product.ImageUrl,
             product.UnitPrice,
             product.CostPrice,
             ReorderLevel = product.Inventory?.ReorderLevel ?? 0m,
@@ -186,6 +192,7 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
         product.Name = normalizedName;
         product.Sku = normalizedSku;
         product.Barcode = normalizedBarcode;
+        product.ImageUrl = normalizedImageUrl;
         product.CategoryId = request.CategoryId;
         product.UnitPrice = RoundMoney(request.UnitPrice);
         product.CostPrice = RoundMoney(request.CostPrice);
@@ -219,6 +226,7 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
                 product.Name,
                 product.Sku,
                 product.Barcode,
+                product.ImageUrl,
                 product.UnitPrice,
                 product.CostPrice,
                 ReorderLevel = product.Inventory.ReorderLevel,
@@ -531,6 +539,7 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
             Name = product.Name,
             Sku = product.Sku,
             Barcode = product.Barcode,
+            ImageUrl = product.ImageUrl,
             CategoryId = product.CategoryId,
             CategoryName = product.Category?.Name,
             UnitPrice = RoundMoney(product.UnitPrice),

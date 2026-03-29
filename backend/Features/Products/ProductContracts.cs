@@ -13,6 +13,8 @@ public sealed class ProductSearchItem
     public string Name { get; set; } = string.Empty;
     public string? Sku { get; set; }
     public string? Barcode { get; set; }
+    [JsonPropertyName("image_url")]
+    public string? ImageUrl { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal StockQuantity { get; set; }
 }
@@ -79,6 +81,9 @@ public sealed class ProductCatalogItemResponse
     [JsonPropertyName("barcode")]
     public string? Barcode { get; set; }
 
+    [JsonPropertyName("image_url")]
+    public string? ImageUrl { get; set; }
+
     [JsonPropertyName("category_id")]
     public Guid? CategoryId { get; set; }
 
@@ -127,6 +132,9 @@ public sealed class CreateProductRequest
     [JsonPropertyName("barcode")]
     public string? Barcode { get; set; }
 
+    [JsonPropertyName("image_url")]
+    public string? ImageUrl { get; set; }
+
     [JsonPropertyName("category_id")]
     public Guid? CategoryId { get; set; }
 
@@ -159,6 +167,9 @@ public sealed class UpdateProductRequest
 
     [JsonPropertyName("barcode")]
     public string? Barcode { get; set; }
+
+    [JsonPropertyName("image_url")]
+    public string? ImageUrl { get; set; }
 
     [JsonPropertyName("category_id")]
     public Guid? CategoryId { get; set; }

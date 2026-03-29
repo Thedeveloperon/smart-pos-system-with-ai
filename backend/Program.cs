@@ -26,7 +26,11 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("frontend-dev", policy =>
     {
-        policy.WithOrigins("http://localhost:5173", "http://127.0.0.1:5173")
+        policy.WithOrigins(
+                "http://localhost:5173",
+                "http://127.0.0.1:5173",
+                "http://localhost:8080",
+                "http://127.0.0.1:8080")
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
@@ -110,6 +114,7 @@ using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
     dbContext.Database.EnsureCreated();
+    await DbSchemaUpdater.EnsureProductImageSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureRefundSchemaAsync(dbContext);
     await DbSeeder.SeedAsync(dbContext);
 }
