@@ -1,0 +1,363 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
+import { useAuth } from "@/components/auth/AuthContext";
+import HeaderBar from "@/components/pos/HeaderBar";
+import NewItemDialog from "@/components/pos/NewItemDialog";
+import ProductSearchPanel from "@/components/pos/ProductSearchPanel";
+import CartPanel from "@/components/pos/CartPanel";
+import CheckoutPanel from "@/components/pos/CheckoutPanel";
+import HeldBillsDrawer from "@/components/pos/HeldBillsDrawer";
+import TodaySalesDrawer from "@/components/pos/TodaySalesDrawer";
+import MobileTabBar from "@/components/pos/MobileTabBar";
+import { CashSessionProvider, useCashSession } from "@/components/pos/cash-session/CashSessionContext";
+import OpeningCashDialog from "@/components/pos/cash-session/OpeningCashDialog";
+import ClosingCashDialog from "@/components/pos/cash-session/ClosingCashDialog";
+import CashSessionBanner from "@/components/pos/cash-session/CashSessionBanner";
+import SessionClosedSummary from "@/components/pos/cash-session/SessionClosedSummary";
+import AuditLogPanel from "@/components/pos/cash-session/AuditLogPanel";
+import type { CartItem, HeldBill, PaymentMethod, Product } from "@/components/pos/types";
+import type { DenominationCount } from "@/components/pos/cash-session/types";
+import {
+  completeSale,
+  fetchHeldBill,
+  fetchHeldBills,
+  fetchProducts,
+  holdSale,
+  voidSale,
+} from "@/lib/api";
+
+const IndexInner = () => {
+  const { user, logout } = useAuth();
+  const cashierName = user?.displayName || "Unknown";
+  const isAdmin = user?.role === "admin" || user?.role === "manager";
+  const backendRole = useMemo(() => {
+    if (user?.role === "admin") {
+      return "owner";
+    }
+
+    return user?.role || "cashier";
+  }, [user?.role]);
+
+  const [products, setProducts] = useState<Product[]>([]);
+  const [cartItems, setCartItems] = useState<CartItem[]>([]);
+  const [heldBills, setHeldBills] = useState<HeldBill[]>([]);
+  const [activeHeldSaleId, setActiveHeldSaleId] = useState<string | null>(null);
+  const [showHeldBills, setShowHeldBills] = useState(false);
+  const [showNewItem, setShowNewItem] = useState(false);
+  const [showTodaySales, setShowTodaySales] = useState(false);
+  const [showClosing, setShowClosing] = useState(false);
+  const [showAuditLog, setShowAuditLog] = useState(false);
+  const [mobileTab, setMobileTab] = useState<"products" | "cart" | "checkout">("products");
+
+  const {
+    session,
+    canSell,
+    startSession,
+    resetSession,
+    initiateClosing,
+    completeClosing,
+    cancelClosing,
+    getExpectedCash,
+    addSaleToCash,
+    auditLog,
+    cashSalesTotal,
+  } = useCashSession();
+
+  const loadProducts = useCallback(async () => {
+    try {
+      const items = await fetchProducts();
+      setProducts(items);
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to load products.");
+    }
+  }, []);
+
+  const loadHeldBills = useCallback(async () => {
+    try {
+      const items = await fetchHeldBills();
+      setHeldBills(items);
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to load held bills.");
+    }
+  }, []);
+
+  useEffect(() => {
+    void Promise.all([loadProducts(), loadHeldBills()]);
+  }, [loadHeldBills, loadProducts]);
+
+  const cartCount = cartItems.reduce((a, i) => a + i.quantity, 0);
+  const needsOpening = !session || session.status === "closed";
+  const isClosed = session?.status === "closed";
+
+  const handleAddToCart = useCallback((product: Product, qty: number) => {
+    setCartItems((prev) => {
+      const existing = prev.find((i) => i.product.id === product.id);
+      if (existing) {
+        return prev.map((i) =>
+          i.product.id === product.id ? { ...i, quantity: i.quantity + qty } : i
+        );
+      }
+      return [...prev, { product, quantity: qty }];
+    });
+    toast.success(`Added ${product.name}`, { duration: 1500 });
+  }, []);
+
+  const handleUpdateQty = useCallback((productId: string, qty: number) => {
+    if (qty <= 0) {
+      setCartItems((prev) => prev.filter((i) => i.product.id !== productId));
+      return;
+    }
+
+    setCartItems((prev) =>
+      prev.map((i) => (i.product.id === productId ? { ...i, quantity: qty } : i))
+    );
+  }, []);
+
+  const handleRemove = useCallback((productId: string) => {
+    setCartItems((prev) => prev.filter((i) => i.product.id !== productId));
+    toast.info("Item removed");
+  }, []);
+
+  const handleHoldBill = useCallback(async () => {
+    if (cartItems.length === 0) {
+      return;
+    }
+
+    try {
+      await holdSale(cartItems, backendRole);
+      setCartItems([]);
+      setActiveHeldSaleId(null);
+      toast.success("Bill held successfully");
+      await loadHeldBills();
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to hold bill.");
+    }
+  }, [backendRole, cartItems, loadHeldBills]);
+
+  const handleResumeBill = useCallback(
+    async (billId: string) => {
+      try {
+        const bill = await fetchHeldBill(billId);
+        setCartItems(bill.items);
+        setActiveHeldSaleId(bill.id);
+        toast.success("Bill resumed");
+      } catch (error) {
+        console.error(error);
+        toast.error("Failed to resume held bill.");
+      }
+    },
+    []
+  );
+
+  const handleDeleteHeldBill = useCallback(
+    async (billId: string) => {
+      try {
+        await voidSale(billId);
+        if (activeHeldSaleId === billId) {
+          setCartItems([]);
+          setActiveHeldSaleId(null);
+        }
+        toast.info("Held bill removed");
+        await Promise.all([loadHeldBills(), loadProducts()]);
+      } catch (error) {
+        console.error(error);
+        toast.error("Failed to remove held bill.");
+      }
+    },
+    [activeHeldSaleId, loadHeldBills, loadProducts]
+  );
+
+  const handleCompleteSale = useCallback(
+    async (paymentMethod: PaymentMethod, cashReceived: number, customerMobile: string) => {
+      const total = cartItems.reduce((a, i) => a + i.product.price * i.quantity, 0);
+      const paidAmount = paymentMethod === "cash" ? cashReceived || total : total;
+      const referenceNumber = customerMobile.trim() || undefined;
+
+      try {
+        const result = await completeSale(
+          cartItems,
+          backendRole,
+          paymentMethod,
+          paidAmount,
+          activeHeldSaleId || undefined,
+          referenceNumber
+        );
+
+        setCartItems([]);
+        setActiveHeldSaleId(null);
+        addSaleToCash(total, paymentMethod);
+        toast.success("Sale completed!", { duration: 2000 });
+
+        await Promise.all([loadProducts(), loadHeldBills()]);
+
+        if (result.status === "completed") {
+          return;
+        }
+      } catch (error) {
+        console.error(error);
+        toast.error("Failed to complete sale.");
+      }
+    },
+    [activeHeldSaleId, addSaleToCash, backendRole, cartItems, loadHeldBills, loadProducts]
+  );
+
+  const handleCancelSale = useCallback(() => {
+    setCartItems([]);
+    setActiveHeldSaleId(null);
+    toast.info("Sale cancelled");
+  }, []);
+
+  const handleEndShift = () => {
+    initiateClosing();
+    setShowClosing(true);
+  };
+
+  const handleCloseSession = (counts: DenominationCount[], total: number, reason?: string) => {
+    completeClosing(counts, total, reason);
+    setShowClosing(false);
+  };
+
+  const handleNewSession = () => {
+    resetSession();
+    toast.success("Ready for a new session.");
+  };
+
+  return (
+    <div className="h-screen flex flex-col overflow-hidden">
+      <HeaderBar
+        cashierName={cashierName}
+        heldBillsCount={heldBills.length}
+        onHeldBills={() => setShowHeldBills(true)}
+        onTodaySales={() => setShowTodaySales(true)}
+        onNewItem={() => setShowNewItem(true)}
+        onAdminTools={() => toast.info("Admin tools are not connected yet.")}
+        onSignOut={() => {
+          void logout();
+        }}
+        onAuditLog={() => setShowAuditLog(true)}
+        onEndShift={handleEndShift}
+        isAdmin={isAdmin}
+        hasActiveSession={canSell}
+      />
+
+      {canSell && <CashSessionBanner onEndShift={handleEndShift} />}
+
+      {needsOpening && !isClosed && (
+        <OpeningCashDialog
+          open={true}
+          cashierName={cashierName}
+          onConfirm={(counts, total) => startSession(counts, total, cashierName)}
+        />
+      )}
+
+      {isClosed && session ? (
+        <SessionClosedSummary
+          session={session}
+          onNewSession={handleNewSession}
+          onViewAuditLog={() => setShowAuditLog(true)}
+        />
+      ) : (
+        <>
+          <div className="flex-1 hidden md:flex overflow-hidden">
+            <div className="flex-1 min-w-0 border-r border-border">
+              <ProductSearchPanel products={products} onAddToCart={handleAddToCart} />
+            </div>
+            <div className="w-[320px] lg:w-[380px] xl:w-[420px] flex flex-col shrink-0 bg-card">
+              <div className="flex-1 overflow-hidden flex flex-col">
+                <div className="flex-1 overflow-y-auto min-h-0">
+                  <CartPanel items={cartItems} onUpdateQty={handleUpdateQty} onRemove={handleRemove} />
+                </div>
+                <div className="border-t border-border shrink-0 overflow-y-auto max-h-[55vh]">
+                  <CheckoutPanel
+                    items={cartItems}
+                    onCompleteSale={handleCompleteSale}
+                    onHoldBill={() => void handleHoldBill()}
+                    onCancelSale={handleCancelSale}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex-1 md:hidden overflow-hidden pb-14">
+            {mobileTab === "products" && (
+              <ProductSearchPanel products={products} onAddToCart={handleAddToCart} />
+            )}
+            {mobileTab === "cart" && (
+              <div className="h-full overflow-y-auto">
+                <CartPanel items={cartItems} onUpdateQty={handleUpdateQty} onRemove={handleRemove} />
+              </div>
+            )}
+            {mobileTab === "checkout" && (
+              <div className="h-full overflow-y-auto">
+                <CheckoutPanel
+                  items={cartItems}
+                  onCompleteSale={handleCompleteSale}
+                  onHoldBill={() => void handleHoldBill()}
+                  onCancelSale={handleCancelSale}
+                />
+              </div>
+            )}
+          </div>
+
+          <MobileTabBar activeTab={mobileTab} onTabChange={setMobileTab} cartCount={cartCount} />
+        </>
+      )}
+
+      <ClosingCashDialog
+        open={showClosing}
+        onClose={() => {
+          setShowClosing(false);
+          cancelClosing();
+        }}
+        cashierName={cashierName}
+        expectedCash={getExpectedCash()}
+        openingCash={session?.opening.total || 0}
+        cashSalesTotal={cashSalesTotal}
+        onConfirm={handleCloseSession}
+      />
+
+      <AuditLogPanel
+        open={showAuditLog}
+        onClose={() => setShowAuditLog(false)}
+        entries={auditLog}
+      />
+
+      <TodaySalesDrawer
+        open={showTodaySales}
+        onClose={() => setShowTodaySales(false)}
+        session={session}
+        cashSalesTotal={cashSalesTotal}
+      />
+
+      <NewItemDialog
+        open={showNewItem}
+        onOpenChange={setShowNewItem}
+        onCreated={() => void loadProducts()}
+      />
+
+      <HeldBillsDrawer
+        open={showHeldBills}
+        onClose={() => setShowHeldBills(false)}
+        heldBills={heldBills}
+        onResume={(billId) => {
+          void handleResumeBill(billId);
+        }}
+        onDelete={(billId) => {
+          void handleDeleteHeldBill(billId);
+        }}
+      />
+    </div>
+  );
+};
+
+const Index = () => (
+  <CashSessionProvider>
+    <IndexInner />
+  </CashSessionProvider>
+);
+
+export default Index;

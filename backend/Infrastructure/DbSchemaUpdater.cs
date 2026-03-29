@@ -4,6 +4,38 @@ namespace SmartPos.Backend.Infrastructure;
 
 public static class DbSchemaUpdater
 {
+    public static async Task EnsureProductImageSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken = default)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+
+        if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            if (await ColumnExistsAsync(dbContext, "products", "ImageUrl", cancellationToken))
+            {
+                return;
+            }
+
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "products" ADD COLUMN "ImageUrl" TEXT NULL;""",
+                cancellationToken);
+            return;
+        }
+
+        if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            if (await ColumnExistsAsync(dbContext, "products", "ImageUrl", cancellationToken))
+            {
+                return;
+            }
+
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE products ADD COLUMN IF NOT EXISTS "ImageUrl" varchar(500);""",
+                cancellationToken);
+        }
+    }
+
     public static async Task EnsureRefundSchemaAsync(
         SmartPosDbContext dbContext,
         CancellationToken cancellationToken = default)
@@ -63,6 +95,30 @@ public static class DbSchemaUpdater
             """;
 
         await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+    }
+
+    private static async Task<bool> ColumnExistsAsync(
+        SmartPosDbContext dbContext,
+        string tableName,
+        string columnName,
+        CancellationToken cancellationToken)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+        var connection = dbContext.Database.GetDbConnection();
+
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync(cancellationToken);
+        }
+
+        var sql = provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase)
+            ? $"""SELECT 1 FROM pragma_table_info('{tableName}') WHERE name = '{columnName}' LIMIT 1;"""
+            : $"""SELECT 1 FROM information_schema.columns WHERE table_name = '{tableName}' AND column_name = '{columnName}' LIMIT 1;""";
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is not null && result is not DBNull;
     }
 
     private static async Task EnsurePostgresRefundSchemaAsync(

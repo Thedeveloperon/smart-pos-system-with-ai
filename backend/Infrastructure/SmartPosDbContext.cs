@@ -36,6 +36,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.Name).HasMaxLength(200);
             entity.Property(x => x.Sku).HasMaxLength(64);
             entity.Property(x => x.Barcode).HasMaxLength(64);
+            entity.Property(x => x.ImageUrl).HasMaxLength(500);
             entity.Property(x => x.UnitPrice).HasPrecision(18, 2);
             entity.Property(x => x.CostPrice).HasPrecision(18, 2);
             entity.HasIndex(x => new { x.StoreId, x.Barcode }).IsUnique();
