@@ -9,6 +9,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
     public DbSet<Product> Products => Set<Product>();
     public DbSet<InventoryRecord> Inventory => Set<InventoryRecord>();
     public DbSet<Supplier> Suppliers => Set<Supplier>();
+    public DbSet<ShopProfile> ShopProfiles => Set<ShopProfile>();
     public DbSet<PurchaseBill> PurchaseBills => Set<PurchaseBill>();
     public DbSet<PurchaseBillItem> PurchaseBillItems => Set<PurchaseBillItem>();
     public DbSet<BillDocument> BillDocuments => Set<BillDocument>();
@@ -73,6 +74,19 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.Address).HasMaxLength(500);
             entity.HasIndex(x => new { x.StoreId, x.Name }).IsUnique();
             entity.HasIndex(x => new { x.StoreId, x.Code }).IsUnique();
+        });
+
+        modelBuilder.Entity<ShopProfile>(entity =>
+        {
+            entity.ToTable("shop_profiles");
+            entity.Property(x => x.ShopName).HasMaxLength(160);
+            entity.Property(x => x.AddressLine1).HasMaxLength(180);
+            entity.Property(x => x.AddressLine2).HasMaxLength(180);
+            entity.Property(x => x.Phone).HasMaxLength(32);
+            entity.Property(x => x.Email).HasMaxLength(120);
+            entity.Property(x => x.Website).HasMaxLength(120);
+            entity.Property(x => x.LogoUrl).HasMaxLength(500);
+            entity.Property(x => x.ReceiptFooter).HasMaxLength(500);
         });
 
         modelBuilder.Entity<PurchaseBill>(entity =>

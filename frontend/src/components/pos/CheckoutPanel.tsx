@@ -11,6 +11,7 @@ import {
   Phone,
 } from "lucide-react";
 import CashReceivedDialog from "./cash-session/CashReceivedDialog";
+import { playSaleCompleteSound, primeConfirmationSound } from "@/lib/sound";
 import type { CartItem, PaymentMethod } from "./types";
 
 interface CheckoutPanelProps {
@@ -170,7 +171,13 @@ const CheckoutPanel = ({
           variant="pos-primary"
           className="h-11 w-full rounded-xl text-sm"
           disabled={!canComplete}
-          onClick={handleComplete}
+          onPointerDown={() => {
+            void primeConfirmationSound();
+          }}
+          onClick={() => {
+            void playSaleCompleteSound();
+            handleComplete();
+          }}
         >
           <CheckCircle2 className="h-4 w-4" />
           Complete Sale

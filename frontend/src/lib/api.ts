@@ -109,6 +109,20 @@ type BackendCategoryListResponse = {
   items: BackendCategoryItem[];
 };
 
+type BackendShopProfileResponse = {
+  id: string;
+  shop_name: string;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  website?: string | null;
+  logo_url?: string | null;
+  receipt_footer?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+};
+
 export type CreateProductRequest = {
   name: string;
   sku?: string | null;
@@ -231,6 +245,20 @@ export type PurchaseImportConfirmResponse = {
     new_quantity: number;
   }[];
   created_at: string;
+};
+
+export type ShopProfile = {
+  id: string;
+  shopName: string;
+  addressLine1: string;
+  addressLine2: string;
+  phone: string;
+  email: string;
+  website: string;
+  logoUrl: string;
+  receiptFooter: string;
+  createdAt: string;
+  updatedAt?: string | null;
 };
 
 type HeldSalesResponse = {
@@ -535,6 +563,22 @@ function mapSaleResponseToHeldBill(sale: BackendSaleResponse): HeldBill {
   };
 }
 
+function mapShopProfile(profile: BackendShopProfileResponse): ShopProfile {
+  return {
+    id: profile.id,
+    shopName: profile.shop_name,
+    addressLine1: profile.address_line1 || "",
+    addressLine2: profile.address_line2 || "",
+    phone: profile.phone || "",
+    email: profile.email || "",
+    website: profile.website || "",
+    logoUrl: profile.logo_url || "",
+    receiptFooter: profile.receipt_footer || "",
+    createdAt: profile.created_at,
+    updatedAt: profile.updated_at,
+  };
+}
+
 export async function bootstrapSession() {
   return request<BackendAuthSession>("/api/auth/me");
 }
@@ -667,6 +711,10 @@ export async function fetchReceipt(saleId: string) {
   return request<BackendSaleResponse>(`/api/receipts/${saleId}`);
 }
 
+export function fetchReceiptHtmlUrl(saleId: string) {
+  return `${API_BASE_URL}/api/receipts/${saleId}/html`;
+}
+
 export async function fetchThermalReceipt(saleId: string) {
   return request<string>(`/api/receipts/${saleId}/thermal`);
 }
@@ -705,4 +753,27 @@ export async function confirmPurchaseImport(payload: PurchaseImportConfirmReques
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export async function fetchShopProfile() {
+  const response = await request<BackendShopProfileResponse>("/api/settings/shop-profile");
+  return mapShopProfile(response);
+}
+
+export async function updateShopProfile(profile: ShopProfile) {
+  const response = await request<BackendShopProfileResponse>("/api/settings/shop-profile", {
+    method: "PUT",
+    body: JSON.stringify({
+      shop_name: profile.shopName,
+      address_line1: profile.addressLine1 || null,
+      address_line2: profile.addressLine2 || null,
+      phone: profile.phone || null,
+      email: profile.email || null,
+      website: profile.website || null,
+      logo_url: profile.logoUrl || null,
+      receipt_footer: profile.receiptFooter || null,
+    }),
+  });
+
+  return mapShopProfile(response);
 }

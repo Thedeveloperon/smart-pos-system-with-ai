@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Banknote, CheckCircle2 } from "lucide-react";
+import { playCashCountSound, primeConfirmationSound } from "@/lib/sound";
 import DenominationCounter from "./DenominationCounter";
 import type { DenominationCount } from "./types";
 
@@ -45,6 +46,7 @@ const CashReceivedDialog = ({
   };
 
   const handleProceed = () => {
+    void playCashCountSound();
     onConfirm(counts, total);
   };
 
@@ -113,6 +115,9 @@ const CashReceivedDialog = ({
                 variant="pos-primary"
                 size="xl"
                 className="h-11 flex-1 rounded-2xl border border-emerald-300 bg-emerald-600 px-4 text-sm font-bold text-white shadow-[0_12px_28px_rgba(16,185,129,0.35)] transition-all hover:bg-emerald-500 hover:shadow-[0_14px_32px_rgba(16,185,129,0.42)] focus-visible:ring-emerald-400 sm:flex-none sm:w-[16rem]"
+                onPointerDown={() => {
+                  void primeConfirmationSound();
+                }}
                 onClick={handleProceed}
               >
                 <CheckCircle2 className="h-5 w-5" />

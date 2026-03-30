@@ -55,6 +55,21 @@ public static class DbSeeder
             }
         }
 
+        if (!dbContext.ShopProfiles.Any())
+        {
+            dbContext.ShopProfiles.Add(new ShopProfile
+            {
+                ShopName = "SmartPOS Lanka",
+                AddressLine1 = "Your shop address",
+                AddressLine2 = "Add your branch or city",
+                Phone = string.Empty,
+                Email = string.Empty,
+                Website = string.Empty,
+                LogoUrl = string.Empty,
+                ReceiptFooter = "Thank you for shopping with us."
+            });
+        }
+
         if (!dbContext.Roles.Any())
         {
             var roles = new[]

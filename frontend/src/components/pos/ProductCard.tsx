@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Plus, Minus, Package } from "lucide-react";
+import { primeCartAddSound } from "@/lib/sound";
 import type { Product } from "./types";
 
 interface ProductCardProps {
@@ -19,6 +20,9 @@ const ProductCard = ({ product, onAdd }: ProductCardProps) => {
       className={`group bg-card rounded-md border border-border pos-shadow hover:pos-shadow-md transition-all duration-200 overflow-hidden flex flex-col ${
         isOutOfStock ? "opacity-60" : "cursor-pointer hover:-translate-y-0.5"
       }`}
+      onPointerDown={() => {
+        void primeCartAddSound();
+      }}
       onClick={() => !isOutOfStock && onAdd(product, qty)}
     >
       {/* Image */}
@@ -98,6 +102,9 @@ const ProductCard = ({ product, onAdd }: ProductCardProps) => {
             variant="pos-primary"
             className="flex-1 h-7 text-[11px]"
             disabled={isOutOfStock}
+            onPointerDown={() => {
+              void primeCartAddSound();
+            }}
             onClick={() => {
               onAdd(product, qty);
               setQty(1);

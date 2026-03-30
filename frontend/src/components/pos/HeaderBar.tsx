@@ -10,6 +10,7 @@ import {
   Lock,
   PlusCircle,
   Upload,
+  Settings2,
 } from "lucide-react";
 
 interface HeaderBarProps {
@@ -19,6 +20,7 @@ interface HeaderBarProps {
   onTodaySales: () => void;
   onNewItem: () => void;
   onImportSupplierBill: () => void;
+  onShopSettings?: () => void;
   onSignOut: () => void;
   onAuditLog?: () => void;
   onEndShift?: () => void;
@@ -33,6 +35,7 @@ const HeaderBar = ({
   onTodaySales,
   onNewItem,
   onImportSupplierBill,
+  onShopSettings,
   onSignOut,
   onAuditLog,
   onEndShift,
@@ -122,6 +125,18 @@ const HeaderBar = ({
           >
             <Upload className="h-4 w-4" />
             <span className="hidden md:inline ml-1">Import Bill</span>
+          </Button>
+        )}
+
+        {isAdmin && onShopSettings && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onShopSettings}
+            className="text-pos-header-foreground hover:bg-pos-header-foreground/10"
+          >
+            <Settings2 className="h-4 w-4" />
+            <span className="hidden md:inline ml-1">Shop</span>
           </Button>
         )}
 

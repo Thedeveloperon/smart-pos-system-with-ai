@@ -36,6 +36,56 @@ public static class DbSchemaUpdater
         }
     }
 
+    public static async Task EnsureShopProfileSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken = default)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+
+        if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            var sql = """
+                CREATE TABLE IF NOT EXISTS "shop_profiles" (
+                  "Id" TEXT NOT NULL CONSTRAINT "PK_shop_profiles" PRIMARY KEY,
+                  "ShopName" TEXT NOT NULL,
+                  "AddressLine1" TEXT NULL,
+                  "AddressLine2" TEXT NULL,
+                  "Phone" TEXT NULL,
+                  "Email" TEXT NULL,
+                  "Website" TEXT NULL,
+                  "LogoUrl" TEXT NULL,
+                  "ReceiptFooter" TEXT NULL,
+                  "CreatedAtUtc" TEXT NOT NULL,
+                  "UpdatedAtUtc" TEXT NULL
+                );
+                """;
+
+            await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+            return;
+        }
+
+        if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            var sql = """
+                CREATE TABLE IF NOT EXISTS shop_profiles (
+                  "Id" uuid NOT NULL PRIMARY KEY,
+                  "ShopName" varchar(160) NOT NULL,
+                  "AddressLine1" varchar(180) NULL,
+                  "AddressLine2" varchar(180) NULL,
+                  "Phone" varchar(32) NULL,
+                  "Email" varchar(120) NULL,
+                  "Website" varchar(120) NULL,
+                  "LogoUrl" varchar(500) NULL,
+                  "ReceiptFooter" varchar(500) NULL,
+                  "CreatedAtUtc" timestamptz NOT NULL,
+                  "UpdatedAtUtc" timestamptz NULL
+                );
+                """;
+
+            await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+        }
+    }
+
     public static async Task EnsureRefundSchemaAsync(
         SmartPosDbContext dbContext,
         CancellationToken cancellationToken = default)
