@@ -6,13 +6,14 @@ import {
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { PauseCircle, Play, Trash2, ShoppingCart } from "lucide-react";
+import { useState } from "react";
 import type { HeldBill } from "./types";
 
 interface HeldBillsDrawerProps {
   open: boolean;
   onClose: () => void;
   heldBills: HeldBill[];
-  onResume: (billId: string) => void;
+  onResume: (billId: string) => Promise<void> | void;
   onDelete: (billId: string) => void;
 }
 
@@ -23,8 +24,17 @@ const HeldBillsDrawer = ({
   onResume,
   onDelete,
 }: HeldBillsDrawerProps) => {
+  const [resumingId, setResumingId] = useState<string | null>(null);
+
   return (
-    <Sheet open={open} onOpenChange={onClose}>
+    <Sheet
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          onClose();
+        }
+      }}
+    >
       <SheetContent className="w-full sm:max-w-md">
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
@@ -79,13 +89,19 @@ const HeldBillsDrawer = ({
                       size="sm"
                       variant="pos-primary"
                       className="flex-1 rounded-lg"
-                      onClick={() => {
-                        onResume(bill.id);
-                        onClose();
+                      disabled={resumingId === bill.id}
+                      onClick={async () => {
+                        setResumingId(bill.id);
+                        try {
+                          await onResume(bill.id);
+                          onClose();
+                        } finally {
+                          setResumingId(null);
+                        }
                       }}
                     >
                       <Play className="h-3.5 w-3.5" />
-                      Resume
+                      {resumingId === bill.id ? "Resuming..." : "Resume"}
                     </Button>
                     <Button
                       size="sm"

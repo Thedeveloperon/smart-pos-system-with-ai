@@ -238,6 +238,49 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
         return await GetSingleCatalogItemAsync(product.Id, DefaultLowStockThreshold, cancellationToken);
     }
 
+    public async Task DeleteProductAsync(Guid productId, CancellationToken cancellationToken)
+    {
+        var product = await dbContext.Products
+            .Include(x => x.Inventory)
+            .FirstOrDefaultAsync(x => x.Id == productId, cancellationToken)
+            ?? throw new KeyNotFoundException("Product not found.");
+
+        if (!product.IsActive)
+        {
+            return;
+        }
+
+        var before = new
+        {
+            product.Name,
+            product.Sku,
+            product.Barcode,
+            product.IsActive
+        };
+
+        product.IsActive = false;
+        product.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        if (product.Inventory is not null)
+        {
+            product.Inventory.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        }
+
+        auditLogService.Queue(
+            action: "product_deleted",
+            entityName: "product",
+            entityId: product.Id.ToString(),
+            before: before,
+            after: new
+            {
+                product.Name,
+                product.Sku,
+                product.Barcode,
+                product.IsActive
+            });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<StockAdjustmentResponse> AdjustStockAsync(
         Guid productId,
         StockAdjustmentRequest request,

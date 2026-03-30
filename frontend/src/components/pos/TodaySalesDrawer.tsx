@@ -74,7 +74,7 @@ const TodaySalesDrawer = ({ open, onClose, session, cashSalesTotal }: TodaySales
   }, [transactions]);
 
   return (
-    <Sheet open={open} onOpenChange={onClose}>
+    <Sheet open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       <SheetContent className="w-full sm:max-w-2xl">
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">

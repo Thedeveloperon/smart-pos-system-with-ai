@@ -7,7 +7,10 @@ namespace SmartPos.Backend.Features.Checkout;
 
 public sealed class CheckoutService(SmartPosDbContext dbContext, AuditLogService auditLogService)
 {
-    public async Task<SaleResponse> HoldAsync(HoldSaleRequest request, CancellationToken cancellationToken)
+    public async Task<SaleResponse> HoldAsync(
+        HoldSaleRequest request,
+        Guid? createdByUserId,
+        CancellationToken cancellationToken)
     {
         var cart = await BuildCartAsync(request.Items, request.DiscountPercent, request.Role, cancellationToken);
         var sale = new Sale
@@ -18,6 +21,7 @@ public sealed class CheckoutService(SmartPosDbContext dbContext, AuditLogService
             DiscountTotal = cart.DiscountTotal,
             TaxTotal = 0m,
             GrandTotal = cart.GrandTotal,
+            CreatedByUserId = createdByUserId,
             CreatedAtUtc = DateTimeOffset.UtcNow,
             Items = cart.Items.Select(x => new SaleItem
             {
@@ -38,7 +42,10 @@ public sealed class CheckoutService(SmartPosDbContext dbContext, AuditLogService
         return ToSaleResponse(sale, paidTotal: 0m, change: 0m);
     }
 
-    public async Task<SaleResponse> CompleteAsync(CompleteSaleRequest request, CancellationToken cancellationToken)
+    public async Task<SaleResponse> CompleteAsync(
+        CompleteSaleRequest request,
+        Guid? createdByUserId,
+        CancellationToken cancellationToken)
     {
         if (request.Payments.Count == 0)
         {
@@ -60,6 +67,8 @@ public sealed class CheckoutService(SmartPosDbContext dbContext, AuditLogService
             {
                 throw new InvalidOperationException("Only held bills can be completed.");
             }
+
+            sale.CreatedByUserId ??= createdByUserId;
         }
         else
         {
@@ -72,6 +81,7 @@ public sealed class CheckoutService(SmartPosDbContext dbContext, AuditLogService
                 DiscountTotal = cart.DiscountTotal,
                 TaxTotal = 0m,
                 GrandTotal = cart.GrandTotal,
+                CreatedByUserId = createdByUserId,
                 CreatedAtUtc = DateTimeOffset.UtcNow,
                 Items = cart.Items.Select(x => new SaleItem
                 {
