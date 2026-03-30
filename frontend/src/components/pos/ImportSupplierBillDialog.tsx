@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, Loader2, PackagePlus, UploadCloud } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import { CheckCircle2, FileText, Loader2, PackagePlus, ReceiptText, Search, Sparkles, UploadCloud } from "lucide-react";
 import { toast } from "sonner";
 import type { Product } from "@/components/pos/types";
 import {
@@ -25,7 +25,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -77,7 +76,6 @@ type ImportSupplierBillDialogProps = {
 
 const ACCEPTED_FILE_TYPES = ".pdf,.png,.jpg,.jpeg";
 const UNASSIGNED_PRODUCT_VALUE = "__unassigned";
-
 function normalizeComparableText(value?: string | null) {
   if (!value) {
     return "";
@@ -135,6 +133,28 @@ function toDecimalOrNull(value: string) {
   return parsed;
 }
 
+function formatFileSize(bytes?: number | null) {
+  if (bytes == null || Number.isNaN(bytes)) {
+    return "";
+  }
+
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  const precision = value >= 10 ? 0 : 1;
+  return `${value.toFixed(precision)} ${units[unitIndex]}`;
+}
+
 function toDraftLine(line: PurchaseOcrDraftLineItem): EditableLine {
   const sourceName = formatSupplierItemText(
     line.item_name?.trim() || line.raw_text?.trim() || `Line ${line.line_no}`,
@@ -188,11 +208,16 @@ function getMatchBadge(line: EditableLine) {
 }
 
 export default function ImportSupplierBillDialog({ open, onOpenChange, onImported }: ImportSupplierBillDialogProps) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
   const [isCatalogLoading, setIsCatalogLoading] = useState(false);
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [supplierHint, setSupplierHint] = useState("");
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const [draft, setDraft] = useState<PurchaseOcrDraftResponse | null>(null);
   const [importRequestId, setImportRequestId] = useState<string | null>(null);
@@ -213,6 +238,40 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
 
   const isBusy = isUploading || isConfirming || isCreatingProduct;
+
+  useEffect(() => {
+    if (!selectedFile) {
+      setIsPreviewOpen(false);
+      setPreviewUrl(null);
+      return;
+    }
+
+    setIsPreviewOpen(false);
+    const reader = new FileReader();
+    let isActive = true;
+
+    reader.onload = () => {
+      if (!isActive) {
+        return;
+      }
+
+      setPreviewUrl(typeof reader.result === "string" ? reader.result : null);
+    };
+
+    reader.onerror = () => {
+      if (!isActive) {
+        return;
+      }
+
+      setPreviewUrl(null);
+    };
+
+    reader.readAsDataURL(selectedFile);
+
+    return () => {
+      isActive = false;
+    };
+  }, [selectedFile]);
 
   useEffect(() => {
     if (!open) {
@@ -261,6 +320,24 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
     [editableLines],
   );
 
+  const selectedFileTypeLabel = useMemo(() => {
+    if (!selectedFile) {
+      return "";
+    }
+
+    if (selectedFile.type === "application/pdf") {
+      return "PDF";
+    }
+
+    if (selectedFile.type.startsWith("image/")) {
+      return selectedFile.type.replace("image/", "").toUpperCase();
+    }
+
+    return selectedFile.type || "FILE";
+  }, [selectedFile]);
+
+  const SelectedFileIcon = selectedFile?.type === "application/pdf" ? ReceiptText : FileText;
+
   const unresolvedLineCount = useMemo(
     () => editableLines.filter((line) => !line.selectedProductId).length,
     [editableLines],
@@ -299,7 +376,7 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
     const blockers: string[] = [];
 
     if (!draft || !importRequestId) {
-      blockers.push("Upload and parse a supplier bill first.");
+      blockers.push("Upload and scan a supplier bill first.");
     }
 
     if (editableLines.length === 0) {
@@ -348,6 +425,7 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
   const resetState = () => {
     setSelectedFile(null);
     setSupplierHint("");
+    setIsDragOver(false);
     setDraft(null);
     setImportRequestId(null);
     setEditableLines([]);
@@ -363,6 +441,10 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
     setIsUploading(false);
     setIsConfirming(false);
     setIsCreatingProduct(false);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
   };
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -399,14 +481,62 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
       setApprovalReason("");
       setCreateProductDraft(null);
 
-      toast.success("Bill parsed. Review and confirm the import.");
+      toast.success("Bill scanned. Review and confirm the import.");
     } catch (error) {
       console.error(error);
-      const message = error instanceof ApiError ? error.message : "Failed to parse supplier bill.";
+      const message = error instanceof ApiError ? error.message : "Failed to scan supplier bill.";
       toast.error(message);
     } finally {
       setIsUploading(false);
     }
+  };
+
+  const handleFileInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+    setSelectedFile(event.target.files?.[0] || null);
+  };
+
+  const handleDropzoneDragOver = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+
+    if (!isBusy) {
+      setIsDragOver(true);
+    }
+  };
+
+  const handleDropzoneDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsDragOver(false);
+  };
+
+  const handleDropzoneDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsDragOver(false);
+
+    if (isBusy) {
+      return;
+    }
+
+    setSelectedFile(event.dataTransfer.files?.[0] || null);
+  };
+
+  const handleRemoveSelectedFile = () => {
+    setSelectedFile(null);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const handlePreviewSelectedFile = () => {
+    if (!selectedFile) {
+      return;
+    }
+
+    setIsPreviewOpen((current) => !current);
+  };
+
+  const openFilePicker = () => {
+    fileInputRef.current?.click();
   };
 
   const handleOpenCreateProduct = (line: EditableLine) => {
@@ -614,161 +744,275 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         className={cn(
-          "w-[96vw] max-w-[96vw] gap-0 overflow-hidden p-0 sm:max-w-6xl",
-          draft ? "h-[92vh]" : "max-h-[85vh]",
+          "w-[96vw] max-w-[96vw] gap-0 overflow-hidden rounded-3xl border-slate-200 bg-slate-50 p-0 shadow-2xl sm:max-w-[min(1280px,96vw)]",
+          draft ? "h-[94vh]" : "max-h-[90vh]",
+          "[&>button]:right-6 [&>button]:top-6 [&>button]:z-20 [&>button]:flex [&>button]:h-10 [&>button]:w-10 [&>button]:items-center [&>button]:justify-center [&>button]:rounded-full [&>button]:border [&>button]:border-border [&>button]:bg-background/90 [&>button]:p-0 [&>button]:shadow-sm",
         )}
       >
-        <div className={cn("flex min-h-0 flex-col", draft && "h-full")}>
-          <div className="border-b px-6 py-4">
-            <DialogHeader>
-              <DialogTitle>Import Supplier Bill</DialogTitle>
-              <DialogDescription>
-                Upload a supplier invoice, review OCR matches, and confirm stock intake.
-              </DialogDescription>
-            </DialogHeader>
+        <div className="flex min-h-0 h-full flex-col">
+          <div className="border-b border-slate-200 bg-gradient-to-b from-white via-white to-slate-50 px-5 py-5 sm:px-6">
+            <div className="flex items-start justify-between gap-4">
+              <DialogHeader className="text-left">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary shadow-sm">
+                    <ReceiptText className="h-6 w-6" />
+                  </div>
+                  <div className="space-y-1">
+                    <DialogTitle className="text-2xl">Import Supplier Bill</DialogTitle>
+                    <DialogDescription className="max-w-2xl text-sm sm:text-base">
+                      Upload a supplier bill, review detected items, and confirm stock intake.
+                    </DialogDescription>
+                  </div>
+                </div>
+              </DialogHeader>
+            </div>
           </div>
 
-          <ScrollArea className={cn("min-h-0", draft && "flex-1")}>
-            <div className="space-y-6 px-6 py-5 pb-20">
-              <section className="rounded-lg border bg-card p-4">
-                <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
-                  <div className="space-y-2">
-                    <Label htmlFor="supplier-bill-file">Supplier Bill File</Label>
-                    <Input
+          <div className="flex-1 overflow-y-auto">
+            <div className="space-y-5 px-4 py-4 sm:px-6 sm:py-5">
+              <section className="grid gap-6">
+                <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+                  <div
+                    className={cn(
+                      "rounded-3xl border-2 border-dashed p-5 transition-all sm:p-6",
+                      isDragOver && "border-primary bg-primary/5 shadow-[0_0_0_4px_rgba(59,130,246,0.08)]",
+                      selectedFile && !isDragOver && "border-emerald-200 bg-emerald-50/40",
+                      !selectedFile && !isDragOver && "border-slate-200 bg-slate-50/70",
+                    )}
+                    onDragEnter={handleDropzoneDragOver}
+                    onDragOver={handleDropzoneDragOver}
+                    onDragLeave={handleDropzoneDragLeave}
+                    onDrop={handleDropzoneDrop}
+                  >
+                    <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="flex flex-1 items-start gap-4 text-left">
+                        <div
+                          className={cn(
+                            "flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border text-primary shadow-sm",
+                            isDragOver ? "border-primary/30 bg-primary/10" : "border-slate-200 bg-white",
+                            isUploading && "animate-pulse",
+                          )}
+                        >
+                          <UploadCloud className="h-8 w-8" />
+                        </div>
+
+                        <div className="min-w-0 space-y-2">
+                          <div className="space-y-1">
+                            <p className="text-lg font-semibold text-foreground sm:text-xl">
+                              Upload your supplier bill
+                            </p>
+                            <p className="text-sm text-muted-foreground sm:text-base">
+                              Drag and drop your bill here, or tap to browse
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                            <Badge variant="outline" className="rounded-full bg-background">
+                              PDF
+                            </Badge>
+                            <Badge variant="outline" className="rounded-full bg-background">
+                              PNG
+                            </Badge>
+                            <Badge variant="outline" className="rounded-full bg-background">
+                              JPG
+                            </Badge>
+                            <span>Supports PDF, PNG, and JPG files</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-2 sm:flex-row lg:flex-col">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="lg"
+                          onClick={openFilePicker}
+                          disabled={isBusy}
+                          className="min-h-11 px-5"
+                        >
+                          <UploadCloud className="h-4 w-4" />
+                          Browse files
+                        </Button>
+                        <Button
+                          type="button"
+                          size="lg"
+                          onClick={() => void handleUploadDraft()}
+                          disabled={!selectedFile || isUploading || isConfirming}
+                          className="min-h-11 px-5"
+                        >
+                          {isUploading ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              Scanning...
+                            </>
+                          ) : (
+                            <>
+                              <Search className="h-4 w-4" />
+                              Upload and Scan
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+
+                    <input
+                      ref={fileInputRef}
                       id="supplier-bill-file"
                       type="file"
                       accept={ACCEPTED_FILE_TYPES}
                       disabled={isBusy}
-                      onChange={(event) => setSelectedFile(event.target.files?.[0] || null)}
+                      onChange={handleFileInputChange}
+                      className="sr-only"
                     />
-                    <p className="text-xs text-muted-foreground">Accepted: PDF, PNG, JPG. Max size follows backend policy.</p>
-                  </div>
+                    <Label htmlFor="supplier-bill-file" className="sr-only">
+                      Upload your supplier bill
+                    </Label>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="supplier-hint">Supplier Hint (optional)</Label>
-                    <Input
-                      id="supplier-hint"
-                      value={supplierHint}
-                      onChange={(event) => setSupplierHint(event.target.value)}
-                      placeholder="e.g. Ceylon Wholesale Traders"
-                      disabled={isBusy}
-                    />
-                  </div>
+                    <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.75fr)]">
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                        {selectedFile ? (
+                          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              onClick={handlePreviewSelectedFile}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                  event.preventDefault();
+                                  handlePreviewSelectedFile();
+                                }
+                              }}
+                              className="flex min-w-0 items-start gap-4 rounded-2xl outline-none transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-primary/40"
+                            >
+                              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                                <SelectedFileIcon className="h-6 w-6" />
+                              </div>
+                              <div className="min-w-0 space-y-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="truncate text-sm font-semibold text-foreground">{selectedFile.name}</p>
+                                  {selectedFileTypeLabel && (
+                                    <Badge variant="secondary" className="rounded-full">
+                                      {selectedFileTypeLabel}
+                                    </Badge>
+                                  )}
+                                </div>
+                                <p className="text-sm text-muted-foreground">
+                                  {formatFileSize(selectedFile.size)}
+                                  {selectedFile.type ? ` - ${selectedFile.type}` : ""}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  Ready to scan. You can change or remove this file before importing.
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={openFilePicker}
+                                disabled={isBusy}
+                                className="h-10 px-4"
+                              >
+                                Change file
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={handleRemoveSelectedFile}
+                                disabled={isBusy}
+                                className="h-10 px-4"
+                              >
+                                Remove
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-start gap-4">
+                            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
+                              <FileText className="h-6 w-6" />
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-sm font-semibold text-foreground">No file selected yet</p>
+                              <p className="text-sm text-muted-foreground">
+                                Choose a bill from your device or drop it into the upload area to begin.
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
 
-                  <Button onClick={() => void handleUploadDraft()} disabled={!selectedFile || isUploading || isConfirming}>
-                    {isUploading ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Parsing...
-                      </>
-                    ) : (
-                      <>
-                        <UploadCloud className="mr-2 h-4 w-4" />
-                        Upload & Parse
-                      </>
-                    )}
-                  </Button>
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 shadow-sm">
+                        <div className="flex items-center gap-4">
+                          <div className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                            <span className="absolute inset-0 rounded-full border border-primary/15 animate-ping opacity-30" />
+                            <Sparkles className="h-7 w-7 animate-pulse" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-foreground">
+                              {draft ? "Bill scanned and ready for review" : "Upload a supplier bill to get started"}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              {draft
+                                ? "Review detected items and confirm stock intake."
+                                : "Drag and drop your bill or tap browse to begin."}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      {selectedFile && isPreviewOpen && (
+                        <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+                          <div className="mb-3 flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-semibold text-foreground">Bill preview</p>
+                              <p className="text-xs text-muted-foreground">
+                                Review the uploaded bill here before scanning.
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setIsPreviewOpen(false)}
+                              disabled={isBusy}
+                              className="h-9 px-3"
+                            >
+                              Close
+                            </Button>
+                          </div>
+                          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+                            {previewUrl ? (
+                              selectedFile.type === "application/pdf" ? (
+                                <iframe
+                                  src={previewUrl}
+                                  title="Supplier bill preview"
+                                  className="h-[280px] w-full border-0 bg-white"
+                                />
+                              ) : (
+                                <img
+                                  src={previewUrl}
+                                  alt="Supplier bill preview"
+                                  className="h-[280px] w-full object-contain bg-white"
+                                />
+                              )
+                            ) : (
+                              <div className="flex h-[280px] items-center justify-center px-4 text-sm text-muted-foreground">
+                                Loading preview...
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
-
-                {selectedFile && (
-                  <p className="mt-3 text-xs text-muted-foreground">
-                    Selected: {selectedFile.name} ({Math.max(1, Math.round(selectedFile.size / 1024))} KB)
-                  </p>
-                )}
               </section>
-
-              {!draft && (
-                <section className="rounded-lg border border-dashed bg-muted/20 p-8 text-center">
-                  <p className="text-sm font-medium">Upload a supplier bill to begin OCR import</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    After parsing, you can review line mapping, create missing products, and confirm the stock intake.
-                  </p>
-                </section>
-              )}
 
               {draft && (
                 <>
-                  <section className="grid gap-4 rounded-lg border bg-card p-4 md:grid-cols-2 lg:grid-cols-4">
-                    <div className="space-y-2 lg:col-span-2">
-                      <Label htmlFor="import-supplier-name">Supplier Name</Label>
-                      <Input
-                        id="import-supplier-name"
-                        value={supplierName}
-                        onChange={(event) => setSupplierName(event.target.value)}
-                        disabled={isBusy}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="import-invoice-number">Invoice Number</Label>
-                      <Input
-                        id="import-invoice-number"
-                        value={invoiceNumber}
-                        onChange={(event) => setInvoiceNumber(event.target.value)}
-                        disabled={isBusy}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="import-invoice-date">Invoice Date</Label>
-                      <Input
-                        id="import-invoice-date"
-                        type="date"
-                        value={invoiceDate}
-                        onChange={(event) => setInvoiceDate(event.target.value)}
-                        disabled={isBusy}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="import-currency">Currency</Label>
-                      <Input
-                        id="import-currency"
-                        value={currency}
-                        onChange={(event) => setCurrency(event.target.value.toUpperCase())}
-                        maxLength={6}
-                        disabled={isBusy}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="import-tax-total">Tax Total</Label>
-                      <Input
-                        id="import-tax-total"
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={taxTotal}
-                        onChange={(event) => setTaxTotal(event.target.value)}
-                        disabled={isBusy}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="import-grand-total">Grand Total</Label>
-                      <Input
-                        id="import-grand-total"
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={grandTotal}
-                        onChange={(event) => setGrandTotal(event.target.value)}
-                        disabled={isBusy}
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between rounded-md border bg-background px-3 py-2 lg:col-span-4">
-                      <div>
-                        <p className="text-sm font-medium">Update Product Cost Price</p>
-                        <p className="text-xs text-muted-foreground">Apply weighted average cost based on imported quantities.</p>
-                      </div>
-                      <Switch checked={updateCostPrice} onCheckedChange={setUpdateCostPrice} disabled={isBusy} />
-                    </div>
-                  </section>
-
-                  <section className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-                    <div className="rounded-md border bg-card p-3">
-                      <p className="text-xs text-muted-foreground">Draft Status</p>
+                  <section className="hidden grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <p className="text-xs text-muted-foreground">Bill Overview</p>
                       <div className="mt-1 flex items-center gap-2">
                         <Badge variant={draft.review_required ? "secondary" : "default"}>
                           {draft.status.replaceAll("_", " ")}
@@ -777,58 +1021,36 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                       </div>
                     </div>
 
-                    <div className="rounded-md border bg-card p-3">
-                      <p className="text-xs text-muted-foreground">Line Summary</p>
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <p className="text-xs text-muted-foreground">Item Overview</p>
                       <p className="mt-1 text-sm font-medium">
                         {editableLines.length} lines, {unresolvedLineCount} unmapped, {invalidLineCount} invalid
                       </p>
                     </div>
 
-                    <div className="rounded-md border bg-card p-3">
-                      <p className="text-xs text-muted-foreground">Computed Subtotal</p>
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <p className="text-xs text-muted-foreground">Computed Total</p>
                       <p className="mt-1 text-sm font-medium">
                         {currency} {computedSubtotal.toFixed(2)}
                       </p>
                     </div>
 
-                    <div className="rounded-md border bg-card p-3">
-                      <p className="text-xs text-muted-foreground">Totals Validation</p>
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <p className="text-xs text-muted-foreground">Variance Check</p>
                       <p
                         className={cn(
                           "mt-1 text-sm font-medium",
                           draft.totals.within_tolerance ? "text-emerald-600" : "text-amber-600",
                         )}
                       >
-                        Diff {draft.totals.difference.toFixed(2)} / Tol {draft.totals.tolerance.toFixed(2)}
+                        Range {draft.totals.difference.toFixed(2)} / Limit {draft.totals.tolerance.toFixed(2)}
                       </p>
                     </div>
                   </section>
 
-                  {(draft.warnings.length > 0 || draft.blocked_reasons.length > 0 || requiresApprovalReason) && (
-                    <section className="rounded-lg border border-amber-300/70 bg-amber-50/70 p-4 text-amber-900">
-                      <div className="flex items-start gap-2">
-                        <AlertTriangle className="mt-0.5 h-4 w-4" />
-                        <div className="space-y-1 text-sm">
-                          <p className="font-medium">Review required before confirm</p>
-                          {draft.warnings.map((warning) => (
-                            <p key={warning}>- {warning}</p>
-                          ))}
-                          {draft.blocked_reasons.length > 0 && (
-                            <p>
-                              Blocked reasons: {draft.blocked_reasons.join(", ").replaceAll("_", " ")}
-                            </p>
-                          )}
-                          {requiresApprovalReason && (
-                            <p>Totals are out of tolerance; approval reason is required.</p>
-                          )}
-                        </div>
-                      </div>
-                    </section>
-                  )}
-
-                  <section className="rounded-lg border bg-card p-4">
+                  <section className="flex max-h-[62vh] flex-col rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
                     <div className="mb-3 flex items-center justify-between gap-3">
-                      <h3 className="text-sm font-semibold">Line Review and Mapping</h3>
+                      <h3 className="text-sm font-semibold">Item Review and Mapping</h3>
                       {isCatalogLoading ? (
                         <span className="text-xs text-muted-foreground">Loading products...</span>
                       ) : (
@@ -843,9 +1065,9 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                       )}
                     </div>
 
-                    <div className="overflow-x-auto rounded-md border">
+                    <div className="min-h-0 flex-1 overflow-auto rounded-2xl border">
                       <Table>
-                        <TableHeader className="bg-background">
+                        <TableHeader className="bg-slate-50 sticky top-0 z-10">
                           <TableRow>
                             <TableHead className="w-[60px]">Line</TableHead>
                             <TableHead className="min-w-[280px]">Supplier Item</TableHead>
@@ -870,7 +1092,7 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                                   </p>
                                   {shouldShowRawTextPreview(line.sourceName, line.rawText) && (
                                     <p className="mt-1 line-clamp-2 break-words text-xs text-muted-foreground">
-                                      OCR: {line.rawText}
+                                      Detected text: {line.rawText}
                                     </p>
                                   )}
                                 </TableCell>
@@ -889,7 +1111,7 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                                       )
                                     }
                                     disabled={isBusy}
-                                    className={cn(!validation.hasValidQuantity && "border-destructive")}
+                                    className={cn("h-11 rounded-xl bg-background", !validation.hasValidQuantity && "border-destructive")}
                                   />
                                 </TableCell>
 
@@ -907,7 +1129,7 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                                       )
                                     }
                                     disabled={isBusy}
-                                    className={cn(!validation.hasValidUnitCost && "border-destructive")}
+                                    className={cn("h-11 rounded-xl bg-background", !validation.hasValidUnitCost && "border-destructive")}
                                   />
                                 </TableCell>
 
@@ -939,7 +1161,7 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                                     }}
                                     disabled={isBusy || isCatalogLoading}
                                   >
-                                    <SelectTrigger className="h-9">
+                                    <SelectTrigger className="h-11 rounded-xl">
                                       <SelectValue placeholder="Select product" />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -961,7 +1183,7 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                                       type="button"
                                       variant="ghost"
                                       size="sm"
-                                      className="mt-1 h-7 px-2 text-xs"
+                                      className="mt-1 h-9 px-2 text-xs"
                                       onClick={() => handleOpenCreateProduct(line)}
                                       disabled={isBusy}
                                     >
@@ -991,7 +1213,7 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                                         <span>Score: {(line.matchScore * 100).toFixed(1)}%</span>
                                       )}
                                       {line.confidence != null && (
-                                        <span>OCR: {(line.confidence * 100).toFixed(1)}%</span>
+                                        <span>Scan confidence: {(line.confidence * 100).toFixed(1)}%</span>
                                       )}
                                     </div>
                                   </div>
@@ -1004,12 +1226,12 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                     </div>
 
                     {createProductDraft && (
-                      <div className="mt-4 rounded-md border border-dashed bg-muted/30 p-4">
+                      <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-4">
                         <div className="flex flex-wrap items-start justify-between gap-2">
                           <div>
                             <p className="text-sm font-semibold">Create Product for Line {createProductDraft.lineNo}</p>
                             <p className="text-xs text-muted-foreground">
-                              Save a new catalog product and auto-map it to this OCR line.
+                              Save a new catalog product and auto-map it to this detected line.
                             </p>
                           </div>
                           <div className="flex items-center gap-2">
@@ -1052,6 +1274,7 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                                 )
                               }
                               disabled={isCreatingProduct}
+                              className="h-11 rounded-xl bg-background"
                             />
                           </div>
 
@@ -1066,6 +1289,7 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                                 )
                               }
                               disabled={isCreatingProduct}
+                              className="h-11 rounded-xl bg-background"
                             />
                           </div>
 
@@ -1080,6 +1304,7 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                                 )
                               }
                               disabled={isCreatingProduct}
+                              className="h-11 rounded-xl bg-background"
                             />
                           </div>
 
@@ -1097,6 +1322,7 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                                 )
                               }
                               disabled={isCreatingProduct}
+                              className="h-11 rounded-xl bg-background"
                             />
                           </div>
 
@@ -1114,6 +1340,7 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                                 )
                               }
                               disabled={isCreatingProduct}
+                              className="h-11 rounded-xl bg-background"
                             />
                           </div>
 
@@ -1131,6 +1358,7 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                                 )
                               }
                               disabled={isCreatingProduct}
+                              className="h-11 rounded-xl bg-background"
                             />
                           </div>
 
@@ -1148,6 +1376,7 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                                 )
                               }
                               disabled={isCreatingProduct}
+                              className="h-11 rounded-xl bg-background"
                             />
                           </div>
                         </div>
@@ -1173,12 +1402,12 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                   </section>
 
                   {requiresApprovalReason && (
-                    <section className="rounded-lg border bg-card p-4">
+                    <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
                       <Label htmlFor="import-approval-reason">Approval Reason</Label>
                       <Textarea
                         id="import-approval-reason"
-                        className="mt-2"
-                        placeholder="Explain why this totals mismatch is acceptable."
+                        className="mt-2 min-h-28 rounded-2xl"
+                        placeholder="Add a short reason for approving this totals difference."
                         value={approvalReason}
                         onChange={(event) => setApprovalReason(event.target.value)}
                         disabled={isBusy}
@@ -1188,37 +1417,50 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                 </>
               )}
             </div>
-          </ScrollArea>
+          </div>
 
-          <DialogFooter className="border-t px-6 py-4 sm:justify-between">
-            <div className="space-y-1 text-xs text-muted-foreground">
-              {draft ? (
-                <div className="flex items-center">
-                  <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
-                  Draft {draft.draft_id.slice(0, 8)} ready for review
-                </div>
-              ) : (
-                "Upload a file to start OCR import"
-              )}
-              {draft && !canConfirm && primaryConfirmBlocker && (
-                <p className="text-amber-700">{primaryConfirmBlocker}</p>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Button variant="outline" onClick={() => handleOpenChange(false)} disabled={isBusy}>
-                Cancel
-              </Button>
-              <Button onClick={() => void handleConfirmImport()} disabled={!canConfirm}>
-                {isConfirming ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Confirming...
-                  </>
+          <DialogFooter className="sticky bottom-0 z-10 border-t border-slate-200 bg-white/95 px-4 py-4 backdrop-blur sm:px-6">
+            <div className="flex w-full flex-col gap-4 md:flex-row md:items-end md:justify-between">
+              <div className="space-y-1 text-sm text-muted-foreground md:max-w-[36rem]">
+                {draft ? (
+                  <div className="flex items-center gap-2 text-foreground">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                    <span>Bill draft {draft.draft_id.slice(0, 8)} ready for review</span>
+                  </div>
                 ) : (
-                  "Confirm Import"
+                  "Upload a bill to start the import flow"
                 )}
-              </Button>
+                {draft && !canConfirm && primaryConfirmBlocker && (
+                  <p className="text-amber-700">{primaryConfirmBlocker}</p>
+                )}
+              </div>
+
+              <div className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end md:w-auto md:flex-shrink-0">
+                <Button
+                  variant="outline"
+                  size="lg"
+                  onClick={() => handleOpenChange(false)}
+                  disabled={isBusy}
+                  className="min-h-11 w-full px-6 sm:w-auto"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="lg"
+                  onClick={() => void handleConfirmImport()}
+                  disabled={!canConfirm}
+                  className="min-h-11 w-full whitespace-nowrap px-6 sm:w-auto"
+                >
+                  {isConfirming ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Confirming...
+                    </>
+                  ) : (
+                    "Confirm Import"
+                  )}
+                </Button>
+              </div>
             </div>
           </DialogFooter>
         </div>

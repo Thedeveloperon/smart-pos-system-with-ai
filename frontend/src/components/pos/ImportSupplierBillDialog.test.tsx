@@ -150,11 +150,11 @@ function renderDialog() {
 }
 
 async function uploadDraft() {
-  const fileInput = screen.getByLabelText("Supplier Bill File") as HTMLInputElement;
+  const fileInput = screen.getByLabelText("Upload your supplier bill") as HTMLInputElement;
   const file = new File(["test"], "supplier-bill.pdf", { type: "application/pdf" });
 
   fireEvent.change(fileInput, { target: { files: [file] } });
-  fireEvent.click(screen.getByRole("button", { name: /upload & parse/i }));
+  fireEvent.click(screen.getByRole("button", { name: /upload and scan/i }));
 
   await waitFor(() => {
     expect(createPurchaseOcrDraft).toHaveBeenCalledTimes(1);
@@ -189,9 +189,8 @@ describe("ImportSupplierBillDialog", () => {
     renderDialog();
     await uploadDraft();
 
-    expect(await screen.findByText("Line Review and Mapping")).toBeInTheDocument();
-    expect(screen.getByText(/Review required before confirm/i)).toBeInTheDocument();
-    expect(screen.getByText(/Diff 2.50 \/ Tol 1.00/i)).toBeInTheDocument();
+    expect(await screen.findByText("Item Review and Mapping")).toBeInTheDocument();
+    expect(screen.getAllByText(/Range 2.50 \/ Limit 1.00/i).length).toBeGreaterThan(0);
     expect(screen.getByLabelText("Approval Reason")).toBeInTheDocument();
   });
 
@@ -260,7 +259,7 @@ describe("ImportSupplierBillDialog", () => {
     expect(toast.success).toHaveBeenCalled();
   });
 
-  it("creates a new product inline and auto-maps the OCR line", async () => {
+  it("creates a new product inline and auto-maps the detected line", async () => {
     vi.mocked(createPurchaseOcrDraft).mockResolvedValue(
       createDraftResponse({
         line_items: [

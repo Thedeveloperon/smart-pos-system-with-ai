@@ -238,10 +238,10 @@ const ClosingCashDialog = ({
             </div>
           </div>
 
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setStep(hasMismatch ? "reason" : "count")} className="rounded-xl">
-              Go Back
-            </Button>
+        <DialogFooter className="w-full gap-2 px-6">
+          <Button variant="outline" onClick={() => setStep(hasMismatch ? "reason" : "count")} className="rounded-xl">
+            Go Back
+          </Button>
             <Button variant="pos-primary" onClick={handleConfirm} className="rounded-xl">
               <Lock className="h-4 w-4" />
               Confirm & Lock Session
@@ -254,20 +254,20 @@ const ClosingCashDialog = ({
 
   return (
     <Dialog open={open} onOpenChange={() => handleCancel()}>
-      <DialogContent className="w-[min(96vw,44rem)] max-h-[92vh] overflow-hidden flex flex-col sm:max-w-3xl">
+      <DialogContent className="w-[min(96vw,56rem)] max-h-[92vh] overflow-hidden flex flex-col sm:max-w-4xl">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+          <DialogTitle className="flex items-center gap-2 font-medium text-slate-600">
             <Shield className="h-5 w-5 text-primary" />
             Closing Cash Count
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="text-slate-500">
             Count all cash in the register to close your shift.
           </DialogDescription>
         </DialogHeader>
 
         <div className="rounded-xl bg-muted p-3 flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">Expected Cash</span>
-          <span className="text-lg font-bold tabular-nums">Rs. {expectedCash.toLocaleString()}</span>
+          <span className="text-sm font-medium text-slate-500">Expected Cash</span>
+          <span className="text-lg font-semibold tabular-nums text-slate-600">Rs. {expectedCash.toLocaleString()}</span>
         </div>
 
         <div className="flex-1 overflow-y-auto py-2 -mx-6 px-6">

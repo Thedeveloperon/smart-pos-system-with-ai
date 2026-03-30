@@ -165,7 +165,7 @@ const CheckoutPanel = ({
       </div>
 
       {/* Actions */}
-      <div className="shrink-0 space-y-2 border-t border-border bg-background/95 p-3 pb-[env(safe-area-inset-bottom)]">
+      <div className="shrink-0 space-y-1.5 border-t border-border bg-background/95 px-3 pt-2.5 pb-[calc(env(safe-area-inset-bottom)+0.35rem)]">
         <Button
           variant="pos-primary"
           className="h-11 w-full rounded-xl text-sm"
@@ -176,7 +176,7 @@ const CheckoutPanel = ({
           Complete Sale
         </Button>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-1.5">
           <Button
             variant="pos-outline"
             className="h-10 rounded-xl text-sm"
