@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.Extensions.Options;
 using SmartPos.Backend.Features.Auth;
+using SmartPos.Backend.Features.CashSessions;
 using SmartPos.Backend.Features.Checkout;
 using SmartPos.Backend.Features.Products;
 using SmartPos.Backend.Features.Purchases;
@@ -75,6 +76,7 @@ builder.Services.AddAuthorization(options =>
         policy.RequireRole(SmartPosRoles.Owner, SmartPosRoles.Manager));
 });
 builder.Services.AddScoped<CheckoutService>();
+builder.Services.AddScoped<CashSessionService>();
 builder.Services.AddScoped<ProductService>();
 builder.Services.AddScoped<PurchaseService>();
 builder.Services.AddScoped<ReceiptService>();
@@ -149,6 +151,7 @@ using (var scope = app.Services.CreateScope())
     await DbSchemaUpdater.EnsureProductImageSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureShopProfileSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureRefundSchemaAsync(dbContext);
+    await DbSchemaUpdater.EnsureCashSessionSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsurePurchasingSchemaAsync(dbContext);
     await DbSeeder.SeedAsync(dbContext);
 }
@@ -170,6 +173,7 @@ app.MapGet("/health", () =>
 .WithOpenApi();
 
 app.MapAuthEndpoints();
+app.MapCashSessionEndpoints();
 app.MapSyncEndpoints();
 app.MapProductEndpoints();
 app.MapPurchaseEndpoints();

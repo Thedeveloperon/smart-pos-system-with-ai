@@ -8,6 +8,7 @@ import {
   Layers3,
   Package,
   RefreshCw,
+  RotateCcw,
   ShieldCheck,
   ShoppingCart,
   FileDown,
@@ -33,6 +34,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 type ManagerReportsDrawerProps = {
   open: boolean;
   onClose: () => void;
+  refreshToken?: number;
+  onRefundSale?: (saleId: string) => void;
 };
 
 type TransactionsItem = Awaited<ReturnType<typeof fetchTransactionsReport>>["items"][number];
@@ -153,7 +156,12 @@ const BadgeTone = ({ method }: { method: string }) => {
   return <Badge variant={variant} className="capitalize text-[10px]">{method}</Badge>;
 };
 
-const ManagerReportsDrawer = ({ open, onClose }: ManagerReportsDrawerProps) => {
+const ManagerReportsDrawer = ({
+  open,
+  onClose,
+  refreshToken = 0,
+  onRefundSale,
+}: ManagerReportsDrawerProps) => {
   const [fromDate, setFromDate] = useState(formatDateInput(defaultFromDate));
   const [toDate, setToDate] = useState(formatDateInput(today));
   const [loading, setLoading] = useState(false);
@@ -199,7 +207,7 @@ const ManagerReportsDrawer = ({ open, onClose }: ManagerReportsDrawerProps) => {
     }
 
     void loadReports();
-  }, [open, fromDate, toDate]);
+  }, [open, fromDate, toDate, refreshToken]);
 
   const overview = useMemo(() => {
     const cashierMap = new Map<string, number>();
@@ -618,23 +626,24 @@ const ManagerReportsDrawer = ({ open, onClose }: ManagerReportsDrawerProps) => {
 
                   <Table>
                     <TableHeader>
-                      <TableRow>
-                        <TableHead>Bill</TableHead>
-                        <TableHead>Cashier</TableHead>
-                        <TableHead>Time</TableHead>
-                        <TableHead className="text-right">Total</TableHead>
-                      </TableRow>
-                    </TableHeader>
+                    <TableRow>
+                      <TableHead>Bill</TableHead>
+                      <TableHead>Cashier</TableHead>
+                      <TableHead>Time</TableHead>
+                      <TableHead className="text-right">Total</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
                     <TableBody>
-                      {loading ? (
+                    {loading ? (
                         <TableRow>
-                          <TableCell colSpan={4} className="py-10 text-center text-muted-foreground">
+                          <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
                             Loading reports...
                           </TableCell>
                         </TableRow>
                       ) : report.transactions.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={4} className="py-10 text-center text-muted-foreground">
+                          <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
                             No sales in this period.
                           </TableCell>
                         </TableRow>
@@ -672,6 +681,20 @@ const ManagerReportsDrawer = ({ open, onClose }: ManagerReportsDrawerProps) => {
                               <p className="text-xs font-normal text-muted-foreground">
                                 Paid {money(sale.paid_total)}
                               </p>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {(sale.status === "completed" || sale.status === "refundedpartially") && onRefundSale ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => onRefundSale(sale.sale_id)}
+                                >
+                                  <RotateCcw className="h-4 w-4" />
+                                  Refund
+                                </Button>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">Unavailable</span>
+                              )}
                             </TableCell>
                           </TableRow>
                         ))

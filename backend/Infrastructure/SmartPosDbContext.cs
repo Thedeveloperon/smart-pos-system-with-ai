@@ -23,6 +23,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
     public DbSet<AppRole> Roles => Set<AppRole>();
     public DbSet<UserRole> UserRoles => Set<UserRole>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<CashSession> CashSessions => Set<CashSession>();
     public DbSet<Device> Devices => Set<Device>();
     public DbSet<OfflineEvent> OfflineEvents => Set<OfflineEvent>();
 
@@ -280,6 +281,25 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.Action).HasMaxLength(120);
             entity.Property(x => x.EntityName).HasMaxLength(120);
             entity.Property(x => x.EntityId).HasMaxLength(64);
+        });
+
+        modelBuilder.Entity<CashSession>(entity =>
+        {
+            entity.ToTable("cash_sessions");
+            entity.Property(x => x.CashierName).HasMaxLength(120);
+            entity.Property(x => x.OpeningCountsJson).HasColumnType("text");
+            entity.Property(x => x.OpeningTotal).HasPrecision(18, 2);
+            entity.Property(x => x.OpeningApprovedBy).HasMaxLength(120);
+            entity.Property(x => x.ClosingCountsJson).HasColumnType("text");
+            entity.Property(x => x.ClosingTotal).HasPrecision(18, 2);
+            entity.Property(x => x.ClosingApprovedBy).HasMaxLength(120);
+            entity.Property(x => x.CashSalesTotal).HasPrecision(18, 2);
+            entity.Property(x => x.ExpectedCash).HasPrecision(18, 2);
+            entity.Property(x => x.Difference).HasPrecision(18, 2);
+            entity.Property(x => x.DifferenceReason).HasMaxLength(250);
+            entity.HasIndex(x => x.DeviceId);
+            entity.HasIndex(x => new { x.DeviceId, x.OpenedAtUtc });
+            entity.HasIndex(x => new { x.StoreId, x.Status });
         });
 
         modelBuilder.Entity<Device>(entity =>

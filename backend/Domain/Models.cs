@@ -287,6 +287,33 @@ public sealed class AuditLog
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
+public sealed class CashSession
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? StoreId { get; set; }
+    public Guid? DeviceId { get; set; }
+    public Guid? AppUserId { get; set; }
+    public required string CashierName { get; set; }
+    public CashSessionStatus Status { get; set; } = CashSessionStatus.Active;
+    public required string OpeningCountsJson { get; set; }
+    public decimal OpeningTotal { get; set; }
+    public DateTimeOffset OpeningSubmittedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public string? OpeningApprovedBy { get; set; }
+    public DateTimeOffset? OpeningApprovedAtUtc { get; set; }
+    public string? ClosingCountsJson { get; set; }
+    public decimal? ClosingTotal { get; set; }
+    public DateTimeOffset? ClosingSubmittedAtUtc { get; set; }
+    public string? ClosingApprovedBy { get; set; }
+    public DateTimeOffset? ClosingApprovedAtUtc { get; set; }
+    public decimal CashSalesTotal { get; set; }
+    public decimal? ExpectedCash { get; set; }
+    public decimal? Difference { get; set; }
+    public string? DifferenceReason { get; set; }
+    public DateTimeOffset OpenedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? ClosedAtUtc { get; set; }
+    public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
 public sealed class Device
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -355,4 +382,12 @@ public enum OfflineEventStatus
     Synced = 2,
     Conflict = 3,
     Rejected = 4
+}
+
+public enum CashSessionStatus
+{
+    Active = 1,
+    Closing = 2,
+    Closed = 3,
+    Locked = 4
 }

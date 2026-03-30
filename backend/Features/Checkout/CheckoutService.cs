@@ -1,11 +1,15 @@
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
+using SmartPos.Backend.Features.CashSessions;
 using SmartPos.Backend.Infrastructure;
 using SmartPos.Backend.Security;
 
 namespace SmartPos.Backend.Features.Checkout;
 
-public sealed class CheckoutService(SmartPosDbContext dbContext, AuditLogService auditLogService)
+public sealed class CheckoutService(
+    SmartPosDbContext dbContext,
+    AuditLogService auditLogService,
+    CashSessionService cashSessionService)
 {
     public async Task<SaleResponse> HoldAsync(
         HoldSaleRequest request,
@@ -172,6 +176,18 @@ public sealed class CheckoutService(SmartPosDbContext dbContext, AuditLogService
                 paid_total = paidTotal,
                 change
             });
+
+        var cashPaidTotal = paymentRecords
+            .Where(x => x.Method == PaymentMethod.Cash)
+            .Sum(x => x.Amount);
+        if (cashPaidTotal > 0m)
+        {
+            await cashSessionService.RecordCashSaleAsync(
+                cashPaidTotal,
+                sale.Id,
+                sale.SaleNumber,
+                cancellationToken);
+        }
 
         await dbContext.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);

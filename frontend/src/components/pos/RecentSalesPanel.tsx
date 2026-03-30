@@ -14,6 +14,7 @@ import {
   CreditCard,
   QrCode,
   Receipt,
+  RotateCcw,
 } from "lucide-react";
 import type { RecentSale } from "./types";
 
@@ -23,6 +24,7 @@ interface RecentSalesPanelProps {
   sales: RecentSale[];
   onReprint: (saleId: string) => void;
   onWhatsApp: (saleId: string) => void;
+  onRefund?: (saleId: string) => void;
 }
 
 const PaymentIcon = ({ method }: { method: string }) => {
@@ -44,6 +46,7 @@ const RecentSalesPanel = ({
   sales,
   onReprint,
   onWhatsApp,
+  onRefund,
 }: RecentSalesPanelProps) => {
   return (
     <Sheet open={open} onOpenChange={onClose}>
@@ -122,6 +125,17 @@ const RecentSalesPanel = ({
                       <MessageCircle className="h-3.5 w-3.5" />
                       WhatsApp
                     </Button>
+                    {onRefund && (sale.status === "completed" || sale.status === "refundedpartially") && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="rounded-lg"
+                        onClick={() => onRefund(sale.id)}
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        Refund
+                      </Button>
+                    )}
                   </div>
                 </div>
               );

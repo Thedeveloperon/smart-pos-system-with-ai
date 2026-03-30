@@ -1,0 +1,129 @@
+using System.Net.Http.Json;
+using System.Text.Json.Nodes;
+
+namespace SmartPos.Backend.IntegrationTests;
+
+public sealed class CashSessionFlowTests(CustomWebApplicationFactory factory)
+    : IClassFixture<CustomWebApplicationFactory>
+{
+    private readonly HttpClient client = factory.CreateClient();
+
+    [Fact]
+    public async Task CashSession_ShouldPersist_OnOpenSaleRefundAndClose()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var productSearch = await TestJson.ReadObjectAsync(
+            await client.GetAsync("/api/products/search"));
+        var firstProduct = FirstObjectFromArray(productSearch, "items");
+        var productId = Guid.Parse(TestJson.GetString(firstProduct, "id"));
+        var unitPrice = TestJson.GetDecimal(firstProduct, "unitPrice");
+
+        var openedSession = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/cash-sessions/open", new
+            {
+                counts = new[]
+                {
+                    new { denomination = 1000m, quantity = 1m }
+                },
+                total = 1000m
+            }));
+
+        Assert.Equal("active", TestJson.GetString(openedSession, "status"));
+        Assert.Equal(1000m, TestJson.GetDecimal(openedSession["opening"]!, "total"));
+
+        var currentAfterOpen = await TestJson.ReadObjectAsync(
+            await client.GetAsync("/api/cash-sessions/current"));
+        Assert.Equal(0m, TestJson.GetDecimal(currentAfterOpen, "cash_sales_total"));
+        Assert.Contains(
+            currentAfterOpen["audit_log"]!.AsArray().OfType<JsonObject>(),
+            entry => TestJson.GetString(entry, "action") == "cash_session_opened");
+
+        var saleResponse = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/checkout/complete", new
+            {
+                sale_id = (Guid?)null,
+                items = new[]
+                {
+                    new
+                    {
+                        product_id = productId,
+                        quantity = 1m
+                    }
+                },
+                discount_percent = 0m,
+                role = "cashier",
+                payments = new[]
+                {
+                    new
+                    {
+                        method = "cash",
+                        amount = unitPrice,
+                        reference_number = (string?)null
+                    }
+                }
+            }));
+
+        Assert.Equal("completed", TestJson.GetString(saleResponse, "status"));
+
+        var currentAfterSale = await TestJson.ReadObjectAsync(
+            await client.GetAsync("/api/cash-sessions/current"));
+        Assert.Equal(unitPrice, TestJson.GetDecimal(currentAfterSale, "cash_sales_total"));
+        Assert.Contains(
+            currentAfterSale["audit_log"]!.AsArray().OfType<JsonObject>(),
+            entry => TestJson.GetString(entry, "action") == "cash_session_sale_recorded");
+
+        var saleId = Guid.Parse(TestJson.GetString(saleResponse, "sale_id"));
+        var saleItemId = Guid.Parse(TestJson.GetString(FirstObjectFromArray(saleResponse, "items"), "sale_item_id"));
+
+        var refundResponse = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/refunds", new
+            {
+                sale_id = saleId,
+                reason = "customer_request",
+                items = new[]
+                {
+                    new
+                    {
+                        sale_item_id = saleItemId,
+                        quantity = 1m
+                    }
+                }
+            }));
+
+        Assert.Equal("refundedfully", TestJson.GetString(refundResponse, "sale_status"));
+
+        var currentAfterRefund = await TestJson.ReadObjectAsync(
+            await client.GetAsync("/api/cash-sessions/current"));
+        Assert.Equal(0m, TestJson.GetDecimal(currentAfterRefund, "cash_sales_total"));
+        Assert.Contains(
+            currentAfterRefund["audit_log"]!.AsArray().OfType<JsonObject>(),
+            entry => TestJson.GetString(entry, "action") == "cash_session_refund_recorded");
+
+        var sessionId = Guid.Parse(TestJson.GetString(openedSession, "cash_session_id"));
+        var closedSession = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync($"/api/cash-sessions/{sessionId}/close", new
+            {
+                counts = new[]
+                {
+                    new { denomination = 1000m, quantity = 1m }
+                },
+                total = 1000m
+            }));
+
+        Assert.Equal("closed", TestJson.GetString(closedSession, "status"));
+        Assert.Equal(1000m, TestJson.GetDecimal(closedSession, "expected_cash"));
+        Assert.Equal(0m, TestJson.GetDecimal(closedSession, "difference"));
+    }
+
+    private static JsonObject FirstObjectFromArray(JsonNode root, string propertyName)
+    {
+        var array = root[propertyName]?.AsArray()
+                    ?? throw new InvalidOperationException($"Missing array '{propertyName}'.");
+
+        return array
+                   .OfType<JsonObject>()
+                   .FirstOrDefault()
+               ?? throw new InvalidOperationException($"Array '{propertyName}' was empty.");
+    }
+}

@@ -104,6 +104,90 @@ public static class DbSchemaUpdater
         }
     }
 
+    public static async Task EnsureCashSessionSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken = default)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+
+        if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            var sql = """
+                CREATE TABLE IF NOT EXISTS "cash_sessions" (
+                  "Id" TEXT NOT NULL CONSTRAINT "PK_cash_sessions" PRIMARY KEY,
+                  "StoreId" TEXT NULL,
+                  "DeviceId" TEXT NULL,
+                  "AppUserId" TEXT NULL,
+                  "CashierName" TEXT NOT NULL,
+                  "Status" TEXT NOT NULL,
+                  "OpeningCountsJson" TEXT NOT NULL,
+                  "OpeningTotal" TEXT NOT NULL,
+                  "OpeningSubmittedAtUtc" TEXT NOT NULL,
+                  "OpeningApprovedBy" TEXT NULL,
+                  "OpeningApprovedAtUtc" TEXT NULL,
+                  "ClosingCountsJson" TEXT NULL,
+                  "ClosingTotal" TEXT NULL,
+                  "ClosingSubmittedAtUtc" TEXT NULL,
+                  "ClosingApprovedBy" TEXT NULL,
+                  "ClosingApprovedAtUtc" TEXT NULL,
+                  "CashSalesTotal" TEXT NOT NULL,
+                  "ExpectedCash" TEXT NULL,
+                  "Difference" TEXT NULL,
+                  "DifferenceReason" TEXT NULL,
+                  "OpenedAtUtc" TEXT NOT NULL,
+                  "ClosedAtUtc" TEXT NULL,
+                  "UpdatedAtUtc" TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS "IX_cash_sessions_DeviceId" ON "cash_sessions" ("DeviceId");
+                CREATE INDEX IF NOT EXISTS "IX_cash_sessions_DeviceId_OpenedAtUtc" ON "cash_sessions" ("DeviceId", "OpenedAtUtc");
+                CREATE INDEX IF NOT EXISTS "IX_cash_sessions_StoreId_Status" ON "cash_sessions" ("StoreId", "Status");
+                CREATE INDEX IF NOT EXISTS "IX_cash_sessions_AppUserId" ON "cash_sessions" ("AppUserId");
+                """;
+
+            await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+            return;
+        }
+
+        if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            var sql = """
+                CREATE TABLE IF NOT EXISTS cash_sessions (
+                  "Id" uuid NOT NULL PRIMARY KEY,
+                  "StoreId" uuid NULL,
+                  "DeviceId" uuid NULL,
+                  "AppUserId" uuid NULL,
+                  "CashierName" varchar(120) NOT NULL,
+                  "Status" varchar(32) NOT NULL,
+                  "OpeningCountsJson" text NOT NULL,
+                  "OpeningTotal" numeric(18,2) NOT NULL,
+                  "OpeningSubmittedAtUtc" timestamptz NOT NULL,
+                  "OpeningApprovedBy" varchar(120) NULL,
+                  "OpeningApprovedAtUtc" timestamptz NULL,
+                  "ClosingCountsJson" text NULL,
+                  "ClosingTotal" numeric(18,2) NULL,
+                  "ClosingSubmittedAtUtc" timestamptz NULL,
+                  "ClosingApprovedBy" varchar(120) NULL,
+                  "ClosingApprovedAtUtc" timestamptz NULL,
+                  "CashSalesTotal" numeric(18,2) NOT NULL,
+                  "ExpectedCash" numeric(18,2) NULL,
+                  "Difference" numeric(18,2) NULL,
+                  "DifferenceReason" varchar(250) NULL,
+                  "OpenedAtUtc" timestamptz NOT NULL,
+                  "ClosedAtUtc" timestamptz NULL,
+                  "UpdatedAtUtc" timestamptz NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS "IX_cash_sessions_DeviceId" ON cash_sessions ("DeviceId");
+                CREATE INDEX IF NOT EXISTS "IX_cash_sessions_DeviceId_OpenedAtUtc" ON cash_sessions ("DeviceId", "OpenedAtUtc");
+                CREATE INDEX IF NOT EXISTS "IX_cash_sessions_StoreId_Status" ON cash_sessions ("StoreId", "Status");
+                CREATE INDEX IF NOT EXISTS "IX_cash_sessions_AppUserId" ON cash_sessions ("AppUserId");
+                """;
+
+            await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+        }
+    }
+
     public static async Task EnsurePurchasingSchemaAsync(
         SmartPosDbContext dbContext,
         CancellationToken cancellationToken = default)
