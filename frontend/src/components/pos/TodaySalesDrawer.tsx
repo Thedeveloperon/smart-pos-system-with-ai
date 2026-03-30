@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { AlertTriangle, CalendarDays, DollarSign, Package, ReceiptText, Wallet } from "lucide-react";
+import { AlertTriangle, CalendarDays, DollarSign, Package, ReceiptText, RotateCcw, Wallet } from "lucide-react";
 import { fetchDailySalesReport, fetchTransactionsReport } from "@/lib/api";
 import type { CashSession } from "./cash-session/types";
 
@@ -11,6 +12,8 @@ type TodaySalesDrawerProps = {
   onClose: () => void;
   session: CashSession | null;
   cashSalesTotal: number;
+  refreshToken?: number;
+  onRefundSale?: (saleId: string) => void;
 };
 
 type TransactionsItem = Awaited<ReturnType<typeof fetchTransactionsReport>>["items"][number];
@@ -23,7 +26,14 @@ const PaymentBadge = ({ method }: { method: string }) => {
   return <Badge variant={variant} className="capitalize text-[10px]">{method}</Badge>;
 };
 
-const TodaySalesDrawer = ({ open, onClose, session, cashSalesTotal }: TodaySalesDrawerProps) => {
+const TodaySalesDrawer = ({
+  open,
+  onClose,
+  session,
+  cashSalesTotal,
+  refreshToken = 0,
+  onRefundSale,
+}: TodaySalesDrawerProps) => {
   const [summary, setSummary] = useState<Awaited<ReturnType<typeof fetchDailySalesReport>> | null>(null);
   const [transactions, setTransactions] = useState<TransactionsItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -61,7 +71,7 @@ const TodaySalesDrawer = ({ open, onClose, session, cashSalesTotal }: TodaySales
     return () => {
       alive = false;
     };
-  }, [open]);
+  }, [open, refreshToken]);
 
   const paymentTotals = useMemo(() => {
     const totals = new Map<string, number>();
@@ -182,28 +192,45 @@ const TodaySalesDrawer = ({ open, onClose, session, cashSalesTotal }: TodaySales
                 </div>
               ) : (
                 <div className="divide-y divide-border">
-                  {transactions.map((sale) => (
-                    <div key={sale.sale_id} className="px-4 py-3 flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="font-semibold truncate">{sale.sale_number}</p>
-                          <Badge variant="outline" className="text-[10px] capitalize">{sale.status}</Badge>
+                  {transactions.map((sale) => {
+                    const canRefund = sale.status === "completed" || sale.status === "refundedpartially";
+
+                    return (
+                      <div key={sale.sale_id} className="px-4 py-3 flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="font-semibold truncate">{sale.sale_number}</p>
+                            <Badge variant="outline" className="text-[10px] capitalize">{sale.status}</Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {new Date(sale.timestamp).toLocaleString()} · {sale.items_count} items
+                          </p>
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            {sale.payment_breakdown.map((payment) => (
+                              <PaymentBadge key={`${sale.sale_id}-${payment.method}`} method={payment.method} />
+                            ))}
+                          </div>
                         </div>
-                        <p className="text-xs text-muted-foreground">
-                          {new Date(sale.timestamp).toLocaleString()} · {sale.items_count} items
-                        </p>
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          {sale.payment_breakdown.map((payment) => (
-                            <PaymentBadge key={`${sale.sale_id}-${payment.method}`} method={payment.method} />
-                          ))}
+                        <div className="flex shrink-0 flex-col items-end gap-2 text-right">
+                          <div>
+                            <p className="font-bold text-primary">{money(sale.grand_total)}</p>
+                            <p className="text-xs text-muted-foreground">Paid {money(sale.paid_total)}</p>
+                          </div>
+                          {canRefund && onRefundSale && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 rounded-lg"
+                              onClick={() => onRefundSale(sale.sale_id)}
+                            >
+                              <RotateCcw className="h-3.5 w-3.5" />
+                              Refund
+                            </Button>
+                          )}
                         </div>
                       </div>
-                      <div className="text-right shrink-0">
-                        <p className="font-bold text-primary">{money(sale.grand_total)}</p>
-                        <p className="text-xs text-muted-foreground">Paid {money(sale.paid_total)}</p>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

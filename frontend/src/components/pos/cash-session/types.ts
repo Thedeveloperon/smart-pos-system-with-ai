@@ -43,6 +43,7 @@ export interface CashSession {
   differenceReason?: string;
   status: "active" | "closing" | "closed" | "locked";
   auditLog: AuditLogEntry[];
+  cashSalesTotal: number;
 }
 
 export interface AuditLogEntry {

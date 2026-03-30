@@ -226,6 +226,20 @@ public sealed class ReceiptService(CheckoutService checkoutService)
     font-size: 13px;
     text-transform: uppercase;
   }
+  .actions {
+    margin-top: 14px;
+    display: flex;
+    justify-content: center;
+  }
+  .refund-button {
+    border: 1px solid #111827;
+    background: #111827;
+    color: #fff;
+    font-size: 12px;
+    border-radius: 999px;
+    padding: 10px 14px;
+    cursor: pointer;
+  }
   .footer {
     margin-top: 14px;
     text-align: center;
@@ -319,6 +333,11 @@ public sealed class ReceiptService(CheckoutService checkoutService)
             sb.AppendLine($"<div class=\"payment-row\"><span>{Html(payment.Method.ToUpperInvariant())}</span><span>{payment.NetAmount:0.00}</span></div>");
         }
         sb.AppendLine($"<div class=\"payment-row\"><span>BALANCE</span><span class=\"balance-negative\">{sale.GrandTotal - sale.PaidTotal:0.00}</span></div>");
+        sb.AppendLine("</div>");
+
+        sb.AppendLine("<div class=\"actions\">");
+        sb.AppendLine(
+            $"<button type=\"button\" class=\"refund-button\" onclick=\"window.opener && window.opener.postMessage({{ type: 'smartpos-open-refund', saleId: '{Html(sale.SaleId.ToString())}' }}, '*'); this.textContent='Opened in POS';\">Refund in POS</button>");
         sb.AppendLine("</div>");
 
         sb.AppendLine("<div class=\"rule\"></div>");

@@ -1,4 +1,9 @@
 import type { CartItem, HeldBill, PaymentMethod, Product, RecentSale } from "@/components/pos/types";
+import type {
+  CashSession,
+  CashSessionEntry,
+  DenominationCount,
+} from "@/components/pos/cash-session/types";
 
 function getDefaultApiBaseUrl() {
   if (typeof window !== "undefined") {
@@ -88,7 +93,7 @@ type BackendSalePayment = {
   reference_number?: string | null;
 };
 
-type BackendSaleResponse = {
+export type SaleReceiptResponse = {
   sale_id: string;
   sale_number: string;
   status: string;
@@ -103,6 +108,106 @@ type BackendSaleResponse = {
   completed_at?: string | null;
   items: BackendSaleItem[];
   payments: BackendSalePayment[];
+};
+
+export type RefundableSaleItem = {
+  sale_item_id: string;
+  product_name: string;
+  sold_quantity: number;
+  refunded_quantity: number;
+  refundable_quantity: number;
+};
+
+export type SaleRefundSummary = {
+  sale_id: string;
+  sale_number: string;
+  sale_status: string;
+  refunded_total: number;
+  refunded_tax_total: number;
+  remaining_refundable_total: number;
+  items: RefundableSaleItem[];
+  refunds: {
+    refund_id: string;
+    refund_number: string;
+    grand_total: number;
+    tax_amount: number;
+    created_at: string;
+  }[];
+};
+
+export type CreateRefundRequest = {
+  sale_id: string;
+  reason: string;
+  items: {
+    sale_item_id: string;
+    quantity: number;
+  }[];
+};
+
+export type RefundResponse = {
+  refund_id: string;
+  refund_number: string;
+  sale_id: string;
+  sale_status: string;
+  subtotal_amount: number;
+  discount_amount: number;
+  tax_amount: number;
+  grand_total: number;
+  created_at: string;
+  items: {
+    sale_item_id: string;
+    product_id: string;
+    product_name: string;
+    quantity: number;
+    subtotal_amount: number;
+    discount_amount: number;
+    tax_amount: number;
+    total_amount: number;
+  }[];
+  payment_reversals: {
+    method: string;
+    amount: number;
+  }[];
+};
+
+type BackendCashCount = {
+  denomination: number;
+  quantity: number;
+};
+
+type BackendCashSessionEntry = {
+  counts: BackendCashCount[];
+  total: number;
+  submitted_by: string;
+  submitted_at: string;
+  approved_by?: string | null;
+  approved_at?: string | null;
+};
+
+type BackendCashSessionAuditEntry = {
+  id: string;
+  action: string;
+  performed_by: string;
+  performed_at: string;
+  details: string;
+  amount?: number | null;
+};
+
+type BackendCashSessionResponse = {
+  cash_session_id: string;
+  device_id?: string | null;
+  device_code: string;
+  cashier_name: string;
+  status: string;
+  opened_at: string;
+  closed_at?: string | null;
+  opening: BackendCashSessionEntry;
+  closing?: BackendCashSessionEntry | null;
+  expected_cash?: number | null;
+  difference?: number | null;
+  difference_reason?: string | null;
+  cash_sales_total: number;
+  audit_log: BackendCashSessionAuditEntry[];
 };
 
 type BackendCategoryItem = {
@@ -623,6 +728,7 @@ function mapSaleResponseToRecentSale(sale: BackendSaleResponse): RecentSale {
     id: sale.sale_id,
     items: mapSaleItems(sale.items),
     total: Number(sale.grand_total),
+    status: sale.status,
     paymentMethod: primaryPayment ? normalizePaymentMethod(primaryPayment.method) : "cash",
     customerMobile: undefined,
     completedAt: new Date(sale.completed_at || sale.created_at),
@@ -637,6 +743,44 @@ function mapSaleResponseToHeldBill(sale: BackendSaleResponse): HeldBill {
     label: sale.sale_number,
     items: mapSaleItems(sale.items),
     heldAt: new Date(sale.created_at),
+  };
+}
+
+function mapCashSessionEntry(entry: BackendCashSessionEntry): CashSessionEntry {
+  return {
+    counts: entry.counts.map((count) => ({
+      denomination: Number(count.denomination),
+      quantity: Number(count.quantity),
+    })),
+    total: Number(entry.total),
+    submittedBy: entry.submitted_by,
+    submittedAt: new Date(entry.submitted_at),
+    approvedBy: entry.approved_by ?? undefined,
+    approvedAt: entry.approved_at ? new Date(entry.approved_at) : undefined,
+  };
+}
+
+function mapCashSessionResponse(session: BackendCashSessionResponse): CashSession {
+  return {
+    id: session.cash_session_id,
+    cashierName: session.cashier_name,
+    openedAt: new Date(session.opened_at),
+    closedAt: session.closed_at ? new Date(session.closed_at) : undefined,
+    opening: mapCashSessionEntry(session.opening),
+    closing: session.closing ? mapCashSessionEntry(session.closing) : undefined,
+    expectedCash: session.expected_cash ?? undefined,
+    difference: session.difference ?? undefined,
+    differenceReason: session.difference_reason ?? undefined,
+    status: session.status as CashSession["status"],
+    auditLog: session.audit_log.map((entry) => ({
+      id: entry.id,
+      action: entry.action,
+      performedBy: entry.performed_by,
+      performedAt: new Date(entry.performed_at),
+      details: entry.details,
+      amount: entry.amount ?? undefined,
+    })),
+    cashSalesTotal: Number(session.cash_sales_total),
   };
 }
 
@@ -788,6 +932,51 @@ export async function fetchHeldBill(saleId: string) {
   return mapSaleResponseToHeldBill(response);
 }
 
+export async function fetchCurrentCashSession() {
+  const response = await request<BackendCashSessionResponse | null>("/api/cash-sessions/current");
+  return response ? mapCashSessionResponse(response) : null;
+}
+
+export async function openCashSession(counts: DenominationCount[], total: number) {
+  const payload = {
+    counts: counts.map((item) => ({
+      denomination: item.denomination,
+      quantity: item.quantity,
+    })),
+    total,
+  };
+
+  const response = await request<BackendCashSessionResponse>("/api/cash-sessions/open", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
+  return mapCashSessionResponse(response);
+}
+
+export async function closeCashSession(
+  sessionId: string,
+  counts: DenominationCount[],
+  total: number,
+  reason?: string
+) {
+  const payload = {
+    counts: counts.map((item) => ({
+      denomination: item.denomination,
+      quantity: item.quantity,
+    })),
+    total,
+    reason: reason || null,
+  };
+
+  const response = await request<BackendCashSessionResponse>(`/api/cash-sessions/${sessionId}/close`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
+  return mapCashSessionResponse(response);
+}
+
 export async function holdSale(items: CartItem[], role: "admin" | "manager" | "cashier") {
   const payload: HoldSaleRequest = {
     items: items.map((item) => ({
@@ -844,7 +1033,7 @@ export async function voidSale(saleId: string) {
 }
 
 export async function fetchReceipt(saleId: string) {
-  return request<BackendSaleResponse>(`/api/receipts/${saleId}`);
+  return request<SaleReceiptResponse>(`/api/receipts/${saleId}`);
 }
 
 export function fetchReceiptHtmlUrl(saleId: string) {
@@ -858,6 +1047,17 @@ export async function fetchThermalReceipt(saleId: string) {
 export async function fetchWhatsAppReceipt(saleId: string, phone?: string) {
   const query = phone ? `?phone=${encodeURIComponent(phone)}` : "";
   return request<{ message: string; url: string }>(`/api/receipts/${saleId}/whatsapp${query}`);
+}
+
+export async function fetchSaleRefundSummary(saleId: string) {
+  return request<SaleRefundSummary>(`/api/refunds/sale/${saleId}`);
+}
+
+export async function createRefund(requestBody: CreateRefundRequest) {
+  return request<RefundResponse>("/api/refunds", {
+    method: "POST",
+    body: JSON.stringify(requestBody),
+  });
 }
 
 export async function fetchDailySalesReport(fromDate = new Date(), toDate = fromDate) {

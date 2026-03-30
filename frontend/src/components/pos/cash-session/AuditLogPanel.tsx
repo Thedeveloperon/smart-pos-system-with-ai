@@ -24,18 +24,20 @@ interface AuditLogPanelProps {
 
 const getIcon = (action: string) => {
   switch (action) {
-    case "SESSION_OPENED": return <Shield className="h-3.5 w-3.5 text-success" />;
-    case "SESSION_CLOSED": return <Lock className="h-3.5 w-3.5 text-primary" />;
-    case "SALE_COMPLETED": return <ShoppingCart className="h-3.5 w-3.5 text-foreground" />;
+    case "cash_session_opened": return <Shield className="h-3.5 w-3.5 text-success" />;
+    case "cash_session_closed": return <Lock className="h-3.5 w-3.5 text-primary" />;
+    case "cash_session_sale_recorded": return <ShoppingCart className="h-3.5 w-3.5 text-foreground" />;
+    case "cash_session_refund_recorded": return <DollarSign className="h-3.5 w-3.5 text-warning" />;
     default: return <DollarSign className="h-3.5 w-3.5 text-muted-foreground" />;
   }
 };
 
 const getBadgeVariant = (action: string): "default" | "secondary" | "outline" => {
   switch (action) {
-    case "SESSION_OPENED": return "default";
-    case "SESSION_CLOSED": return "secondary";
-    case "SALE_COMPLETED": return "outline";
+    case "cash_session_opened": return "default";
+    case "cash_session_closed": return "secondary";
+    case "cash_session_sale_recorded": return "outline";
+    case "cash_session_refund_recorded": return "outline";
     default: return "outline";
   }
 };

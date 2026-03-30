@@ -26,6 +26,7 @@ export interface RecentSale {
   id: string;
   items: CartItem[];
   total: number;
+  status: string;
   paymentMethod: "cash" | "card" | "qr";
   customerMobile?: string;
   completedAt: Date;

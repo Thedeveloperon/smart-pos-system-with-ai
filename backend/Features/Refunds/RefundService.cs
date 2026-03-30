@@ -1,11 +1,15 @@
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
+using SmartPos.Backend.Features.CashSessions;
 using SmartPos.Backend.Infrastructure;
 using SmartPos.Backend.Security;
 
 namespace SmartPos.Backend.Features.Refunds;
 
-public sealed class RefundService(SmartPosDbContext dbContext, AuditLogService auditLogService)
+public sealed class RefundService(
+    SmartPosDbContext dbContext,
+    AuditLogService auditLogService,
+    CashSessionService cashSessionService)
 {
     public async Task<RefundResponse> CreateRefundAsync(
         CreateRefundRequest request,
@@ -182,6 +186,18 @@ public sealed class RefundService(SmartPosDbContext dbContext, AuditLogService a
                 CreatedAtUtc = now,
                 Sale = null!
             });
+        }
+
+        var cashReversalTotal = reversalAllocations.TryGetValue(PaymentMethod.Cash, out var cashReversal)
+            ? cashReversal
+            : 0m;
+        if (cashReversalTotal > 0m)
+        {
+            await cashSessionService.RecordCashRefundAsync(
+                cashReversalTotal,
+                refund.Id,
+                refund.RefundNumber,
+                cancellationToken);
         }
 
         foreach (var refundItem in refundItems)

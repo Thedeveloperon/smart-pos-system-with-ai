@@ -13,6 +13,7 @@ import HeldBillsDrawer from "@/components/pos/HeldBillsDrawer";
 import TodaySalesDrawer from "@/components/pos/TodaySalesDrawer";
 import MobileTabBar from "@/components/pos/MobileTabBar";
 import ShopProfileDialog from "@/components/pos/ShopProfileDialog";
+import RefundSaleDialog from "@/components/pos/RefundSaleDialog";
 import { CashSessionProvider, useCashSession } from "@/components/pos/cash-session/CashSessionContext";
 import OpeningCashDialog from "@/components/pos/cash-session/OpeningCashDialog";
 import ClosingCashDialog from "@/components/pos/cash-session/ClosingCashDialog";
@@ -58,6 +59,8 @@ const IndexInner = () => {
   const [showAuditLog, setShowAuditLog] = useState(false);
   const [showImportSupplierBill, setShowImportSupplierBill] = useState(false);
   const [showShopSettings, setShowShopSettings] = useState(false);
+  const [refundSaleId, setRefundSaleId] = useState<string | null>(null);
+  const [salesRefreshToken, setSalesRefreshToken] = useState(0);
   const [mobileTab, setMobileTab] = useState<"products" | "cart" | "checkout">("products");
 
   const {
@@ -69,7 +72,7 @@ const IndexInner = () => {
     completeClosing,
     cancelClosing,
     getExpectedCash,
-    addSaleToCash,
+    refreshSession,
     auditLog,
     cashSalesTotal,
   } = useCashSession();
@@ -202,14 +205,13 @@ const IndexInner = () => {
 
         setCartItems([]);
         setActiveHeldSaleId(null);
-        addSaleToCash(total, paymentMethod);
         toast.success("Sale completed!", { duration: 2000 });
 
         if (receiptWindow) {
           receiptWindow.location.href = await fetchReceiptHtmlUrl(result.sale_id);
         }
 
-        await Promise.all([loadProducts(), loadHeldBills()]);
+        await Promise.all([loadProducts(), loadHeldBills(), refreshSession()]);
       } catch (error) {
         if (receiptWindow) {
           receiptWindow.close();
@@ -218,7 +220,7 @@ const IndexInner = () => {
         toast.error("Failed to complete sale.");
       }
     },
-    [activeHeldSaleId, addSaleToCash, backendRole, cartItems, loadHeldBills, loadProducts]
+    [activeHeldSaleId, backendRole, cartItems, loadHeldBills, loadProducts, refreshSession]
   );
 
   const handleCancelSale = useCallback(() => {
@@ -232,8 +234,8 @@ const IndexInner = () => {
     setShowClosing(true);
   };
 
-  const handleCloseSession = (counts: DenominationCount[], total: number, reason?: string) => {
-    completeClosing(counts, total, reason);
+  const handleCloseSession = async (counts: DenominationCount[], total: number, reason?: string) => {
+    await completeClosing(counts, total, reason);
     setShowClosing(false);
   };
 
@@ -241,6 +243,32 @@ const IndexInner = () => {
     resetSession();
     toast.success("Ready for a new session.");
   };
+
+  const handleRefundRequested = (saleId: string) => {
+    setRefundSaleId(saleId);
+  };
+
+  const handleRefundCompleted = async () => {
+    setSalesRefreshToken((current) => current + 1);
+    await Promise.all([loadProducts(), loadHeldBills(), refreshSession()]);
+  };
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      const data = event.data as { type?: string; saleId?: string } | undefined;
+      if (data?.type !== "smartpos-open-refund" || !data.saleId) {
+        return;
+      }
+
+      setShowTodaySales(true);
+      setRefundSaleId(data.saleId);
+    };
+
+    window.addEventListener("message", handleMessage);
+    return () => {
+      window.removeEventListener("message", handleMessage);
+    };
+  }, []);
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
@@ -351,6 +379,8 @@ const IndexInner = () => {
         onClose={() => setShowTodaySales(false)}
         session={session}
         cashSalesTotal={cashSalesTotal}
+        refreshToken={salesRefreshToken}
+        onRefundSale={handleRefundRequested}
       />
 
       <NewItemDialog
@@ -368,6 +398,8 @@ const IndexInner = () => {
       <ManagerReportsDrawer
         open={showReports}
         onClose={() => setShowReports(false)}
+        refreshToken={salesRefreshToken}
+        onRefundSale={handleRefundRequested}
       />
 
       <HeldBillsDrawer
@@ -393,6 +425,20 @@ const IndexInner = () => {
       <ShopProfileDialog
         open={showShopSettings}
         onOpenChange={setShowShopSettings}
+      />
+
+      <RefundSaleDialog
+        open={refundSaleId !== null}
+        saleId={refundSaleId}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRefundSaleId(null);
+          }
+        }}
+        onRefunded={async () => {
+          await handleRefundCompleted();
+          setRefundSaleId(null);
+        }}
       />
     </div>
   );
