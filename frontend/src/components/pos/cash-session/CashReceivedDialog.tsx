@@ -50,7 +50,7 @@ const CashReceivedDialog = ({
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
-      <DialogContent className="flex max-h-[96vh] w-[min(98vw,80rem)] flex-col overflow-hidden rounded-3xl border-border/70 p-0 shadow-2xl sm:max-w-none md:w-[min(96vw,84rem)]">
+      <DialogContent className="flex max-h-[92vh] w-[min(96vw,56rem)] flex-col overflow-hidden rounded-3xl border-border/70 p-0 shadow-2xl sm:max-w-4xl">
         <div className="flex max-h-[96vh] min-h-0 flex-col bg-gradient-to-b from-slate-50 via-white to-slate-100">
           <DialogHeader className="border-b border-border/60 bg-background/95 px-4 py-4 pr-16 backdrop-blur-sm sm:px-6">
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -70,7 +70,7 @@ const CashReceivedDialog = ({
                 <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                   Target
                 </p>
-                <p className="mt-1 text-2xl font-black tabular-nums text-foreground sm:text-[2rem]">
+                <p className="mt-1 text-2xl font-black tabular-nums text-emerald-600 sm:text-[2rem]">
                   Rs. {expectedCash.toLocaleString()}
                 </p>
               </div>
