@@ -261,16 +261,16 @@ const IndexInner = () => {
         />
       ) : (
         <>
-          <div className="flex-1 hidden md:flex overflow-hidden">
-            <div className="flex-1 min-w-0 border-r border-border">
+          <div className="flex-1 hidden md:grid md:grid-cols-[5fr_3fr] overflow-hidden">
+            <div className="min-h-0 min-w-0 border-r border-border overflow-hidden">
               <ProductSearchPanel products={products} onAddToCart={handleAddToCart} />
             </div>
-            <div className="w-[320px] lg:w-[380px] xl:w-[420px] flex flex-col shrink-0 bg-card">
-              <div className="flex-1 overflow-hidden flex flex-col">
-                <div className="flex-1 overflow-y-auto min-h-0">
+            <div className="scrollbar-thin min-h-0 overflow-y-auto bg-card">
+              <div className="grid h-full min-h-0" style={{ gridTemplateRows: "38% 62%" }}>
+                <div className="min-h-0 overflow-hidden border-b border-border">
                   <CartPanel items={cartItems} onUpdateQty={handleUpdateQty} onRemove={handleRemove} />
                 </div>
-                <div className="border-t border-border shrink-0 overflow-y-auto max-h-[55vh]">
+                <div className="min-h-0 overflow-hidden">
                   <CheckoutPanel
                     items={cartItems}
                     onCompleteSale={handleCompleteSale}

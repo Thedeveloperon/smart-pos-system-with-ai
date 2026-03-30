@@ -20,31 +20,31 @@ const CartItemRow = ({ item, onUpdateQty, onRemove }: CartItemRowProps) => {
         </p>
       </div>
 
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-2">
         <Button
           variant="ghost"
-          size="icon-sm"
+          size="sm"
           onClick={() =>
             onUpdateQty(item.product.id, Math.max(0, item.quantity - 1))
           }
-          className="h-7 w-7"
+          className="h-10 w-10 shrink-0 rounded-xl border border-border bg-background p-0 text-lg font-semibold shadow-sm"
         >
-          <Minus className="h-3 w-3" />
+          <Minus className="h-5 w-5" />
         </Button>
-        <span className="w-7 text-center text-sm font-semibold">
+        <span className="min-w-8 px-2 text-center text-base font-semibold tabular-nums">
           {item.quantity}
         </span>
         <Button
           variant="ghost"
-          size="icon-sm"
+          size="sm"
           onClick={() => onUpdateQty(item.product.id, item.quantity + 1)}
-          className="h-7 w-7"
+          className="h-10 w-10 shrink-0 rounded-xl border border-border bg-background p-0 text-lg font-semibold shadow-sm"
         >
-          <Plus className="h-3 w-3" />
+          <Plus className="h-5 w-5" />
         </Button>
       </div>
 
-      <span className="text-sm font-semibold w-20 text-right">
+      <span className="w-24 text-right text-sm font-semibold">
         Rs. {lineTotal.toLocaleString()}
       </span>
 
@@ -52,7 +52,7 @@ const CartItemRow = ({ item, onUpdateQty, onRemove }: CartItemRowProps) => {
         variant="ghost"
         size="icon-sm"
         onClick={() => onRemove(item.product.id)}
-        className="text-muted-foreground hover:text-destructive h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+        className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive"
       >
         <Trash2 className="h-3.5 w-3.5" />
       </Button>
