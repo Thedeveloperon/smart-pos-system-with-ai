@@ -1,6 +1,17 @@
 import type { CartItem, HeldBill, PaymentMethod, Product, RecentSale } from "@/components/pos/types";
 
-const DEFAULT_API_BASE_URL = "http://localhost:5080";
+function getDefaultApiBaseUrl() {
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (host === "127.0.0.1" || host === "localhost") {
+      return `http://${host}:5080`;
+    }
+  }
+
+  return "http://localhost:5080";
+}
+
+const DEFAULT_API_BASE_URL = getDefaultApiBaseUrl();
 
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL).replace(/\/$/, "");
 
@@ -36,6 +47,20 @@ type BackendProductSearchItem = {
 
 type BackendProductSearchResponse = {
   items: BackendProductSearchItem[];
+};
+
+type BackendProductCatalogItem = {
+  product_id: string;
+  name: string;
+  sku?: string | null;
+  barcode?: string | null;
+  image_url?: string | null;
+  unit_price: number;
+  stock_quantity: number;
+};
+
+type BackendProductCatalogResponse = {
+  items: BackendProductCatalogItem[];
 };
 
 type BackendSaleItem = {
@@ -84,7 +109,7 @@ type BackendCategoryListResponse = {
   items: BackendCategoryItem[];
 };
 
-type CreateProductRequest = {
+export type CreateProductRequest = {
   name: string;
   sku?: string | null;
   barcode?: string | null;
@@ -96,6 +121,116 @@ type CreateProductRequest = {
   reorder_level: number;
   allow_negative_stock: boolean;
   is_active: boolean;
+};
+
+export type PurchaseOcrTotalsValidation = {
+  line_total_sum: number;
+  extracted_subtotal?: number | null;
+  extracted_tax_total?: number | null;
+  extracted_grand_total?: number | null;
+  expected_grand_total?: number | null;
+  difference: number;
+  tolerance: number;
+  within_tolerance: boolean;
+  requires_approval_reason: boolean;
+};
+
+export type PurchaseOcrDraftLineItem = {
+  line_no: number;
+  raw_text?: string | null;
+  item_name?: string | null;
+  quantity?: number | null;
+  unit_cost?: number | null;
+  line_total?: number | null;
+  confidence?: number | null;
+  review_status: string;
+  match_status: string;
+  match_method?: string | null;
+  match_score?: number | null;
+  matched_product_id?: string | null;
+  matched_product_name?: string | null;
+  matched_product_sku?: string | null;
+  matched_product_barcode?: string | null;
+};
+
+export type PurchaseOcrDraftResponse = {
+  draft_id: string;
+  correlation_id: string;
+  status: string;
+  scan_status: string;
+  file_name: string;
+  content_type: string;
+  file_size: number;
+  supplier_name?: string | null;
+  invoice_number?: string | null;
+  invoice_date?: string | null;
+  currency: string;
+  subtotal?: number | null;
+  tax_total?: number | null;
+  grand_total?: number | null;
+  ocr_confidence?: number | null;
+  review_required: boolean;
+  can_auto_commit: boolean;
+  blocked_reasons: string[];
+  totals: PurchaseOcrTotalsValidation;
+  line_items: PurchaseOcrDraftLineItem[];
+  warnings: string[];
+  created_at: string;
+};
+
+export type PurchaseImportConfirmLineRequest = {
+  line_no: number;
+  product_id: string;
+  supplier_item_name?: string | null;
+  quantity: number;
+  unit_cost: number;
+  line_total: number;
+};
+
+export type PurchaseImportConfirmRequest = {
+  import_request_id: string;
+  draft_id: string;
+  supplier_name?: string | null;
+  invoice_number?: string | null;
+  invoice_date?: string | null;
+  currency?: string | null;
+  approval_reason?: string | null;
+  update_cost_price?: boolean;
+  tax_total?: number | null;
+  grand_total?: number | null;
+  items: PurchaseImportConfirmLineRequest[];
+};
+
+export type PurchaseImportConfirmResponse = {
+  purchase_bill_id: string;
+  import_request_id: string;
+  status: string;
+  idempotent_replay: boolean;
+  supplier_id: string;
+  supplier_name: string;
+  invoice_number: string;
+  invoice_date: string;
+  currency: string;
+  subtotal: number;
+  tax_total: number;
+  grand_total: number;
+  items: {
+    purchase_bill_item_id: string;
+    line_no?: number | null;
+    product_id: string;
+    product_name: string;
+    quantity: number;
+    unit_cost: number;
+    line_total: number;
+  }[];
+  inventory_updates: {
+    product_id: string;
+    product_name: string;
+    previous_quantity: number;
+    delta_quantity: number;
+    new_quantity: number;
+  }[];
+  created_at: string;
 };
 
 type HeldSalesResponse = {
@@ -220,11 +355,12 @@ async function parseResponse<T>(response: Response): Promise<T> {
 }
 
 async function request<T>(path: string, init: RequestInit = {}) {
+  const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
   const response = await fetch(`${API_BASE_URL}${path}`, {
     credentials: "include",
     ...init,
     headers: {
-      ...(init.body ? { "Content-Type": "application/json" } : {}),
+      ...(init.body && !isFormData ? { "Content-Type": "application/json" } : {}),
       ...(init.headers || {}),
     },
   });
@@ -333,6 +469,21 @@ function mapProduct(item: BackendProductSearchItem): Product {
   };
 }
 
+function mapCatalogProduct(item: BackendProductCatalogItem): Product {
+  const accent = colorFromText(item.name + (item.barcode || ""));
+  const sampleImage = getSampleProductImage(item.name);
+  return {
+    id: item.product_id,
+    name: item.name,
+    sku: item.sku || item.product_id.slice(0, 8),
+    barcode: item.barcode || undefined,
+    price: Number(item.unit_price),
+    category: undefined,
+    stock: Number(item.stock_quantity),
+    image: item.image_url || sampleImage || createProductImage(item.name, accent),
+  };
+}
+
 function mapSaleItems(items: BackendSaleItem[]): CartItem[] {
   return items.map((item) => ({
     product: {
@@ -414,6 +565,13 @@ export async function fetchProducts(query?: string) {
   return response.items.map(mapProduct);
 }
 
+export async function fetchProductCatalog(take = 200) {
+  const response = await request<BackendProductCatalogResponse>(
+    `/api/products/catalog?take=${Math.max(1, Math.min(200, take))}&include_inactive=false`
+  );
+  return response.items.map(mapCatalogProduct);
+}
+
 export async function fetchCategories(includeInactive = false) {
   const query = `?include_inactive=${includeInactive ? "true" : "false"}`;
   const response = await request<BackendCategoryListResponse>(`/api/categories${query}`);
@@ -421,10 +579,12 @@ export async function fetchCategories(includeInactive = false) {
 }
 
 export async function createProduct(requestBody: CreateProductRequest) {
-  return request<Record<string, unknown>>("/api/products", {
+  const response = await request<BackendProductCatalogItem>("/api/products", {
     method: "POST",
     body: JSON.stringify(requestBody),
   });
+
+  return mapCatalogProduct(response);
 }
 
 export async function fetchHeldBills() {
@@ -524,4 +684,25 @@ export async function fetchDailySalesReport(date = new Date()) {
 export async function fetchTransactionsReport(date = new Date(), take = 200) {
   const utcDate = date.toISOString().slice(0, 10);
   return request<TransactionsReportResponse>(`/api/reports/transactions?from=${utcDate}&to=${utcDate}&take=${take}`);
+}
+
+export async function createPurchaseOcrDraft(file: File, supplierHint?: string) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  if (supplierHint?.trim()) {
+    formData.append("supplier_hint", supplierHint.trim());
+  }
+
+  return request<PurchaseOcrDraftResponse>("/api/purchases/imports/ocr-draft", {
+    method: "POST",
+    body: formData,
+  });
+}
+
+export async function confirmPurchaseImport(payload: PurchaseImportConfirmRequest) {
+  return request<PurchaseImportConfirmResponse>("/api/purchases/imports/confirm", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }

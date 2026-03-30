@@ -25,7 +25,8 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 ["JwtAuth:SecretKey"] = "smartpos-integration-test-secret-key-2026",
                 ["JwtAuth:ExpiryMinutes"] = "60",
                 ["JwtAuth:CookieName"] = "smartpos_auth",
-                ["JwtAuth:SecureCookie"] = "false"
+                ["JwtAuth:SecureCookie"] = "false",
+                ["Purchasing:OcrProvider"] = "basic-text"
             });
         });
     }

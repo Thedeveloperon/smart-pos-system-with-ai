@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/components/auth/AuthContext";
 import HeaderBar from "@/components/pos/HeaderBar";
 import NewItemDialog from "@/components/pos/NewItemDialog";
+import ImportSupplierBillDialog from "@/components/pos/ImportSupplierBillDialog";
 import ProductSearchPanel from "@/components/pos/ProductSearchPanel";
 import CartPanel from "@/components/pos/CartPanel";
 import CheckoutPanel from "@/components/pos/CheckoutPanel";
@@ -23,6 +24,7 @@ import {
   fetchHeldBills,
   fetchProducts,
   holdSale,
+  type PurchaseImportConfirmResponse,
   voidSale,
 } from "@/lib/api";
 
@@ -47,6 +49,7 @@ const IndexInner = () => {
   const [showTodaySales, setShowTodaySales] = useState(false);
   const [showClosing, setShowClosing] = useState(false);
   const [showAuditLog, setShowAuditLog] = useState(false);
+  const [showImportSupplierBill, setShowImportSupplierBill] = useState(false);
   const [mobileTab, setMobileTab] = useState<"products" | "cart" | "checkout">("products");
 
   const {
@@ -233,7 +236,7 @@ const IndexInner = () => {
         onHeldBills={() => setShowHeldBills(true)}
         onTodaySales={() => setShowTodaySales(true)}
         onNewItem={() => setShowNewItem(true)}
-        onAdminTools={() => toast.info("Admin tools are not connected yet.")}
+        onImportSupplierBill={() => setShowImportSupplierBill(true)}
         onSignOut={() => {
           void logout();
         }}
@@ -348,6 +351,14 @@ const IndexInner = () => {
         }}
         onDelete={(billId) => {
           void handleDeleteHeldBill(billId);
+        }}
+      />
+
+      <ImportSupplierBillDialog
+        open={showImportSupplierBill}
+        onOpenChange={setShowImportSupplierBill}
+        onImported={async (_result: PurchaseImportConfirmResponse) => {
+          await loadProducts();
         }}
       />
     </div>

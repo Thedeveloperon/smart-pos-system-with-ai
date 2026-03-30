@@ -476,3 +476,13 @@
 /Users/iroshwijesiri/Documents/SMART POS SYSTEM WITH AI/backend/tests/SmartPos.Backend.IntegrationTests/bin/Debug/net8.0/Microsoft.IdentityModel.Protocols.OpenIdConnect.dll
 /Users/iroshwijesiri/Documents/SMART POS SYSTEM WITH AI/backend/tests/SmartPos.Backend.IntegrationTests/bin/Debug/net8.0/Microsoft.IdentityModel.Tokens.dll
 /Users/iroshwijesiri/Documents/SMART POS SYSTEM WITH AI/backend/tests/SmartPos.Backend.IntegrationTests/bin/Debug/net8.0/System.IdentityModel.Tokens.Jwt.dll
+/Users/iroshwijesiri/Documents/SMART POS SYSTEM WITH AI/backend/tests/SmartPos.Backend.IntegrationTests/bin/Debug/net8.0/Fixtures/clear-invoice-image.png
+/Users/iroshwijesiri/Documents/SMART POS SYSTEM WITH AI/backend/tests/SmartPos.Backend.IntegrationTests/bin/Debug/net8.0/Fixtures/noisy-invoice-image.png
+/Users/iroshwijesiri/Documents/SMART POS SYSTEM WITH AI/backend/tests/SmartPos.Backend.IntegrationTests/bin/Debug/net8.0/Fixtures/sample-supplier-bill.pdf
+/Users/iroshwijesiri/Documents/SMART POS SYSTEM WITH AI/backend/tests/SmartPos.Backend.IntegrationTests/bin/Debug/net8.0/UglyToad.PdfPig.Core.dll
+/Users/iroshwijesiri/Documents/SMART POS SYSTEM WITH AI/backend/tests/SmartPos.Backend.IntegrationTests/bin/Debug/net8.0/UglyToad.PdfPig.DocumentLayoutAnalysis.dll
+/Users/iroshwijesiri/Documents/SMART POS SYSTEM WITH AI/backend/tests/SmartPos.Backend.IntegrationTests/bin/Debug/net8.0/UglyToad.PdfPig.Fonts.dll
+/Users/iroshwijesiri/Documents/SMART POS SYSTEM WITH AI/backend/tests/SmartPos.Backend.IntegrationTests/bin/Debug/net8.0/UglyToad.PdfPig.Package.dll
+/Users/iroshwijesiri/Documents/SMART POS SYSTEM WITH AI/backend/tests/SmartPos.Backend.IntegrationTests/bin/Debug/net8.0/UglyToad.PdfPig.Tokenization.dll
+/Users/iroshwijesiri/Documents/SMART POS SYSTEM WITH AI/backend/tests/SmartPos.Backend.IntegrationTests/bin/Debug/net8.0/UglyToad.PdfPig.Tokens.dll
+/Users/iroshwijesiri/Documents/SMART POS SYSTEM WITH AI/backend/tests/SmartPos.Backend.IntegrationTests/bin/Debug/net8.0/UglyToad.PdfPig.dll

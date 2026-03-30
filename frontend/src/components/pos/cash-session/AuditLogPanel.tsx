@@ -31,7 +31,7 @@ const getIcon = (action: string) => {
   }
 };
 
-const getBadgeVariant = (action: string) => {
+const getBadgeVariant = (action: string): "default" | "secondary" | "outline" => {
   switch (action) {
     case "SESSION_OPENED": return "default";
     case "SESSION_CLOSED": return "secondary";
@@ -70,7 +70,7 @@ const AuditLogPanel = ({ open, onClose, entries }: AuditLogPanelProps) => {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       {getIcon(entry.action)}
-                      <Badge variant={getBadgeVariant(entry.action) as any} className="text-[10px]">
+                      <Badge variant={getBadgeVariant(entry.action)} className="text-[10px]">
                         {entry.action.replace(/_/g, " ")}
                       </Badge>
                     </div>

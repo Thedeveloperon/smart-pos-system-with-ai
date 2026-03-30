@@ -31,6 +31,85 @@ public sealed class Product
     public Category? Category { get; set; }
     public InventoryRecord? Inventory { get; set; }
     public ICollection<SaleItem> SaleItems { get; set; } = [];
+    public ICollection<PurchaseBillItem> PurchaseBillItems { get; set; } = [];
+}
+
+public sealed class Supplier
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? StoreId { get; set; }
+    public required string Name { get; set; }
+    public string? Code { get; set; }
+    public string? ContactName { get; set; }
+    public string? Phone { get; set; }
+    public string? Email { get; set; }
+    public string? Address { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public ICollection<PurchaseBill> PurchaseBills { get; set; } = [];
+}
+
+public sealed class PurchaseBill
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? StoreId { get; set; }
+    public string? ImportRequestId { get; set; }
+    public Guid SupplierId { get; set; }
+    public required string InvoiceNumber { get; set; }
+    public DateTimeOffset InvoiceDateUtc { get; set; } = DateTimeOffset.UtcNow;
+    public string Currency { get; set; } = "LKR";
+    public decimal Subtotal { get; set; }
+    public decimal DiscountTotal { get; set; }
+    public decimal TaxTotal { get; set; }
+    public decimal GrandTotal { get; set; }
+    public string SourceType { get; set; } = "manual";
+    public decimal? OcrConfidence { get; set; }
+    public Guid? CreatedByUserId { get; set; }
+    public string? Notes { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public required Supplier Supplier { get; set; }
+    public AppUser? CreatedByUser { get; set; }
+    public ICollection<PurchaseBillItem> Items { get; set; } = [];
+    public ICollection<BillDocument> Documents { get; set; } = [];
+}
+
+public sealed class PurchaseBillItem
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid PurchaseBillId { get; set; }
+    public Guid ProductId { get; set; }
+    public required string ProductNameSnapshot { get; set; }
+    public string? SupplierItemName { get; set; }
+    public decimal Quantity { get; set; }
+    public decimal UnitCost { get; set; }
+    public decimal TaxAmount { get; set; }
+    public decimal LineTotal { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+
+    public required PurchaseBill PurchaseBill { get; set; }
+    public required Product Product { get; set; }
+}
+
+public sealed class BillDocument
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? StoreId { get; set; }
+    public Guid? PurchaseBillId { get; set; }
+    public required string FileName { get; set; }
+    public required string ContentType { get; set; }
+    public string? StoragePath { get; set; }
+    public string? FileHash { get; set; }
+    public string OcrStatus { get; set; } = "pending";
+    public decimal? OcrConfidence { get; set; }
+    public string? ExtractedPayloadJson { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? ProcessedAtUtc { get; set; }
+
+    public PurchaseBill? PurchaseBill { get; set; }
 }
 
 public sealed class InventoryRecord
@@ -156,6 +235,7 @@ public sealed class AppUser
 
     public ICollection<UserRole> UserRoles { get; set; } = [];
     public ICollection<Device> Devices { get; set; } = [];
+    public ICollection<PurchaseBill> CreatedPurchaseBills { get; set; } = [];
 }
 
 public sealed class AppRole

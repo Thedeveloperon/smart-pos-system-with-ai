@@ -3,13 +3,13 @@ import { Badge } from "@/components/ui/badge";
 import {
   PauseCircle,
   Clock,
-  Settings,
   LogOut,
   User,
   ShoppingBag,
   FileText,
   Lock,
   PlusCircle,
+  Upload,
 } from "lucide-react";
 
 interface HeaderBarProps {
@@ -18,7 +18,7 @@ interface HeaderBarProps {
   onHeldBills: () => void;
   onTodaySales: () => void;
   onNewItem: () => void;
-  onAdminTools: () => void;
+  onImportSupplierBill: () => void;
   onSignOut: () => void;
   onAuditLog?: () => void;
   onEndShift?: () => void;
@@ -32,7 +32,7 @@ const HeaderBar = ({
   onHeldBills,
   onTodaySales,
   onNewItem,
-  onAdminTools,
+  onImportSupplierBill,
   onSignOut,
   onAuditLog,
   onEndShift,
@@ -117,11 +117,11 @@ const HeaderBar = ({
           <Button
             variant="ghost"
             size="sm"
-            onClick={onAdminTools}
+            onClick={onImportSupplierBill}
             className="text-pos-header-foreground hover:bg-pos-header-foreground/10"
           >
-            <Settings className="h-4 w-4" />
-            <span className="hidden md:inline ml-1">Admin</span>
+            <Upload className="h-4 w-4" />
+            <span className="hidden md:inline ml-1">Import Bill</span>
           </Button>
         )}
 

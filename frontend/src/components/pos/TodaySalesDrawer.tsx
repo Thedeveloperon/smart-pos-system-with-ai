@@ -18,9 +18,9 @@ type TransactionsItem = Awaited<ReturnType<typeof fetchTransactionsReport>>["ite
 const money = (value: number) => `Rs. ${value.toLocaleString()}`;
 
 const PaymentBadge = ({ method }: { method: string }) => {
-  const variant =
+  const variant: "default" | "secondary" | "outline" =
     method === "cash" ? "default" : method === "card" ? "secondary" : "outline";
-  return <Badge variant={variant as any} className="capitalize text-[10px]">{method}</Badge>;
+  return <Badge variant={variant} className="capitalize text-[10px]">{method}</Badge>;
 };
 
 const TodaySalesDrawer = ({ open, onClose, session, cashSalesTotal }: TodaySalesDrawerProps) => {

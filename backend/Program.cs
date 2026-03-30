@@ -1,9 +1,11 @@
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.Extensions.Options;
 using SmartPos.Backend.Features.Auth;
 using SmartPos.Backend.Features.Checkout;
 using SmartPos.Backend.Features.Products;
+using SmartPos.Backend.Features.Purchases;
 using SmartPos.Backend.Features.Reports;
 using SmartPos.Backend.Features.Receipts;
 using SmartPos.Backend.Features.Refunds;
@@ -20,6 +22,8 @@ var jwtOptions = builder.Configuration
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.Configure<PurchasingOptions>(
+    builder.Configuration.GetSection(PurchasingOptions.SectionName));
 builder.Services.AddSingleton(jwtOptions);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddCors(options =>
@@ -71,12 +75,38 @@ builder.Services.AddAuthorization(options =>
 });
 builder.Services.AddScoped<CheckoutService>();
 builder.Services.AddScoped<ProductService>();
+builder.Services.AddScoped<PurchaseService>();
 builder.Services.AddScoped<ReceiptService>();
 builder.Services.AddScoped<RefundService>();
 builder.Services.AddScoped<ReportService>();
 builder.Services.AddScoped<SyncEventsProcessor>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<AuditLogService>();
+builder.Services.AddSingleton<BasicTextOcrProvider>();
+builder.Services.AddSingleton<TesseractOcrProvider>();
+builder.Services.AddSingleton<IOcrProviderCore>(serviceProvider =>
+{
+    var purchasingOptions = serviceProvider.GetRequiredService<IOptions<PurchasingOptions>>().Value;
+    var configuredProvider = purchasingOptions.OcrProvider?.Trim();
+
+    if (string.Equals(configuredProvider, "tesseract", StringComparison.OrdinalIgnoreCase))
+    {
+        return serviceProvider.GetRequiredService<TesseractOcrProvider>();
+    }
+
+    if (!string.IsNullOrWhiteSpace(configuredProvider) &&
+        !string.Equals(configuredProvider, "basic-text", StringComparison.OrdinalIgnoreCase))
+    {
+        var logger = serviceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
+        logger.LogWarning(
+            "Unknown Purchasing:OcrProvider value '{Provider}'. Falling back to basic-text.",
+            configuredProvider);
+    }
+
+    return serviceProvider.GetRequiredService<BasicTextOcrProvider>();
+});
+builder.Services.AddSingleton<IOcrProvider, ResilientOcrProvider>();
+builder.Services.AddSingleton<IBillMalwareScanner, NoOpBillMalwareScanner>();
 builder.Services.AddDbContext<SmartPosDbContext>(options =>
 {
     var provider = builder.Configuration.GetValue<string>("Database:Provider") ?? "Postgres";
@@ -116,6 +146,7 @@ using (var scope = app.Services.CreateScope())
     dbContext.Database.EnsureCreated();
     await DbSchemaUpdater.EnsureProductImageSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureRefundSchemaAsync(dbContext);
+    await DbSchemaUpdater.EnsurePurchasingSchemaAsync(dbContext);
     await DbSeeder.SeedAsync(dbContext);
 }
 
@@ -138,6 +169,7 @@ app.MapGet("/health", () =>
 app.MapAuthEndpoints();
 app.MapSyncEndpoints();
 app.MapProductEndpoints();
+app.MapPurchaseEndpoints();
 app.MapCheckoutEndpoints();
 app.MapReceiptEndpoints();
 app.MapRefundEndpoints();

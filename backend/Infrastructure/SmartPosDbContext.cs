@@ -8,6 +8,10 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<Product> Products => Set<Product>();
     public DbSet<InventoryRecord> Inventory => Set<InventoryRecord>();
+    public DbSet<Supplier> Suppliers => Set<Supplier>();
+    public DbSet<PurchaseBill> PurchaseBills => Set<PurchaseBill>();
+    public DbSet<PurchaseBillItem> PurchaseBillItems => Set<PurchaseBillItem>();
+    public DbSet<BillDocument> BillDocuments => Set<BillDocument>();
     public DbSet<Sale> Sales => Set<Sale>();
     public DbSet<SaleItem> SaleItems => Set<SaleItem>();
     public DbSet<Refund> Refunds => Set<Refund>();
@@ -56,6 +60,84 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
                 .WithOne(x => x.Inventory)
                 .HasForeignKey<InventoryRecord>(x => x.ProductId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<Supplier>(entity =>
+        {
+            entity.ToTable("suppliers");
+            entity.Property(x => x.Name).HasMaxLength(160);
+            entity.Property(x => x.Code).HasMaxLength(64);
+            entity.Property(x => x.ContactName).HasMaxLength(120);
+            entity.Property(x => x.Phone).HasMaxLength(32);
+            entity.Property(x => x.Email).HasMaxLength(120);
+            entity.Property(x => x.Address).HasMaxLength(500);
+            entity.HasIndex(x => new { x.StoreId, x.Name }).IsUnique();
+            entity.HasIndex(x => new { x.StoreId, x.Code }).IsUnique();
+        });
+
+        modelBuilder.Entity<PurchaseBill>(entity =>
+        {
+            entity.ToTable("purchase_bills");
+            entity.Property(x => x.ImportRequestId).HasMaxLength(80);
+            entity.Property(x => x.InvoiceNumber).HasMaxLength(80);
+            entity.Property(x => x.Currency).HasMaxLength(8);
+            entity.Property(x => x.Subtotal).HasPrecision(18, 2);
+            entity.Property(x => x.DiscountTotal).HasPrecision(18, 2);
+            entity.Property(x => x.TaxTotal).HasPrecision(18, 2);
+            entity.Property(x => x.GrandTotal).HasPrecision(18, 2);
+            entity.Property(x => x.SourceType).HasMaxLength(32);
+            entity.Property(x => x.OcrConfidence).HasPrecision(6, 4);
+            entity.Property(x => x.Notes).HasMaxLength(500);
+            entity.HasIndex(x => new { x.StoreId, x.SupplierId, x.InvoiceNumber }).IsUnique();
+            entity.HasIndex(x => new { x.StoreId, x.ImportRequestId }).IsUnique();
+            entity.HasIndex(x => x.ImportRequestId).IsUnique();
+            entity.HasOne(x => x.Supplier)
+                .WithMany(x => x.PurchaseBills)
+                .HasForeignKey(x => x.SupplierId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.CreatedByUser)
+                .WithMany(x => x.CreatedPurchaseBills)
+                .HasForeignKey(x => x.CreatedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<PurchaseBillItem>(entity =>
+        {
+            entity.ToTable("purchase_bill_items");
+            entity.Property(x => x.ProductNameSnapshot).HasMaxLength(200);
+            entity.Property(x => x.SupplierItemName).HasMaxLength(200);
+            entity.Property(x => x.Quantity).HasPrecision(18, 3);
+            entity.Property(x => x.UnitCost).HasPrecision(18, 2);
+            entity.Property(x => x.TaxAmount).HasPrecision(18, 2);
+            entity.Property(x => x.LineTotal).HasPrecision(18, 2);
+            entity.HasOne(x => x.PurchaseBill)
+                .WithMany(x => x.Items)
+                .HasForeignKey(x => x.PurchaseBillId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Product)
+                .WithMany(x => x.PurchaseBillItems)
+                .HasForeignKey(x => x.ProductId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(x => x.PurchaseBillId);
+            entity.HasIndex(x => x.ProductId);
+        });
+
+        modelBuilder.Entity<BillDocument>(entity =>
+        {
+            entity.ToTable("bill_documents");
+            entity.Property(x => x.FileName).HasMaxLength(260);
+            entity.Property(x => x.ContentType).HasMaxLength(120);
+            entity.Property(x => x.StoragePath).HasMaxLength(500);
+            entity.Property(x => x.FileHash).HasMaxLength(128);
+            entity.Property(x => x.OcrStatus).HasMaxLength(32);
+            entity.Property(x => x.OcrConfidence).HasPrecision(6, 4);
+            entity.Property(x => x.ExtractedPayloadJson).HasColumnType("text");
+            entity.HasOne(x => x.PurchaseBill)
+                .WithMany(x => x.Documents)
+                .HasForeignKey(x => x.PurchaseBillId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(x => x.PurchaseBillId);
+            entity.HasIndex(x => x.FileHash);
         });
 
         modelBuilder.Entity<Sale>(entity =>

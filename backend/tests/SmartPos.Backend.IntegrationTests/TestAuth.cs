@@ -16,4 +16,17 @@ internal static class TestAuth
 
         response.EnsureSuccessStatusCode();
     }
+
+    public static async Task SignInAsCashierAsync(HttpClient client)
+    {
+        var response = await client.PostAsJsonAsync("/api/auth/login", new
+        {
+            username = "cashier",
+            password = "cashier123",
+            device_code = "integration-tests-device",
+            device_name = "Integration Tests"
+        });
+
+        response.EnsureSuccessStatusCode();
+    }
 }

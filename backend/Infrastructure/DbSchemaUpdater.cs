@@ -54,6 +54,24 @@ public static class DbSchemaUpdater
         }
     }
 
+    public static async Task EnsurePurchasingSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken = default)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+
+        if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            await EnsureSqlitePurchasingSchemaAsync(dbContext, cancellationToken);
+            return;
+        }
+
+        if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            await EnsurePostgresPurchasingSchemaAsync(dbContext, cancellationToken);
+        }
+    }
+
     private static async Task EnsureSqliteRefundSchemaAsync(
         SmartPosDbContext dbContext,
         CancellationToken cancellationToken)
@@ -159,5 +177,204 @@ public static class DbSchemaUpdater
             """;
 
         await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+    }
+
+    private static async Task EnsureSqlitePurchasingSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var sql = """
+            CREATE TABLE IF NOT EXISTS "suppliers" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_suppliers" PRIMARY KEY,
+              "StoreId" TEXT NULL,
+              "Name" TEXT NOT NULL,
+              "Code" TEXT NULL,
+              "ContactName" TEXT NULL,
+              "Phone" TEXT NULL,
+              "Email" TEXT NULL,
+              "Address" TEXT NULL,
+              "IsActive" INTEGER NOT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "UpdatedAtUtc" TEXT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS "purchase_bills" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_purchase_bills" PRIMARY KEY,
+              "StoreId" TEXT NULL,
+              "ImportRequestId" TEXT NULL,
+              "SupplierId" TEXT NOT NULL,
+              "InvoiceNumber" TEXT NOT NULL,
+              "InvoiceDateUtc" TEXT NOT NULL,
+              "Currency" TEXT NOT NULL,
+              "Subtotal" TEXT NOT NULL,
+              "DiscountTotal" TEXT NOT NULL,
+              "TaxTotal" TEXT NOT NULL,
+              "GrandTotal" TEXT NOT NULL,
+              "SourceType" TEXT NOT NULL,
+              "OcrConfidence" TEXT NULL,
+              "CreatedByUserId" TEXT NULL,
+              "Notes" TEXT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "UpdatedAtUtc" TEXT NULL,
+              CONSTRAINT "FK_purchase_bills_suppliers_SupplierId" FOREIGN KEY ("SupplierId") REFERENCES "suppliers" ("Id") ON DELETE RESTRICT,
+              CONSTRAINT "FK_purchase_bills_users_CreatedByUserId" FOREIGN KEY ("CreatedByUserId") REFERENCES "users" ("Id") ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS "purchase_bill_items" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_purchase_bill_items" PRIMARY KEY,
+              "PurchaseBillId" TEXT NOT NULL,
+              "ProductId" TEXT NOT NULL,
+              "ProductNameSnapshot" TEXT NOT NULL,
+              "SupplierItemName" TEXT NULL,
+              "Quantity" TEXT NOT NULL,
+              "UnitCost" TEXT NOT NULL,
+              "TaxAmount" TEXT NOT NULL,
+              "LineTotal" TEXT NOT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              CONSTRAINT "FK_purchase_bill_items_purchase_bills_PurchaseBillId" FOREIGN KEY ("PurchaseBillId") REFERENCES "purchase_bills" ("Id") ON DELETE CASCADE,
+              CONSTRAINT "FK_purchase_bill_items_products_ProductId" FOREIGN KEY ("ProductId") REFERENCES "products" ("Id") ON DELETE RESTRICT
+            );
+
+            CREATE TABLE IF NOT EXISTS "bill_documents" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_bill_documents" PRIMARY KEY,
+              "StoreId" TEXT NULL,
+              "PurchaseBillId" TEXT NULL,
+              "FileName" TEXT NOT NULL,
+              "ContentType" TEXT NOT NULL,
+              "StoragePath" TEXT NULL,
+              "FileHash" TEXT NULL,
+              "OcrStatus" TEXT NOT NULL,
+              "OcrConfidence" TEXT NULL,
+              "ExtractedPayloadJson" TEXT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "ProcessedAtUtc" TEXT NULL,
+              CONSTRAINT "FK_bill_documents_purchase_bills_PurchaseBillId" FOREIGN KEY ("PurchaseBillId") REFERENCES "purchase_bills" ("Id") ON DELETE SET NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_suppliers_StoreId_Name" ON "suppliers" ("StoreId", "Name");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_suppliers_StoreId_Code" ON "suppliers" ("StoreId", "Code");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_StoreId_SupplierId_InvoiceNumber" ON "purchase_bills" ("StoreId", "SupplierId", "InvoiceNumber");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_StoreId_ImportRequestId" ON "purchase_bills" ("StoreId", "ImportRequestId");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_ImportRequestId" ON "purchase_bills" ("ImportRequestId");
+            CREATE INDEX IF NOT EXISTS "IX_purchase_bills_SupplierId" ON "purchase_bills" ("SupplierId");
+            CREATE INDEX IF NOT EXISTS "IX_purchase_bills_CreatedByUserId" ON "purchase_bills" ("CreatedByUserId");
+            CREATE INDEX IF NOT EXISTS "IX_purchase_bill_items_PurchaseBillId" ON "purchase_bill_items" ("PurchaseBillId");
+            CREATE INDEX IF NOT EXISTS "IX_purchase_bill_items_ProductId" ON "purchase_bill_items" ("ProductId");
+            CREATE INDEX IF NOT EXISTS "IX_bill_documents_PurchaseBillId" ON "bill_documents" ("PurchaseBillId");
+            CREATE INDEX IF NOT EXISTS "IX_bill_documents_FileHash" ON "bill_documents" ("FileHash");
+            """;
+
+        await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+
+        if (!await ColumnExistsAsync(dbContext, "purchase_bills", "ImportRequestId", cancellationToken))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "purchase_bills" ADD COLUMN "ImportRequestId" TEXT NULL;""",
+                cancellationToken);
+        }
+
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_StoreId_ImportRequestId" ON "purchase_bills" ("StoreId", "ImportRequestId");""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_ImportRequestId" ON "purchase_bills" ("ImportRequestId");""",
+            cancellationToken);
+    }
+
+    private static async Task EnsurePostgresPurchasingSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var sql = """
+            CREATE TABLE IF NOT EXISTS suppliers (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "StoreId" uuid NULL,
+              "Name" varchar(160) NOT NULL,
+              "Code" varchar(64) NULL,
+              "ContactName" varchar(120) NULL,
+              "Phone" varchar(32) NULL,
+              "Email" varchar(120) NULL,
+              "Address" varchar(500) NULL,
+              "IsActive" boolean NOT NULL,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "UpdatedAtUtc" timestamptz NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS purchase_bills (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "StoreId" uuid NULL,
+              "ImportRequestId" varchar(80) NULL,
+              "SupplierId" uuid NOT NULL REFERENCES suppliers("Id") ON DELETE RESTRICT,
+              "InvoiceNumber" varchar(80) NOT NULL,
+              "InvoiceDateUtc" timestamptz NOT NULL,
+              "Currency" varchar(8) NOT NULL,
+              "Subtotal" numeric(18,2) NOT NULL,
+              "DiscountTotal" numeric(18,2) NOT NULL,
+              "TaxTotal" numeric(18,2) NOT NULL,
+              "GrandTotal" numeric(18,2) NOT NULL,
+              "SourceType" varchar(32) NOT NULL,
+              "OcrConfidence" numeric(6,4) NULL,
+              "CreatedByUserId" uuid NULL REFERENCES users("Id") ON DELETE SET NULL,
+              "Notes" varchar(500) NULL,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "UpdatedAtUtc" timestamptz NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS purchase_bill_items (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "PurchaseBillId" uuid NOT NULL REFERENCES purchase_bills("Id") ON DELETE CASCADE,
+              "ProductId" uuid NOT NULL REFERENCES products("Id") ON DELETE RESTRICT,
+              "ProductNameSnapshot" varchar(200) NOT NULL,
+              "SupplierItemName" varchar(200) NULL,
+              "Quantity" numeric(18,3) NOT NULL,
+              "UnitCost" numeric(18,2) NOT NULL,
+              "TaxAmount" numeric(18,2) NOT NULL,
+              "LineTotal" numeric(18,2) NOT NULL,
+              "CreatedAtUtc" timestamptz NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS bill_documents (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "StoreId" uuid NULL,
+              "PurchaseBillId" uuid NULL REFERENCES purchase_bills("Id") ON DELETE SET NULL,
+              "FileName" varchar(260) NOT NULL,
+              "ContentType" varchar(120) NOT NULL,
+              "StoragePath" varchar(500) NULL,
+              "FileHash" varchar(128) NULL,
+              "OcrStatus" varchar(32) NOT NULL,
+              "OcrConfidence" numeric(6,4) NULL,
+              "ExtractedPayloadJson" text NULL,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "ProcessedAtUtc" timestamptz NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_suppliers_StoreId_Name" ON suppliers("StoreId", "Name");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_suppliers_StoreId_Code" ON suppliers("StoreId", "Code");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_StoreId_SupplierId_InvoiceNumber" ON purchase_bills("StoreId", "SupplierId", "InvoiceNumber");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_StoreId_ImportRequestId" ON purchase_bills("StoreId", "ImportRequestId");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_ImportRequestId" ON purchase_bills("ImportRequestId");
+            CREATE INDEX IF NOT EXISTS "IX_purchase_bills_SupplierId" ON purchase_bills("SupplierId");
+            CREATE INDEX IF NOT EXISTS "IX_purchase_bills_CreatedByUserId" ON purchase_bills("CreatedByUserId");
+            CREATE INDEX IF NOT EXISTS "IX_purchase_bill_items_PurchaseBillId" ON purchase_bill_items("PurchaseBillId");
+            CREATE INDEX IF NOT EXISTS "IX_purchase_bill_items_ProductId" ON purchase_bill_items("ProductId");
+            CREATE INDEX IF NOT EXISTS "IX_bill_documents_PurchaseBillId" ON bill_documents("PurchaseBillId");
+            CREATE INDEX IF NOT EXISTS "IX_bill_documents_FileHash" ON bill_documents("FileHash");
+            """;
+
+        await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+
+        if (!await ColumnExistsAsync(dbContext, "purchase_bills", "ImportRequestId", cancellationToken))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE purchase_bills ADD COLUMN IF NOT EXISTS "ImportRequestId" varchar(80);""",
+                cancellationToken);
+        }
+
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_StoreId_ImportRequestId" ON purchase_bills("StoreId", "ImportRequestId");""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_ImportRequestId" ON purchase_bills("ImportRequestId");""",
+            cancellationToken);
     }
 }

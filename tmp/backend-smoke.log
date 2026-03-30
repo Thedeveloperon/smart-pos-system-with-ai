@@ -1,0 +1,189 @@
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (5ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT COUNT(*) FROM "sqlite_master" WHERE "type" = 'table' AND "rootpage" IS NOT NULL;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      CREATE TABLE IF NOT EXISTS "refunds" (
+        "Id" TEXT NOT NULL CONSTRAINT "PK_refunds" PRIMARY KEY,
+        "StoreId" TEXT NULL,
+        "SaleId" TEXT NOT NULL,
+        "RefundNumber" TEXT NOT NULL,
+        "Reason" TEXT NOT NULL,
+        "SubtotalAmount" TEXT NOT NULL,
+        "DiscountAmount" TEXT NOT NULL,
+        "TaxAmount" TEXT NOT NULL,
+        "GrandTotal" TEXT NOT NULL,
+        "CreatedAtUtc" TEXT NOT NULL,
+        CONSTRAINT "FK_refunds_sales_SaleId" FOREIGN KEY ("SaleId") REFERENCES "sales" ("Id") ON DELETE CASCADE
+      );
+      
+      CREATE TABLE IF NOT EXISTS "refund_items" (
+        "Id" TEXT NOT NULL CONSTRAINT "PK_refund_items" PRIMARY KEY,
+        "RefundId" TEXT NOT NULL,
+        "SaleItemId" TEXT NOT NULL,
+        "ProductId" TEXT NOT NULL,
+        "ProductNameSnapshot" TEXT NOT NULL,
+        "Quantity" TEXT NOT NULL,
+        "SubtotalAmount" TEXT NOT NULL,
+        "DiscountAmount" TEXT NOT NULL,
+        "TaxAmount" TEXT NOT NULL,
+        "TotalAmount" TEXT NOT NULL,
+        CONSTRAINT "FK_refund_items_refunds_RefundId" FOREIGN KEY ("RefundId") REFERENCES "refunds" ("Id") ON DELETE CASCADE,
+        CONSTRAINT "FK_refund_items_sale_items_SaleItemId" FOREIGN KEY ("SaleItemId") REFERENCES "sale_items" ("Id") ON DELETE RESTRICT
+      );
+      
+      CREATE UNIQUE INDEX IF NOT EXISTS "IX_refunds_RefundNumber" ON "refunds" ("RefundNumber");
+      CREATE INDEX IF NOT EXISTS "IX_refunds_SaleId" ON "refunds" ("SaleId");
+      CREATE INDEX IF NOT EXISTS "IX_refund_items_RefundId" ON "refund_items" ("RefundId");
+      CREATE INDEX IF NOT EXISTS "IX_refund_items_SaleItemId" ON "refund_items" ("SaleItemId");
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      CREATE TABLE IF NOT EXISTS "suppliers" (
+        "Id" TEXT NOT NULL CONSTRAINT "PK_suppliers" PRIMARY KEY,
+        "StoreId" TEXT NULL,
+        "Name" TEXT NOT NULL,
+        "Code" TEXT NULL,
+        "ContactName" TEXT NULL,
+        "Phone" TEXT NULL,
+        "Email" TEXT NULL,
+        "Address" TEXT NULL,
+        "IsActive" INTEGER NOT NULL,
+        "CreatedAtUtc" TEXT NOT NULL,
+        "UpdatedAtUtc" TEXT NULL
+      );
+      
+      CREATE TABLE IF NOT EXISTS "purchase_bills" (
+        "Id" TEXT NOT NULL CONSTRAINT "PK_purchase_bills" PRIMARY KEY,
+        "StoreId" TEXT NULL,
+        "ImportRequestId" TEXT NULL,
+        "SupplierId" TEXT NOT NULL,
+        "InvoiceNumber" TEXT NOT NULL,
+        "InvoiceDateUtc" TEXT NOT NULL,
+        "Currency" TEXT NOT NULL,
+        "Subtotal" TEXT NOT NULL,
+        "DiscountTotal" TEXT NOT NULL,
+        "TaxTotal" TEXT NOT NULL,
+        "GrandTotal" TEXT NOT NULL,
+        "SourceType" TEXT NOT NULL,
+        "OcrConfidence" TEXT NULL,
+        "CreatedByUserId" TEXT NULL,
+        "Notes" TEXT NULL,
+        "CreatedAtUtc" TEXT NOT NULL,
+        "UpdatedAtUtc" TEXT NULL,
+        CONSTRAINT "FK_purchase_bills_suppliers_SupplierId" FOREIGN KEY ("SupplierId") REFERENCES "suppliers" ("Id") ON DELETE RESTRICT,
+        CONSTRAINT "FK_purchase_bills_users_CreatedByUserId" FOREIGN KEY ("CreatedByUserId") REFERENCES "users" ("Id") ON DELETE SET NULL
+      );
+      
+      CREATE TABLE IF NOT EXISTS "purchase_bill_items" (
+        "Id" TEXT NOT NULL CONSTRAINT "PK_purchase_bill_items" PRIMARY KEY,
+        "PurchaseBillId" TEXT NOT NULL,
+        "ProductId" TEXT NOT NULL,
+        "ProductNameSnapshot" TEXT NOT NULL,
+        "SupplierItemName" TEXT NULL,
+        "Quantity" TEXT NOT NULL,
+        "UnitCost" TEXT NOT NULL,
+        "TaxAmount" TEXT NOT NULL,
+        "LineTotal" TEXT NOT NULL,
+        "CreatedAtUtc" TEXT NOT NULL,
+        CONSTRAINT "FK_purchase_bill_items_purchase_bills_PurchaseBillId" FOREIGN KEY ("PurchaseBillId") REFERENCES "purchase_bills" ("Id") ON DELETE CASCADE,
+        CONSTRAINT "FK_purchase_bill_items_products_ProductId" FOREIGN KEY ("ProductId") REFERENCES "products" ("Id") ON DELETE RESTRICT
+      );
+      
+      CREATE TABLE IF NOT EXISTS "bill_documents" (
+        "Id" TEXT NOT NULL CONSTRAINT "PK_bill_documents" PRIMARY KEY,
+        "StoreId" TEXT NULL,
+        "PurchaseBillId" TEXT NULL,
+        "FileName" TEXT NOT NULL,
+        "ContentType" TEXT NOT NULL,
+        "StoragePath" TEXT NULL,
+        "FileHash" TEXT NULL,
+        "OcrStatus" TEXT NOT NULL,
+        "OcrConfidence" TEXT NULL,
+        "ExtractedPayloadJson" TEXT NULL,
+        "CreatedAtUtc" TEXT NOT NULL,
+        "ProcessedAtUtc" TEXT NULL,
+        CONSTRAINT "FK_bill_documents_purchase_bills_PurchaseBillId" FOREIGN KEY ("PurchaseBillId") REFERENCES "purchase_bills" ("Id") ON DELETE SET NULL
+      );
+      
+      CREATE UNIQUE INDEX IF NOT EXISTS "IX_suppliers_StoreId_Name" ON "suppliers" ("StoreId", "Name");
+      CREATE UNIQUE INDEX IF NOT EXISTS "IX_suppliers_StoreId_Code" ON "suppliers" ("StoreId", "Code");
+      CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_StoreId_SupplierId_InvoiceNumber" ON "purchase_bills" ("StoreId", "SupplierId", "InvoiceNumber");
+      CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_StoreId_ImportRequestId" ON "purchase_bills" ("StoreId", "ImportRequestId");
+      CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_ImportRequestId" ON "purchase_bills" ("ImportRequestId");
+      CREATE INDEX IF NOT EXISTS "IX_purchase_bills_SupplierId" ON "purchase_bills" ("SupplierId");
+      CREATE INDEX IF NOT EXISTS "IX_purchase_bills_CreatedByUserId" ON "purchase_bills" ("CreatedByUserId");
+      CREATE INDEX IF NOT EXISTS "IX_purchase_bill_items_PurchaseBillId" ON "purchase_bill_items" ("PurchaseBillId");
+      CREATE INDEX IF NOT EXISTS "IX_purchase_bill_items_ProductId" ON "purchase_bill_items" ("ProductId");
+      CREATE INDEX IF NOT EXISTS "IX_bill_documents_PurchaseBillId" ON "bill_documents" ("PurchaseBillId");
+      CREATE INDEX IF NOT EXISTS "IX_bill_documents_FileHash" ON "bill_documents" ("FileHash");
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_StoreId_ImportRequestId" ON "purchase_bills" ("StoreId", "ImportRequestId");
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_ImportRequestId" ON "purchase_bills" ("ImportRequestId");
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT EXISTS (
+          SELECT 1
+          FROM "products" AS "p")
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT EXISTS (
+          SELECT 1
+          FROM "roles" AS "r")
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT EXISTS (
+          SELECT 1
+          FROM "users" AS "u")
+info: Microsoft.Hosting.Lifetime[14]
+      Now listening on: http://127.0.0.1:5080
+info: Microsoft.Hosting.Lifetime[0]
+      Application started. Press Ctrl+C to shut down.
+info: Microsoft.Hosting.Lifetime[0]
+      Hosting environment: Development
+info: Microsoft.Hosting.Lifetime[0]
+      Content root path: /Users/iroshwijesiri/Documents/SMART POS SYSTEM WITH AI/backend
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (3ms) [Parameters=[@__normalizedUsername_0='?' (Size = 7)], CommandType='Text', CommandTimeout='30']
+      SELECT "t"."Id", "t"."CreatedAtUtc", "t"."FullName", "t"."IsActive", "t"."LastLoginAtUtc", "t"."PasswordHash", "t"."StoreId", "t"."Username", "t0"."UserId", "t0"."RoleId", "t0"."AssignedAtUtc", "t0"."Id", "t0"."Code", "t0"."CreatedAtUtc", "t0"."Name"
+      FROM (
+          SELECT "u"."Id", "u"."CreatedAtUtc", "u"."FullName", "u"."IsActive", "u"."LastLoginAtUtc", "u"."PasswordHash", "u"."StoreId", "u"."Username"
+          FROM "users" AS "u"
+          WHERE "u"."IsActive" AND lower("u"."Username") = @__normalizedUsername_0
+          LIMIT 1
+      ) AS "t"
+      LEFT JOIN (
+          SELECT "u0"."UserId", "u0"."RoleId", "u0"."AssignedAtUtc", "r"."Id", "r"."Code", "r"."CreatedAtUtc", "r"."Name"
+          FROM "user_roles" AS "u0"
+          INNER JOIN "roles" AS "r" ON "u0"."RoleId" = "r"."Id"
+      ) AS "t0" ON "t"."Id" = "t0"."UserId"
+      ORDER BY "t"."Id", "t0"."UserId", "t0"."RoleId"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[@__deviceCode_0='?' (Size = 18)], CommandType='Text', CommandTimeout='30']
+      SELECT "d"."Id", "d"."AppUserId", "d"."CreatedAtUtc", "d"."DeviceCode", "d"."IsTrusted", "d"."LastSeenAtUtc", "d"."Name", "d"."StoreId"
+      FROM "devices" AS "d"
+      WHERE "d"."DeviceCode" = @__deviceCode_0
+      LIMIT 1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (2ms) [Parameters=[@p1='?' (DbType = Guid), @p0='?' (DbType = DateTimeOffset)], CommandType='Text', CommandTimeout='30']
+      UPDATE "devices" SET "LastSeenAtUtc" = @p0
+      WHERE "Id" = @p1
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[@p1='?' (DbType = Guid), @p0='?' (DbType = DateTimeOffset)], CommandType='Text', CommandTimeout='30']
+      UPDATE "users" SET "LastLoginAtUtc" = @p0
+      WHERE "Id" = @p1
+      RETURNING 1;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='30']
+      SELECT "p"."Id", "p"."Name", "p"."Sku", "p"."Barcode"
+      FROM "products" AS "p"
+      WHERE "p"."IsActive"
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?' (Size = 15), @p2='?' (DbType = DateTimeOffset), @p3='?' (Size = 2209), @p4='?' (Size = 64), @p5='?' (Size = 24), @p6='?' (DbType = Decimal), @p7='?' (Size = 15), @p8='?' (DbType = DateTimeOffset), @p9='?' (DbType = Guid), @p10='?', @p11='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+      INSERT INTO "bill_documents" ("Id", "ContentType", "CreatedAtUtc", "ExtractedPayloadJson", "FileHash", "FileName", "OcrConfidence", "OcrStatus", "ProcessedAtUtc", "PurchaseBillId", "StoragePath", "StoreId")
+      VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10, @p11);
+info: Microsoft.Hosting.Lifetime[0]
+      Application is shutting down...

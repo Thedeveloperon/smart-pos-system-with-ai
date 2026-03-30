@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("SmartPos.Backend.IntegrationTests")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+283e6b096907bcb38e06b119562e6d60600db033")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+1b0c99f75d64b865e45acc3b2bc763133abbeec9")]
 [assembly: System.Reflection.AssemblyProductAttribute("SmartPos.Backend.IntegrationTests")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SmartPos.Backend.IntegrationTests")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
