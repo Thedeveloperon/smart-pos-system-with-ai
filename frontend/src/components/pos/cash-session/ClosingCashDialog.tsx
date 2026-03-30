@@ -48,7 +48,6 @@ const ClosingCashDialog = ({
   const difference = total - expectedCash;
   const hasMismatch = Math.abs(difference) > 0;
   const isShortage = difference < 0;
-  const isExcess = difference > 0;
 
   const handleCountChange = (newCounts: DenominationCount[], newTotal: number) => {
     setCounts(newCounts);
@@ -83,7 +82,7 @@ const ClosingCashDialog = ({
   if (step === "reason") {
     return (
       <Dialog open={open} onOpenChange={() => handleCancel()}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="w-[min(96vw,34rem)] sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-destructive" />
@@ -95,15 +94,15 @@ const ClosingCashDialog = ({
           </DialogHeader>
 
           <div className="space-y-4 py-4">
-            <div className={`rounded-xl p-4 text-center ${
-              isShortage ? "bg-destructive/10" : "bg-warning/10"
-            }`}>
-              <p className="text-xs font-semibold uppercase tracking-wider mb-1 text-muted-foreground">
+            <div
+              className={`rounded-xl p-4 text-center ${
+                isShortage ? "bg-destructive/10" : "bg-warning/10"
+              }`}
+            >
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 {isShortage ? "Cash Shortage" : "Cash Excess"}
               </p>
-              <p className={`text-3xl font-extrabold tabular-nums ${
-                isShortage ? "text-destructive" : "text-warning"
-              }`}>
+              <p className={`text-3xl font-extrabold tabular-nums ${isShortage ? "text-destructive" : "text-warning"}`}>
                 {isShortage ? "-" : "+"} Rs. {Math.abs(difference).toLocaleString()}
               </p>
             </div>
@@ -114,13 +113,13 @@ const ClosingCashDialog = ({
               </label>
               <Textarea
                 value={reason}
-                onChange={e => setReason(e.target.value)}
+                onChange={(e) => setReason(e.target.value)}
                 placeholder="E.g., Manual correction, cash shortage, excess change given..."
                 rows={3}
                 className="rounded-xl resize-none"
               />
               {reason.trim().length === 0 && (
-                <p className="text-xs text-destructive flex items-center gap-1">
+                <p className="flex items-center gap-1 text-xs text-destructive">
                   <XCircle className="h-3 w-3" />
                   A reason is required to proceed
                 </p>
@@ -149,7 +148,7 @@ const ClosingCashDialog = ({
   if (step === "review") {
     return (
       <Dialog open={open} onOpenChange={() => handleCancel()}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="w-[min(96vw,34rem)] sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Lock className="h-5 w-5 text-primary" />
@@ -161,7 +160,6 @@ const ClosingCashDialog = ({
           </DialogHeader>
 
           <div className="space-y-4 py-4">
-            {/* Summary */}
             <div className="space-y-2 rounded-xl bg-muted p-4">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Opening Cash</span>
@@ -179,39 +177,44 @@ const ClosingCashDialog = ({
             </div>
 
             <div className="rounded-xl bg-accent p-4 text-center">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Actual Counted
               </p>
-              <p className="text-3xl font-extrabold text-primary tabular-nums">
+              <p className="text-3xl font-extrabold tabular-nums text-primary">
                 Rs. {total.toLocaleString()}
               </p>
             </div>
 
-            {/* Difference */}
-            <div className={`rounded-xl p-3 text-center ${
-              hasMismatch
-                ? isShortage
-                  ? "bg-destructive/10 border border-destructive/20"
-                  : "bg-warning/10 border border-warning/20"
-                : "bg-success/10 border border-success/20"
-            }`}>
-              <p className="text-xs font-semibold uppercase tracking-wider mb-0.5">
+            <div
+              className={`rounded-xl p-3 text-center ${
+                hasMismatch
+                  ? isShortage
+                    ? "border border-destructive/20 bg-destructive/10"
+                    : "border border-warning/20 bg-warning/10"
+                  : "border border-success/20 bg-success/10"
+              }`}
+            >
+              <p className="mb-0.5 text-xs font-semibold uppercase tracking-wider">
                 {hasMismatch ? "Difference" : "Status"}
               </p>
-              <p className={`text-lg font-bold ${
-                hasMismatch
-                  ? isShortage ? "text-destructive" : "text-warning"
-                  : "text-success"
-              }`}>
+              <p
+                className={`text-lg font-bold ${
+                  hasMismatch
+                    ? isShortage
+                      ? "text-destructive"
+                      : "text-warning"
+                    : "text-success"
+                }`}
+              >
                 {hasMismatch
                   ? `${isShortage ? "-" : "+"} Rs. ${Math.abs(difference).toLocaleString()}`
-                  : "✓ Cash Balanced"}
+                  : "Check Cash Balanced"}
               </p>
             </div>
 
             {hasMismatch && reason && (
               <div className="rounded-xl bg-muted p-3">
-                <p className="text-xs font-semibold text-muted-foreground mb-1">Reason</p>
+                <p className="mb-1 text-xs font-semibold text-muted-foreground">Reason</p>
                 <p className="text-sm">{reason}</p>
               </div>
             )}
@@ -228,7 +231,7 @@ const ClosingCashDialog = ({
             </div>
 
             <div className="flex items-start gap-2 rounded-xl border border-warning/30 bg-warning/5 p-3">
-              <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
               <p className="text-xs text-warning-foreground">
                 Once confirmed, this session will be locked. Only a manager can reopen or modify it.
               </p>
@@ -251,7 +254,7 @@ const ClosingCashDialog = ({
 
   return (
     <Dialog open={open} onOpenChange={() => handleCancel()}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
+      <DialogContent className="w-[min(96vw,44rem)] max-h-[92vh] overflow-hidden flex flex-col sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Shield className="h-5 w-5 text-primary" />
@@ -262,8 +265,7 @@ const ClosingCashDialog = ({
           </DialogDescription>
         </DialogHeader>
 
-        {/* Expected info */}
-        <div className="rounded-xl bg-muted p-3 flex justify-between items-center">
+        <div className="rounded-xl bg-muted p-3 flex items-center justify-between">
           <span className="text-sm text-muted-foreground">Expected Cash</span>
           <span className="text-lg font-bold tabular-nums">Rs. {expectedCash.toLocaleString()}</span>
         </div>
@@ -272,33 +274,36 @@ const ClosingCashDialog = ({
           <DenominationCounter onChange={handleCountChange} />
         </div>
 
-        {/* Live difference */}
         {total > 0 && (
-          <div className={`rounded-xl p-3 text-center ${
-            Math.abs(total - expectedCash) === 0
-              ? "bg-success/10"
-              : total < expectedCash
-                ? "bg-destructive/10"
-                : "bg-warning/10"
-          }`}>
-            <p className="text-xs font-semibold uppercase tracking-wider mb-0.5">
+          <div
+            className={`rounded-xl p-3 text-center ${
+              Math.abs(total - expectedCash) === 0
+                ? "bg-success/10"
+                : total < expectedCash
+                  ? "bg-destructive/10"
+                  : "bg-warning/10"
+            }`}
+          >
+            <p className="mb-0.5 text-xs font-semibold uppercase tracking-wider">
               {total === expectedCash ? "Balanced" : total < expectedCash ? "Short" : "Excess"}
             </p>
-            <p className={`text-lg font-bold tabular-nums ${
-              total === expectedCash
-                ? "text-success"
-                : total < expectedCash
-                  ? "text-destructive"
-                  : "text-warning"
-            }`}>
+            <p
+              className={`text-lg font-bold tabular-nums ${
+                total === expectedCash
+                  ? "text-success"
+                  : total < expectedCash
+                    ? "text-destructive"
+                    : "text-warning"
+              }`}
+            >
               {total === expectedCash
-                ? "✓ Rs. 0"
+                ? "Check Rs. 0"
                 : `${total < expectedCash ? "-" : "+"} Rs. ${Math.abs(total - expectedCash).toLocaleString()}`}
             </p>
           </div>
         )}
 
-        <DialogFooter className="pt-2 border-t border-border gap-2">
+        <DialogFooter className="border-t border-border gap-2 pt-2">
           <Button variant="outline" onClick={handleCancel} className="rounded-xl">
             Cancel
           </Button>
@@ -309,7 +314,7 @@ const ClosingCashDialog = ({
             onClick={handleProceed}
           >
             <CheckCircle2 className="h-5 w-5" />
-            Proceed — Rs. {total.toLocaleString()}
+            Proceed - Rs. {total.toLocaleString()}
           </Button>
         </DialogFooter>
       </DialogContent>

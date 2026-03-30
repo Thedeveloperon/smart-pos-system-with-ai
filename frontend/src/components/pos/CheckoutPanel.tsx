@@ -61,46 +61,47 @@ const CheckoutPanel = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-card">
+    <div className="flex h-full min-h-0 flex-col bg-card">
+      <div className="scrollbar-thin flex-1 min-h-0 overflow-y-auto">
       {/* Summary */}
-      <div className="p-4 space-y-3 border-b border-border">
-        <div className="flex justify-between text-sm">
+      <div className="space-y-2 border-b border-border px-3 py-3">
+        <div className="flex justify-between text-xs sm:text-sm">
           <span className="text-muted-foreground">
             Items ({itemCount})
           </span>
           <span>Rs. {subtotal.toLocaleString()}</span>
         </div>
         {discount > 0 && (
-          <div className="flex justify-between text-sm text-success">
+          <div className="flex justify-between text-xs sm:text-sm text-success">
             <span>Discount</span>
             <span>- Rs. {discount.toLocaleString()}</span>
           </div>
         )}
         <div className="h-px bg-border" />
         <div className="flex justify-between items-baseline">
-          <span className="text-lg font-bold">Grand Total</span>
-          <span className="text-2xl font-extrabold text-primary">
+          <span className="text-base font-bold sm:text-lg">Grand Total</span>
+          <span className="text-xl font-extrabold text-primary sm:text-2xl">
             Rs. {grandTotal.toLocaleString()}
           </span>
         </div>
       </div>
 
       {/* Customer Mobile */}
-      <div className="px-4 py-3 border-b border-border">
+      <div className="border-b border-border px-3 py-2">
         <div className="relative">
-          <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             value={customerMobile}
             onChange={(e) => setCustomerMobile(e.target.value)}
             placeholder="Customer mobile (optional)"
-            className="pl-10 h-10 rounded-xl"
+            className="h-9 rounded-xl pl-9 text-sm"
           />
         </div>
       </div>
 
       {/* Payment Method */}
-      <div className="px-4 py-3 border-b border-border">
-        <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wider">
+      <div className="border-b border-border px-3 py-2">
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           Payment Method
         </p>
         <div className="grid grid-cols-3 gap-2">
@@ -114,13 +115,13 @@ const CheckoutPanel = ({
             <Button
               key={key}
               variant={paymentMethod === key ? "default" : "pos-quick"}
-              className={`h-12 flex-col gap-0.5 rounded-xl ${
+              className={`h-11 flex-col gap-0.5 rounded-xl text-xs ${
                 paymentMethod === key ? "" : ""
               }`}
               onClick={() => (key === "cash" ? openCashCountDialog() : setPaymentMethod(key))}
             >
-              <Icon className="h-5 w-5" />
-              <span className="text-[11px]">{label}</span>
+              <Icon className="h-4 w-4" />
+              <span className="text-[10px] sm:text-[11px]">{label}</span>
             </Button>
           ))}
         </div>
@@ -128,9 +129,9 @@ const CheckoutPanel = ({
 
       {/* Cash Input */}
       {paymentMethod === "cash" && (
-        <div className="px-4 py-3 border-b border-border space-y-3">
+        <div className="space-y-2 border-b border-border px-3 py-2">
           <div>
-            <p className="text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wider">
+            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               Cash Received
             </p>
             <Input
@@ -138,47 +139,47 @@ const CheckoutPanel = ({
               value={cashReceived}
               onChange={(e) => setCashReceived(e.target.value)}
               placeholder="0.00"
-              className="h-12 text-xl font-bold text-center rounded-xl"
+              className="h-10 rounded-xl text-center text-lg font-bold"
             />
           </div>
 
           {/* Change / Due */}
           {cashNum > 0 && (
             <div
-              className={`rounded-xl p-3 text-center ${
+              className={`rounded-xl px-3 py-2.5 text-center ${
                 change >= 0
                   ? "bg-accent text-accent-foreground"
                   : "bg-destructive/10 text-destructive"
               }`}
             >
-              <p className="text-xs font-medium uppercase tracking-wider mb-0.5">
+              <p className="mb-0.5 text-[11px] font-medium uppercase tracking-wider">
                 {change >= 0 ? "Change" : "Due"}
               </p>
-              <p className="text-2xl font-extrabold">
+              <p className="text-xl font-extrabold sm:text-2xl">
                 Rs. {Math.abs(change >= 0 ? change : due).toLocaleString()}
               </p>
             </div>
           )}
         </div>
       )}
+      </div>
 
       {/* Actions */}
-      <div className="p-4 mt-auto space-y-2">
+      <div className="shrink-0 space-y-2 border-t border-border bg-background/95 p-3 pb-[env(safe-area-inset-bottom)]">
         <Button
           variant="pos-primary"
-          size="xl"
-          className="w-full rounded-xl"
+          className="h-11 w-full rounded-xl text-sm"
           disabled={!canComplete}
           onClick={handleComplete}
         >
-          <CheckCircle2 className="h-5 w-5" />
+          <CheckCircle2 className="h-4 w-4" />
           Complete Sale
         </Button>
 
         <div className="grid grid-cols-2 gap-2">
           <Button
             variant="pos-outline"
-            className="rounded-xl"
+            className="h-10 rounded-xl text-sm"
             onClick={onHoldBill}
             disabled={items.length === 0}
           >
@@ -187,7 +188,7 @@ const CheckoutPanel = ({
           </Button>
           <Button
             variant="pos-danger"
-            className="rounded-xl"
+            className="h-10 rounded-xl text-sm"
             onClick={onCancelSale}
             disabled={items.length === 0}
           >

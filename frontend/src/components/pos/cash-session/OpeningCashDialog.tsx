@@ -40,7 +40,10 @@ const OpeningCashDialog = ({ open, cashierName, onConfirm }: OpeningCashDialogPr
   if (showConfirm) {
     return (
       <Dialog open={open}>
-        <DialogContent className="sm:max-w-md" onInteractOutside={e => e.preventDefault()}>
+        <DialogContent
+          className="w-[min(96vw,42rem)] max-h-[90vh] overflow-hidden flex flex-col sm:max-w-3xl"
+          onInteractOutside={(e) => e.preventDefault()}
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <CheckCircle2 className="h-5 w-5 text-success" />
@@ -53,10 +56,10 @@ const OpeningCashDialog = ({ open, cashierName, onConfirm }: OpeningCashDialogPr
 
           <div className="space-y-4 py-4">
             <div className="rounded-xl bg-accent p-4 text-center">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Opening Cash Amount
               </p>
-              <p className="text-3xl font-extrabold text-primary tabular-nums">
+              <p className="text-3xl font-extrabold tabular-nums text-primary">
                 Rs. {total.toLocaleString()}
               </p>
             </div>
@@ -77,7 +80,7 @@ const OpeningCashDialog = ({ open, cashierName, onConfirm }: OpeningCashDialogPr
             </div>
 
             <div className="flex items-start gap-2 rounded-xl border border-warning/30 bg-warning/5 p-3">
-              <AlertTriangle className="h-4 w-4 text-warning shrink-0 mt-0.5" />
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
               <p className="text-xs text-warning-foreground">
                 Once confirmed, the opening cash cannot be modified without manager approval. Please ensure the count is accurate.
               </p>
@@ -100,7 +103,10 @@ const OpeningCashDialog = ({ open, cashierName, onConfirm }: OpeningCashDialogPr
 
   return (
     <Dialog open={open}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-hidden flex flex-col" onInteractOutside={e => e.preventDefault()}>
+      <DialogContent
+        className="w-[min(96vw,56rem)] max-h-[92vh] overflow-hidden flex flex-col sm:max-w-4xl"
+        onInteractOutside={(e) => e.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Shield className="h-5 w-5 text-primary" />
@@ -115,7 +121,7 @@ const OpeningCashDialog = ({ open, cashierName, onConfirm }: OpeningCashDialogPr
           <DenominationCounter onChange={handleCountChange} />
         </div>
 
-        <DialogFooter className="pt-4 border-t border-border">
+        <DialogFooter className="border-t border-border pt-4">
           <Button
             variant="pos-primary"
             size="lg"
@@ -123,7 +129,7 @@ const OpeningCashDialog = ({ open, cashierName, onConfirm }: OpeningCashDialogPr
             onClick={handleProceed}
           >
             <CheckCircle2 className="h-5 w-5" />
-            Proceed — Rs. {total.toLocaleString()}
+            Proceed - Rs. {total.toLocaleString()}
           </Button>
         </DialogFooter>
       </DialogContent>

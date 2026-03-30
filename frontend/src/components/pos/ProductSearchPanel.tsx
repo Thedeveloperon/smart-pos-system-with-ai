@@ -72,7 +72,7 @@ const ProductSearchPanel = ({ products, onAddToCart }: ProductSearchPanelProps) 
       </div>
 
       {/* Product Grid */}
-      <div className="flex-1 overflow-y-auto scrollbar-thin p-2.5">
+      <div className="flex-1 overflow-y-scroll scrollbar-thin p-2.5 pr-3">
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-muted-foreground gap-3">
             <Package className="h-12 w-12 opacity-40" />
