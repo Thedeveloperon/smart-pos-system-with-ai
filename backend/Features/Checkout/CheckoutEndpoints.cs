@@ -51,7 +51,7 @@ public static class CheckoutEndpoints
             try
             {
                 request.Role = ResolveRole(user);
-                var result = await service.HoldAsync(request, cancellationToken);
+                var result = await service.HoldAsync(request, ResolveUserId(user), cancellationToken);
                 return Results.Ok(result);
             }
             catch (InvalidOperationException exception)
@@ -71,7 +71,7 @@ public static class CheckoutEndpoints
             try
             {
                 request.Role = ResolveRole(user);
-                var result = await service.CompleteAsync(request, cancellationToken);
+                var result = await service.CompleteAsync(request, ResolveUserId(user), cancellationToken);
                 return Results.Ok(result);
             }
             catch (InvalidOperationException exception)
@@ -106,5 +106,11 @@ public static class CheckoutEndpoints
     private static string ResolveRole(ClaimsPrincipal user)
     {
         return user.FindFirstValue(ClaimTypes.Role) ?? "cashier";
+    }
+
+    private static Guid? ResolveUserId(ClaimsPrincipal user)
+    {
+        var value = user.FindFirstValue(ClaimTypes.NameIdentifier) ?? user.FindFirstValue("sub");
+        return Guid.TryParse(value, out var userId) ? userId : null;
     }
 }

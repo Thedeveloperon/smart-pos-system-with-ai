@@ -91,6 +91,15 @@ public sealed class TransactionReportRow
     [JsonPropertyName("timestamp")]
     public DateTimeOffset Timestamp { get; set; }
 
+    [JsonPropertyName("created_by_user_id")]
+    public Guid? CreatedByUserId { get; set; }
+
+    [JsonPropertyName("cashier_username")]
+    public string? CashierUsername { get; set; }
+
+    [JsonPropertyName("cashier_full_name")]
+    public string? CashierFullName { get; set; }
+
     [JsonPropertyName("items_count")]
     public int ItemsCount { get; set; }
 

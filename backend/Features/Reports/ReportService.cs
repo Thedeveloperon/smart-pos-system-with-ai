@@ -81,10 +81,26 @@ public sealed class ReportService(SmartPosDbContext dbContext)
             .Include(x => x.Payments)
             .ToListAsync(cancellationToken);
 
+        var cashierIds = sales
+            .Select(x => x.CreatedByUserId)
+            .Where(x => x.HasValue)
+            .Select(x => x!.Value)
+            .Distinct()
+            .ToArray();
+
+        var cashiersById = cashierIds.Length == 0
+            ? new Dictionary<Guid, CashierLookupRow>()
+            : await dbContext.Users
+                .AsNoTracking()
+                .Where(x => cashierIds.Contains(x.Id))
+                .Select(x => new CashierLookupRow(x.Id, x.Username, x.FullName))
+                .ToDictionaryAsync(x => x.UserId, cancellationToken);
+
         var allItems = sales
             .Where(x => IsFinancialSaleStatus(x.Status) && IsInRange(GetSaleTimestamp(x), range))
             .Select(x =>
             {
+                cashiersById.TryGetValue(x.CreatedByUserId ?? Guid.Empty, out var cashier);
                 var paidTotal = RoundMoney(x.Payments.Where(y => !y.IsReversal).Sum(y => y.Amount));
                 var reversedTotal = RoundMoney(x.Payments.Where(y => y.IsReversal).Sum(y => y.Amount));
                 return new TransactionReportRow
@@ -93,6 +109,9 @@ public sealed class ReportService(SmartPosDbContext dbContext)
                     SaleNumber = x.SaleNumber,
                     Status = x.Status.ToString().ToLowerInvariant(),
                     Timestamp = GetSaleTimestamp(x),
+                    CreatedByUserId = x.CreatedByUserId,
+                    CashierUsername = cashier?.Username,
+                    CashierFullName = cashier?.FullName,
                     ItemsCount = x.Items.Count,
                     GrandTotal = x.GrandTotal,
                     PaidTotal = paidTotal,
@@ -360,4 +379,9 @@ public sealed class ReportService(SmartPosDbContext dbContext)
     {
         public static ItemAgg Empty { get; } = new(string.Empty, 0m, 0m);
     }
+
+    private sealed record CashierLookupRow(
+        Guid UserId,
+        string Username,
+        string FullName);
 }

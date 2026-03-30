@@ -55,8 +55,18 @@ type BackendProductCatalogItem = {
   sku?: string | null;
   barcode?: string | null;
   image_url?: string | null;
+  category_id?: string | null;
+  category_name?: string | null;
   unit_price: number;
+  cost_price: number;
   stock_quantity: number;
+  reorder_level: number;
+  alert_level: number;
+  allow_negative_stock: boolean;
+  is_active: boolean;
+  is_low_stock: boolean;
+  created_at: string;
+  updated_at?: string | null;
 };
 
 type BackendProductCatalogResponse = {
@@ -135,6 +145,26 @@ export type CreateProductRequest = {
   reorder_level: number;
   allow_negative_stock: boolean;
   is_active: boolean;
+};
+
+export type CatalogProduct = {
+  id: string;
+  name: string;
+  sku: string;
+  barcode?: string;
+  image?: string;
+  categoryId?: string | null;
+  categoryName?: string | null;
+  unitPrice: number;
+  costPrice: number;
+  stockQuantity: number;
+  reorderLevel: number;
+  alertLevel: number;
+  allowNegativeStock: boolean;
+  isActive: boolean;
+  isLowStock: boolean;
+  createdAt: string;
+  updatedAt?: string | null;
 };
 
 export type PurchaseOcrTotalsValidation = {
@@ -313,6 +343,9 @@ type TransactionsReportResponse = {
     sale_number: string;
     status: string;
     timestamp: string;
+    created_by_user_id?: string | null;
+    cashier_username?: string | null;
+    cashier_full_name?: string | null;
     items_count: number;
     grand_total: number;
     paid_total: number;
@@ -324,6 +357,50 @@ type TransactionsReportResponse = {
       reversed_amount: number;
       net_amount: number;
     }[];
+  }[];
+};
+
+type PaymentBreakdownReportResponse = {
+  from_date: string;
+  to_date: string;
+  paid_total: number;
+  reversed_total: number;
+  net_total: number;
+  items: {
+    method: string;
+    paid_amount: number;
+    reversed_amount: number;
+    net_amount: number;
+  }[];
+};
+
+type TopItemsReportResponse = {
+  from_date: string;
+  to_date: string;
+  take: number;
+  items: {
+    product_id: string;
+    product_name: string;
+    sold_quantity: number;
+    refunded_quantity: number;
+    net_quantity: number;
+    net_sales: number;
+  }[];
+};
+
+type LowStockReportResponse = {
+  generated_at: string;
+  threshold: number;
+  take: number;
+  items: {
+    product_id: string;
+    product_name: string;
+    sku?: string | null;
+    barcode?: string | null;
+    quantity_on_hand: number;
+    reorder_level: number;
+    alert_level: number;
+    deficit: number;
   }[];
 };
 
@@ -563,6 +640,30 @@ function mapSaleResponseToHeldBill(sale: BackendSaleResponse): HeldBill {
   };
 }
 
+function mapCatalogProductItem(item: BackendProductCatalogItem): CatalogProduct {
+  const accent = colorFromText(item.name + (item.barcode || ""));
+  const sampleImage = getSampleProductImage(item.name);
+  return {
+    id: item.product_id,
+    name: item.name,
+    sku: item.sku || item.product_id.slice(0, 8),
+    barcode: item.barcode || undefined,
+    image: item.image_url || sampleImage || createProductImage(item.name, accent),
+    categoryId: item.category_id || null,
+    categoryName: item.category_name || null,
+    unitPrice: Number(item.unit_price),
+    costPrice: Number(item.cost_price),
+    stockQuantity: Number(item.stock_quantity),
+    reorderLevel: Number(item.reorder_level),
+    alertLevel: Number(item.alert_level),
+    allowNegativeStock: item.allow_negative_stock,
+    isActive: item.is_active,
+    isLowStock: item.is_low_stock,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+  };
+}
+
 function mapShopProfile(profile: BackendShopProfileResponse): ShopProfile {
   return {
     id: profile.id,
@@ -616,6 +717,13 @@ export async function fetchProductCatalog(take = 200) {
   return response.items.map(mapCatalogProduct);
 }
 
+export async function fetchProductCatalogItems(take = 200, includeInactive = true) {
+  const response = await request<BackendProductCatalogResponse>(
+    `/api/products/catalog?take=${Math.max(1, Math.min(200, take))}&include_inactive=${includeInactive ? "true" : "false"}`
+  );
+  return response.items.map(mapCatalogProductItem);
+}
+
 export async function fetchCategories(includeInactive = false) {
   const query = `?include_inactive=${includeInactive ? "true" : "false"}`;
   const response = await request<BackendCategoryListResponse>(`/api/categories${query}`);
@@ -629,6 +737,34 @@ export async function createProduct(requestBody: CreateProductRequest) {
   });
 
   return mapCatalogProduct(response);
+}
+
+export type UpdateProductRequest = {
+  name: string;
+  sku?: string | null;
+  barcode?: string | null;
+  image_url?: string | null;
+  category_id?: string | null;
+  unit_price: number;
+  cost_price: number;
+  reorder_level: number;
+  allow_negative_stock: boolean;
+  is_active: boolean;
+};
+
+export async function updateProduct(productId: string, requestBody: UpdateProductRequest) {
+  const response = await request<BackendProductCatalogItem>(`/api/products/${productId}`, {
+    method: "PUT",
+    body: JSON.stringify(requestBody),
+  });
+
+  return mapCatalogProduct(response);
+}
+
+export async function deleteProduct(productId: string) {
+  return request<void>(`/api/products/${productId}`, {
+    method: "DELETE",
+  });
 }
 
 export async function fetchHeldBills() {
@@ -724,14 +860,32 @@ export async function fetchWhatsAppReceipt(saleId: string, phone?: string) {
   return request<{ message: string; url: string }>(`/api/receipts/${saleId}/whatsapp${query}`);
 }
 
-export async function fetchDailySalesReport(date = new Date()) {
-  const utcDate = date.toISOString().slice(0, 10);
-  return request<DailySalesReportResponse>(`/api/reports/daily?from=${utcDate}&to=${utcDate}`);
+export async function fetchDailySalesReport(fromDate = new Date(), toDate = fromDate) {
+  const from = fromDate.toISOString().slice(0, 10);
+  const to = toDate.toISOString().slice(0, 10);
+  return request<DailySalesReportResponse>(`/api/reports/daily?from=${from}&to=${to}`);
 }
 
-export async function fetchTransactionsReport(date = new Date(), take = 200) {
-  const utcDate = date.toISOString().slice(0, 10);
-  return request<TransactionsReportResponse>(`/api/reports/transactions?from=${utcDate}&to=${utcDate}&take=${take}`);
+export async function fetchTransactionsReport(fromDate = new Date(), toDate = fromDate, take = 200) {
+  const from = fromDate.toISOString().slice(0, 10);
+  const to = toDate.toISOString().slice(0, 10);
+  return request<TransactionsReportResponse>(`/api/reports/transactions?from=${from}&to=${to}&take=${take}`);
+}
+
+export async function fetchPaymentBreakdownReport(fromDate = new Date(), toDate = fromDate) {
+  const from = fromDate.toISOString().slice(0, 10);
+  const to = toDate.toISOString().slice(0, 10);
+  return request<PaymentBreakdownReportResponse>(`/api/reports/payment-breakdown?from=${from}&to=${to}`);
+}
+
+export async function fetchTopItemsReport(fromDate = new Date(), toDate = fromDate, take = 10) {
+  const from = fromDate.toISOString().slice(0, 10);
+  const to = toDate.toISOString().slice(0, 10);
+  return request<TopItemsReportResponse>(`/api/reports/top-items?from=${from}&to=${to}&take=${take}`);
+}
+
+export async function fetchLowStockReport(take = 20, threshold = 5) {
+  return request<LowStockReportResponse>(`/api/reports/low-stock?take=${take}&threshold=${threshold}`);
 }
 
 export async function createPurchaseOcrDraft(file: File, supplierHint?: string) {

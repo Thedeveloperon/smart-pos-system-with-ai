@@ -4,6 +4,8 @@ import { useAuth } from "@/components/auth/AuthContext";
 import HeaderBar from "@/components/pos/HeaderBar";
 import NewItemDialog from "@/components/pos/NewItemDialog";
 import ImportSupplierBillDialog from "@/components/pos/ImportSupplierBillDialog";
+import ProductManagementDialog from "@/components/pos/ProductManagementDialog";
+import ManagerReportsDrawer from "@/components/pos/ManagerReportsDrawer";
 import ProductSearchPanel from "@/components/pos/ProductSearchPanel";
 import CartPanel from "@/components/pos/CartPanel";
 import CheckoutPanel from "@/components/pos/CheckoutPanel";
@@ -49,6 +51,8 @@ const IndexInner = () => {
   const [activeHeldSaleId, setActiveHeldSaleId] = useState<string | null>(null);
   const [showHeldBills, setShowHeldBills] = useState(false);
   const [showNewItem, setShowNewItem] = useState(false);
+  const [showProductManagement, setShowProductManagement] = useState(false);
+  const [showReports, setShowReports] = useState(false);
   const [showTodaySales, setShowTodaySales] = useState(false);
   const [showClosing, setShowClosing] = useState(false);
   const [showAuditLog, setShowAuditLog] = useState(false);
@@ -151,6 +155,7 @@ const IndexInner = () => {
         const bill = await fetchHeldBill(billId);
         setCartItems(bill.items);
         setActiveHeldSaleId(bill.id);
+        setMobileTab("cart");
         toast.success("Bill resumed");
       } catch (error) {
         console.error(error);
@@ -245,6 +250,8 @@ const IndexInner = () => {
         onHeldBills={() => setShowHeldBills(true)}
         onTodaySales={() => setShowTodaySales(true)}
         onNewItem={() => setShowNewItem(true)}
+        onManageProducts={() => setShowProductManagement(true)}
+        onReports={() => setShowReports(true)}
         onImportSupplierBill={() => setShowImportSupplierBill(true)}
         onShopSettings={() => setShowShopSettings(true)}
         onSignOut={() => {
@@ -352,12 +359,23 @@ const IndexInner = () => {
         onCreated={() => void loadProducts()}
       />
 
+      <ProductManagementDialog
+        open={showProductManagement}
+        onOpenChange={setShowProductManagement}
+        onChanged={() => void loadProducts()}
+      />
+
+      <ManagerReportsDrawer
+        open={showReports}
+        onClose={() => setShowReports(false)}
+      />
+
       <HeldBillsDrawer
         open={showHeldBills}
         onClose={() => setShowHeldBills(false)}
         heldBills={heldBills}
         onResume={(billId) => {
-          void handleResumeBill(billId);
+          return handleResumeBill(billId);
         }}
         onDelete={(billId) => {
           void handleDeleteHeldBill(billId);

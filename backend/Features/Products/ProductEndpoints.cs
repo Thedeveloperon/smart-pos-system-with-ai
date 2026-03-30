@@ -108,6 +108,25 @@ public static class ProductEndpoints
         .WithName("AdjustProductStock")
         .WithOpenApi();
 
+        productGroup.MapDelete("/{productId:guid}", async (
+            Guid productId,
+            ProductService productService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                await productService.DeleteProductAsync(productId, cancellationToken);
+                return Results.NoContent();
+            }
+            catch (KeyNotFoundException exception)
+            {
+                return Results.NotFound(new { message = exception.Message });
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.ManagerOrOwner)
+        .WithName("DeleteProduct")
+        .WithOpenApi();
+
         categoryGroup.MapGet("", async (
             bool? include_inactive,
             ProductService productService,

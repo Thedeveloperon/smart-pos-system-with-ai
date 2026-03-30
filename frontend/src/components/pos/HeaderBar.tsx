@@ -9,8 +9,10 @@ import {
   FileText,
   Lock,
   PlusCircle,
+  BarChart3,
   Upload,
   Settings2,
+  PencilLine,
 } from "lucide-react";
 
 interface HeaderBarProps {
@@ -19,6 +21,8 @@ interface HeaderBarProps {
   onHeldBills: () => void;
   onTodaySales: () => void;
   onNewItem: () => void;
+  onManageProducts?: () => void;
+  onReports?: () => void;
   onImportSupplierBill: () => void;
   onShopSettings?: () => void;
   onSignOut: () => void;
@@ -34,6 +38,8 @@ const HeaderBar = ({
   onHeldBills,
   onTodaySales,
   onNewItem,
+  onManageProducts,
+  onReports,
   onImportSupplierBill,
   onShopSettings,
   onSignOut,
@@ -77,6 +83,30 @@ const HeaderBar = ({
           >
             <PlusCircle className="h-4 w-4" />
             <span className="hidden md:inline ml-1">New Item</span>
+          </Button>
+        )}
+
+        {isAdmin && onManageProducts && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onManageProducts}
+            className="text-pos-header-foreground hover:bg-pos-header-foreground/10"
+          >
+            <PencilLine className="h-4 w-4" />
+            <span className="hidden md:inline ml-1">Manage</span>
+          </Button>
+        )}
+
+        {isAdmin && onReports && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onReports}
+            className="text-pos-header-foreground hover:bg-pos-header-foreground/10"
+          >
+            <BarChart3 className="h-4 w-4" />
+            <span className="hidden md:inline ml-1">Reports</span>
           </Button>
         )}
 
