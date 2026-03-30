@@ -10,6 +10,7 @@ import CheckoutPanel from "@/components/pos/CheckoutPanel";
 import HeldBillsDrawer from "@/components/pos/HeldBillsDrawer";
 import TodaySalesDrawer from "@/components/pos/TodaySalesDrawer";
 import MobileTabBar from "@/components/pos/MobileTabBar";
+import ShopProfileDialog from "@/components/pos/ShopProfileDialog";
 import { CashSessionProvider, useCashSession } from "@/components/pos/cash-session/CashSessionContext";
 import OpeningCashDialog from "@/components/pos/cash-session/OpeningCashDialog";
 import ClosingCashDialog from "@/components/pos/cash-session/ClosingCashDialog";
@@ -24,9 +25,11 @@ import {
   fetchHeldBills,
   fetchProducts,
   holdSale,
+  fetchReceiptHtmlUrl,
   type PurchaseImportConfirmResponse,
   voidSale,
 } from "@/lib/api";
+import { playCartAddSound } from "@/lib/sound";
 
 const IndexInner = () => {
   const { user, logout } = useAuth();
@@ -50,6 +53,7 @@ const IndexInner = () => {
   const [showClosing, setShowClosing] = useState(false);
   const [showAuditLog, setShowAuditLog] = useState(false);
   const [showImportSupplierBill, setShowImportSupplierBill] = useState(false);
+  const [showShopSettings, setShowShopSettings] = useState(false);
   const [mobileTab, setMobileTab] = useState<"products" | "cart" | "checkout">("products");
 
   const {
@@ -104,6 +108,7 @@ const IndexInner = () => {
       }
       return [...prev, { product, quantity: qty }];
     });
+    void playCartAddSound();
     toast.success(`Added ${product.name}`, { duration: 1500 });
   }, []);
 
@@ -178,6 +183,7 @@ const IndexInner = () => {
       const total = cartItems.reduce((a, i) => a + i.product.price * i.quantity, 0);
       const paidAmount = paymentMethod === "cash" ? cashReceived || total : total;
       const referenceNumber = customerMobile.trim() || undefined;
+      const receiptWindow = window.open("", "_blank", "width=420,height=760");
 
       try {
         const result = await completeSale(
@@ -194,12 +200,15 @@ const IndexInner = () => {
         addSaleToCash(total, paymentMethod);
         toast.success("Sale completed!", { duration: 2000 });
 
-        await Promise.all([loadProducts(), loadHeldBills()]);
-
-        if (result.status === "completed") {
-          return;
+        if (receiptWindow) {
+          receiptWindow.location.href = await fetchReceiptHtmlUrl(result.sale_id);
         }
+
+        await Promise.all([loadProducts(), loadHeldBills()]);
       } catch (error) {
+        if (receiptWindow) {
+          receiptWindow.close();
+        }
         console.error(error);
         toast.error("Failed to complete sale.");
       }
@@ -237,6 +246,7 @@ const IndexInner = () => {
         onTodaySales={() => setShowTodaySales(true)}
         onNewItem={() => setShowNewItem(true)}
         onImportSupplierBill={() => setShowImportSupplierBill(true)}
+        onShopSettings={() => setShowShopSettings(true)}
         onSignOut={() => {
           void logout();
         }}
@@ -360,6 +370,11 @@ const IndexInner = () => {
         onImported={async (_result: PurchaseImportConfirmResponse) => {
           await loadProducts();
         }}
+      />
+
+      <ShopProfileDialog
+        open={showShopSettings}
+        onOpenChange={setShowShopSettings}
       />
     </div>
   );

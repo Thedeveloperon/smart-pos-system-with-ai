@@ -51,6 +51,21 @@ public sealed class Supplier
     public ICollection<PurchaseBill> PurchaseBills { get; set; } = [];
 }
 
+public sealed class ShopProfile
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string ShopName { get; set; } = "SmartPOS Lanka";
+    public string? AddressLine1 { get; set; }
+    public string? AddressLine2 { get; set; }
+    public string? Phone { get; set; }
+    public string? Email { get; set; }
+    public string? Website { get; set; }
+    public string? LogoUrl { get; set; }
+    public string? ReceiptFooter { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+}
+
 public sealed class PurchaseBill
 {
     public Guid Id { get; set; } = Guid.NewGuid();
