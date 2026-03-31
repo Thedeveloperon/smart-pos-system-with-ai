@@ -235,8 +235,10 @@ const IndexInner = () => {
   };
 
   const handleCloseSession = async (counts: DenominationCount[], total: number, reason?: string) => {
-    await completeClosing(counts, total, reason);
-    setShowClosing(false);
+    const didClose = await completeClosing(counts, total, reason);
+    if (didClose) {
+      setShowClosing(false);
+    }
   };
 
   const handleNewSession = () => {

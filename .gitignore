@@ -15,6 +15,9 @@ frontend/.vite/
 backend/bin/
 backend/obj/
 
+# Deployment artifacts
+release/
+
 # IDE and tooling
 .idea/
 .vscode/

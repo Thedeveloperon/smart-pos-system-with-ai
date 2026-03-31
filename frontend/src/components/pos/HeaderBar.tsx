@@ -5,7 +5,6 @@ import {
   Clock,
   LogOut,
   User,
-  ShoppingBag,
   FileText,
   Lock,
   PlusCircle,
@@ -50,12 +49,8 @@ const HeaderBar = ({
 }: HeaderBarProps) => {
   return (
     <header className="bg-pos-header text-pos-header-foreground h-14 flex items-center justify-between px-4 gap-3 shrink-0">
-      <div className="flex items-center gap-3">
-        <ShoppingBag className="h-6 w-6 text-primary" />
-        <h1 className="text-lg font-bold tracking-tight hidden sm:block">
-          SmartPOS Lanka
-        </h1>
-        <h1 className="text-lg font-bold tracking-tight sm:hidden">POS</h1>
+      <div className="flex items-center">
+        <img src="/logo.png" alt="SmartPOS Lanka logo" className="h-10 w-auto object-contain" />
       </div>
 
       <div className="flex items-center gap-2">

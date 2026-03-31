@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.Extensions.Options;
+using SmartPos.Backend.Features.Ai;
 using SmartPos.Backend.Features.Auth;
 using SmartPos.Backend.Features.CashSessions;
 using SmartPos.Backend.Features.Checkout;
@@ -26,6 +27,8 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.Configure<PurchasingOptions>(
     builder.Configuration.GetSection(PurchasingOptions.SectionName));
+builder.Services.Configure<AiSuggestionOptions>(
+    builder.Configuration.GetSection(AiSuggestionOptions.SectionName));
 builder.Services.AddSingleton(jwtOptions);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddCors(options =>
@@ -86,6 +89,7 @@ builder.Services.AddScoped<ShopProfileService>();
 builder.Services.AddScoped<SyncEventsProcessor>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<AuditLogService>();
+builder.Services.AddHttpClient<AiSuggestionService>();
 builder.Services.AddSingleton<BasicTextOcrProvider>();
 builder.Services.AddSingleton<TesseractOcrProvider>();
 builder.Services.AddSingleton<IOcrProviderCore>(serviceProvider =>
@@ -137,6 +141,8 @@ builder.Services.AddDbContext<SmartPosDbContext>(options =>
 });
 
 var app = builder.Build();
+var staticFilesAvailable = Directory.Exists(
+    Path.Combine(app.Environment.ContentRootPath, "wwwroot"));
 
 if (app.Environment.IsDevelopment())
 {
@@ -156,6 +162,12 @@ using (var scope = app.Services.CreateScope())
     await DbSeeder.SeedAsync(dbContext);
 }
 
+if (staticFilesAvailable)
+{
+    app.UseDefaultFiles();
+    app.UseStaticFiles();
+}
+
 app.UseCors("frontend-dev");
 app.UseAuthentication();
 app.UseAuthorization();
@@ -173,6 +185,7 @@ app.MapGet("/health", () =>
 .WithOpenApi();
 
 app.MapAuthEndpoints();
+app.MapAiSuggestionEndpoints();
 app.MapCashSessionEndpoints();
 app.MapSyncEndpoints();
 app.MapProductEndpoints();
@@ -182,6 +195,11 @@ app.MapReceiptEndpoints();
 app.MapRefundEndpoints();
 app.MapSettingsEndpoints();
 app.MapReportEndpoints();
+
+if (staticFilesAvailable)
+{
+    app.MapFallbackToFile("index.html");
+}
 
 app.Run();
 

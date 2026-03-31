@@ -14,7 +14,7 @@ interface CashSessionContextValue {
   startSession: (counts: DenominationCount[], total: number, cashierName: string) => Promise<void>;
   resetSession: () => void;
   initiateClosing: () => void;
-  completeClosing: (counts: DenominationCount[], total: number, reason?: string) => Promise<void>;
+  completeClosing: (counts: DenominationCount[], total: number, reason?: string) => Promise<boolean>;
   cancelClosing: () => void;
   getExpectedCash: () => number;
   userRole: UserRole;
@@ -79,16 +79,19 @@ export const CashSessionProvider = ({ children }: { children: ReactNode }) => {
   const completeClosing = useCallback(
     async (counts: DenominationCount[], total: number, reason?: string) => {
       if (!session) {
-        return;
+        return false;
       }
 
       try {
         const closedSession = await closeCashSession(session.id, counts, total, reason);
         setSession(closedSession);
         toast.success("Cash session closed.");
+        return true;
       } catch (error) {
         console.error(error);
+        setSession((prev) => (prev && prev.status === "closing" ? { ...prev, status: "active" } : prev));
         toast.error(error instanceof Error ? error.message : "Failed to close cash session.");
+        return false;
       }
     },
     [session]

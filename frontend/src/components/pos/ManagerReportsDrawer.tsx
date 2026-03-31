@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import {
@@ -56,8 +56,22 @@ const today = new Date();
 const defaultFromDate = new Date(today);
 defaultFromDate.setDate(today.getDate() - 6);
 
-const formatDateInput = (date: Date) => date.toISOString().slice(0, 10);
-const formatDate = (value: string) => new Date(value).toLocaleDateString();
+const formatDateInput = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
+const parseDateInput = (value: string) => {
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) {
+    return null;
+  }
+
+  return new Date(year, month - 1, day);
+};
+
+const formatDate = (value: string) => {
+  const parsed = parseDateInput(value);
+  return parsed ? parsed.toLocaleDateString() : value;
+};
 
 const escapeCsvValue = (value: string | number | null | undefined) => {
   const text = String(value ?? "");
@@ -173,17 +187,14 @@ const ManagerReportsDrawer = ({
     lowStock: [],
   });
 
-  const loadReports = async () => {
-    const from = new Date(`${fromDate}T00:00:00`);
-    const to = new Date(`${toDate}T00:00:00`);
-
+  const loadReports = useCallback(async () => {
     setLoading(true);
     try {
       const [summary, transactions, payments, topItems, lowStock] = await Promise.all([
-        fetchDailySalesReport(from, to),
-        fetchTransactionsReport(from, to, 50),
-        fetchPaymentBreakdownReport(from, to),
-        fetchTopItemsReport(from, to, 8),
+        fetchDailySalesReport(fromDate, toDate),
+        fetchTransactionsReport(fromDate, toDate, 50),
+        fetchPaymentBreakdownReport(fromDate, toDate),
+        fetchTopItemsReport(fromDate, toDate, 8),
         fetchLowStockReport(12, 5),
       ]);
 
@@ -196,10 +207,11 @@ const ManagerReportsDrawer = ({
       });
     } catch (error) {
       console.error(error);
+      toast.error(error instanceof Error ? error.message : "Failed to load reports.");
     } finally {
       setLoading(false);
     }
-  };
+  }, [fromDate, toDate]);
 
   useEffect(() => {
     if (!open) {
@@ -207,7 +219,7 @@ const ManagerReportsDrawer = ({
     }
 
     void loadReports();
-  }, [open, fromDate, toDate, refreshToken]);
+  }, [open, loadReports, refreshToken]);
 
   const overview = useMemo(() => {
     const cashierMap = new Map<string, number>();

@@ -486,3 +486,4 @@
 /Users/iroshwijesiri/Documents/SMART POS SYSTEM WITH AI/backend/tests/SmartPos.Backend.IntegrationTests/bin/Debug/net8.0/UglyToad.PdfPig.Tokenization.dll
 /Users/iroshwijesiri/Documents/SMART POS SYSTEM WITH AI/backend/tests/SmartPos.Backend.IntegrationTests/bin/Debug/net8.0/UglyToad.PdfPig.Tokens.dll
 /Users/iroshwijesiri/Documents/SMART POS SYSTEM WITH AI/backend/tests/SmartPos.Backend.IntegrationTests/bin/Debug/net8.0/UglyToad.PdfPig.dll
+/Users/iroshwijesiri/Documents/SMART POS SYSTEM WITH AI/backend/tests/SmartPos.Backend.IntegrationTests/bin/Debug/net8.0/appsettings.Production.json

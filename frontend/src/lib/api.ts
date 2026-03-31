@@ -8,9 +8,11 @@ import type {
 function getDefaultApiBaseUrl() {
   if (typeof window !== "undefined") {
     const host = window.location.hostname;
-    if (host === "127.0.0.1" || host === "localhost") {
+    if (import.meta.env.DEV && (host === "127.0.0.1" || host === "localhost")) {
       return `http://${host}:5080`;
     }
+
+    return window.location.origin;
   }
 
   return "http://localhost:5080";
@@ -252,12 +254,19 @@ export type CreateProductRequest = {
   is_active: boolean;
 };
 
+export type CreateCategoryRequest = {
+  name: string;
+  description?: string | null;
+  is_active?: boolean;
+};
+
 export type CatalogProduct = {
   id: string;
   name: string;
   sku: string;
   barcode?: string;
   image?: string;
+  imageUrl?: string | null;
   categoryId?: string | null;
   categoryName?: string | null;
   unitPrice: number;
@@ -793,6 +802,7 @@ function mapCatalogProductItem(item: BackendProductCatalogItem): CatalogProduct 
     sku: item.sku || item.product_id.slice(0, 8),
     barcode: item.barcode || undefined,
     image: item.image_url || sampleImage || createProductImage(item.name, accent),
+    imageUrl: item.image_url || null,
     categoryId: item.category_id || null,
     categoryName: item.category_name || null,
     unitPrice: Number(item.unit_price),
@@ -874,6 +884,17 @@ export async function fetchCategories(includeInactive = false) {
   return response.items;
 }
 
+export async function createCategory(requestBody: CreateCategoryRequest) {
+  return request<BackendCategoryItem>("/api/categories", {
+    method: "POST",
+    body: JSON.stringify({
+      description: requestBody.description ?? null,
+      is_active: requestBody.is_active ?? true,
+      name: requestBody.name,
+    }),
+  });
+}
+
 export async function createProduct(requestBody: CreateProductRequest) {
   const response = await request<BackendProductCatalogItem>("/api/products", {
     method: "POST",
@@ -881,6 +902,64 @@ export async function createProduct(requestBody: CreateProductRequest) {
   });
 
   return mapCatalogProduct(response);
+}
+
+export type ProductAiSuggestionTarget = "name" | "sku" | "barcode" | "image_url" | "category";
+
+export type ProductAiSuggestionRequest = {
+  target: ProductAiSuggestionTarget;
+  name?: string | null;
+  sku?: string | null;
+  barcode?: string | null;
+  image_url?: string | null;
+  image_hint?: string | null;
+  category_name?: string | null;
+  category_options?: string[];
+  unit_price?: number | null;
+  cost_price?: number | null;
+};
+
+export type ProductAiSuggestionResponse = {
+  target: ProductAiSuggestionTarget;
+  suggestion: string;
+  model: string;
+  source: string;
+};
+
+export async function generateProductAiSuggestion(requestBody: ProductAiSuggestionRequest) {
+  return request<ProductAiSuggestionResponse>("/api/ai/product-suggestions", {
+    method: "POST",
+    body: JSON.stringify(requestBody),
+  });
+}
+
+export type ProductFromImageRequest = {
+  image_url?: string | null;
+  image_hint?: string | null;
+  name?: string | null;
+  sku?: string | null;
+  barcode?: string | null;
+  category_name?: string | null;
+  category_options?: string[];
+  unit_price?: number | null;
+  cost_price?: number | null;
+};
+
+export type ProductFromImageResponse = {
+  name?: string | null;
+  sku?: string | null;
+  barcode?: string | null;
+  category?: string | null;
+  source: string;
+  model: string;
+  details: ProductAiSuggestionResponse[];
+};
+
+export async function generateProductFromImageSuggestions(requestBody: ProductFromImageRequest) {
+  return request<ProductFromImageResponse>("/api/ai/product-from-image", {
+    method: "POST",
+    body: JSON.stringify(requestBody),
+  });
 }
 
 export type UpdateProductRequest = {
@@ -1060,27 +1139,49 @@ export async function createRefund(requestBody: CreateRefundRequest) {
   });
 }
 
-export async function fetchDailySalesReport(fromDate = new Date(), toDate = fromDate) {
-  const from = fromDate.toISOString().slice(0, 10);
-  const to = toDate.toISOString().slice(0, 10);
+function formatDateQueryValue(value: Date | string) {
+  if (typeof value === "string") {
+    return value.slice(0, 10);
+  }
+
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export async function fetchDailySalesReport(fromDate: Date | string = new Date(), toDate: Date | string = fromDate) {
+  const from = formatDateQueryValue(fromDate);
+  const to = formatDateQueryValue(toDate);
   return request<DailySalesReportResponse>(`/api/reports/daily?from=${from}&to=${to}`);
 }
 
-export async function fetchTransactionsReport(fromDate = new Date(), toDate = fromDate, take = 200) {
-  const from = fromDate.toISOString().slice(0, 10);
-  const to = toDate.toISOString().slice(0, 10);
+export async function fetchTransactionsReport(
+  fromDate: Date | string = new Date(),
+  toDate: Date | string = fromDate,
+  take = 200
+) {
+  const from = formatDateQueryValue(fromDate);
+  const to = formatDateQueryValue(toDate);
   return request<TransactionsReportResponse>(`/api/reports/transactions?from=${from}&to=${to}&take=${take}`);
 }
 
-export async function fetchPaymentBreakdownReport(fromDate = new Date(), toDate = fromDate) {
-  const from = fromDate.toISOString().slice(0, 10);
-  const to = toDate.toISOString().slice(0, 10);
+export async function fetchPaymentBreakdownReport(
+  fromDate: Date | string = new Date(),
+  toDate: Date | string = fromDate
+) {
+  const from = formatDateQueryValue(fromDate);
+  const to = formatDateQueryValue(toDate);
   return request<PaymentBreakdownReportResponse>(`/api/reports/payment-breakdown?from=${from}&to=${to}`);
 }
 
-export async function fetchTopItemsReport(fromDate = new Date(), toDate = fromDate, take = 10) {
-  const from = fromDate.toISOString().slice(0, 10);
-  const to = toDate.toISOString().slice(0, 10);
+export async function fetchTopItemsReport(
+  fromDate: Date | string = new Date(),
+  toDate: Date | string = fromDate,
+  take = 10
+) {
+  const from = formatDateQueryValue(fromDate);
+  const to = formatDateQueryValue(toDate);
   return request<TopItemsReportResponse>(`/api/reports/top-items?from=${from}&to=${to}&take=${take}`);
 }
 

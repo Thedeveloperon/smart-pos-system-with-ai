@@ -116,12 +116,18 @@ function toDateInputValue(value?: string | null) {
     return "";
   }
 
+  const normalized = value.trim();
+  const match = normalized.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (match) {
+    return match[1];
+  }
+
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
     return "";
   }
 
-  return parsed.toISOString().slice(0, 10);
+  return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-${String(parsed.getDate()).padStart(2, "0")}`;
 }
 
 function toDecimalOrNull(value: string) {
