@@ -14,6 +14,19 @@ frontend/.vite/
 # Backend
 backend/bin/
 backend/obj/
+**/bin/
+**/obj/
+
+# Test artifacts
+TestResults/
+
+# Local DB/runtime files
+backend/*.db
+backend/*.db-shm
+backend/*.db-wal
+
+# Logs
+*.log
 
 # Deployment artifacts
 release/
