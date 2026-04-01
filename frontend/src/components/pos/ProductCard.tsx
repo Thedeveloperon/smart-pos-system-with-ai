@@ -1,7 +1,6 @@
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Minus, Package } from "lucide-react";
+import { Plus, Package } from "lucide-react";
 import { primeCartAddSound } from "@/lib/sound";
 import type { Product } from "./types";
 
@@ -11,7 +10,6 @@ interface ProductCardProps {
 }
 
 const ProductCard = ({ product, onAdd }: ProductCardProps) => {
-  const [qty, setQty] = useState(1);
   const isLowStock = product.stock > 0 && product.stock <= 5;
   const isOutOfStock = product.stock === 0;
 
@@ -23,7 +21,7 @@ const ProductCard = ({ product, onAdd }: ProductCardProps) => {
       onPointerDown={() => {
         void primeCartAddSound();
       }}
-      onClick={() => !isOutOfStock && onAdd(product, qty)}
+      onClick={() => !isOutOfStock && onAdd(product, 1)}
     >
       {/* Image */}
       <div className="aspect-[5/4] bg-muted relative overflow-hidden">
@@ -77,41 +75,21 @@ const ProductCard = ({ product, onAdd }: ProductCardProps) => {
           </span>
         </div>
 
-        {/* Qty + Add */}
-        <div
-          className="flex items-center gap-1 mt-0.5"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="flex items-center border border-border rounded-md overflow-hidden h-7">
-            <button
-              className="h-7 w-6 flex items-center justify-center hover:bg-muted transition-colors"
-              onClick={() => setQty((q) => Math.max(1, q - 1))}
-            >
-              <Minus className="h-3 w-3" />
-            </button>
-            <span className="w-6 text-center text-[11px] font-medium">{qty}</span>
-            <button
-              className="h-7 w-6 flex items-center justify-center hover:bg-muted transition-colors"
-              onClick={() => setQty((q) => Math.min(product.stock, q + 1))}
-            >
-              <Plus className="h-3 w-3" />
-            </button>
-          </div>
+        <div className="mt-1" onClick={(e) => e.stopPropagation()}>
           <Button
             size="sm"
             variant="pos-primary"
-            className="flex-1 h-7 text-[11px]"
+            className="h-10 w-full rounded-xl text-sm font-semibold shadow-md"
             disabled={isOutOfStock}
             onPointerDown={() => {
               void primeCartAddSound();
             }}
             onClick={() => {
-              onAdd(product, qty);
-              setQty(1);
+              onAdd(product, 1);
             }}
           >
-            <Plus className="h-3 w-3" />
-            Add
+            <Plus className="h-4 w-4" />
+            <span>Add</span>
           </Button>
         </div>
       </div>
