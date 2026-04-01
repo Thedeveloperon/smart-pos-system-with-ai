@@ -1,6 +1,13 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   PauseCircle,
   Clock,
   LogOut,
@@ -12,6 +19,7 @@ import {
   Upload,
   Settings2,
   PencilLine,
+  Menu,
 } from "lucide-react";
 
 interface HeaderBarProps {
@@ -53,7 +61,7 @@ const HeaderBar = ({
         <img src="/logo.png" alt="SmartPOS Lanka logo" className="h-10 w-auto object-contain" />
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="hidden xl:flex items-center gap-2">
         <Button
           variant="ghost"
           size="sm"
@@ -180,6 +188,98 @@ const HeaderBar = ({
         >
           <LogOut className="h-4 w-4" />
         </Button>
+      </div>
+
+      <div className="flex xl:hidden items-center gap-2">
+        <div className="h-6 w-px bg-pos-header-foreground/20 hidden sm:block" />
+
+        <div className="flex items-center gap-2 text-sm text-pos-header-foreground/80">
+          <User className="h-4 w-4" />
+          <span className="hidden lg:inline">{cashierName}</span>
+        </div>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="text-pos-header-foreground hover:bg-pos-header-foreground/10"
+              aria-label="Open menu"
+            >
+              <Menu className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuItem onSelect={() => onHeldBills()}>
+              <PauseCircle className="mr-2 h-4 w-4" />
+              Held
+              {heldBillsCount > 0 && <Badge className="ml-auto h-5 min-w-5 px-1 text-[10px]">{heldBillsCount}</Badge>}
+            </DropdownMenuItem>
+
+            {isAdmin && (
+              <DropdownMenuItem onSelect={() => onNewItem()}>
+                <PlusCircle className="mr-2 h-4 w-4" />
+                New Item
+              </DropdownMenuItem>
+            )}
+
+            {isAdmin && onManageProducts && (
+              <DropdownMenuItem onSelect={() => onManageProducts()}>
+                <PencilLine className="mr-2 h-4 w-4" />
+                Manage
+              </DropdownMenuItem>
+            )}
+
+            {isAdmin && onReports && (
+              <DropdownMenuItem onSelect={() => onReports()}>
+                <BarChart3 className="mr-2 h-4 w-4" />
+                Reports
+              </DropdownMenuItem>
+            )}
+
+            {isAdmin && (
+              <DropdownMenuItem onSelect={() => onTodaySales()}>
+                <Clock className="mr-2 h-4 w-4" />
+                Today
+              </DropdownMenuItem>
+            )}
+
+            {onAuditLog && (
+              <DropdownMenuItem onSelect={() => onAuditLog()}>
+                <FileText className="mr-2 h-4 w-4" />
+                Audit
+              </DropdownMenuItem>
+            )}
+
+            {hasActiveSession && onEndShift && (
+              <DropdownMenuItem onSelect={() => onEndShift()}>
+                <Lock className="mr-2 h-4 w-4" />
+                End Shift
+              </DropdownMenuItem>
+            )}
+
+            {isAdmin && (
+              <DropdownMenuItem onSelect={() => onImportSupplierBill()}>
+                <Upload className="mr-2 h-4 w-4" />
+                Import Bill
+              </DropdownMenuItem>
+            )}
+
+            {isAdmin && onShopSettings && (
+              <DropdownMenuItem onSelect={() => onShopSettings()}>
+                <Settings2 className="mr-2 h-4 w-4" />
+                Shop
+              </DropdownMenuItem>
+            )}
+
+            <DropdownMenuSeparator />
+
+            <DropdownMenuItem onSelect={() => onSignOut()}>
+              <LogOut className="mr-2 h-4 w-4" />
+              Sign Out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </header>
   );
