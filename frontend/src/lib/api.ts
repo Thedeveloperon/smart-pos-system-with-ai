@@ -24,11 +24,13 @@ export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BA
 
 export class ApiError extends Error {
   status: number;
+  code?: string;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -41,6 +43,57 @@ type BackendAuthSession = {
   device_code: string;
   expires_at: string;
 };
+
+type BackendLicenseErrorPayload = {
+  message?: string;
+  error?: {
+    code?: string;
+    message?: string;
+  };
+};
+
+type BackendLicenseStatus = {
+  state: "unprovisioned" | "active" | "grace" | "suspended" | "revoked";
+  shop_id?: string | null;
+  device_code: string;
+  subscription_status?: "trialing" | "active" | "past_due" | "canceled" | null;
+  plan?: string | null;
+  seat_limit?: number | null;
+  active_seats?: number | null;
+  valid_until?: string | null;
+  grace_until?: string | null;
+  license_token?: string | null;
+  blocked_actions?: string[];
+  server_time: string;
+};
+
+export type LicenseState = BackendLicenseStatus["state"];
+
+export type LicenseStatus = {
+  state: LicenseState;
+  shopId?: string | null;
+  deviceCode: string;
+  subscriptionStatus?: BackendLicenseStatus["subscription_status"];
+  plan?: string | null;
+  seatLimit?: number | null;
+  activeSeats?: number | null;
+  validUntil?: Date | null;
+  graceUntil?: Date | null;
+  licenseToken?: string | null;
+  blockedActions: string[];
+  serverTime: Date;
+};
+
+export type ActivateLicenseRequest = {
+  deviceCode?: string;
+  deviceName?: string;
+  actor?: string;
+  reason?: string;
+};
+
+const DEVICE_CODE_STORAGE_KEY = "smartpos-device-code";
+const LICENSE_TOKEN_STORAGE_KEY = "smartpos-license-token";
+const DEFAULT_DEVICE_NAME = "RetailFlow POS Web";
 
 type BackendProductSearchItem = {
   id: string;
@@ -518,6 +571,114 @@ type LowStockReportResponse = {
   }[];
 };
 
+type SupportTriageReportResponse = {
+  generated_at: string;
+  window_minutes: number;
+  devices: {
+    active_devices: number;
+    grace_devices: number;
+    suspended_devices: number;
+    revoked_devices: number;
+    devices_without_license: number;
+  };
+  shops: {
+    active_shops: number;
+    grace_shops: number;
+    suspended_shops: number;
+    revoked_shops: number;
+    shops_with_missing_license: number;
+  };
+  activity: {
+    activations_in_window: number;
+    deactivations_in_window: number;
+    heartbeats_in_window: number;
+  };
+  alerts: {
+    validation_failures_in_window: number;
+    webhook_failures_in_window: number;
+    top_validation_failures: {
+      reason: string;
+      count: number;
+    }[];
+    top_webhook_failures: {
+      reason: string;
+      count: number;
+    }[];
+    last_validation_alert_at?: string | null;
+    last_webhook_alert_at?: string | null;
+  };
+  recent_audit_events: {
+    timestamp: string;
+    action: string;
+    actor: string;
+    device_code?: string | null;
+    reason?: string | null;
+  }[];
+};
+
+export type AdminShopsLicensingSnapshotResponse = {
+  generated_at: string;
+  items: {
+    shop_id: string;
+    shop_code: string;
+    shop_name: string;
+    subscription_status: string;
+    plan: string;
+    seat_limit: number;
+    active_seats: number;
+    total_devices: number;
+    devices: {
+      provisioned_device_id: string;
+      device_code: string;
+      device_name: string;
+      device_status: string;
+      license_state: string;
+      valid_until?: string | null;
+      grace_until?: string | null;
+      last_heartbeat_at?: string | null;
+    }[];
+  }[];
+};
+
+export type AdminAuditLogsResponse = {
+  generated_at: string;
+  count: number;
+  items: {
+    id: string;
+    timestamp: string;
+    shop_id?: string | null;
+    device_id?: string | null;
+    action: string;
+    actor: string;
+    reason?: string | null;
+    metadata_json?: string | null;
+    is_manual_override: boolean;
+    immutable_hash?: string | null;
+    immutable_previous_hash?: string | null;
+  }[];
+};
+
+export type AdminDeviceActionResponse = {
+  shop_id: string;
+  device_code: string;
+  action: string;
+  status: string;
+  license_state: string;
+  valid_until?: string | null;
+  grace_until?: string | null;
+  processed_at: string;
+};
+
+export type AdminLicenseResyncResponse = {
+  shop_id: string;
+  shop_code: string;
+  subscription_status: string;
+  plan: string;
+  reissued_devices: number;
+  revoked_licenses: number;
+  processed_at: string;
+};
+
 type CreateSaleRequest = {
   sale_id?: string;
   items?: { product_id: string; quantity: number }[];
@@ -532,16 +693,70 @@ type HoldSaleRequest = {
   role: string;
 };
 
+function getStoredLicenseToken() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const token = localStorage.getItem(LICENSE_TOKEN_STORAGE_KEY)?.trim();
+  return token || null;
+}
+
+function setStoredLicenseToken(token?: string | null) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (!token || !token.trim()) {
+    localStorage.removeItem(LICENSE_TOKEN_STORAGE_KEY);
+    return;
+  }
+
+  localStorage.setItem(LICENSE_TOKEN_STORAGE_KEY, token.trim());
+}
+
+function createIdempotencyKey() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  return `idemp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 function getAuthDeviceCode() {
-  const storageKey = "smartpos-device-code";
-  const existing = localStorage.getItem(storageKey);
-  if (existing) {
+  if (typeof window === "undefined") {
+    return "server-device";
+  }
+
+  const existing = localStorage.getItem(DEVICE_CODE_STORAGE_KEY);
+  if (existing?.trim()) {
     return existing;
   }
 
-  const generated = crypto.randomUUID();
-  localStorage.setItem(storageKey, generated);
+  const generated =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  localStorage.setItem(DEVICE_CODE_STORAGE_KEY, generated);
   return generated;
+}
+
+function mapLicenseStatus(status: BackendLicenseStatus): LicenseStatus {
+  return {
+    state: status.state,
+    shopId: status.shop_id ?? null,
+    deviceCode: status.device_code || getAuthDeviceCode(),
+    subscriptionStatus: status.subscription_status ?? null,
+    plan: status.plan ?? null,
+    seatLimit: status.seat_limit ?? null,
+    activeSeats: status.active_seats ?? null,
+    validUntil: status.valid_until ? new Date(status.valid_until) : null,
+    graceUntil: status.grace_until ? new Date(status.grace_until) : null,
+    licenseToken: status.license_token ?? null,
+    blockedActions: Array.isArray(status.blocked_actions) ? status.blocked_actions : [],
+    serverTime: new Date(status.server_time),
+  };
 }
 
 async function parseResponse<T>(response: Response): Promise<T> {
@@ -550,16 +765,25 @@ async function parseResponse<T>(response: Response): Promise<T> {
 
   if (!response.ok) {
     let message = response.statusText || "Request failed";
+    let code: string | undefined;
     if (raw) {
       try {
-        const payload = JSON.parse(raw) as { message?: string };
-        message = payload.message || message;
+        const payload = JSON.parse(raw) as BackendLicenseErrorPayload;
+        if (payload.error?.message) {
+          message = payload.error.message;
+        } else if (payload.message) {
+          message = payload.message;
+        }
+
+        if (payload.error?.code) {
+          code = payload.error.code;
+        }
       } catch {
         message = raw;
       }
     }
 
-    throw new ApiError(message, response.status);
+    throw new ApiError(message, response.status, code);
   }
 
   if (!raw) {
@@ -575,12 +799,23 @@ async function parseResponse<T>(response: Response): Promise<T> {
 
 async function request<T>(path: string, init: RequestInit = {}) {
   const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
+  const deviceCode = getAuthDeviceCode();
+  const licenseToken = getStoredLicenseToken();
+  const method = (init.method || "GET").toUpperCase();
+  const isMutation = method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE";
+  const existingHeaders = new Headers(init.headers || {});
+  if (isMutation && !existingHeaders.has("Idempotency-Key")) {
+    existingHeaders.set("Idempotency-Key", createIdempotencyKey());
+  }
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
     credentials: "include",
     ...init,
     headers: {
       ...(init.body && !isFormData ? { "Content-Type": "application/json" } : {}),
-      ...(init.headers || {}),
+      "X-Device-Code": deviceCode,
+      ...(licenseToken ? { "X-License-Token": licenseToken } : {}),
+      ...Object.fromEntries(existingHeaders.entries()),
     },
   });
 
@@ -588,11 +823,19 @@ async function request<T>(path: string, init: RequestInit = {}) {
 }
 
 function mapBackendRole(role: string): "admin" | "manager" | "cashier" {
-  if (role.toLowerCase() === "owner") {
+  const normalizedRole = role.toLowerCase();
+
+  if (
+    normalizedRole === "owner" ||
+    normalizedRole === "super_admin" ||
+    normalizedRole === "support" ||
+    normalizedRole === "billing_admin" ||
+    normalizedRole === "security_admin"
+  ) {
     return "admin";
   }
 
-  if (role.toLowerCase() === "manager") {
+  if (normalizedRole === "manager") {
     return "manager";
   }
 
@@ -838,12 +1081,74 @@ export async function bootstrapSession() {
   return request<BackendAuthSession>("/api/auth/me");
 }
 
-export async function login(username: string, password: string) {
+export function getDeviceCode() {
+  return getAuthDeviceCode();
+}
+
+export async function fetchLicenseStatus() {
+  try {
+    const response = await request<BackendLicenseStatus>("/api/license/status");
+    const status = mapLicenseStatus(response);
+    setStoredLicenseToken(status.licenseToken);
+    return status;
+  } catch (error) {
+    if (
+      error instanceof ApiError &&
+      (error.code === "INVALID_LICENSE_TOKEN" || error.code === "DEVICE_MISMATCH")
+    ) {
+      setStoredLicenseToken(null);
+
+      const retryResponse = await request<BackendLicenseStatus>("/api/license/status");
+      const retryStatus = mapLicenseStatus(retryResponse);
+      setStoredLicenseToken(retryStatus.licenseToken);
+      return retryStatus;
+    }
+
+    throw error;
+  }
+}
+
+export async function activateLicense(requestBody: ActivateLicenseRequest = {}) {
+  const payload = {
+    device_code: requestBody.deviceCode || getAuthDeviceCode(),
+    device_name: requestBody.deviceName || DEFAULT_DEVICE_NAME,
+    actor: requestBody.actor || "pos-web-ui",
+    reason: requestBody.reason || null,
+  };
+
+  const response = await request<BackendLicenseStatus>("/api/provision/activate", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
+  const status = mapLicenseStatus(response);
+  setStoredLicenseToken(status.licenseToken);
+  return status;
+}
+
+export async function heartbeatLicense(deviceCode?: string) {
+  const payload = {
+    device_code: deviceCode || getAuthDeviceCode(),
+    license_token: getStoredLicenseToken(),
+  };
+
+  const response = await request<BackendLicenseStatus>("/api/license/heartbeat", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
+  const status = mapLicenseStatus(response);
+  setStoredLicenseToken(status.licenseToken);
+  return status;
+}
+
+export async function login(username: string, password: string, mfaCode?: string) {
   const payload = {
     username,
     password,
     device_code: getAuthDeviceCode(),
-    device_name: "RetailFlow POS Web",
+    device_name: DEFAULT_DEVICE_NAME,
+    mfa_code: mfaCode?.trim() || null,
   };
 
   return request<BackendAuthSession>("/api/auth/login", {
@@ -1187,6 +1492,94 @@ export async function fetchTopItemsReport(
 
 export async function fetchLowStockReport(take = 20, threshold = 5) {
   return request<LowStockReportResponse>(`/api/reports/low-stock?take=${take}&threshold=${threshold}`);
+}
+
+export async function fetchSupportTriageReport(windowMinutes = 30) {
+  return request<SupportTriageReportResponse>(`/api/reports/support-triage?window_minutes=${windowMinutes}`);
+}
+
+export async function fetchAdminLicensingShops(search?: string) {
+  const query = search?.trim() ? `?search=${encodeURIComponent(search.trim())}` : "";
+  return request<AdminShopsLicensingSnapshotResponse>(`/api/admin/licensing/shops${query}`);
+}
+
+export async function fetchAdminLicenseAuditLogs({
+  search,
+  action,
+  actor,
+  take = 50,
+}: {
+  search?: string;
+  action?: string;
+  actor?: string;
+  take?: number;
+}) {
+  const params = new URLSearchParams();
+  if (search?.trim()) {
+    params.set("search", search.trim());
+  }
+
+  if (action?.trim()) {
+    params.set("action", action.trim());
+  }
+
+  if (actor?.trim()) {
+    params.set("actor", actor.trim());
+  }
+
+  params.set("take", String(Math.max(1, Math.min(200, take))));
+  const query = params.toString();
+  return request<AdminAuditLogsResponse>(`/api/admin/licensing/audit-logs${query ? `?${query}` : ""}`);
+}
+
+export async function adminRevokeDevice(deviceCode: string, reason: string, actor = "support-ui") {
+  return request<AdminDeviceActionResponse>(`/api/admin/licensing/devices/${encodeURIComponent(deviceCode)}/revoke`, {
+    method: "POST",
+    body: JSON.stringify({
+      actor,
+      reason,
+    }),
+  });
+}
+
+export async function adminReactivateDevice(deviceCode: string, reason: string, actor = "support-ui") {
+  return request<AdminDeviceActionResponse>(`/api/admin/licensing/devices/${encodeURIComponent(deviceCode)}/reactivate`, {
+    method: "POST",
+    body: JSON.stringify({
+      actor,
+      reason,
+    }),
+  });
+}
+
+export async function adminExtendDeviceGrace(
+  deviceCode: string,
+  extendDays: number,
+  reason: string,
+  actor = "support-ui"
+) {
+  return request<AdminDeviceActionResponse>(
+    `/api/admin/licensing/devices/${encodeURIComponent(deviceCode)}/extend-grace`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        actor,
+        reason,
+        extend_days: Math.max(1, Math.min(30, Math.round(extendDays))),
+      }),
+    }
+  );
+}
+
+export async function adminForceLicenseResync(shopCode: string, reason: string, actor = "support-ui") {
+  return request<AdminLicenseResyncResponse>("/api/admin/licensing/resync", {
+    method: "POST",
+    body: JSON.stringify({
+      shop_code: shopCode,
+      actor,
+      reason,
+    }),
+  });
 }
 
 export async function createPurchaseOcrDraft(file: File, supplierHint?: string) {

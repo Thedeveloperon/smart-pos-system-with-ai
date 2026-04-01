@@ -70,62 +70,157 @@ public static class DbSeeder
             });
         }
 
-        if (!dbContext.Roles.Any())
+        var requiredRoles = new[]
         {
-            var roles = new[]
+            new AppRole { Code = SmartPosRoles.Owner, Name = "Owner" },
+            new AppRole { Code = SmartPosRoles.Manager, Name = "Manager" },
+            new AppRole { Code = SmartPosRoles.Cashier, Name = "Cashier" },
+            new AppRole { Code = SmartPosRoles.Support, Name = "Support" },
+            new AppRole { Code = SmartPosRoles.BillingAdmin, Name = "Billing Admin" },
+            new AppRole { Code = SmartPosRoles.SecurityAdmin, Name = "Security Admin" }
+        };
+
+        var existingRolesByCode = await dbContext.Roles
+            .ToDictionaryAsync(x => x.Code.ToLowerInvariant(), cancellationToken);
+        var rolesAdded = false;
+        foreach (var requiredRole in requiredRoles)
+        {
+            var normalizedCode = requiredRole.Code.ToLowerInvariant();
+            if (existingRolesByCode.ContainsKey(normalizedCode))
             {
-                new AppRole { Code = SmartPosRoles.Owner, Name = "Owner" },
-                new AppRole { Code = SmartPosRoles.Manager, Name = "Manager" },
-                new AppRole { Code = SmartPosRoles.Cashier, Name = "Cashier" }
-            };
-            dbContext.Roles.AddRange(roles);
+                continue;
+            }
+
+            dbContext.Roles.Add(requiredRole);
+            existingRolesByCode[normalizedCode] = requiredRole;
+            rolesAdded = true;
+        }
+
+        if (rolesAdded)
+        {
             await dbContext.SaveChangesAsync(cancellationToken);
         }
 
-        if (!dbContext.Users.Any())
-        {
-            var roleByCode = await dbContext.Roles
-                .ToDictionaryAsync(x => x.Code.ToLowerInvariant(), cancellationToken);
+        var roleByCode = await dbContext.Roles
+            .ToDictionaryAsync(x => x.Code.ToLowerInvariant(), cancellationToken);
 
-            var owner = new AppUser
-            {
-                Username = "owner",
-                FullName = "Store Owner",
-                PasswordHash = string.Empty,
-                IsActive = true
-            };
-            owner.PasswordHash = PasswordHashing.HashPassword(owner, "owner123");
-
-            var manager = new AppUser
-            {
-                Username = "manager",
-                FullName = "Store Manager",
-                PasswordHash = string.Empty,
-                IsActive = true
-            };
-            manager.PasswordHash = PasswordHashing.HashPassword(manager, "manager123");
-
-            var cashier = new AppUser
-            {
-                Username = "cashier",
-                FullName = "Store Cashier",
-                PasswordHash = string.Empty,
-                IsActive = true
-            };
-            cashier.PasswordHash = PasswordHashing.HashPassword(cashier, "cashier123");
-
-            dbContext.Users.AddRange(owner, manager, cashier);
-            await dbContext.SaveChangesAsync(cancellationToken);
-
-            var userRoles = new[]
-            {
-                new UserRole { UserId = owner.Id, RoleId = roleByCode[SmartPosRoles.Owner].Id, User = null!, Role = null! },
-                new UserRole { UserId = manager.Id, RoleId = roleByCode[SmartPosRoles.Manager].Id, User = null!, Role = null! },
-                new UserRole { UserId = cashier.Id, RoleId = roleByCode[SmartPosRoles.Cashier].Id, User = null!, Role = null! }
-            };
-            dbContext.UserRoles.AddRange(userRoles);
-        }
+        await EnsureSeedUserAsync(
+            dbContext,
+            roleByCode,
+            username: "owner",
+            fullName: "Store Owner",
+            password: "owner123",
+            roleCode: SmartPosRoles.Owner,
+            mfaSecret: null,
+            cancellationToken);
+        await EnsureSeedUserAsync(
+            dbContext,
+            roleByCode,
+            username: "manager",
+            fullName: "Store Manager",
+            password: "manager123",
+            roleCode: SmartPosRoles.Manager,
+            mfaSecret: null,
+            cancellationToken);
+        await EnsureSeedUserAsync(
+            dbContext,
+            roleByCode,
+            username: "cashier",
+            fullName: "Store Cashier",
+            password: "cashier123",
+            roleCode: SmartPosRoles.Cashier,
+            mfaSecret: null,
+            cancellationToken);
+        await EnsureSeedUserAsync(
+            dbContext,
+            roleByCode,
+            username: "support_admin",
+            fullName: "Support Administrator",
+            password: "support123",
+            roleCode: SmartPosRoles.Support,
+            mfaSecret: "support-admin-mfa-secret-2026",
+            cancellationToken);
+        await EnsureSeedUserAsync(
+            dbContext,
+            roleByCode,
+            username: "billing_admin",
+            fullName: "Billing Administrator",
+            password: "billing123",
+            roleCode: SmartPosRoles.BillingAdmin,
+            mfaSecret: "billing-admin-mfa-secret-2026",
+            cancellationToken);
+        await EnsureSeedUserAsync(
+            dbContext,
+            roleByCode,
+            username: "security_admin",
+            fullName: "Security Administrator",
+            password: "security123",
+            roleCode: SmartPosRoles.SecurityAdmin,
+            mfaSecret: "security-admin-mfa-secret-2026",
+            cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task EnsureSeedUserAsync(
+        SmartPosDbContext dbContext,
+        IReadOnlyDictionary<string, AppRole> roleByCode,
+        string username,
+        string fullName,
+        string password,
+        string roleCode,
+        string? mfaSecret,
+        CancellationToken cancellationToken)
+    {
+        var normalizedUsername = username.Trim().ToLowerInvariant();
+        var user = await dbContext.Users
+            .FirstOrDefaultAsync(x => x.Username.ToLower() == normalizedUsername, cancellationToken);
+
+        if (user is null)
+        {
+            user = new AppUser
+            {
+                Username = username,
+                FullName = fullName,
+                PasswordHash = string.Empty,
+                IsActive = true,
+                IsMfaEnabled = !string.IsNullOrWhiteSpace(mfaSecret),
+                MfaSecret = mfaSecret,
+                MfaConfiguredAtUtc = string.IsNullOrWhiteSpace(mfaSecret) ? null : DateTimeOffset.UtcNow
+            };
+            user.PasswordHash = PasswordHashing.HashPassword(user, password);
+            dbContext.Users.Add(user);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        else
+        {
+            user.IsMfaEnabled = !string.IsNullOrWhiteSpace(mfaSecret);
+            user.MfaSecret = mfaSecret;
+            user.MfaConfiguredAtUtc = user.IsMfaEnabled
+                ? (user.MfaConfiguredAtUtc ?? DateTimeOffset.UtcNow)
+                : null;
+        }
+
+        var normalizedRoleCode = roleCode.ToLowerInvariant();
+        if (!roleByCode.TryGetValue(normalizedRoleCode, out var role))
+        {
+            throw new InvalidOperationException($"Seed role '{roleCode}' does not exist.");
+        }
+
+        var hasRole = await dbContext.UserRoles
+            .AnyAsync(x => x.UserId == user.Id && x.RoleId == role.Id, cancellationToken);
+
+        if (hasRole)
+        {
+            return;
+        }
+
+        dbContext.UserRoles.Add(new UserRole
+        {
+            UserId = user.Id,
+            RoleId = role.Id,
+            User = null!,
+            Role = null!
+        });
     }
 }

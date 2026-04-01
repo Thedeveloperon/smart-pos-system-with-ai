@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import {
+  Activity,
   AlertTriangle,
   CalendarDays,
   DollarSign,
+  LifeBuoy,
   Layers3,
   Package,
   RefreshCw,
@@ -17,9 +19,16 @@ import {
   Wallet,
 } from "lucide-react";
 import {
+  adminExtendDeviceGrace,
+  adminForceLicenseResync,
+  adminReactivateDevice,
+  adminRevokeDevice,
+  fetchAdminLicenseAuditLogs,
+  fetchAdminLicensingShops,
   fetchDailySalesReport,
   fetchLowStockReport,
   fetchPaymentBreakdownReport,
+  fetchSupportTriageReport,
   fetchTopItemsReport,
   fetchTransactionsReport,
 } from "@/lib/api";
@@ -36,12 +45,16 @@ type ManagerReportsDrawerProps = {
   onClose: () => void;
   refreshToken?: number;
   onRefundSale?: (saleId: string) => void;
+  isSuperAdmin?: boolean;
 };
 
 type TransactionsItem = Awaited<ReturnType<typeof fetchTransactionsReport>>["items"][number];
 type PaymentBreakdownItem = Awaited<ReturnType<typeof fetchPaymentBreakdownReport>>["items"][number];
 type TopItem = Awaited<ReturnType<typeof fetchTopItemsReport>>["items"][number];
 type LowStockItem = Awaited<ReturnType<typeof fetchLowStockReport>>["items"][number];
+type SupportTriageData = Awaited<ReturnType<typeof fetchSupportTriageReport>>;
+type AdminLicensingShopData = Awaited<ReturnType<typeof fetchAdminLicensingShops>>;
+type AdminLicensingAuditData = Awaited<ReturnType<typeof fetchAdminLicenseAuditLogs>>;
 
 type ReportData = {
   summary: Awaited<ReturnType<typeof fetchDailySalesReport>> | null;
@@ -49,6 +62,9 @@ type ReportData = {
   payments: PaymentBreakdownItem[];
   topItems: TopItem[];
   lowStock: LowStockItem[];
+  support: SupportTriageData | null;
+  adminShops: AdminLicensingShopData | null;
+  adminAudit: AdminLicensingAuditData | null;
 };
 
 const money = (value: number) => `Rs. ${value.toLocaleString()}`;
@@ -175,9 +191,11 @@ const ManagerReportsDrawer = ({
   onClose,
   refreshToken = 0,
   onRefundSale,
+  isSuperAdmin = false,
 }: ManagerReportsDrawerProps) => {
   const [fromDate, setFromDate] = useState(formatDateInput(defaultFromDate));
   const [toDate, setToDate] = useState(formatDateInput(today));
+  const [auditSearch, setAuditSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [report, setReport] = useState<ReportData>({
     summary: null,
@@ -185,6 +203,9 @@ const ManagerReportsDrawer = ({
     payments: [],
     topItems: [],
     lowStock: [],
+    support: null,
+    adminShops: null,
+    adminAudit: null,
   });
 
   const loadReports = useCallback(async () => {
@@ -198,12 +219,27 @@ const ManagerReportsDrawer = ({
         fetchLowStockReport(12, 5),
       ]);
 
+      let support: SupportTriageData | null = null;
+      let adminShops: AdminLicensingShopData | null = null;
+      let adminAudit: AdminLicensingAuditData | null = null;
+
+      if (isSuperAdmin) {
+        [support, adminShops, adminAudit] = await Promise.all([
+          fetchSupportTriageReport(30),
+          fetchAdminLicensingShops(),
+          fetchAdminLicenseAuditLogs({ take: 50 }),
+        ]);
+      }
+
       setReport({
         summary,
         transactions: transactions.items,
         payments: payments.items,
         topItems: topItems.items,
         lowStock: lowStock.items,
+        support,
+        adminShops,
+        adminAudit,
       });
     } catch (error) {
       console.error(error);
@@ -211,7 +247,111 @@ const ManagerReportsDrawer = ({
     } finally {
       setLoading(false);
     }
-  }, [fromDate, toDate]);
+  }, [fromDate, isSuperAdmin, toDate]);
+
+  const handleSearchAuditLogs = useCallback(async () => {
+    try {
+      const adminAudit = await fetchAdminLicenseAuditLogs({
+        search: auditSearch,
+        take: 100,
+      });
+
+      setReport((current) => ({
+        ...current,
+        adminAudit,
+      }));
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Failed to search audit logs.");
+    }
+  }, [auditSearch]);
+
+  const handleRevokeDevice = useCallback(
+    async (deviceCode: string) => {
+      const reason = window.prompt("Reason for revoking this device?");
+      if (!reason?.trim()) {
+        return;
+      }
+
+      try {
+        await adminRevokeDevice(deviceCode, reason.trim());
+        toast.success(`Revoked ${deviceCode}`);
+        await loadReports();
+      } catch (error) {
+        console.error(error);
+        toast.error(error instanceof Error ? error.message : "Failed to revoke device.");
+      }
+    },
+    [loadReports]
+  );
+
+  const handleReactivateDevice = useCallback(
+    async (deviceCode: string) => {
+      const reason = window.prompt("Reason for reactivating this device?");
+      if (!reason?.trim()) {
+        return;
+      }
+
+      try {
+        await adminReactivateDevice(deviceCode, reason.trim());
+        toast.success(`Reactivated ${deviceCode}`);
+        await loadReports();
+      } catch (error) {
+        console.error(error);
+        toast.error(error instanceof Error ? error.message : "Failed to reactivate device.");
+      }
+    },
+    [loadReports]
+  );
+
+  const handleExtendGrace = useCallback(
+    async (deviceCode: string) => {
+      const reason = window.prompt("Reason for extending grace?");
+      if (!reason?.trim()) {
+        return;
+      }
+
+      const daysInput = window.prompt("Extend by how many days? (1-30)", "3");
+      if (!daysInput?.trim()) {
+        return;
+      }
+
+      const days = Number(daysInput);
+      if (!Number.isFinite(days) || days < 1 || days > 30) {
+        toast.error("Grace extension days must be between 1 and 30.");
+        return;
+      }
+
+      try {
+        await adminExtendDeviceGrace(deviceCode, days, reason.trim());
+        toast.success(`Extended grace for ${deviceCode}`);
+        await loadReports();
+      } catch (error) {
+        console.error(error);
+        toast.error(error instanceof Error ? error.message : "Failed to extend grace.");
+      }
+    },
+    [loadReports]
+  );
+
+  const handleResyncShop = useCallback(
+    async (shopCode: string) => {
+      const reason = window.prompt(`Reason for forcing license resync on ${shopCode}?`);
+      if (!reason?.trim()) {
+        return;
+      }
+
+      try {
+        await adminForceLicenseResync(shopCode, reason.trim());
+        toast.success(`Forced resync for ${shopCode}`);
+        await loadReports();
+      } catch (error) {
+        console.error(error);
+        toast.error(error instanceof Error ? error.message : "Failed to force license resync.");
+      }
+    },
+    [loadReports]
+  );
 
   useEffect(() => {
     if (!open) {
@@ -546,11 +686,12 @@ const ManagerReportsDrawer = ({
             </div>
 
             <Tabs defaultValue="overview" className="space-y-4">
-              <TabsList className="grid w-full grid-cols-4">
+              <TabsList className={`grid w-full ${isSuperAdmin ? "grid-cols-5" : "grid-cols-4"}`}>
                 <TabsTrigger value="overview">Overview</TabsTrigger>
                 <TabsTrigger value="sales">Sales</TabsTrigger>
                 <TabsTrigger value="items">Items</TabsTrigger>
                 <TabsTrigger value="stock">Stock</TabsTrigger>
+                {isSuperAdmin && <TabsTrigger value="support">Support</TabsTrigger>}
               </TabsList>
 
               <TabsContent value="overview" className="space-y-4">
@@ -841,6 +982,288 @@ const ManagerReportsDrawer = ({
                   </Table>
                 </div>
               </TabsContent>
+
+              {isSuperAdmin && (
+                <TabsContent value="support" className="space-y-4">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <StatCard
+                    icon={<LifeBuoy className="h-5 w-5" />}
+                    label="Active Devices"
+                    value={String(report.support?.devices.active_devices ?? 0)}
+                    hint="Currently healthy devices"
+                  />
+                  <StatCard
+                    icon={<AlertTriangle className="h-5 w-5" />}
+                    label="Grace Devices"
+                    value={String(report.support?.devices.grace_devices ?? 0)}
+                    hint="Need billing attention soon"
+                  />
+                  <StatCard
+                    icon={<ShieldCheck className="h-5 w-5" />}
+                    label="Suspended Devices"
+                    value={String(report.support?.devices.suspended_devices ?? 0)}
+                    hint="Checkout/refund blocked"
+                  />
+                  <StatCard
+                    icon={<Activity className="h-5 w-5" />}
+                    label="Validation Failures"
+                    value={String(report.support?.alerts.validation_failures_in_window ?? 0)}
+                    hint={`Last ${report.support?.window_minutes ?? 30} minutes`}
+                  />
+                </div>
+
+                <div className="grid gap-4 xl:grid-cols-2">
+                  <div className="rounded-2xl border border-border bg-card shadow-sm">
+                    <div className="border-b border-border px-4 py-3">
+                      <p className="text-sm font-semibold">License Activity</p>
+                    </div>
+                    <div className="space-y-3 p-4 text-sm">
+                      <div className="flex items-center justify-between rounded-xl bg-muted/40 px-4 py-3">
+                        <span>Activations</span>
+                        <span className="font-semibold">{report.support?.activity.activations_in_window ?? 0}</span>
+                      </div>
+                      <div className="flex items-center justify-between rounded-xl bg-muted/40 px-4 py-3">
+                        <span>Deactivations</span>
+                        <span className="font-semibold">{report.support?.activity.deactivations_in_window ?? 0}</span>
+                      </div>
+                      <div className="flex items-center justify-between rounded-xl bg-muted/40 px-4 py-3">
+                        <span>Heartbeats</span>
+                        <span className="font-semibold">{report.support?.activity.heartbeats_in_window ?? 0}</span>
+                      </div>
+                      <div className="flex items-center justify-between rounded-xl bg-muted/40 px-4 py-3">
+                        <span>Webhook failures</span>
+                        <span className="font-semibold">{report.support?.alerts.webhook_failures_in_window ?? 0}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-border bg-card shadow-sm">
+                    <div className="border-b border-border px-4 py-3">
+                      <p className="text-sm font-semibold">Top Alert Causes</p>
+                    </div>
+                    <div className="space-y-3 p-4">
+                      {(report.support?.alerts.top_validation_failures.length || 0) === 0 &&
+                      (report.support?.alerts.top_webhook_failures.length || 0) === 0 ? (
+                        <p className="text-sm text-muted-foreground">No alert spikes in the current window.</p>
+                      ) : (
+                        <>
+                          {(report.support?.alerts.top_validation_failures ?? []).map((item) => (
+                            <div key={`validation-${item.reason}`} className="rounded-xl border border-border bg-background px-4 py-3">
+                              <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Validation</p>
+                              <div className="mt-1 flex items-center justify-between gap-3">
+                                <p className="truncate text-sm font-medium">{item.reason}</p>
+                                <Badge variant="secondary">{item.count}</Badge>
+                              </div>
+                            </div>
+                          ))}
+
+                          {(report.support?.alerts.top_webhook_failures ?? []).map((item) => (
+                            <div key={`webhook-${item.reason}`} className="rounded-xl border border-border bg-background px-4 py-3">
+                              <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Webhook</p>
+                              <div className="mt-1 flex items-center justify-between gap-3">
+                                <p className="truncate text-sm font-medium">{item.reason}</p>
+                                <Badge variant="secondary">{item.count}</Badge>
+                              </div>
+                            </div>
+                          ))}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-border bg-card shadow-sm">
+                  <div className="border-b border-border px-4 py-3">
+                    <p className="text-sm font-semibold">Recent Licensing Audit Events</p>
+                  </div>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Time</TableHead>
+                        <TableHead>Action</TableHead>
+                        <TableHead>Actor</TableHead>
+                        <TableHead>Device</TableHead>
+                        <TableHead>Reason</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(report.support?.recent_audit_events.length ?? 0) === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
+                            No recent audit events.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        (report.support?.recent_audit_events ?? []).map((event, index) => (
+                          <TableRow key={`${event.timestamp}-${event.action}-${index}`}>
+                            <TableCell className="text-muted-foreground">
+                              {new Date(event.timestamp).toLocaleString()}
+                            </TableCell>
+                            <TableCell className="font-medium">{event.action}</TableCell>
+                            <TableCell>{event.actor}</TableCell>
+                            <TableCell>{event.device_code || "-"}</TableCell>
+                            <TableCell className="text-muted-foreground">{event.reason || "-"}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                <div className="rounded-2xl border border-border bg-card shadow-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+                    <p className="text-sm font-semibold">Super Admin Device Controls</p>
+                    <div className="flex flex-wrap gap-2">
+                      {(report.adminShops?.items ?? []).slice(0, 4).map((shop) => (
+                        <Button
+                          key={shop.shop_id}
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            void handleResyncShop(shop.shop_code);
+                          }}
+                        >
+                          Resync {shop.shop_code}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Shop</TableHead>
+                        <TableHead>Device</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>License</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(report.adminShops?.items ?? []).flatMap((shop) =>
+                        shop.devices.map((device) => ({
+                          shopCode: shop.shop_code,
+                          device,
+                        }))
+                      ).length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
+                            No admin device seats found.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        (report.adminShops?.items ?? [])
+                          .flatMap((shop) =>
+                            shop.devices.map((device) => ({
+                              shopCode: shop.shop_code,
+                              device,
+                            }))
+                          )
+                          .slice(0, 24)
+                          .map((row) => (
+                            <TableRow key={`${row.shopCode}-${row.device.provisioned_device_id}`}>
+                              <TableCell className="font-medium">{row.shopCode}</TableCell>
+                              <TableCell>
+                                <div className="space-y-1">
+                                  <p className="font-medium">{row.device.device_name}</p>
+                                  <p className="text-xs text-muted-foreground">{row.device.device_code}</p>
+                                </div>
+                              </TableCell>
+                              <TableCell className="capitalize">{row.device.device_status}</TableCell>
+                              <TableCell className="capitalize">{row.device.license_state}</TableCell>
+                              <TableCell className="text-right">
+                                <div className="flex justify-end gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      void handleRevokeDevice(row.device.device_code);
+                                    }}
+                                  >
+                                    Revoke
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      void handleReactivateDevice(row.device.device_code);
+                                    }}
+                                  >
+                                    Reactivate
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      void handleExtendGrace(row.device.device_code);
+                                    }}
+                                  >
+                                    Extend Grace
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                <div className="rounded-2xl border border-border bg-card shadow-sm">
+                  <div className="flex flex-col gap-3 border-b border-border px-4 py-3 md:flex-row md:items-center md:justify-between">
+                    <p className="text-sm font-semibold">Searchable Audit Logs</p>
+                    <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
+                      <Input
+                        value={auditSearch}
+                        onChange={(event) => setAuditSearch(event.target.value)}
+                        placeholder="Search action, actor, reason, metadata"
+                        className="md:w-80"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          void handleSearchAuditLogs();
+                        }}
+                      >
+                        Search
+                      </Button>
+                    </div>
+                  </div>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Time</TableHead>
+                        <TableHead>Action</TableHead>
+                        <TableHead>Actor</TableHead>
+                        <TableHead>Manual</TableHead>
+                        <TableHead>Reason</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(report.adminAudit?.items.length ?? 0) === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
+                            No audit logs matched this search.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        (report.adminAudit?.items ?? []).map((event) => (
+                          <TableRow key={event.id}>
+                            <TableCell className="text-muted-foreground">
+                              {new Date(event.timestamp).toLocaleString()}
+                            </TableCell>
+                            <TableCell className="font-medium">{event.action}</TableCell>
+                            <TableCell>{event.actor}</TableCell>
+                            <TableCell>{event.is_manual_override ? "Yes" : "No"}</TableCell>
+                            <TableCell className="text-muted-foreground">{event.reason || "-"}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+                </TabsContent>
+              )}
             </Tabs>
           </div>
         </ScrollArea>

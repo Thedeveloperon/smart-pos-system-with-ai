@@ -1,0 +1,202 @@
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  ApiError,
+  activateLicense as apiActivateLicense,
+  fetchLicenseStatus,
+  getDeviceCode,
+  heartbeatLicense,
+  type ActivateLicenseRequest,
+  type LicenseStatus,
+} from "@/lib/api";
+import { loadCachedLicenseStatus, saveCachedLicenseStatus } from "@/components/licensing/licenseCache";
+
+interface LicensingContextValue {
+  status: LicenseStatus | null;
+  isLoading: boolean;
+  isRefreshing: boolean;
+  error: string | null;
+  isLicensed: boolean;
+  isBlocked: boolean;
+  refresh: () => Promise<LicenseStatus | null>;
+  activate: (requestBody?: ActivateLicenseRequest) => Promise<string | null>;
+  heartbeat: () => Promise<LicenseStatus | null>;
+}
+
+const LicensingContext = createContext<LicensingContextValue | null>(null);
+
+const isLicensedState = (status: LicenseStatus | null) => status?.state === "active" || status?.state === "grace";
+const isBlockedState = (status: LicenseStatus | null) => status?.state === "suspended" || status?.state === "revoked";
+
+function toErrorMessage(error: unknown) {
+  if (error instanceof ApiError) {
+    return error.message;
+  }
+
+  return "Unable to validate device license.";
+}
+
+export const useLicensing = () => {
+  const context = useContext(LicensingContext);
+  if (!context) {
+    throw new Error("useLicensing must be used within LicensingProvider");
+  }
+
+  return context;
+};
+
+export const LicensingProvider = ({ children }: { children: ReactNode }) => {
+  const [status, setStatus] = useState<LicenseStatus | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const applyOnlineStatus = useCallback((next: LicenseStatus) => {
+    setStatus(next);
+    setError(null);
+    void saveCachedLicenseStatus(next);
+  }, []);
+
+  const tryLoadCachedStatus = useCallback(async () => {
+    const cached = await loadCachedLicenseStatus(getDeviceCode());
+    if (!cached) {
+      return null;
+    }
+
+    setStatus(cached.status);
+    if (cached.warning) {
+      setError(cached.warning);
+    }
+    return cached.status;
+  }, []);
+
+  const refresh = useCallback(async () => {
+    setIsRefreshing(true);
+    setError(null);
+
+    try {
+      const next = await fetchLicenseStatus();
+      applyOnlineStatus(next);
+      return next;
+    } catch (refreshError) {
+      if (!(refreshError instanceof ApiError)) {
+        const cached = await tryLoadCachedStatus();
+        if (cached) {
+          return cached;
+        }
+      }
+
+      setError(toErrorMessage(refreshError));
+      return null;
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [applyOnlineStatus, tryLoadCachedStatus]);
+
+  const activate = useCallback(async (requestBody: ActivateLicenseRequest = {}) => {
+    setError(null);
+
+    try {
+      const next = await apiActivateLicense(requestBody);
+      applyOnlineStatus(next);
+      return null;
+    } catch (activateError) {
+      const message = toErrorMessage(activateError);
+      setError(message);
+      return message;
+    }
+  }, [applyOnlineStatus]);
+
+  const heartbeat = useCallback(async () => {
+    try {
+      const next = await heartbeatLicense(status?.deviceCode);
+      applyOnlineStatus(next);
+      return next;
+    } catch (heartbeatError) {
+      if (heartbeatError instanceof ApiError && (heartbeatError.status === 403 || heartbeatError.status === 404)) {
+        return refresh();
+      }
+
+      if (!(heartbeatError instanceof ApiError)) {
+        return tryLoadCachedStatus();
+      }
+
+      return null;
+    }
+  }, [applyOnlineStatus, refresh, status?.deviceCode, tryLoadCachedStatus]);
+
+  useEffect(() => {
+    let alive = true;
+
+    const hydrate = async () => {
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const next = await fetchLicenseStatus();
+        if (!alive) {
+          return;
+        }
+
+        applyOnlineStatus(next);
+      } catch (hydrateError) {
+        if (!alive) {
+          return;
+        }
+
+        if (!(hydrateError instanceof ApiError)) {
+          const cached = await tryLoadCachedStatus();
+          if (cached) {
+            return;
+          }
+        }
+
+        setError(toErrorMessage(hydrateError));
+      } finally {
+        if (alive) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    void hydrate();
+
+    return () => {
+      alive = false;
+    };
+  }, [applyOnlineStatus, tryLoadCachedStatus]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !isLicensedState(status)) {
+      return;
+    }
+
+    const ping = () => {
+      void heartbeat();
+    };
+
+    const timerId = window.setInterval(ping, 5 * 60 * 1000);
+    window.addEventListener("online", ping);
+
+    return () => {
+      window.clearInterval(timerId);
+      window.removeEventListener("online", ping);
+    };
+  }, [heartbeat, status]);
+
+  const value = useMemo<LicensingContextValue>(
+    () => ({
+      status,
+      isLoading,
+      isRefreshing,
+      error,
+      isLicensed: isLicensedState(status),
+      isBlocked: isBlockedState(status),
+      refresh,
+      activate,
+      heartbeat,
+    }),
+    [activate, error, heartbeat, isLoading, isRefreshing, refresh, status]
+  );
+
+  return <LicensingContext.Provider value={value}>{children}</LicensingContext.Provider>;
+};

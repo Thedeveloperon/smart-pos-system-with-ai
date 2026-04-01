@@ -244,6 +244,9 @@ public sealed class AppUser
     public required string Username { get; set; }
     public required string FullName { get; set; }
     public required string PasswordHash { get; set; }
+    public bool IsMfaEnabled { get; set; }
+    public string? MfaSecret { get; set; }
+    public DateTimeOffset? MfaConfiguredAtUtc { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastLoginAtUtc { get; set; }
@@ -344,6 +347,109 @@ public sealed class OfflineEvent
     public DateTimeOffset? UpdatedAtUtc { get; set; }
 }
 
+public sealed class Shop
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public required string Code { get; set; }
+    public required string Name { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public ICollection<Subscription> Subscriptions { get; set; } = [];
+    public ICollection<ProvisionedDevice> ProvisionedDevices { get; set; } = [];
+    public ICollection<LicenseRecord> Licenses { get; set; } = [];
+    public ICollection<LicenseAuditLog> LicenseAuditLogs { get; set; } = [];
+}
+
+public sealed class Subscription
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ShopId { get; set; }
+    public string Plan { get; set; } = "trial";
+    public SubscriptionStatus Status { get; set; } = SubscriptionStatus.Trialing;
+    public DateTimeOffset PeriodStartUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset PeriodEndUtc { get; set; } = DateTimeOffset.UtcNow.AddDays(14);
+    public int SeatLimit { get; set; } = 1;
+    public string? FeatureFlagsJson { get; set; }
+    public string? BillingCustomerId { get; set; }
+    public string? BillingSubscriptionId { get; set; }
+    public string? BillingPriceId { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public required Shop Shop { get; set; }
+}
+
+public sealed class ProvisionedDevice
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ShopId { get; set; }
+    public Guid? DeviceId { get; set; }
+    public required string DeviceCode { get; set; }
+    public required string Name { get; set; }
+    public ProvisionedDeviceStatus Status { get; set; } = ProvisionedDeviceStatus.Active;
+    public DateTimeOffset AssignedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? RevokedAtUtc { get; set; }
+    public DateTimeOffset? LastHeartbeatAtUtc { get; set; }
+
+    public required Shop Shop { get; set; }
+    public ICollection<LicenseRecord> Licenses { get; set; } = [];
+    public ICollection<LicenseAuditLog> AuditLogs { get; set; } = [];
+}
+
+public sealed class LicenseRecord
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ShopId { get; set; }
+    public Guid ProvisionedDeviceId { get; set; }
+    public required string Token { get; set; }
+    public DateTimeOffset ValidUntil { get; set; }
+    public DateTimeOffset GraceUntil { get; set; }
+    public string SignatureKeyId { get; set; } = "k1";
+    public string SignatureAlgorithm { get; set; } = "HS256";
+    public required string Signature { get; set; }
+    public LicenseRecordStatus Status { get; set; } = LicenseRecordStatus.Active;
+    public DateTimeOffset IssuedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? RevokedAtUtc { get; set; }
+    public DateTimeOffset? LastValidatedAtUtc { get; set; }
+
+    public required Shop Shop { get; set; }
+    public required ProvisionedDevice ProvisionedDevice { get; set; }
+}
+
+public sealed class LicenseAuditLog
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? ShopId { get; set; }
+    public Guid? ProvisionedDeviceId { get; set; }
+    public required string Action { get; set; }
+    public string Actor { get; set; } = "system";
+    public string? Reason { get; set; }
+    public string? MetadataJson { get; set; }
+    public bool IsManualOverride { get; set; }
+    public string? ImmutableHash { get; set; }
+    public string? ImmutablePreviousHash { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+
+    public Shop? Shop { get; set; }
+    public ProvisionedDevice? ProvisionedDevice { get; set; }
+}
+
+public sealed class BillingWebhookEvent
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public required string ProviderEventId { get; set; }
+    public required string EventType { get; set; }
+    public string Status { get; set; } = "processing";
+    public Guid? ShopId { get; set; }
+    public string? BillingSubscriptionId { get; set; }
+    public string? LastErrorCode { get; set; }
+    public DateTimeOffset ReceivedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? ProcessedAtUtc { get; set; }
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+}
+
 public enum SaleStatus
 {
     Held = 1,
@@ -390,4 +496,33 @@ public enum CashSessionStatus
     Closing = 2,
     Closed = 3,
     Locked = 4
+}
+
+public enum SubscriptionStatus
+{
+    Trialing = 1,
+    Active = 2,
+    PastDue = 3,
+    Canceled = 4
+}
+
+public enum LicenseState
+{
+    Unprovisioned = 1,
+    Active = 2,
+    Grace = 3,
+    Suspended = 4,
+    Revoked = 5
+}
+
+public enum ProvisionedDeviceStatus
+{
+    Active = 1,
+    Revoked = 2
+}
+
+public enum LicenseRecordStatus
+{
+    Active = 1,
+    Revoked = 2
 }

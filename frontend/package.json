@@ -10,7 +10,9 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:license": "playwright test tests/e2e/license-gate.spec.js --project=desktop-chromium"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

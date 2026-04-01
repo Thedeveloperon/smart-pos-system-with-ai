@@ -4,10 +4,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "./AuthContext";
 
-const LoginScreen = () => {
+type LoginScreenMode = "pos" | "admin";
+
+type LoginScreenProps = {
+  mode?: LoginScreenMode;
+};
+
+const LoginScreen = ({ mode = "pos" }: LoginScreenProps) => {
   const { login } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [mfaCode, setMfaCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -16,13 +23,15 @@ const LoginScreen = () => {
     setError("");
     setLoading(true);
 
-    const err = await login(username, password);
+    const err = await login(username, password, isAdminMode ? mfaCode : undefined);
     if (err) {
       setError(err);
     }
 
     setLoading(false);
   };
+
+  const isAdminMode = mode === "admin";
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
@@ -38,10 +47,21 @@ const LoginScreen = () => {
           <div>
             <h2 className="text-xl font-bold">Sign In</h2>
             <p className="text-sm text-muted-foreground mt-1">
-              Use the seeded backend users:{" "}
-              <code className="text-primary font-medium">owner</code>,{" "}
-              <code className="text-primary font-medium">manager</code>, or{" "}
-              <code className="text-primary font-medium">cashier</code>.
+              {isAdminMode ? (
+                <>
+                  Super admin access only:{" "}
+                  <code className="text-primary font-medium">support_admin</code>,{" "}
+                  <code className="text-primary font-medium">billing_admin</code>, or{" "}
+                  <code className="text-primary font-medium">security_admin</code>.
+                </>
+              ) : (
+                <>
+                  Use the seeded backend users:{" "}
+                  <code className="text-primary font-medium">owner</code>,{" "}
+                  <code className="text-primary font-medium">manager</code>, or{" "}
+                  <code className="text-primary font-medium">cashier</code>.
+                </>
+              )}
             </p>
           </div>
 
@@ -68,6 +88,19 @@ const LoginScreen = () => {
               />
             </div>
 
+            {isAdminMode && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">MFA Code (Super Admin)</label>
+                <Input
+                  value={mfaCode}
+                  onChange={(e) => setMfaCode(e.target.value)}
+                  placeholder="6-digit code"
+                  className="h-11 rounded-xl bg-muted/50"
+                  inputMode="numeric"
+                />
+              </div>
+            )}
+
             {error && (
               <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 rounded-xl px-3 py-2">
                 <AlertCircle className="h-4 w-4 shrink-0" />
@@ -87,11 +120,21 @@ const LoginScreen = () => {
           </form>
         </div>
 
-        <p className="text-center text-xs text-muted-foreground">
-          Passwords are the seeded values: <code className="font-medium">owner123</code>,{" "}
-          <code className="font-medium">manager123</code>, and{" "}
-          <code className="font-medium">cashier123</code>.
-        </p>
+        {isAdminMode ? (
+          <p className="text-center text-xs text-muted-foreground">
+            Super admin seeded credentials (MFA required):
+            <code className="font-medium"> support_admin / support123</code>,
+            <code className="font-medium"> billing_admin / billing123</code>,
+            <code className="font-medium"> security_admin / security123</code>.
+          </p>
+        ) : (
+          <p className="text-center text-xs text-muted-foreground">
+            Passwords are the seeded values: <code className="font-medium">owner123</code>,{" "}
+            <code className="font-medium">manager123</code>, and{" "}
+            <code className="font-medium">cashier123</code>. Super admin login is at{" "}
+            <code className="font-medium">/admin/login</code>.
+          </p>
+        )}
       </div>
     </div>
   );

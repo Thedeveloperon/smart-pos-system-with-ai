@@ -1,10 +1,14 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
+using SmartPos.Backend.Features.Licensing;
 using SmartPos.Backend.Infrastructure;
 
 namespace SmartPos.Backend.Features.Reports;
 
-public sealed class ReportService(SmartPosDbContext dbContext)
+public sealed class ReportService(
+    SmartPosDbContext dbContext,
+    ILicensingAlertMonitor alertMonitor)
 {
     public async Task<DailySalesReportResponse> GetDailySalesReportAsync(
         DateOnly? fromDate,
@@ -297,6 +301,158 @@ public sealed class ReportService(SmartPosDbContext dbContext)
         };
     }
 
+    public async Task<SupportTriageReportResponse> GetSupportTriageReportAsync(
+        int windowMinutes,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var normalizedWindowMinutes = Math.Clamp(windowMinutes, 5, 180);
+        var windowStart = now.AddMinutes(-normalizedWindowMinutes);
+
+        var provisionedDevices = await dbContext.ProvisionedDevices
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+        var subscriptions = await dbContext.Subscriptions
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+        var licenses = await dbContext.Licenses
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        var latestSubscriptionsByShop = subscriptions
+            .GroupBy(x => x.ShopId)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .OrderByDescending(x => x.UpdatedAtUtc ?? x.CreatedAtUtc)
+                    .First());
+
+        var latestLicenseByDevice = licenses
+            .GroupBy(x => x.ProvisionedDeviceId)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .OrderByDescending(x => x.IssuedAtUtc)
+                    .First());
+
+        var deviceSummary = new SupportDeviceStateSummary();
+        var shopSeverities = new Dictionary<Guid, int>();
+        var shopsWithMissingLicense = new HashSet<Guid>();
+
+        foreach (var device in provisionedDevices)
+        {
+            latestSubscriptionsByShop.TryGetValue(device.ShopId, out var subscription);
+            latestLicenseByDevice.TryGetValue(device.Id, out var license);
+
+            var state = ResolveSupportState(device, license, subscription, now);
+            switch (state)
+            {
+                case SupportLicenseState.Active:
+                    deviceSummary.ActiveDevices += 1;
+                    break;
+                case SupportLicenseState.Grace:
+                    deviceSummary.GraceDevices += 1;
+                    break;
+                case SupportLicenseState.Suspended:
+                    deviceSummary.SuspendedDevices += 1;
+                    break;
+                case SupportLicenseState.Revoked:
+                    deviceSummary.RevokedDevices += 1;
+                    break;
+                case SupportLicenseState.MissingLicense:
+                    deviceSummary.DevicesWithoutLicense += 1;
+                    shopsWithMissingLicense.Add(device.ShopId);
+                    break;
+            }
+
+            var severity = state switch
+            {
+                SupportLicenseState.Active => 1,
+                SupportLicenseState.Grace => 2,
+                SupportLicenseState.Suspended => 3,
+                SupportLicenseState.MissingLicense => 3,
+                SupportLicenseState.Revoked => 4,
+                _ => 1
+            };
+
+            if (!shopSeverities.TryGetValue(device.ShopId, out var current) || severity > current)
+            {
+                shopSeverities[device.ShopId] = severity;
+            }
+        }
+
+        var shopSummary = new SupportShopStateSummary
+        {
+            ActiveShops = shopSeverities.Values.Count(x => x == 1),
+            GraceShops = shopSeverities.Values.Count(x => x == 2),
+            SuspendedShops = shopSeverities.Values.Count(x => x == 3),
+            RevokedShops = shopSeverities.Values.Count(x => x == 4),
+            ShopsWithMissingLicense = shopsWithMissingLicense.Count
+        };
+
+        var allAuditLogs = await dbContext.LicenseAuditLogs
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        var activityLogs = allAuditLogs
+            .Where(x => x.CreatedAtUtc >= windowStart)
+            .ToList();
+
+        var activitySummary = new SupportLicenseActivitySummary
+        {
+            ActivationsInWindow = activityLogs.Count(x => x.Action == "provision_activate"),
+            DeactivationsInWindow = activityLogs.Count(x => x.Action == "provision_deactivate"),
+            HeartbeatsInWindow = activityLogs.Count(x => x.Action == "license_heartbeat")
+        };
+
+        var recentAuditLogs = allAuditLogs
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .Take(12)
+            .ToList();
+
+        var alertSnapshot = alertMonitor.GetSnapshot(normalizedWindowMinutes);
+
+        return new SupportTriageReportResponse
+        {
+            GeneratedAt = now,
+            WindowMinutes = normalizedWindowMinutes,
+            Devices = deviceSummary,
+            Shops = shopSummary,
+            Activity = activitySummary,
+            Alerts = new SupportLicenseAlertSummary
+            {
+                ValidationFailuresInWindow = alertSnapshot.ValidationFailureCount,
+                WebhookFailuresInWindow = alertSnapshot.WebhookFailureCount,
+                TopValidationFailures = alertSnapshot.TopValidationFailures
+                    .Select(x => new SupportAlertBreakdownRow
+                    {
+                        Reason = x.Reason,
+                        Count = x.Count
+                    })
+                    .ToList(),
+                TopWebhookFailures = alertSnapshot.TopWebhookFailures
+                    .Select(x => new SupportAlertBreakdownRow
+                    {
+                        Reason = x.Reason,
+                        Count = x.Count
+                    })
+                    .ToList(),
+                LastValidationAlertAt = alertSnapshot.LastValidationAlertAtUtc,
+                LastWebhookAlertAt = alertSnapshot.LastWebhookAlertAtUtc
+            },
+            RecentAuditEvents = recentAuditLogs
+                .Select(x => new SupportLicenseAuditEventRow
+                {
+                    Timestamp = x.CreatedAtUtc,
+                    Action = x.Action,
+                    Actor = x.Actor,
+                    DeviceCode = ExtractDeviceCode(x.MetadataJson),
+                    Reason = x.Reason
+                })
+                .ToList()
+        };
+    }
+
     private static List<ReportPaymentBreakdownRow> BuildPaymentBreakdown(IEnumerable<PaymentSnapshot> payments)
     {
         return payments
@@ -361,6 +517,81 @@ public sealed class ReportService(SmartPosDbContext dbContext)
         return decimal.Round(value, 3, MidpointRounding.AwayFromZero);
     }
 
+    private static SupportLicenseState ResolveSupportState(
+        ProvisionedDevice device,
+        LicenseRecord? license,
+        Subscription? subscription,
+        DateTimeOffset now)
+    {
+        if (device.Status == ProvisionedDeviceStatus.Revoked)
+        {
+            return SupportLicenseState.Revoked;
+        }
+
+        if (license is null)
+        {
+            return SupportLicenseState.MissingLicense;
+        }
+
+        if (license.Status == LicenseRecordStatus.Revoked)
+        {
+            return SupportLicenseState.Revoked;
+        }
+
+        var subscriptionStatus = subscription?.Status;
+        if (subscription is { } && subscriptionStatus is SubscriptionStatus.Trialing or SubscriptionStatus.Active &&
+            subscription.PeriodEndUtc < now)
+        {
+            subscriptionStatus = SubscriptionStatus.PastDue;
+        }
+
+        if (subscriptionStatus == SubscriptionStatus.Canceled)
+        {
+            return SupportLicenseState.Revoked;
+        }
+
+        if (subscription is null || subscriptionStatus == SubscriptionStatus.PastDue)
+        {
+            return now <= license.GraceUntil ? SupportLicenseState.Grace : SupportLicenseState.Suspended;
+        }
+
+        if (now <= license.ValidUntil)
+        {
+            return SupportLicenseState.Active;
+        }
+
+        if (now <= license.GraceUntil)
+        {
+            return SupportLicenseState.Grace;
+        }
+
+        return SupportLicenseState.Suspended;
+    }
+
+    private static string? ExtractDeviceCode(string? metadataJson)
+    {
+        if (string.IsNullOrWhiteSpace(metadataJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(metadataJson);
+            if (document.RootElement.TryGetProperty("device_code", out var deviceCode))
+            {
+                var value = deviceCode.GetString();
+                return string.IsNullOrWhiteSpace(value) ? null : value;
+            }
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        return null;
+    }
+
     private sealed record DateRange(
         DateOnly FromDate,
         DateOnly ToDate,
@@ -384,4 +615,13 @@ public sealed class ReportService(SmartPosDbContext dbContext)
         Guid UserId,
         string Username,
         string FullName);
+
+    private enum SupportLicenseState
+    {
+        Active = 1,
+        Grace = 2,
+        Suspended = 3,
+        Revoked = 4,
+        MissingLicense = 5
+    }
 }

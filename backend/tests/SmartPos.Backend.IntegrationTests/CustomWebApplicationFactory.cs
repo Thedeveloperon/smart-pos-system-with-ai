@@ -6,6 +6,92 @@ namespace SmartPos.Backend.IntegrationTests;
 
 public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
 {
+    private const string K1PrivateKeyPem = """
+        -----BEGIN PRIVATE KEY-----
+        MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDtQaprcoqCI5oa
+        PViVCU6dg9h/cxp/LqFBXrmMksRo3a8Hp3lGuE+YtdJWH2zLHNtL+AiyszqZAT5V
+        /TGwg3hLHDZn6/CncFmnlwkpKFimVlBFq82WDvew1IBxVbT4OyCh1RJyY1Y/9Hsy
+        u+OzIHvpXy8OPshOekvb3BaZ+Uw/ZhVZWv/buJ6cHECy4IcvQTNh5Idfe5VrVsYB
+        vfdULHzD9mresemM8R4DOWizYQItmT4fojwGhRYRiRxOLNKo9iIeuy3+sTElGURN
+        TqG6vQ6b2vV3P5vRu4gb0rZ9kR5dXTQEP8XeY9MxXrV67rjx7Mjq1zcNYv1Jgi7m
+        QYzFlJO5AgMBAAECggEAXA+85xB8+l6CL2hadQo1fR1p5pptT6hyXgE5knhoyiAr
+        CJdNkcl26VS0F0L+XhoGZgYKqfyt4iz/WTJ0E4AQL2T1H4IH0ZDg2QzcOyIys+iO
+        IVq23WFVb0IlzNRq8l9PHDynecdd8lcVbuxFQH58VmPeyHJIG1uND/TouDpqAbcF
+        kQwPA5uvFNeERN6vBDVEwxYxSfuxbvSfn/K019U2XrFcKc62q5OkdqQbK6J8pduy
+        oVRofivHwAzi0sikiu+xQ1F3q0q6+j7phcDn1VlfAUYrQ26QafPJrdZJGQycqZK6
+        e/GkZJRBoRNF6UpCZOE454R/WD1Df0JC9Cy0g27r+QKBgQD4qMA0kNgkQpwuqp4+
+        AXR+8vVrqTxgEQQEKuj6ByeYipr8pKHMtSE112F5IsJAvcGU4Ks6hqKvngT/JJ9F
+        Ml51uhgRIHrsgT5pQYW4DeQ6SuROl4QTQ+HeYAZfIxDjtR7UL+1M+AL7ua65rbIn
+        4DRfxiW+zRicfmeYf4aYkBCs9wKBgQD0Qr0kPxycP90yn/Tu7kE6mcn/gLi9xbIa
+        w5Sx0G5j2j+OkeW/HiLRLPxCRtqMw36Vr4/sUCUF/gy2V8PhTeE4RZqQ7mAVRpjC
+        UK2TTI411mCwzcuPt2yfY3392IVJHIBz2wuonVOhwe5y05O1YQK/G1ZLsBY8BiNn
+        Z6PF65cIzwKBgQDR5OAZfwpz0SY03iClBmVno342Wqx0Cujw+6edJdzujlE1YWKS
+        gXJ/GEdXEVgXfhWhrePbizpYM3LUS/2FU3cYuPUHv/sDGDWuc3iEXHWCHyWIka0S
+        9gH6y+OU+uyOyZw0UCBnEBK0mZA7e7sencqX7ZJ+9HEJ6ElaGItszG7HEQKBgBJS
+        f0WcxlSiJcGKZiEWFiaDKrfTvAfgMH/5c8nyzJUI5gOXxhgT9qCiMzn1fqdYcsJf
+        rPgY+u38JI/4/WSFJwPFlNaSSvrNlN/elWabM3+uWQpqJX7eT3OVTvofp7/YN3p5
+        T+KSCpfzqCNM46OTZ1VWg56h0skl3LoA+DP8fBPZAoGBAMFfldA9tCMRXvyf0YqZ
+        eYNYZT7v5xLetgkW+WCNw2FkCjSXmrsXdOxR4OiuL4kRow7RNYhc77LlkQFvLtjy
+        Uq405KKS+cHj6xZc8yT9xUFQ064khLFOdD+Wl9J5+1eCZAUJCoZrTy9sPfb33il8
+        PPiHehubpHeHvuxFbu87Idkz
+        -----END PRIVATE KEY-----
+        """;
+
+    private const string K1PublicKeyPem = """
+        -----BEGIN PUBLIC KEY-----
+        MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA7UGqa3KKgiOaGj1YlQlO
+        nYPYf3Mafy6hQV65jJLEaN2vB6d5RrhPmLXSVh9syxzbS/gIsrM6mQE+Vf0xsIN4
+        Sxw2Z+vwp3BZp5cJKShYplZQRavNlg73sNSAcVW0+DsgodUScmNWP/R7MrvjsyB7
+        6V8vDj7ITnpL29wWmflMP2YVWVr/27ienBxAsuCHL0EzYeSHX3uVa1bGAb33VCx8
+        w/Zq3rHpjPEeAzlos2ECLZk+H6I8BoUWEYkcTizSqPYiHrst/rExJRlETU6hur0O
+        m9r1dz+b0buIG9K2fZEeXV00BD/F3mPTMV61eu648ezI6tc3DWL9SYIu5kGMxZST
+        uQIDAQAB
+        -----END PUBLIC KEY-----
+        """;
+
+    private const string K2PrivateKeyPem = """
+        -----BEGIN PRIVATE KEY-----
+        MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCVi+7rw22TpBRd
+        Ik2qKfZmmxI09Aqt6mF8h72VEpl1XmXNX9rZ+M+bPwQhyj3By9Scb8OajLc9BfUw
+        tVmzwTIhqaRGkRT0FzgLvsPQMqhshIfQfvB+I+xkHAHR3YJAsN3P8NHUkwIUJkVF
+        nwIm6+Sn2ctMd5ASEdy8DPsYCTEfVGOeMCS2k7JhmskPIXqIzSeiGMw9eY3jIWQw
+        N6ehloCWy4BmjagiM7eYwCkEvaRlbzi3V6r+y47b3dPZqXl1KrMlTfN1Nqpc+hVu
+        v3CRZWt1blAcLf1CiDEcNWR4sBI4q8XFuiY54i3MOMARSDs8yaLklSUIzBtzVl3k
+        ZQqnuBANAgMBAAECggEAQZzdvM9HumlZDevJC4nRs/8Bo/4W2WtmTk74HPnGHrrG
+        C6+sw8novIKPe4vSQL7/j4tx1NM8aie9BhvrOXTgW+ikTNnGybmOO4j9PNGdF8+m
+        DxJCzfVQ+DNZkQyQ43U2PM+6IHxHgzOvXPaA6TbCYeqqyegDbAouQMupN0iBJu8h
+        9+hpLyLW5uBp9vwsfZ2pvhOQzwGvOFH7qJVseHJdxbKudueKvxSj69a9Mi+tfskw
+        zJog/lbgiBMRQeRLD12yWfS6GUj8Und3zhFIOxOvlKwMLnH3VWi12eNCmLJQNRC0
+        9hoS7AcdA4NtXZxsTwc/KvUaG6UPTUu9hhl+NPK3uQKBgQDGZ/6q8HkQoF++v9zr
+        XsTtLrC4NyCstRWnHJQR5kKaIEBHQhm+M58J/6+h3+bEa5bF+/CiGTACu+8VsOxX
+        JjkzFabk2jn3GK5vEHgH13q7dafMQROuQlieCniySrxsidzTGPAphPhegUndIACn
+        xoxm5oXAQ27Wpjp/5q7qhKQpFwKBgQDA9RKSeaBI9S1tx9COb54Sx+c5e+ZCS4Ei
+        mkw8arq2Hl0ITbpAYCd/0FjUaiaz+QCj99QZ+AnHJNU28q7hbPCqdfmta0G9DBnX
+        7VecLtnWQvGdxv+MPetrO0BVRFyWyNnKrMwvnR+3usCVHr2hyG/I0eqGeLK67KuF
+        On4oabl+ewKBgCdi6alhh4cHbzpcuCx5abpz9Fz9hJ0EbcH46GQNQ9d444nB035w
+        nPfNLD6ERjlj6lBvTTvAqElCqZmyv5glXGGJwNHZiHxHCAnASTO1UQX5u0/O82s6
+        fIETLxalw3YAgDff0X1MikmofNNK0RZ9Uc3zoUWjnVM7OI2/a6XeowANAoGBAIeV
+        LMGjmM7rCErVVmRfZbFIqd6ogrkemNSZmuvxCtUhLLnC9BZ7+gVDfsdy91MKqjqM
+        z4qX0TcPWIpNqDhZ9hmw4AnNDdoqgJZK/X6PJR362A/HXpVKhPtKHQBNEsoYw4A4
+        PxlNzJWrMdsWSKU/U9zGM4bdlKjn1/W7jh4Te/W1AoGAPdw7R7c/Z/m7xFgaU/5H
+        cUq9s27VF7gyTOsu7Jqg7bekHpH7YXavAUBGQ4o+NUosuGVpvpqhjS4/6LhCGKmd
+        RS4/h405vXz1cb1TXMRA30l/iGsOF+Gtv0RwwQRjFWWQOU3J2eX25ati5oo+4q6J
+        KK/a4Lj/Wa+FW8slpZMoO/4=
+        -----END PRIVATE KEY-----
+        """;
+
+    private const string K2PublicKeyPem = """
+        -----BEGIN PUBLIC KEY-----
+        MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlYvu68Ntk6QUXSJNqin2
+        ZpsSNPQKrephfIe9lRKZdV5lzV/a2fjPmz8EIco9wcvUnG/Dmoy3PQX1MLVZs8Ey
+        IamkRpEU9Bc4C77D0DKobISH0H7wfiPsZBwB0d2CQLDdz/DR1JMCFCZFRZ8CJuvk
+        p9nLTHeQEhHcvAz7GAkxH1RjnjAktpOyYZrJDyF6iM0nohjMPXmN4yFkMDenoZaA
+        lsuAZo2oIjO3mMApBL2kZW84t1eq/suO293T2al5dSqzJU3zdTaqXPoVbr9wkWVr
+        dW5QHC39QogxHDVkeLASOKvFxbomOeItzDjAEUg7PMmi5JUlCMwbc1Zd5GUKp7gQ
+        DQIDAQAB
+        -----END PUBLIC KEY-----
+        """;
+
     private readonly string sqliteDbPath = Path.Combine(
         Path.GetTempPath(),
         $"smartpos-it-{Guid.NewGuid():N}.db");
@@ -26,6 +112,29 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 ["JwtAuth:ExpiryMinutes"] = "60",
                 ["JwtAuth:CookieName"] = "smartpos_auth",
                 ["JwtAuth:SecureCookie"] = "false",
+                ["Licensing:DefaultShopCode"] = "default",
+                ["Licensing:DefaultShopName"] = "Integration Test Shop",
+                ["Licensing:DefaultPlan"] = "trial",
+                ["Licensing:GracePeriodDays"] = "7",
+                ["Licensing:TrialPeriodDays"] = "14",
+                ["Licensing:TrialSeatLimit"] = "3",
+                ["Licensing:TokenTtlHours"] = "24",
+                ["Licensing:SigningKeyId"] = "it-k2",
+                ["Licensing:SigningPrivateKeyPem"] = K2PrivateKeyPem,
+                ["Licensing:VerificationPublicKeyPem"] = K2PublicKeyPem,
+                ["Licensing:ActiveSigningKeyId"] = "it-k2",
+                ["Licensing:SigningKeys:0:KeyId"] = "it-k1",
+                ["Licensing:SigningKeys:0:PrivateKeyPem"] = K1PrivateKeyPem,
+                ["Licensing:SigningKeys:0:PublicKeyPem"] = K1PublicKeyPem,
+                ["Licensing:SigningKeys:1:KeyId"] = "it-k2",
+                ["Licensing:SigningKeys:1:PrivateKeyPem"] = K2PrivateKeyPem,
+                ["Licensing:SigningKeys:1:PublicKeyPem"] = K2PublicKeyPem,
+                ["Licensing:EnforceProtectedRoutes"] = "true",
+                ["Licensing:WebhookSecurity:RequireSignature"] = "true",
+                ["Licensing:WebhookSecurity:SigningSecret"] = "smartpos-integration-webhook-secret-2026",
+                ["Licensing:WebhookSecurity:SignatureHeaderName"] = "Stripe-Signature",
+                ["Licensing:WebhookSecurity:SignatureScheme"] = "v1",
+                ["Licensing:WebhookSecurity:TimestampToleranceSeconds"] = "300",
                 ["Purchasing:OcrProvider"] = "basic-text"
             });
         });
@@ -51,5 +160,12 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         {
             // Best-effort cleanup for temp db.
         }
+    }
+
+    protected override void ConfigureClient(HttpClient client)
+    {
+        base.ConfigureClient(client);
+        client.DefaultRequestHeaders.Remove("Idempotency-Key");
+        client.DefaultRequestHeaders.Add("Idempotency-Key", "integration-tests-default");
     }
 }

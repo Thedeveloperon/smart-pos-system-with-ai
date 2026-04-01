@@ -6,7 +6,7 @@ interface AuthContextValue {
   user: AppUser | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (username: string, password: string) => Promise<string | null>;
+  login: (username: string, password: string, mfaCode?: string) => Promise<string | null>;
   logout: () => Promise<void>;
 }
 
@@ -23,6 +23,7 @@ function toAppUser(session: { username: string; full_name: string; role: string 
     username: session.username,
     displayName: session.full_name,
     role: mapBackendRoleToUserRole(session.role),
+    backendRole: session.role,
   };
 }
 
@@ -65,9 +66,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     };
   }, []);
 
-  const login = useCallback(async (username: string, password: string): Promise<string | null> => {
+  const login = useCallback(async (username: string, password: string, mfaCode?: string): Promise<string | null> => {
     try {
-      const session = await apiLogin(username, password);
+      const session = await apiLogin(username, password, mfaCode);
       setUser(toAppUser(session));
       return null;
     } catch (error) {

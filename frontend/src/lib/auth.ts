@@ -4,17 +4,38 @@ export interface AppUser {
   username: string;
   displayName: string;
   role: UserRole;
+  backendRole: string;
 }
 
 export const mapBackendRoleToUserRole = (role: string): UserRole => {
-  if (role.toLowerCase() === "owner") {
+  const normalizedRole = role.toLowerCase();
+  if (
+    normalizedRole === "owner" ||
+    normalizedRole === "super_admin" ||
+    normalizedRole === "support" ||
+    normalizedRole === "billing_admin" ||
+    normalizedRole === "security_admin"
+  ) {
     return "admin";
   }
 
-  if (role.toLowerCase() === "manager") {
+  if (normalizedRole === "manager") {
     return "manager";
   }
 
   return "cashier";
 };
 
+export const isSuperAdminBackendRole = (role?: string | null) => {
+  if (!role) {
+    return false;
+  }
+
+  const normalizedRole = role.toLowerCase();
+  return (
+    normalizedRole === "super_admin" ||
+    normalizedRole === "support" ||
+    normalizedRole === "billing_admin" ||
+    normalizedRole === "security_admin"
+  );
+};

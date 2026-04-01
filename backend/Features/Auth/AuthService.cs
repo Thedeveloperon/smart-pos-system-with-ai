@@ -2,6 +2,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Infrastructure;
@@ -9,8 +10,13 @@ using SmartPos.Backend.Security;
 
 namespace SmartPos.Backend.Features.Auth;
 
-public sealed class AuthService(SmartPosDbContext dbContext, JwtCookieOptions jwtOptions)
+public sealed class AuthService(
+    SmartPosDbContext dbContext,
+    JwtCookieOptions jwtOptions,
+    IOptions<AuthSecurityOptions> authSecurityOptionsAccessor)
 {
+    private readonly AuthSecurityOptions authSecurityOptions = authSecurityOptionsAccessor.Value;
+
     public async Task<(string Token, AuthSessionResponse Session)> LoginAsync(
         LoginRequest request,
         CancellationToken cancellationToken)
@@ -42,7 +48,8 @@ public sealed class AuthService(SmartPosDbContext dbContext, JwtCookieOptions jw
             throw new InvalidOperationException("Invalid username or password.");
         }
 
-        var role = ResolveRole(user);
+        var (role, superAdminScope) = ResolveRoleAndScope(user);
+        var mfaVerified = ValidateMfa(user, role, request.MfaCode);
         var now = DateTimeOffset.UtcNow;
         var expiresAt = now.AddMinutes(Math.Max(15, jwtOptions.ExpiryMinutes));
 
@@ -77,7 +84,7 @@ public sealed class AuthService(SmartPosDbContext dbContext, JwtCookieOptions jw
         user.LastLoginAtUtc = now;
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        var token = BuildToken(user, role, device, expiresAt);
+        var token = BuildToken(user, role, device, expiresAt, mfaVerified, superAdminScope);
         var session = new AuthSessionResponse
         {
             UserId = user.Id,
@@ -86,7 +93,8 @@ public sealed class AuthService(SmartPosDbContext dbContext, JwtCookieOptions jw
             Role = role,
             DeviceId = device.Id,
             DeviceCode = device.DeviceCode,
-            ExpiresAt = expiresAt
+            ExpiresAt = expiresAt,
+            MfaVerified = mfaVerified
         };
 
         return (token, session);
@@ -102,6 +110,8 @@ public sealed class AuthService(SmartPosDbContext dbContext, JwtCookieOptions jw
         var deviceId = ParseGuid(principal.FindFirstValue("device_id"));
         var role = principal.FindFirstValue(ClaimTypes.Role);
         var expiresAtUnix = principal.FindFirstValue(JwtRegisteredClaimNames.Exp);
+        var mfaVerifiedClaim = principal.FindFirstValue("mfa_verified");
+        var mfaVerified = bool.TryParse(mfaVerifiedClaim, out var parsedMfaVerified) && parsedMfaVerified;
 
         if (!userId.HasValue || !deviceId.HasValue || string.IsNullOrWhiteSpace(role))
         {
@@ -142,11 +152,18 @@ public sealed class AuthService(SmartPosDbContext dbContext, JwtCookieOptions jw
             Role = role,
             DeviceId = device.Id,
             DeviceCode = device.DeviceCode,
-            ExpiresAt = expiresAt
+            ExpiresAt = expiresAt,
+            MfaVerified = mfaVerified
         };
     }
 
-    private string BuildToken(AppUser user, string role, Device device, DateTimeOffset expiresAt)
+    private string BuildToken(
+        AppUser user,
+        string role,
+        Device device,
+        DateTimeOffset expiresAt,
+        bool mfaVerified,
+        string? superAdminScope)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.SecretKey));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -159,8 +176,13 @@ public sealed class AuthService(SmartPosDbContext dbContext, JwtCookieOptions jw
             new("full_name", user.FullName),
             new(ClaimTypes.Role, role),
             new("device_id", device.Id.ToString()),
-            new("device_code", device.DeviceCode)
+            new("device_code", device.DeviceCode),
+            new("mfa_verified", mfaVerified.ToString().ToLowerInvariant())
         };
+        if (!string.IsNullOrWhiteSpace(superAdminScope))
+        {
+            claims.Add(new Claim("super_admin_scope", superAdminScope.Trim().ToLowerInvariant()));
+        }
 
         var token = new JwtSecurityToken(
             issuer: jwtOptions.Issuer,
@@ -173,28 +195,81 @@ public sealed class AuthService(SmartPosDbContext dbContext, JwtCookieOptions jw
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
-    private static string ResolveRole(AppUser user)
+    private static (string Role, string? SuperAdminScope) ResolveRoleAndScope(AppUser user)
     {
         var roleCodes = user.UserRoles
             .Select(x => x.Role.Code.ToLowerInvariant())
             .ToHashSet();
 
+        if (roleCodes.Contains(SmartPosRoles.SuperAdmin))
+        {
+            return (SmartPosRoles.SuperAdmin, SmartPosRoles.SuperAdmin);
+        }
+
+        if (roleCodes.Contains(SmartPosRoles.SecurityAdmin))
+        {
+            return (SmartPosRoles.SuperAdmin, SmartPosRoles.SecurityAdmin);
+        }
+
+        if (roleCodes.Contains(SmartPosRoles.BillingAdmin))
+        {
+            return (SmartPosRoles.SuperAdmin, SmartPosRoles.BillingAdmin);
+        }
+
+        if (roleCodes.Contains(SmartPosRoles.Support))
+        {
+            return (SmartPosRoles.SuperAdmin, SmartPosRoles.Support);
+        }
+
         if (roleCodes.Contains(SmartPosRoles.Owner))
         {
-            return SmartPosRoles.Owner;
+            return (SmartPosRoles.Owner, null);
         }
 
         if (roleCodes.Contains(SmartPosRoles.Manager))
         {
-            return SmartPosRoles.Manager;
+            return (SmartPosRoles.Manager, null);
         }
 
         if (roleCodes.Contains(SmartPosRoles.Cashier))
         {
-            return SmartPosRoles.Cashier;
+            return (SmartPosRoles.Cashier, null);
         }
 
         throw new InvalidOperationException("User role is not assigned.");
+    }
+
+    private bool ValidateMfa(AppUser user, string resolvedRole, string? mfaCode)
+    {
+        var requiresMfa = authSecurityOptions.RequireMfaForSuperAdmins && SmartPosRoles.IsSuperAdminRole(resolvedRole);
+        if (!requiresMfa)
+        {
+            return true;
+        }
+
+        if (!user.IsMfaEnabled || string.IsNullOrWhiteSpace(user.MfaSecret))
+        {
+            throw new InvalidOperationException("Super admin account is not configured for MFA.");
+        }
+
+        if (string.IsNullOrWhiteSpace(mfaCode))
+        {
+            throw new InvalidOperationException("MFA code is required for super admin login.");
+        }
+
+        var isValid = TotpMfa.VerifyCode(
+            user.MfaSecret,
+            mfaCode,
+            DateTimeOffset.UtcNow,
+            authSecurityOptions.TotpStepSeconds,
+            authSecurityOptions.TotpAllowedSkewWindows);
+
+        if (!isValid)
+        {
+            throw new InvalidOperationException("Invalid MFA code.");
+        }
+
+        return true;
     }
 
     private static Guid? ParseGuid(string? value)

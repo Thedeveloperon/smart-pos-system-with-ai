@@ -103,6 +103,19 @@ public static class ReportEndpoints
         .WithName("GetLowStockReport")
         .WithOpenApi();
 
+        group.MapGet("/support-triage", async (
+            int? window_minutes,
+            ReportService reportService,
+            CancellationToken cancellationToken) =>
+        {
+            var result = await reportService.GetSupportTriageReportAsync(
+                window_minutes ?? 30,
+                cancellationToken);
+            return Results.Ok(result);
+        })
+        .WithName("GetSupportTriageReport")
+        .WithOpenApi();
+
         return app;
     }
 }

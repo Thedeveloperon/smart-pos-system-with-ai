@@ -15,6 +15,9 @@ public sealed class LoginRequest
 
     [JsonPropertyName("device_name")]
     public string? DeviceName { get; set; }
+
+    [JsonPropertyName("mfa_code")]
+    public string? MfaCode { get; set; }
 }
 
 public sealed class AuthSessionResponse
@@ -39,4 +42,7 @@ public sealed class AuthSessionResponse
 
     [JsonPropertyName("expires_at")]
     public DateTimeOffset ExpiresAt { get; set; }
+
+    [JsonPropertyName("mfa_verified")]
+    public bool MfaVerified { get; set; }
 }

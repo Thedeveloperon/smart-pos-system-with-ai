@@ -3,99 +3,99 @@
 ## Phase 1: Core MVP (Must-Have)
 
 ### 1. Product Rules
-- [ ] Define license states: `unprovisioned`, `active`, `grace`, `suspended`, `revoked`.
-- [ ] Define subscription states: `trialing`, `active`, `past_due`, `canceled`.
-- [ ] Define grace policy (example: 7 days).
-- [ ] Define blocked actions in `suspended` (example: block checkout/refund, allow read-only reports).
+- [x] Define license states: `unprovisioned`, `active`, `grace`, `suspended`, `revoked`.
+- [x] Define subscription states: `trialing`, `active`, `past_due`, `canceled`.
+- [x] Define grace policy (example: 7 days).
+- [x] Define blocked actions in `suspended` (example: block checkout/refund, allow read-only reports).
 
 ### 2. Database
-- [ ] Add `shops` table (optional for now, recommended for future multi-branch/SaaS).
-- [ ] Add `subscriptions` table (`shop_id`, plan, status, period_end, billing customer/subscription ids).
-- [ ] Add `licenses` table (`shop_id`, token, `valid_until`, `grace_until`, signature metadata).
-- [ ] Add `provisioned_devices` table (`device_id`, `device_code`, name, status, assigned/revoked timestamps).
-- [ ] Add `license_audit_logs` table (action, actor, reason, timestamp, metadata).
-- [ ] Add indexes for `shop_id`, `device_id`, `status`, `valid_until`.
+- [x] Add `shops` table (optional for now, recommended for future multi-branch/SaaS).
+- [x] Add `subscriptions` table (`shop_id`, plan, status, period_end, billing customer/subscription ids).
+- [x] Add `licenses` table (`shop_id`, token, `valid_until`, `grace_until`, signature metadata).
+- [x] Add `provisioned_devices` table (`device_id`, `device_code`, name, status, assigned/revoked timestamps).
+- [x] Add `license_audit_logs` table (action, actor, reason, timestamp, metadata).
+- [x] Add indexes for `shop_id`, `device_id`, `status`, `valid_until`.
 
 ### 3. Backend APIs
-- [ ] Implement `POST /api/provision/activate`.
-- [ ] Implement `POST /api/provision/deactivate`.
-- [ ] Implement `GET /api/license/status`.
-- [ ] Implement `POST /api/license/heartbeat`.
-- [ ] Return clear machine-readable error codes (`SEAT_LIMIT_EXCEEDED`, `LICENSE_EXPIRED`, `REVOKED`).
+- [x] Implement `POST /api/provision/activate`.
+- [x] Implement `POST /api/provision/deactivate`.
+- [x] Implement `GET /api/license/status`.
+- [x] Implement `POST /api/license/heartbeat`.
+- [x] Return clear machine-readable error codes (`SEAT_LIMIT_EXCEEDED`, `LICENSE_EXPIRED`, `REVOKED`).
 
 ### 4. License Enforcement
-- [ ] Add backend middleware to validate license for protected routes.
-- [ ] Validate signature, expiry, device binding, and store binding.
-- [ ] Apply grace logic centrally in middleware.
-- [ ] Exclude only health/auth/license bootstrap endpoints from enforcement.
+- [x] Add backend middleware to validate license for protected routes.
+- [x] Validate signature, expiry, device binding, and store binding.
+- [x] Apply grace logic centrally in middleware.
+- [x] Exclude only health/auth/license bootstrap endpoints from enforcement.
 
 ### 5. Frontend Flow (React/PWA)
-- [ ] Add startup gate: call `GET /api/license/status` before normal app auth.
-- [ ] Show activation screen when `unprovisioned`.
-- [ ] Show grace warning banner when in `grace`.
-- [ ] Show blocked screen with recovery steps when `suspended`/`revoked`.
+- [x] Add startup gate: call `GET /api/license/status` before normal app auth.
+- [x] Show activation screen when `unprovisioned`.
+- [x] Show grace warning banner when in `grace`.
+- [x] Show blocked screen with recovery steps when `suspended`/`revoked`.
 
 ### 6. Offline Behavior
-- [ ] Cache last valid license locally (encrypted at rest where possible).
-- [ ] Store last successful server validation time.
-- [ ] Add clock rollback protection (reject suspicious backward jumps).
-- [ ] Retry heartbeat automatically when connectivity returns.
+- [x] Cache last valid license locally (encrypted at rest where possible).
+- [x] Store last successful server validation time.
+- [x] Add clock rollback protection (reject suspicious backward jumps).
+- [x] Retry heartbeat automatically when connectivity returns.
 
 ## Phase 2: Subscription Integration
 
 ### 1. Billing Provider Setup
-- [ ] Create plans with seat limits and feature flags.
-- [ ] Persist billing provider IDs per shop (`customer_id`, `subscription_id`, `price_id`).
+- [x] Create plans with seat limits and feature flags.
+- [x] Persist billing provider IDs per shop (`customer_id`, `subscription_id`, `price_id`).
 
 ### 2. Webhook Processing
-- [ ] Handle webhook events: `invoice.paid`, `invoice.payment_failed`, `customer.subscription.updated`, `customer.subscription.deleted`.
-- [ ] Verify webhook signatures.
-- [ ] Make webhook handling idempotent.
-- [ ] Update local subscription state only from webhooks/server-side reconciliation.
+- [x] Handle webhook events: `invoice.paid`, `invoice.payment_failed`, `customer.subscription.updated`, `customer.subscription.deleted`.
+- [x] Verify webhook signatures.
+- [x] Make webhook handling idempotent.
+- [x] Update local subscription state only from webhooks/server-side reconciliation.
 
 ### 3. License Issuance
-- [ ] Issue short-lived signed license tokens from subscription state.
-- [ ] Use asymmetric keys (private key in KMS/HSM, public key in POS backend).
-- [ ] Add key rotation support via `kid`.
-- [ ] Force token reissue on plan/device/status changes.
+- [x] Issue short-lived signed license tokens from subscription state.
+- [x] Use asymmetric keys (private key in KMS/HSM, public key in POS backend).
+- [x] Add key rotation support via `kid`.
+- [x] Force token reissue on plan/device/status changes.
 
 ## Phase 3: Super Admin Operations
 
 ### 1. Admin APIs
-- [ ] List shops, subscriptions, license states, and device seats.
-- [ ] Revoke/reactivate devices.
-- [ ] Extend grace with explicit reason.
-- [ ] Force license refresh/resync.
+- [x] List shops, subscriptions, license states, and device seats.
+- [x] Revoke/reactivate devices.
+- [x] Extend grace with explicit reason.
+- [x] Force license refresh/resync.
 
 ### 2. Admin Panel
-- [ ] Enforce MFA for all super admins.
-- [ ] Implement RBAC (`support`, `billing_admin`, `security_admin`).
-- [ ] Add searchable audit logs.
-- [ ] Keep immutable history for manual overrides.
+- [x] Enforce MFA for all super admins.
+- [x] Implement RBAC (`support`, `billing_admin`, `security_admin`).
+- [x] Add searchable audit logs.
+- [x] Keep immutable history for manual overrides.
 
 ## Phase 4: Security, Testing, and Observability
 
 ### 1. Security
-- [ ] Keep signing private keys out of app runtime nodes.
-- [ ] Add rate limits on activation/deactivation endpoints.
-- [ ] Require idempotency keys on mutation endpoints.
-- [ ] Encrypt sensitive license/provision data at rest.
+- [x] Keep signing private keys out of app runtime nodes.
+- [x] Add rate limits on activation/deactivation endpoints.
+- [x] Require idempotency keys on mutation endpoints.
+- [x] Encrypt sensitive license/provision data at rest.
 
 ### 2. Testing
-- [ ] Unit tests for state transitions and policy rules.
-- [ ] Integration tests for activation, renewal, deactivation.
-- [ ] Offline tests (no internet, heartbeat recovery, grace expiry).
-- [ ] Abuse tests (token tampering, replay, expired token, clock rollback).
-- [ ] E2E tests for frontend gating and user messaging.
+- [x] Unit tests for state transitions and policy rules.
+- [x] Integration tests for activation, renewal, deactivation.
+- [x] Offline tests (no internet, heartbeat recovery, grace expiry).
+- [x] Abuse tests (token tampering, replay, expired token, clock rollback).
+- [x] E2E tests for frontend gating and user messaging.
 
 ### 3. Observability
-- [ ] Add metrics: activations, heartbeat failures, grace-mode shops, suspended shops.
-- [ ] Add alerts for webhook failures and license validation spikes.
-- [ ] Add support dashboard for quick triage.
+- [x] Add metrics: activations, heartbeat failures, grace-mode shops, suspended shops.
+- [x] Add alerts for webhook failures and license validation spikes.
+- [x] Add support dashboard for quick triage.
 
 ## Definition of Done
-- [ ] New shop can activate first device in under 2 minutes.
-- [ ] Offline checkout works during outage within grace policy.
-- [ ] Payment failure transitions automatically to `past_due -> grace -> suspended`.
-- [ ] Device seat limits are enforced reliably.
-- [ ] Support can resolve common license issues without direct DB edits.
+- [x] New shop can activate first device in under 2 minutes.
+- [x] Offline checkout works during outage within grace policy.
+- [x] Payment failure transitions automatically to `past_due -> grace -> suspended`.
+- [x] Device seat limits are enforced reliably.
+- [x] Support can resolve common license issues without direct DB edits.

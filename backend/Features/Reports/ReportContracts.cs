@@ -232,3 +232,123 @@ public sealed class LowStockReportRow
     [JsonPropertyName("deficit")]
     public decimal Deficit { get; set; }
 }
+
+public sealed class SupportTriageReportResponse
+{
+    [JsonPropertyName("generated_at")]
+    public DateTimeOffset GeneratedAt { get; set; }
+
+    [JsonPropertyName("window_minutes")]
+    public int WindowMinutes { get; set; }
+
+    [JsonPropertyName("devices")]
+    public SupportDeviceStateSummary Devices { get; set; } = new();
+
+    [JsonPropertyName("shops")]
+    public SupportShopStateSummary Shops { get; set; } = new();
+
+    [JsonPropertyName("activity")]
+    public SupportLicenseActivitySummary Activity { get; set; } = new();
+
+    [JsonPropertyName("alerts")]
+    public SupportLicenseAlertSummary Alerts { get; set; } = new();
+
+    [JsonPropertyName("recent_audit_events")]
+    public List<SupportLicenseAuditEventRow> RecentAuditEvents { get; set; } = [];
+}
+
+public sealed class SupportDeviceStateSummary
+{
+    [JsonPropertyName("active_devices")]
+    public int ActiveDevices { get; set; }
+
+    [JsonPropertyName("grace_devices")]
+    public int GraceDevices { get; set; }
+
+    [JsonPropertyName("suspended_devices")]
+    public int SuspendedDevices { get; set; }
+
+    [JsonPropertyName("revoked_devices")]
+    public int RevokedDevices { get; set; }
+
+    [JsonPropertyName("devices_without_license")]
+    public int DevicesWithoutLicense { get; set; }
+}
+
+public sealed class SupportShopStateSummary
+{
+    [JsonPropertyName("active_shops")]
+    public int ActiveShops { get; set; }
+
+    [JsonPropertyName("grace_shops")]
+    public int GraceShops { get; set; }
+
+    [JsonPropertyName("suspended_shops")]
+    public int SuspendedShops { get; set; }
+
+    [JsonPropertyName("revoked_shops")]
+    public int RevokedShops { get; set; }
+
+    [JsonPropertyName("shops_with_missing_license")]
+    public int ShopsWithMissingLicense { get; set; }
+}
+
+public sealed class SupportLicenseActivitySummary
+{
+    [JsonPropertyName("activations_in_window")]
+    public int ActivationsInWindow { get; set; }
+
+    [JsonPropertyName("deactivations_in_window")]
+    public int DeactivationsInWindow { get; set; }
+
+    [JsonPropertyName("heartbeats_in_window")]
+    public int HeartbeatsInWindow { get; set; }
+}
+
+public sealed class SupportLicenseAlertSummary
+{
+    [JsonPropertyName("validation_failures_in_window")]
+    public int ValidationFailuresInWindow { get; set; }
+
+    [JsonPropertyName("webhook_failures_in_window")]
+    public int WebhookFailuresInWindow { get; set; }
+
+    [JsonPropertyName("top_validation_failures")]
+    public List<SupportAlertBreakdownRow> TopValidationFailures { get; set; } = [];
+
+    [JsonPropertyName("top_webhook_failures")]
+    public List<SupportAlertBreakdownRow> TopWebhookFailures { get; set; } = [];
+
+    [JsonPropertyName("last_validation_alert_at")]
+    public DateTimeOffset? LastValidationAlertAt { get; set; }
+
+    [JsonPropertyName("last_webhook_alert_at")]
+    public DateTimeOffset? LastWebhookAlertAt { get; set; }
+}
+
+public sealed class SupportAlertBreakdownRow
+{
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = string.Empty;
+
+    [JsonPropertyName("count")]
+    public int Count { get; set; }
+}
+
+public sealed class SupportLicenseAuditEventRow
+{
+    [JsonPropertyName("timestamp")]
+    public DateTimeOffset Timestamp { get; set; }
+
+    [JsonPropertyName("action")]
+    public string Action { get; set; } = string.Empty;
+
+    [JsonPropertyName("actor")]
+    public string Actor { get; set; } = string.Empty;
+
+    [JsonPropertyName("device_code")]
+    public string? DeviceCode { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+}

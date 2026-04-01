@@ -6,6 +6,7 @@ using SmartPos.Backend.Features.Ai;
 using SmartPos.Backend.Features.Auth;
 using SmartPos.Backend.Features.CashSessions;
 using SmartPos.Backend.Features.Checkout;
+using SmartPos.Backend.Features.Licensing;
 using SmartPos.Backend.Features.Products;
 using SmartPos.Backend.Features.Purchases;
 using SmartPos.Backend.Features.Reports;
@@ -29,7 +30,17 @@ builder.Services.Configure<PurchasingOptions>(
     builder.Configuration.GetSection(PurchasingOptions.SectionName));
 builder.Services.Configure<AiSuggestionOptions>(
     builder.Configuration.GetSection(AiSuggestionOptions.SectionName));
+builder.Services.Configure<LicenseOptions>(
+    builder.Configuration.GetSection(LicenseOptions.SectionName));
+builder.Services.Configure<AuthSecurityOptions>(
+    builder.Configuration.GetSection(AuthSecurityOptions.SectionName));
 builder.Services.AddSingleton(jwtOptions);
+builder.Services.AddSingleton<LicensingMetrics>();
+builder.Services.AddSingleton<LicensingAlertMonitor>();
+builder.Services.AddSingleton<ILicensingAlertMonitor>(
+    serviceProvider => serviceProvider.GetRequiredService<LicensingAlertMonitor>());
+builder.Services.AddHostedService(
+    serviceProvider => serviceProvider.GetRequiredService<LicensingAlertMonitor>());
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddCors(options =>
 {
@@ -76,7 +87,25 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy(SmartPosPolicies.ManagerOrOwner, policy =>
-        policy.RequireRole(SmartPosRoles.Owner, SmartPosRoles.Manager));
+        policy.RequireRole(
+            SmartPosRoles.Owner,
+            SmartPosRoles.Manager,
+            SmartPosRoles.SuperAdmin,
+            SmartPosRoles.Support,
+            SmartPosRoles.BillingAdmin,
+            SmartPosRoles.SecurityAdmin));
+    options.AddPolicy(SmartPosPolicies.SuperAdmin, policy =>
+        policy.RequireRole(SmartPosRoles.SuperAdminRoles)
+            .RequireClaim("mfa_verified", "true"));
+    options.AddPolicy(SmartPosPolicies.SupportOrSecurity, policy =>
+        policy.RequireRole(SmartPosRoles.SuperAdmin, SmartPosRoles.Support, SmartPosRoles.SecurityAdmin)
+            .RequireClaim("mfa_verified", "true"));
+    options.AddPolicy(SmartPosPolicies.SupportOrBilling, policy =>
+        policy.RequireRole(SmartPosRoles.SuperAdmin, SmartPosRoles.Support, SmartPosRoles.BillingAdmin)
+            .RequireClaim("mfa_verified", "true"));
+    options.AddPolicy(SmartPosPolicies.BillingOrSecurity, policy =>
+        policy.RequireRole(SmartPosRoles.SuperAdmin, SmartPosRoles.BillingAdmin, SmartPosRoles.SecurityAdmin)
+            .RequireClaim("mfa_verified", "true"));
 });
 builder.Services.AddScoped<CheckoutService>();
 builder.Services.AddScoped<CashSessionService>();
@@ -89,6 +118,7 @@ builder.Services.AddScoped<ShopProfileService>();
 builder.Services.AddScoped<SyncEventsProcessor>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<AuditLogService>();
+builder.Services.AddScoped<LicenseService>();
 builder.Services.AddHttpClient<AiSuggestionService>();
 builder.Services.AddSingleton<BasicTextOcrProvider>();
 builder.Services.AddSingleton<TesseractOcrProvider>();
@@ -159,6 +189,8 @@ using (var scope = app.Services.CreateScope())
     await DbSchemaUpdater.EnsureRefundSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureCashSessionSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsurePurchasingSchemaAsync(dbContext);
+    await DbSchemaUpdater.EnsureLicensingSchemaAsync(dbContext);
+    await DbSchemaUpdater.EnsureAuthSecuritySchemaAsync(dbContext);
     await DbSeeder.SeedAsync(dbContext);
 }
 
@@ -169,7 +201,9 @@ if (staticFilesAvailable)
 }
 
 app.UseCors("frontend-dev");
+app.UseMiddleware<ProvisioningRateLimitMiddleware>();
 app.UseAuthentication();
+app.UseMiddleware<LicenseEnforcementMiddleware>();
 app.UseAuthorization();
 
 app.MapGet("/health", () =>
@@ -185,6 +219,7 @@ app.MapGet("/health", () =>
 .WithOpenApi();
 
 app.MapAuthEndpoints();
+app.MapLicensingEndpoints();
 app.MapAiSuggestionEndpoints();
 app.MapCashSessionEndpoints();
 app.MapSyncEndpoints();

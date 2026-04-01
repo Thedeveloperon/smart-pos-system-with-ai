@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useAuth } from "@/components/auth/AuthContext";
+import { useLicensing } from "@/components/licensing/LicensingContext";
+import { LicenseGraceBanner } from "@/components/licensing/LicenseScreens";
 import HeaderBar from "@/components/pos/HeaderBar";
 import NewItemDialog from "@/components/pos/NewItemDialog";
 import ImportSupplierBillDialog from "@/components/pos/ImportSupplierBillDialog";
@@ -32,12 +34,15 @@ import {
   type PurchaseImportConfirmResponse,
   voidSale,
 } from "@/lib/api";
+import { isSuperAdminBackendRole } from "@/lib/auth";
 import { playCartAddSound } from "@/lib/sound";
 
 const IndexInner = () => {
   const { user, logout } = useAuth();
+  const { status: licenseStatus, isRefreshing: isLicenseRefreshing, refresh: refreshLicenseStatus } = useLicensing();
   const cashierName = user?.displayName || "Unknown";
   const isAdmin = user?.role === "admin" || user?.role === "manager";
+  const isSuperAdmin = isSuperAdminBackendRole(user?.backendRole);
   const backendRole = useMemo(() => {
     if (user?.role === "admin") {
       return "owner";
@@ -293,6 +298,16 @@ const IndexInner = () => {
         hasActiveSession={canSell}
       />
 
+      {licenseStatus?.state === "grace" && (
+        <LicenseGraceBanner
+          status={licenseStatus}
+          isRefreshing={isLicenseRefreshing}
+          onRefresh={() => {
+            void refreshLicenseStatus();
+          }}
+        />
+      )}
+
       {canSell && <CashSessionBanner onEndShift={handleEndShift} />}
 
       {needsOpening && !isClosed && (
@@ -402,6 +417,7 @@ const IndexInner = () => {
         onClose={() => setShowReports(false)}
         refreshToken={salesRefreshToken}
         onRefundSale={handleRefundRequested}
+        isSuperAdmin={isSuperAdmin}
       />
 
       <HeldBillsDrawer

@@ -206,6 +206,70 @@ public static class DbSchemaUpdater
         }
     }
 
+    public static async Task EnsureLicensingSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken = default)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+
+        if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            await EnsureSqliteLicensingSchemaAsync(dbContext, cancellationToken);
+            return;
+        }
+
+        if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            await EnsurePostgresLicensingSchemaAsync(dbContext, cancellationToken);
+        }
+    }
+
+    public static async Task EnsureAuthSecuritySchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken = default)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+
+        if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!await ColumnExistsAsync(dbContext, "users", "IsMfaEnabled", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "users" ADD COLUMN "IsMfaEnabled" INTEGER NOT NULL DEFAULT 0;""",
+                    cancellationToken);
+            }
+
+            if (!await ColumnExistsAsync(dbContext, "users", "MfaSecret", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "users" ADD COLUMN "MfaSecret" TEXT NULL;""",
+                    cancellationToken);
+            }
+
+            if (!await ColumnExistsAsync(dbContext, "users", "MfaConfiguredAtUtc", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "users" ADD COLUMN "MfaConfiguredAtUtc" TEXT NULL;""",
+                    cancellationToken);
+            }
+
+            return;
+        }
+
+        if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE users ADD COLUMN IF NOT EXISTS "IsMfaEnabled" boolean NOT NULL DEFAULT false;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE users ADD COLUMN IF NOT EXISTS "MfaSecret" varchar(256) NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE users ADD COLUMN IF NOT EXISTS "MfaConfiguredAtUtc" timestamptz NULL;""",
+                cancellationToken);
+        }
+    }
+
     private static async Task EnsureSqliteRefundSchemaAsync(
         SmartPosDbContext dbContext,
         CancellationToken cancellationToken)
@@ -415,6 +479,143 @@ public static class DbSchemaUpdater
             cancellationToken);
     }
 
+    private static async Task EnsureSqliteLicensingSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var sql = """
+            CREATE TABLE IF NOT EXISTS "shops" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_shops" PRIMARY KEY,
+              "Code" TEXT NOT NULL,
+              "Name" TEXT NOT NULL,
+              "IsActive" INTEGER NOT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "UpdatedAtUtc" TEXT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS "subscriptions" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_subscriptions" PRIMARY KEY,
+              "ShopId" TEXT NOT NULL,
+              "Plan" TEXT NOT NULL,
+              "Status" TEXT NOT NULL,
+              "PeriodStartUtc" TEXT NOT NULL,
+              "PeriodEndUtc" TEXT NOT NULL,
+              "SeatLimit" INTEGER NOT NULL,
+              "FeatureFlagsJson" TEXT NULL,
+              "BillingCustomerId" TEXT NULL,
+              "BillingSubscriptionId" TEXT NULL,
+              "BillingPriceId" TEXT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "UpdatedAtUtc" TEXT NULL,
+              CONSTRAINT "FK_subscriptions_shops_ShopId" FOREIGN KEY ("ShopId") REFERENCES "shops" ("Id") ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS "provisioned_devices" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_provisioned_devices" PRIMARY KEY,
+              "ShopId" TEXT NOT NULL,
+              "DeviceId" TEXT NULL,
+              "DeviceCode" TEXT NOT NULL,
+              "Name" TEXT NOT NULL,
+              "Status" TEXT NOT NULL,
+              "AssignedAtUtc" TEXT NOT NULL,
+              "RevokedAtUtc" TEXT NULL,
+              "LastHeartbeatAtUtc" TEXT NULL,
+              CONSTRAINT "FK_provisioned_devices_shops_ShopId" FOREIGN KEY ("ShopId") REFERENCES "shops" ("Id") ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS "licenses" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_licenses" PRIMARY KEY,
+              "ShopId" TEXT NOT NULL,
+              "ProvisionedDeviceId" TEXT NOT NULL,
+              "Token" TEXT NOT NULL,
+              "ValidUntil" TEXT NOT NULL,
+              "GraceUntil" TEXT NOT NULL,
+              "SignatureKeyId" TEXT NOT NULL,
+              "SignatureAlgorithm" TEXT NOT NULL,
+              "Signature" TEXT NOT NULL,
+              "Status" TEXT NOT NULL,
+              "IssuedAtUtc" TEXT NOT NULL,
+              "RevokedAtUtc" TEXT NULL,
+              "LastValidatedAtUtc" TEXT NULL,
+              CONSTRAINT "FK_licenses_shops_ShopId" FOREIGN KEY ("ShopId") REFERENCES "shops" ("Id") ON DELETE CASCADE,
+              CONSTRAINT "FK_licenses_provisioned_devices_ProvisionedDeviceId" FOREIGN KEY ("ProvisionedDeviceId") REFERENCES "provisioned_devices" ("Id") ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS "license_audit_logs" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_license_audit_logs" PRIMARY KEY,
+              "ShopId" TEXT NULL,
+              "ProvisionedDeviceId" TEXT NULL,
+              "Action" TEXT NOT NULL,
+              "Actor" TEXT NOT NULL,
+              "Reason" TEXT NULL,
+              "MetadataJson" TEXT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              CONSTRAINT "FK_license_audit_logs_shops_ShopId" FOREIGN KEY ("ShopId") REFERENCES "shops" ("Id") ON DELETE SET NULL,
+              CONSTRAINT "FK_license_audit_logs_provisioned_devices_ProvisionedDeviceId" FOREIGN KEY ("ProvisionedDeviceId") REFERENCES "provisioned_devices" ("Id") ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS "billing_webhook_events" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_billing_webhook_events" PRIMARY KEY,
+              "ProviderEventId" TEXT NOT NULL,
+              "EventType" TEXT NOT NULL,
+              "Status" TEXT NOT NULL,
+              "ShopId" TEXT NULL,
+              "BillingSubscriptionId" TEXT NULL,
+              "LastErrorCode" TEXT NULL,
+              "ReceivedAtUtc" TEXT NOT NULL,
+              "ProcessedAtUtc" TEXT NULL,
+              "UpdatedAtUtc" TEXT NULL,
+              CONSTRAINT "FK_billing_webhook_events_shops_ShopId" FOREIGN KEY ("ShopId") REFERENCES "shops" ("Id") ON DELETE SET NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_shops_Code" ON "shops" ("Code");
+            CREATE INDEX IF NOT EXISTS "IX_subscriptions_ShopId" ON "subscriptions" ("ShopId");
+            CREATE INDEX IF NOT EXISTS "IX_subscriptions_Status" ON "subscriptions" ("Status");
+            CREATE INDEX IF NOT EXISTS "IX_subscriptions_PeriodEndUtc" ON "subscriptions" ("PeriodEndUtc");
+            CREATE INDEX IF NOT EXISTS "IX_provisioned_devices_ShopId" ON "provisioned_devices" ("ShopId");
+            CREATE INDEX IF NOT EXISTS "IX_provisioned_devices_DeviceId" ON "provisioned_devices" ("DeviceId");
+            CREATE INDEX IF NOT EXISTS "IX_provisioned_devices_Status" ON "provisioned_devices" ("Status");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_provisioned_devices_DeviceCode" ON "provisioned_devices" ("DeviceCode");
+            CREATE INDEX IF NOT EXISTS "IX_licenses_ShopId" ON "licenses" ("ShopId");
+            CREATE INDEX IF NOT EXISTS "IX_licenses_ProvisionedDeviceId" ON "licenses" ("ProvisionedDeviceId");
+            CREATE INDEX IF NOT EXISTS "IX_licenses_Status" ON "licenses" ("Status");
+            CREATE INDEX IF NOT EXISTS "IX_licenses_ValidUntil" ON "licenses" ("ValidUntil");
+            CREATE INDEX IF NOT EXISTS "IX_license_audit_logs_ShopId" ON "license_audit_logs" ("ShopId");
+            CREATE INDEX IF NOT EXISTS "IX_license_audit_logs_ProvisionedDeviceId" ON "license_audit_logs" ("ProvisionedDeviceId");
+            CREATE INDEX IF NOT EXISTS "IX_license_audit_logs_Action" ON "license_audit_logs" ("Action");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_billing_webhook_events_ProviderEventId" ON "billing_webhook_events" ("ProviderEventId");
+            CREATE INDEX IF NOT EXISTS "IX_billing_webhook_events_EventType" ON "billing_webhook_events" ("EventType");
+            CREATE INDEX IF NOT EXISTS "IX_billing_webhook_events_ShopId" ON "billing_webhook_events" ("ShopId");
+            """;
+
+        await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+
+        if (!await ColumnExistsAsync(dbContext, "license_audit_logs", "IsManualOverride", cancellationToken))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "license_audit_logs" ADD COLUMN "IsManualOverride" INTEGER NOT NULL DEFAULT 0;""",
+                cancellationToken);
+        }
+
+        if (!await ColumnExistsAsync(dbContext, "license_audit_logs", "ImmutableHash", cancellationToken))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "license_audit_logs" ADD COLUMN "ImmutableHash" TEXT NULL;""",
+                cancellationToken);
+        }
+
+        if (!await ColumnExistsAsync(dbContext, "license_audit_logs", "ImmutablePreviousHash", cancellationToken))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "license_audit_logs" ADD COLUMN "ImmutablePreviousHash" TEXT NULL;""",
+                cancellationToken);
+        }
+
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE INDEX IF NOT EXISTS "IX_license_audit_logs_IsManualOverride" ON "license_audit_logs" ("IsManualOverride");""",
+            cancellationToken);
+    }
+
     private static async Task EnsurePostgresPurchasingSchemaAsync(
         SmartPosDbContext dbContext,
         CancellationToken cancellationToken)
@@ -509,6 +710,123 @@ public static class DbSchemaUpdater
             cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(
             """CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_ImportRequestId" ON purchase_bills("ImportRequestId");""",
+            cancellationToken);
+    }
+
+    private static async Task EnsurePostgresLicensingSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var sql = """
+            CREATE TABLE IF NOT EXISTS shops (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "Code" varchar(64) NOT NULL,
+              "Name" varchar(160) NOT NULL,
+              "IsActive" boolean NOT NULL,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "UpdatedAtUtc" timestamptz NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS subscriptions (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "ShopId" uuid NOT NULL REFERENCES shops("Id") ON DELETE CASCADE,
+              "Plan" varchar(64) NOT NULL,
+              "Status" varchar(32) NOT NULL,
+              "PeriodStartUtc" timestamptz NOT NULL,
+              "PeriodEndUtc" timestamptz NOT NULL,
+              "SeatLimit" integer NOT NULL,
+              "FeatureFlagsJson" text NULL,
+              "BillingCustomerId" varchar(120) NULL,
+              "BillingSubscriptionId" varchar(120) NULL,
+              "BillingPriceId" varchar(120) NULL,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "UpdatedAtUtc" timestamptz NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS provisioned_devices (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "ShopId" uuid NOT NULL REFERENCES shops("Id") ON DELETE CASCADE,
+              "DeviceId" uuid NULL,
+              "DeviceCode" varchar(64) NOT NULL,
+              "Name" varchar(120) NOT NULL,
+              "Status" varchar(32) NOT NULL,
+              "AssignedAtUtc" timestamptz NOT NULL,
+              "RevokedAtUtc" timestamptz NULL,
+              "LastHeartbeatAtUtc" timestamptz NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS licenses (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "ShopId" uuid NOT NULL REFERENCES shops("Id") ON DELETE CASCADE,
+              "ProvisionedDeviceId" uuid NOT NULL REFERENCES provisioned_devices("Id") ON DELETE CASCADE,
+              "Token" text NOT NULL,
+              "ValidUntil" timestamptz NOT NULL,
+              "GraceUntil" timestamptz NOT NULL,
+              "SignatureKeyId" varchar(64) NOT NULL,
+              "SignatureAlgorithm" varchar(32) NOT NULL,
+              "Signature" text NOT NULL,
+              "Status" varchar(32) NOT NULL,
+              "IssuedAtUtc" timestamptz NOT NULL,
+              "RevokedAtUtc" timestamptz NULL,
+              "LastValidatedAtUtc" timestamptz NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS license_audit_logs (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "ShopId" uuid NULL REFERENCES shops("Id") ON DELETE SET NULL,
+              "ProvisionedDeviceId" uuid NULL REFERENCES provisioned_devices("Id") ON DELETE SET NULL,
+              "Action" varchar(120) NOT NULL,
+              "Actor" varchar(120) NOT NULL,
+              "Reason" varchar(500) NULL,
+              "MetadataJson" text NULL,
+              "CreatedAtUtc" timestamptz NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS billing_webhook_events (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "ProviderEventId" varchar(160) NOT NULL,
+              "EventType" varchar(120) NOT NULL,
+              "Status" varchar(32) NOT NULL,
+              "ShopId" uuid NULL REFERENCES shops("Id") ON DELETE SET NULL,
+              "BillingSubscriptionId" varchar(120) NULL,
+              "LastErrorCode" varchar(120) NULL,
+              "ReceivedAtUtc" timestamptz NOT NULL,
+              "ProcessedAtUtc" timestamptz NULL,
+              "UpdatedAtUtc" timestamptz NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_shops_Code" ON shops("Code");
+            CREATE INDEX IF NOT EXISTS "IX_subscriptions_ShopId" ON subscriptions("ShopId");
+            CREATE INDEX IF NOT EXISTS "IX_subscriptions_Status" ON subscriptions("Status");
+            CREATE INDEX IF NOT EXISTS "IX_subscriptions_PeriodEndUtc" ON subscriptions("PeriodEndUtc");
+            CREATE INDEX IF NOT EXISTS "IX_provisioned_devices_ShopId" ON provisioned_devices("ShopId");
+            CREATE INDEX IF NOT EXISTS "IX_provisioned_devices_DeviceId" ON provisioned_devices("DeviceId");
+            CREATE INDEX IF NOT EXISTS "IX_provisioned_devices_Status" ON provisioned_devices("Status");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_provisioned_devices_DeviceCode" ON provisioned_devices("DeviceCode");
+            CREATE INDEX IF NOT EXISTS "IX_licenses_ShopId" ON licenses("ShopId");
+            CREATE INDEX IF NOT EXISTS "IX_licenses_ProvisionedDeviceId" ON licenses("ProvisionedDeviceId");
+            CREATE INDEX IF NOT EXISTS "IX_licenses_Status" ON licenses("Status");
+            CREATE INDEX IF NOT EXISTS "IX_licenses_ValidUntil" ON licenses("ValidUntil");
+            CREATE INDEX IF NOT EXISTS "IX_license_audit_logs_ShopId" ON license_audit_logs("ShopId");
+            CREATE INDEX IF NOT EXISTS "IX_license_audit_logs_ProvisionedDeviceId" ON license_audit_logs("ProvisionedDeviceId");
+            CREATE INDEX IF NOT EXISTS "IX_license_audit_logs_Action" ON license_audit_logs("Action");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_billing_webhook_events_ProviderEventId" ON billing_webhook_events("ProviderEventId");
+            CREATE INDEX IF NOT EXISTS "IX_billing_webhook_events_EventType" ON billing_webhook_events("EventType");
+            CREATE INDEX IF NOT EXISTS "IX_billing_webhook_events_ShopId" ON billing_webhook_events("ShopId");
+            """;
+
+        await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE license_audit_logs ADD COLUMN IF NOT EXISTS "IsManualOverride" boolean NOT NULL DEFAULT false;""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE license_audit_logs ADD COLUMN IF NOT EXISTS "ImmutableHash" varchar(128) NULL;""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE license_audit_logs ADD COLUMN IF NOT EXISTS "ImmutablePreviousHash" varchar(128) NULL;""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE INDEX IF NOT EXISTS "IX_license_audit_logs_IsManualOverride" ON license_audit_logs("IsManualOverride");""",
             cancellationToken);
     }
 }
