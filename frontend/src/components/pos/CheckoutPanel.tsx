@@ -116,13 +116,13 @@ const CheckoutPanel = ({
             <Button
               key={key}
               variant={paymentMethod === key ? "default" : "pos-quick"}
-              className={`h-11 flex-col gap-0.5 rounded-xl text-xs ${
+              className={`h-14 flex-col gap-1 rounded-xl text-sm font-semibold ${
                 paymentMethod === key ? "" : ""
               }`}
               onClick={() => (key === "cash" ? openCashCountDialog() : setPaymentMethod(key))}
             >
-              <Icon className="h-4 w-4" />
-              <span className="text-[10px] sm:text-[11px]">{label}</span>
+              <Icon className="h-5 w-5" />
+              <span className="text-xs sm:text-sm">{label}</span>
             </Button>
           ))}
         </div>

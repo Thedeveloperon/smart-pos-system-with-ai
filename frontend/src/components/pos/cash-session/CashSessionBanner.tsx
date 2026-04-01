@@ -43,23 +43,23 @@ const CashSessionBanner = ({ onEndShift }: CashSessionBannerProps) => {
     .padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
 
   return (
-    <div className="bg-accent/60 border-b border-accent px-4 py-1.5 flex items-center justify-between text-xs">
+    <div className="bg-accent/60 border-b border-accent px-4 py-2 flex items-center justify-between text-sm">
       <div className="flex items-center gap-3">
-        <div className="flex items-center gap-1.5 text-success font-semibold">
-          <Shield className="h-3.5 w-3.5" />
-          <span>Session Active</span>
+        <div className="flex items-center gap-1.5 text-success font-semibold text-sm">
+          <Shield className="h-4 w-4" />
+          <span className="text-sm">Session Active</span>
         </div>
         <span className="text-muted-foreground">|</span>
-        <span className="text-muted-foreground flex items-center gap-1">
-          <Clock className="h-3 w-3" />
-          <span className="inline-block w-[8ch] tabular-nums font-mono text-left">
+        <span className="text-muted-foreground flex items-center gap-1 text-sm">
+          <Clock className="h-3.5 w-3.5" />
+          <span className="inline-block w-[8ch] tabular-nums font-mono text-left text-sm">
             {elapsedLabel}
           </span>
         </span>
         <span className="text-muted-foreground">|</span>
-        <span className="text-muted-foreground">
+        <span className="text-muted-foreground text-sm">
           Opening:{" "}
-          <span className="font-medium text-foreground tabular-nums">
+          <span className="font-medium text-foreground tabular-nums text-sm">
             Rs. {session.opening.total.toLocaleString()}
           </span>
         </span>
@@ -67,10 +67,10 @@ const CashSessionBanner = ({ onEndShift }: CashSessionBannerProps) => {
       <Button
         variant="outline"
         size="sm"
-        className="h-6 text-xs rounded-lg gap-1 border-destructive/30 text-destructive hover:bg-destructive/10"
+        className="h-7 text-sm rounded-lg gap-1 border-destructive/30 text-destructive hover:bg-destructive/10"
         onClick={onEndShift}
       >
-        <Lock className="h-3 w-3" />
+        <Lock className="h-3.5 w-3.5" />
         End Shift
       </Button>
     </div>

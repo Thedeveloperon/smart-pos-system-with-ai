@@ -42,18 +42,6 @@ const DenominationCounter = ({ onChange, initialCounts }: DenominationCounterPro
         : "border-border/70 bg-card hover:border-border hover:bg-muted/20"
     }`;
 
-  const quantityClass = (qty: number) => {
-    if (qty <= 5) {
-      return "inline-flex min-w-10 items-center justify-center rounded-full bg-rose-500 px-3 py-1 text-sm font-black tabular-nums text-white shadow-sm";
-    }
-
-    if (qty <= 10) {
-      return "inline-flex min-w-10 items-center justify-center rounded-full bg-amber-500 px-3 py-1 text-sm font-black tabular-nums text-white shadow-sm";
-    }
-
-    return "inline-flex min-w-10 items-center justify-center rounded-full bg-emerald-500 px-3 py-1 text-sm font-black tabular-nums text-white shadow-sm";
-  };
-
   const renderItem = (d: (typeof SRI_LANKAN_DENOMINATIONS)[number], icon: "note" | "coin") => {
     const qty = quantities[d.value] || 0;
 
@@ -85,9 +73,26 @@ const DenominationCounter = ({ onChange, initialCounts }: DenominationCounterPro
               <span className="text-[1.2rem] font-semibold tracking-tight text-slate-600">Rs.{d.label}</span>
             </div>
 
-            <div className={`${quantityClass(qty)} min-w-8 px-2 py-0.5 text-xs`} aria-live="polite" aria-atomic="true">
+            <div
+              className={`inline-flex min-w-10 items-center justify-center rounded-full px-3 py-1 text-sm font-black tabular-nums text-white shadow-sm ${
+                qty <= 5 ? "bg-rose-500" : qty <= 10 ? "bg-amber-500" : "bg-emerald-500"
+              }`}
+              aria-live="polite"
+              aria-atomic="true"
+            >
               {qty}
             </div>
+
+            <input
+              type="number"
+              min={0}
+              step={1}
+              inputMode="numeric"
+              value={qty}
+              onChange={(event) => handleChange(d.value, Number(event.target.value))}
+              className="h-10 w-16 rounded-xl border-[3px] border-[#f39a6b] bg-background text-center text-sm font-semibold tabular-nums text-slate-700 shadow-sm outline-none transition-colors focus:border-[#f39a6b] focus:ring-2 focus:ring-[#f39a6b]/20"
+              aria-label={`${d.label} quantity`}
+            />
           </div>
 
           <Button
@@ -140,6 +145,7 @@ const DenominationCounter = ({ onChange, initialCounts }: DenominationCounterPro
           </div>
         </section>
       </div>
+
     </div>
   );
 };

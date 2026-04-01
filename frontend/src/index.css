@@ -95,6 +95,18 @@
   body {
     @apply bg-background text-foreground font-sans antialiased;
   }
+
+  body {
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at top left, hsl(152 60% 92% / 0.9), transparent 36%),
+      radial-gradient(circle at top right, hsl(196 100% 94% / 0.75), transparent 30%),
+      linear-gradient(180deg, hsl(210 20% 99%) 0%, hsl(150 40% 97%) 100%);
+  }
+
+  #root {
+    min-height: 100vh;
+  }
 }
 
 @layer utilities {
@@ -141,5 +153,46 @@
     width: 0;
     height: 0;
     display: none;
+  }
+
+  .splash-screen {
+    position: relative;
+    display: grid;
+    min-height: 100vh;
+    place-items: center;
+    overflow: hidden;
+    padding: 1.5rem;
+    color: hsl(220 25% 12%);
+    background: linear-gradient(180deg, hsl(0 0% 99%) 0%, hsl(145 30% 97%) 100%);
+  }
+
+  .splash-logo-image {
+    width: clamp(8rem, 24vw, 12rem);
+    height: clamp(8rem, 24vw, 12rem);
+    object-fit: cover;
+    border-radius: 9999px;
+    opacity: 0.2;
+    animation: splash-fade 4s ease-in-out infinite both;
+  }
+}
+
+@keyframes splash-fade {
+  0%,
+  100% {
+    opacity: 0.2;
+    transform: scale(0.98);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .splash-logo-image {
+    animation: none !important;
+    opacity: 1;
+    transform: none;
   }
 }

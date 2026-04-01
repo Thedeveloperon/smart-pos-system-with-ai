@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
@@ -8,26 +8,70 @@ import { AuthProvider, useAuth } from "@/components/auth/AuthContext";
 import { LicensingProvider, useLicensing } from "@/components/licensing/LicensingContext";
 import { LicenseActivationScreen, LicenseBlockedScreen } from "@/components/licensing/LicenseScreens";
 import { Button } from "@/components/ui/button";
+import SplashScreen from "@/components/ui/SplashScreen";
 import { getDeviceCode } from "@/lib/api";
 import { isSuperAdminBackendRole } from "@/lib/auth";
 import AdminConsole from "./pages/AdminConsole.tsx";
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
-const LoadingScreen = ({ message }: { message: string }) => (
-  <div className="min-h-screen flex items-center justify-center bg-background">
-    <div className="rounded-2xl border border-border bg-card px-6 py-5 text-sm text-muted-foreground shadow-sm">
-      {message}
-    </div>
-  </div>
-);
+const SPLASH_MIN_DURATION_MS = 1000;
+
+const useMinimumVisible = (isVisible: boolean, minimumDurationMs = SPLASH_MIN_DURATION_MS) => {
+  const [shouldRender, setShouldRender] = useState(isVisible);
+  const visibleSinceRef = useRef<number | null>(isVisible ? Date.now() : null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (isVisible) {
+      visibleSinceRef.current ??= Date.now();
+      setShouldRender(true);
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      return;
+    }
+
+    const visibleSince = visibleSinceRef.current;
+    if (visibleSince === null) {
+      setShouldRender(false);
+      return;
+    }
+
+    const elapsed = Date.now() - visibleSince;
+    const remaining = Math.max(0, minimumDurationMs - elapsed);
+
+    if (remaining === 0) {
+      visibleSinceRef.current = null;
+      setShouldRender(false);
+      return;
+    }
+
+    timeoutRef.current = setTimeout(() => {
+      visibleSinceRef.current = null;
+      setShouldRender(false);
+      timeoutRef.current = null;
+    }, remaining);
+
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    };
+  }, [isVisible, minimumDurationMs]);
+
+  return shouldRender;
+};
 
 const AuthGate = () => {
   const { isAuthenticated, isLoading, user } = useAuth();
   const hasSuperAdminAccess = isSuperAdminBackendRole(user?.backendRole);
+  const showSplash = useMinimumVisible(isLoading);
 
-  if (isLoading) {
-    return <LoadingScreen message="Checking session..." />;
+  if (showSplash) {
+    return <SplashScreen />;
   }
 
   if (!isAuthenticated) {
@@ -74,6 +118,7 @@ const AdminUnauthorizedScreen = ({ onSignOut }: { onSignOut: () => void }) => (
 const AdminAuthGate = () => {
   const { isAuthenticated, isLoading, user, logout } = useAuth();
   const hasSuperAdminAccess = isSuperAdminBackendRole(user?.backendRole);
+  const showSplash = useMinimumVisible(isLoading);
 
   return (
     <BrowserRouter>
@@ -81,8 +126,8 @@ const AdminAuthGate = () => {
         <Route
           path="/admin/login"
           element={
-            isLoading ? (
-              <LoadingScreen message="Checking admin session..." />
+            showSplash ? (
+              <SplashScreen />
             ) : isAuthenticated ? (
               hasSuperAdminAccess ? (
                 <Navigate to="/admin" replace />
@@ -101,8 +146,8 @@ const AdminAuthGate = () => {
         <Route
           path="/admin"
           element={
-            isLoading ? (
-              <LoadingScreen message="Checking admin session..." />
+            showSplash ? (
+              <SplashScreen />
             ) : !isAuthenticated ? (
               <Navigate to="/admin/login" replace />
             ) : hasSuperAdminAccess ? (
@@ -132,6 +177,7 @@ const AdminAuthGate = () => {
 const LicenseGate = () => {
   const { status, isLoading, isRefreshing, error, isLicensed, isBlocked, refresh, activate } = useLicensing();
   const [isActivating, setIsActivating] = useState(false);
+  const showSplash = useMinimumVisible(isLoading);
 
   const handleActivate = async () => {
     setIsActivating(true);
@@ -142,8 +188,8 @@ const LicenseGate = () => {
     }
   };
 
-  if (isLoading) {
-    return <LoadingScreen message="Validating device license..." />;
+  if (showSplash) {
+    return <SplashScreen />;
   }
 
   if (!status || status.state === "unprovisioned") {
@@ -179,7 +225,7 @@ const LicenseGate = () => {
   }
 
   if (!isLicensed) {
-    return <LoadingScreen message="Checking license state..." />;
+    return <SplashScreen />;
   }
 
   return (
