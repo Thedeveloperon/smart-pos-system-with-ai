@@ -1,0 +1,96 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222 47% 6%;
+    --foreground: 210 40% 92%;
+
+    --card: 222 40% 10%;
+    --card-foreground: 210 40% 92%;
+
+    --popover: 222 40% 10%;
+    --popover-foreground: 210 40% 92%;
+
+    --primary: 160 84% 39%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 222 30% 14%;
+    --secondary-foreground: 210 40% 92%;
+
+    --muted: 222 25% 16%;
+    --muted-foreground: 215 20% 55%;
+
+    --accent: 174 70% 45%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 222 25% 16%;
+    --input: 222 25% 16%;
+    --ring: 160 84% 39%;
+
+    --radius: 0.75rem;
+
+    --hero-bg: 222 50% 5%;
+    --hero-foreground: 210 40% 96%;
+    --hero-muted: 215 20% 55%;
+
+    --feature-icon-bg: 160 84% 39%;
+    --feature-icon-fg: 0 0% 100%;
+
+    --glass: 222 40% 12%;
+    --glass-border: 215 25% 20%;
+    --glow-primary: 160 84% 39%;
+
+    --sidebar-background: 222 47% 6%;
+    --sidebar-foreground: 210 40% 92%;
+    --sidebar-primary: 160 84% 39%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 222 30% 14%;
+    --sidebar-accent-foreground: 210 40% 92%;
+    --sidebar-border: 222 25% 16%;
+    --sidebar-ring: 160 84% 39%;
+
+    font-family: var(--font-dm-sans), system-ui, sans-serif;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-space-grotesk), system-ui, sans-serif;
+  }
+}
+
+@layer utilities {
+  .glass-card {
+    @apply bg-glass/60 backdrop-blur-xl border border-glass-border rounded-2xl;
+  }
+
+  .glow-primary {
+    box-shadow: 0 0 40px -10px hsl(var(--glow-primary) / 0.3);
+  }
+
+  .glow-primary-sm {
+    box-shadow: 0 0 20px -5px hsl(var(--glow-primary) / 0.2);
+  }
+
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-primary to-accent;
+  }
+}
