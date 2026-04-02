@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Shield, Lock, Clock } from "lucide-react";
+import { Shield, Lock, Clock, SlidersHorizontal } from "lucide-react";
 import { useCashSession } from "./CashSessionContext";
 
 interface CashSessionBannerProps {
   onEndShift: () => void;
+  onManageDrawer: () => void;
 }
 
-const CashSessionBanner = ({ onEndShift }: CashSessionBannerProps) => {
+const CashSessionBanner = ({ onEndShift, onManageDrawer }: CashSessionBannerProps) => {
   const { session } = useCashSession();
   const [nowMs, setNowMs] = useState(() => Date.now());
 
@@ -64,15 +65,26 @@ const CashSessionBanner = ({ onEndShift }: CashSessionBannerProps) => {
           </span>
         </span>
       </div>
-      <Button
-        variant="outline"
-        size="sm"
-        className="h-7 text-sm rounded-lg gap-1 border-destructive/30 text-destructive hover:bg-destructive/10"
-        onClick={onEndShift}
-      >
-        <Lock className="h-3.5 w-3.5" />
-        End Shift
-      </Button>
+      <div className="ml-auto flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 rounded-lg gap-1 border-primary/30 text-primary hover:bg-primary/10"
+          onClick={onManageDrawer}
+        >
+          <SlidersHorizontal className="h-3.5 w-3.5" />
+          Manage Drawer
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 rounded-lg gap-1 border-destructive/30 text-destructive hover:bg-destructive/10"
+          onClick={onEndShift}
+        >
+          <Lock className="h-3.5 w-3.5" />
+          End Shift
+        </Button>
+      </div>
     </div>
   );
 };

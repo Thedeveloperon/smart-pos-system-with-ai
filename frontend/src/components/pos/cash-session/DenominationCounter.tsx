@@ -1,4 +1,4 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Banknote, Coins, Minus, Plus } from "lucide-react";
 import { SRI_LANKAN_DENOMINATIONS, type DenominationCount } from "./types";
@@ -152,4 +152,3 @@ const DenominationCounter = ({ onChange, initialCounts }: DenominationCounterPro
 };
 
 export default DenominationCounter;
-

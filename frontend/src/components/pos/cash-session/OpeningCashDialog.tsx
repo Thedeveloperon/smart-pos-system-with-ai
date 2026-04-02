@@ -15,13 +15,14 @@ import type { DenominationCount } from "./types";
 interface OpeningCashDialogProps {
   open: boolean;
   cashierName: string;
-  onConfirm: (counts: DenominationCount[], total: number) => void;
+  onConfirm: (counts: DenominationCount[], total: number) => Promise<void> | void;
 }
 
 const OpeningCashDialog = ({ open, cashierName, onConfirm }: OpeningCashDialogProps) => {
   const [counts, setCounts] = useState<DenominationCount[]>([]);
   const [total, setTotal] = useState(0);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
 
   const handleCountChange = (newCounts: DenominationCount[], newTotal: number) => {
     setCounts(newCounts);
@@ -32,9 +33,13 @@ const OpeningCashDialog = ({ open, cashierName, onConfirm }: OpeningCashDialogPr
     setShowConfirm(true);
   };
 
-  const handleConfirm = () => {
-    onConfirm(counts, total);
-    setShowConfirm(false);
+  const handleConfirm = async () => {
+    try {
+      setIsConfirming(true);
+      await onConfirm(counts, total);
+    } finally {
+      setIsConfirming(false);
+    }
   };
 
   if (showConfirm) {
@@ -88,12 +93,24 @@ const OpeningCashDialog = ({ open, cashierName, onConfirm }: OpeningCashDialogPr
           </div>
 
           <DialogFooter className="gap-2 border-t border-slate-300 bg-slate-100 px-6 py-3">
-            <Button variant="outline" onClick={() => setShowConfirm(false)} className="rounded-xl">
+            <Button
+              variant="outline"
+              onClick={() => setShowConfirm(false)}
+              className="rounded-xl"
+              disabled={isConfirming}
+            >
               Go Back
             </Button>
-            <Button variant="pos-primary" onClick={handleConfirm} className="rounded-xl">
+            <Button
+              variant="pos-primary"
+              onClick={() => {
+                void handleConfirm();
+              }}
+              className="rounded-xl"
+              disabled={isConfirming}
+            >
               <CheckCircle2 className="h-4 w-4" />
-              Confirm & Start Shift
+              {isConfirming ? "Starting Shift..." : "Confirm & Start Shift"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -131,6 +148,7 @@ const OpeningCashDialog = ({ open, cashierName, onConfirm }: OpeningCashDialogPr
             size="lg"
             className="w-full rounded-xl sm:w-[17rem]"
             onClick={handleProceed}
+            disabled={isConfirming}
           >
             <CheckCircle2 className="h-5 w-5" />
             Proceed - Rs. {total.toLocaleString()}

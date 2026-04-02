@@ -71,6 +71,11 @@ describe("license token replay recovery", () => {
             submitted_by: "cashier",
             submitted_at: "2026-04-02T09:30:00.000Z",
           },
+          drawer: {
+            counts: [{ denomination: 100, quantity: 1 }],
+            total: 100,
+            updated_at: "2026-04-02T09:30:00.000Z",
+          },
           cash_sales_total: 0,
           audit_log: [],
         });

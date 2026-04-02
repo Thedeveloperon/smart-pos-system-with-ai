@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -26,7 +26,8 @@ interface ClosingCashDialogProps {
   expectedCash: number;
   openingCash: number;
   cashSalesTotal: number;
-  onConfirm: (counts: DenominationCount[], total: number, reason?: string) => void;
+  initialCounts?: DenominationCount[];
+  onConfirm: (counts: DenominationCount[], total: number, reason?: string) => Promise<void> | void;
 }
 
 type Step = "count" | "review" | "reason";
@@ -38,12 +39,29 @@ const ClosingCashDialog = ({
   expectedCash,
   openingCash,
   cashSalesTotal,
+  initialCounts,
   onConfirm,
 }: ClosingCashDialogProps) => {
   const [step, setStep] = useState<Step>("count");
   const [counts, setCounts] = useState<DenominationCount[]>([]);
   const [total, setTotal] = useState(0);
   const [reason, setReason] = useState("");
+  const [isConfirming, setIsConfirming] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const startingCounts = initialCounts ?? [];
+    const startingTotal = startingCounts.reduce(
+      (sum, count) => sum + count.denomination * count.quantity,
+      0,
+    );
+
+    setCounts(startingCounts);
+    setTotal(startingTotal);
+  }, [initialCounts, open]);
 
   const difference = total - expectedCash;
   const hasMismatch = Math.abs(difference) > 0;
@@ -67,10 +85,13 @@ const ClosingCashDialog = ({
     setStep("review");
   };
 
-  const handleConfirm = () => {
-    onConfirm(counts, total, hasMismatch ? reason : undefined);
-    setStep("count");
-    setReason("");
+  const handleConfirm = async () => {
+    try {
+      setIsConfirming(true);
+      await onConfirm(counts, total, hasMismatch ? reason : undefined);
+    } finally {
+      setIsConfirming(false);
+    }
   };
 
   const handleCancel = () => {
@@ -239,12 +260,24 @@ const ClosingCashDialog = ({
           </div>
 
           <DialogFooter className="w-full gap-2 border-t border-slate-300 bg-slate-100 px-6 py-3">
-            <Button variant="outline" onClick={() => setStep(hasMismatch ? "reason" : "count")} className="rounded-xl">
+            <Button
+              variant="outline"
+              onClick={() => setStep(hasMismatch ? "reason" : "count")}
+              className="rounded-xl"
+              disabled={isConfirming}
+            >
               Go Back
             </Button>
-            <Button variant="pos-primary" onClick={handleConfirm} className="rounded-xl">
+            <Button
+              variant="pos-primary"
+              onClick={() => {
+                void handleConfirm();
+              }}
+              className="rounded-xl"
+              disabled={isConfirming}
+            >
               <Lock className="h-4 w-4" />
-              Confirm & Lock Session
+              {isConfirming ? "Locking Session..." : "Confirm & Lock Session"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -274,7 +307,7 @@ const ClosingCashDialog = ({
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto px-6 py-4">
-          <DenominationCounter onChange={handleCountChange} />
+          <DenominationCounter initialCounts={initialCounts} onChange={handleCountChange} />
         </div>
 
         {total > 0 && (
@@ -314,6 +347,7 @@ const ClosingCashDialog = ({
             variant="pos-primary"
             className="h-10 rounded-xl px-5"
             onClick={handleProceed}
+            disabled={isConfirming}
           >
             <CheckCircle2 className="h-5 w-5" />
             Proceed - Rs. {total.toLocaleString()}

@@ -294,6 +294,12 @@ type BackendCashSessionEntry = {
   approved_at?: string | null;
 };
 
+type BackendCashDrawer = {
+  counts: BackendCashCount[];
+  total: number;
+  updated_at?: string | null;
+};
+
 type BackendCashSessionAuditEntry = {
   id: string;
   action: string;
@@ -312,6 +318,7 @@ type BackendCashSessionResponse = {
   opened_at: string;
   closed_at?: string | null;
   opening: BackendCashSessionEntry;
+  drawer: BackendCashDrawer;
   closing?: BackendCashSessionEntry | null;
   expected_cash?: number | null;
   difference?: number | null;
@@ -1159,6 +1166,8 @@ type CreateSaleRequest = {
   discount_percent?: number;
   role: string;
   payments: { method: string; amount: number; reference_number?: string | null }[];
+  cash_received_counts?: { denomination: number; quantity: number }[];
+  cash_change_counts?: { denomination: number; quantity: number }[];
 };
 
 type HoldSaleRequest = {
@@ -1788,6 +1797,17 @@ function mapCashSessionEntry(entry: BackendCashSessionEntry): CashSessionEntry {
   };
 }
 
+function mapCashDrawer(drawer: BackendCashDrawer) {
+  return {
+    counts: drawer.counts.map((count) => ({
+      denomination: Number(count.denomination),
+      quantity: Number(count.quantity),
+    })),
+    total: Number(drawer.total),
+    updatedAt: drawer.updated_at ? new Date(drawer.updated_at) : undefined,
+  };
+}
+
 function mapCashSessionResponse(session: BackendCashSessionResponse): CashSession {
   return {
     id: session.cash_session_id,
@@ -1795,6 +1815,7 @@ function mapCashSessionResponse(session: BackendCashSessionResponse): CashSessio
     openedAt: new Date(session.opened_at),
     closedAt: session.closed_at ? new Date(session.closed_at) : undefined,
     opening: mapCashSessionEntry(session.opening),
+    drawer: mapCashDrawer(session.drawer),
     closing: session.closing ? mapCashSessionEntry(session.closing) : undefined,
     expectedCash: session.expected_cash ?? undefined,
     difference: session.difference ?? undefined,
@@ -2217,6 +2238,23 @@ export async function closeCashSession(
   return mapCashSessionResponse(response);
 }
 
+export async function updateCurrentCashDrawer(counts: DenominationCount[], total: number) {
+  const payload = {
+    counts: counts.map((item) => ({
+      denomination: item.denomination,
+      quantity: item.quantity,
+    })),
+    total,
+  };
+
+  const response = await request<BackendCashSessionResponse>("/api/cash-sessions/current/drawer", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+
+  return mapCashSessionResponse(response);
+}
+
 export async function holdSale(items: CartItem[], role: "admin" | "manager" | "cashier") {
   const payload: HoldSaleRequest = {
     items: items.map((item) => ({
@@ -2239,7 +2277,9 @@ export async function completeSale(
   paymentMethod: PaymentMethod,
   amount: number,
   saleId?: string,
-  referenceNumber?: string
+  referenceNumber?: string,
+  cashReceivedCounts?: DenominationCount[],
+  cashChangeCounts?: DenominationCount[]
 ) {
   const payload: CreateSaleRequest = {
     sale_id: saleId,
@@ -2258,6 +2298,14 @@ export async function completeSale(
         reference_number: referenceNumber || null,
       },
     ],
+    cash_received_counts: cashReceivedCounts?.map((item) => ({
+      denomination: item.denomination,
+      quantity: item.quantity,
+    })),
+    cash_change_counts: cashChangeCounts?.map((item) => ({
+      denomination: item.denomination,
+      quantity: item.quantity,
+    })),
   };
 
   return request<BackendSaleResponse>("/api/checkout/complete", {

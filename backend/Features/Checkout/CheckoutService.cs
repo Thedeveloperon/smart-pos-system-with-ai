@@ -184,6 +184,8 @@ public sealed class CheckoutService(
         {
             await cashSessionService.RecordCashSaleAsync(
                 cashPaidTotal,
+                request.CashReceivedCounts,
+                request.CashChangeCounts,
                 sale.Id,
                 sale.SaleNumber,
                 cancellationToken);
