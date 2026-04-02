@@ -601,6 +601,9 @@ public sealed class AdminShopLicensingSnapshotRow
     [JsonPropertyName("total_devices")]
     public int TotalDevices { get; set; }
 
+    [JsonPropertyName("latest_activation_entitlement")]
+    public CustomerActivationEntitlementResponse? LatestActivationEntitlement { get; set; }
+
     [JsonPropertyName("devices")]
     public List<AdminDeviceSeatRow> Devices { get; set; } = [];
 }

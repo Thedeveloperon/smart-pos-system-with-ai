@@ -1356,11 +1356,23 @@ public sealed class LicenseService(
                     .OrderByDescending(x => x.IssuedAtUtc)
                     .First());
 
+        var latestActivationEntitlementByShop = (await dbContext.CustomerActivationEntitlements
+                .AsNoTracking()
+                .Where(x => shopIds.Contains(x.ShopId))
+                .ToListAsync(cancellationToken))
+            .GroupBy(x => x.ShopId)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .OrderByDescending(x => x.IssuedAtUtc)
+                    .First());
+
         var rows = new List<AdminShopLicensingSnapshotRow>(shops.Count);
 
         foreach (var shop in shops)
         {
             latestSubscriptionByShop.TryGetValue(shop.Id, out var subscription);
+            latestActivationEntitlementByShop.TryGetValue(shop.Id, out var latestActivationEntitlement);
             var shopDevices = devices
                 .Where(x => x.ShopId == shop.Id)
                 .OrderBy(x => x.DeviceCode, StringComparer.OrdinalIgnoreCase)
@@ -1400,6 +1412,9 @@ public sealed class LicenseService(
                 SeatLimit = seatLimit,
                 ActiveSeats = shopDevices.Count(x => x.Status == ProvisionedDeviceStatus.Active),
                 TotalDevices = shopDevices.Count,
+                LatestActivationEntitlement = latestActivationEntitlement is null
+                    ? null
+                    : MapActivationEntitlementResponse(latestActivationEntitlement, shop.Code),
                 Devices = deviceRows
             });
         }

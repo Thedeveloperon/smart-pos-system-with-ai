@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useAuth } from "@/components/auth/AuthContext";
 import { useLicensing } from "@/components/licensing/LicensingContext";
-import { LicenseGraceBanner } from "@/components/licensing/LicenseScreens";
+import { LicenseGraceBanner, LicenseOfflineBanner } from "@/components/licensing/LicenseScreens";
 import HeaderBar from "@/components/pos/HeaderBar";
 import LicenseAccountDialog from "@/components/pos/LicenseAccountDialog";
 import NewItemDialog from "@/components/pos/NewItemDialog";
@@ -534,6 +534,17 @@ const IndexInner = () => {
       {licenseStatus?.state === "grace" && (
         <LicenseGraceBanner
           status={licenseStatus}
+          isRefreshing={isLicenseRefreshing}
+          onRefresh={() => {
+            void refreshLicenseStatus();
+          }}
+        />
+      )}
+
+      {(licenseStatus?.state === "active" || licenseStatus?.state === "grace") && (
+        <LicenseOfflineBanner
+          status={licenseStatus}
+          pendingSyncCount={offlinePendingCount}
           isRefreshing={isLicenseRefreshing}
           onRefresh={() => {
             void refreshLicenseStatus();
