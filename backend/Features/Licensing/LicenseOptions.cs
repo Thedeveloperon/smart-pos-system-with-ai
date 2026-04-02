@@ -43,6 +43,12 @@ public sealed class LicenseOptions
     public string TokenCookieSameSite { get; set; } = "Lax";
     public string TokenCookiePath { get; set; } = "/";
     public string AccessSuccessPageBaseUrl { get; set; } = "/license/success";
+    public string InstallerDownloadBaseUrl { get; set; } = string.Empty;
+    public bool InstallerDownloadProtectedEnabled { get; set; }
+    public int InstallerDownloadTokenTtlMinutes { get; set; } = 30;
+    public string InstallerDownloadSigningSecret { get; set; } = string.Empty;
+    public string InstallerDownloadSigningSecretEnvironmentVariable { get; set; } = "SMARTPOS_INSTALLER_DOWNLOAD_SIGNING_SECRET";
+    public string InstallerChecksumSha256 { get; set; } = string.Empty;
     public bool AccessDeliveryEmailEnabled { get; set; }
     public string AccessDeliveryFromEmail { get; set; } = "noreply@smartpos.local";
     public string AccessDeliveryFromName { get; set; } = "SmartPOS Licensing";
@@ -68,6 +74,11 @@ public sealed class LicenseOptions
     public int BillingReconciliationWebhookFailureLookbackHours { get; set; } = 72;
     public int BillingReconciliationTake { get; set; } = 100;
     public int BillingReconciliationWebhookFailureTake { get; set; } = 50;
+    public int ProvisioningRateLimitPerMinute { get; set; } = 20;
+    public int MarketingPaymentRequestRateLimitPerMinute { get; set; } = 12;
+    public int MarketingPaymentSubmitRateLimitPerMinute { get; set; } = 8;
+    public int MarketingPaymentReplayGuardWindowMinutes { get; set; } = 15;
+    public int MarketingPaymentProofMaxFileBytes { get; set; } = 10 * 1024 * 1024;
     public List<LicenseSigningKeyOptions> SigningKeys { get; set; } = [];
     public bool EnforceProtectedRoutes { get; set; } = true;
     public string[] SuspendedBlockedPathPrefixes { get; set; } = ["/api/checkout", "/api/refunds"];

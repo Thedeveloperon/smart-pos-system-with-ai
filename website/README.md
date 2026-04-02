@@ -37,3 +37,4 @@ npm run test
 - Runtime port: `3000` by default (override via `PORT`)
 - Optional env var:
   - `NEXT_PUBLIC_SITE_URL` (used for canonical and social metadata; defaults to `https://smartpos.lk`)
+  - `SMARTPOS_BACKEND_API_URL` (used by website API routes for payment onboarding; defaults to `http://127.0.0.1:5080`)

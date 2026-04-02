@@ -2,8 +2,11 @@
 import { Check } from "lucide-react";
 import { motion } from "framer-motion";
 import { useI18n } from "@/i18n/I18nProvider";
+import Link from "next/link";
+import { trackMarketingEvent } from "@/lib/marketingAnalytics";
 
 type PricingPlan = {
+  code?: string;
   name: string;
   price: string;
   period: string;
@@ -13,8 +16,10 @@ type PricingPlan = {
   highlighted: boolean;
 };
 
+const fallbackPlanCodeByIndex = ["starter", "pro", "business"] as const;
+
 const PricingSection = () => {
-  const { t, get } = useI18n();
+  const { locale, t, get } = useI18n();
   const plans = get<PricingPlan[]>("pricing.plans");
 
   return (
@@ -28,39 +33,58 @@ const PricingSection = () => {
         </div>
 
         <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-          {plans.map((plan, i) => (
-            <motion.div
-              key={plan.name}
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.4, delay: i * 0.1 }}
-              className={`glass-card p-8 relative ${plan.highlighted ? "border-primary/30 glow-primary-sm" : ""}`}
-            >
-              {plan.highlighted && (
-                <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-gradient-to-r from-primary to-accent text-primary-foreground text-xs font-semibold px-3 py-1 rounded-full">
-                  {t("pricing.mostPopular")}
-                </span>
-              )}
-              <h3 className="text-lg font-semibold text-foreground">{plan.name}</h3>
-              <p className="text-muted-foreground text-sm mt-1">{plan.description}</p>
-              <div className="mt-6 mb-6">
-                <span className="text-4xl font-bold text-foreground">{plan.price}</span>
-                <span className="text-muted-foreground text-sm">{plan.period}</span>
-              </div>
-              <ul className="space-y-3 mb-8">
-                {plan.features.map((feature) => (
-                  <li key={feature} className="flex items-center gap-2 text-sm text-foreground">
-                    <Check size={16} className="text-primary shrink-0" />
-                    {feature}
-                  </li>
-                ))}
-              </ul>
-              <Button variant={plan.highlighted ? "hero" : "outline"} className="w-full">
-                {plan.cta}
-              </Button>
-            </motion.div>
-          ))}
+          {plans.map((plan, i) => {
+            const planCode =
+              plan.code?.trim().toLowerCase() ||
+              fallbackPlanCodeByIndex[i] ||
+              "starter";
+
+            return (
+              <motion.div
+                key={plan.name}
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.4, delay: i * 0.1 }}
+                className={`glass-card p-8 relative ${plan.highlighted ? "border-primary/30 glow-primary-sm" : ""}`}
+              >
+                {plan.highlighted && (
+                  <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-gradient-to-r from-primary to-accent text-primary-foreground text-xs font-semibold px-3 py-1 rounded-full">
+                    {t("pricing.mostPopular")}
+                  </span>
+                )}
+                <h3 className="text-lg font-semibold text-foreground">{plan.name}</h3>
+                <p className="text-muted-foreground text-sm mt-1">{plan.description}</p>
+                <div className="mt-6 mb-6">
+                  <span className="text-4xl font-bold text-foreground">{plan.price}</span>
+                  <span className="text-muted-foreground text-sm">{plan.period}</span>
+                </div>
+                <ul className="space-y-3 mb-8">
+                  {plan.features.map((feature) => (
+                    <li key={feature} className="flex items-center gap-2 text-sm text-foreground">
+                      <Check size={16} className="text-primary shrink-0" />
+                      {feature}
+                    </li>
+                  ))}
+                </ul>
+                <Button asChild variant={plan.highlighted ? "hero" : "outline"} className="w-full">
+                  <Link
+                    href={`/${locale}/start?plan=${encodeURIComponent(planCode)}`}
+                    onClick={() => {
+                      trackMarketingEvent("pricing_cta_clicked", {
+                        locale,
+                        plan_code: planCode,
+                        plan_name: plan.name,
+                        cta: plan.cta,
+                      });
+                    }}
+                  >
+                    {plan.cta}
+                  </Link>
+                </Button>
+              </motion.div>
+            );
+          })}
         </div>
       </div>
     </section>

@@ -143,6 +143,18 @@ type ShareDialogState = {
   successUrl?: string;
 };
 
+const marketingInvoiceMetadataPrefix = "MARKETING_REQUEST:";
+const marketingPaymentSubmissionPrefix = "MARKETING_PAYMENT_SUBMISSION:";
+
+const isMarketingBillingRecord = (notes?: string | null) => {
+  const normalized = (notes || "").trim();
+  if (!normalized) {
+    return false;
+  }
+
+  return normalized.includes(marketingInvoiceMetadataPrefix) || normalized.includes(marketingPaymentSubmissionPrefix);
+};
+
 const money = (value: number) => `Rs. ${value.toLocaleString()}`;
 const today = new Date();
 const defaultFromDate = new Date(today);
@@ -1291,6 +1303,12 @@ const ManagerReportsDrawer = ({
       .slice(0, 4);
   }, [report.transactions]);
 
+  const pendingMarketingPaymentsCount = useMemo(() => {
+    return (report.manualPayments?.items ?? []).filter(
+      (payment) => payment.status === "pending_verification" && isMarketingBillingRecord(payment.notes),
+    ).length;
+  }, [report.manualPayments?.items]);
+
   const handleExportSalesCsv = () => {
     if (report.transactions.length === 0) {
       toast.info("No sales data to export.");
@@ -2301,7 +2319,14 @@ const ManagerReportsDrawer = ({
                         <p className="text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">
                           Recent Invoices
                         </p>
-                        <Badge variant="secondary">{report.manualInvoices?.count ?? 0}</Badge>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="secondary">{report.manualInvoices?.count ?? 0}</Badge>
+                          {((report.manualInvoices?.items ?? []).filter((invoice) => isMarketingBillingRecord(invoice.notes)).length > 0) && (
+                            <Badge variant="outline">
+                              Marketing {(report.manualInvoices?.items ?? []).filter((invoice) => isMarketingBillingRecord(invoice.notes)).length}
+                            </Badge>
+                          )}
+                        </div>
                       </div>
                       <Table>
                         <TableHeader>
@@ -2329,6 +2354,11 @@ const ManagerReportsDrawer = ({
                                     <p className="text-xs text-muted-foreground">
                                       Due {new Date(invoice.due_at).toLocaleDateString()}
                                     </p>
+                                    {isMarketingBillingRecord(invoice.notes) && (
+                                      <Badge variant="outline" className="text-[10px]">
+                                        Marketing
+                                      </Badge>
+                                    )}
                                   </div>
                                 </TableCell>
                                 <TableCell>{invoice.shop_code}</TableCell>
@@ -2359,7 +2389,12 @@ const ManagerReportsDrawer = ({
                         <p className="text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">
                           Recent Payments
                         </p>
-                        <Badge variant="secondary">{report.manualPayments?.count ?? 0}</Badge>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="secondary">{report.manualPayments?.count ?? 0}</Badge>
+                          {pendingMarketingPaymentsCount > 0 && (
+                            <Badge variant="outline">Pending Marketing {pendingMarketingPaymentsCount}</Badge>
+                          )}
+                        </div>
                       </div>
                       <Table>
                         <TableHeader>
@@ -2386,6 +2421,11 @@ const ManagerReportsDrawer = ({
                                   <div className="space-y-1">
                                     <p className="font-medium">{payment.invoice_number}</p>
                                     <p className="text-xs text-muted-foreground">{payment.method.replaceAll("_", " ")}</p>
+                                    {isMarketingBillingRecord(payment.notes) && (
+                                      <Badge variant="outline" className="text-[10px]">
+                                        Marketing
+                                      </Badge>
+                                    )}
                                   </div>
                                 </TableCell>
                                 <TableCell className="text-right font-semibold">{money(payment.amount)}</TableCell>

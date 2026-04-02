@@ -343,6 +343,113 @@ public static class LicenseEndpoints
         .WithName("HandleBillingWebhook")
         .WithOpenApi();
 
+        var publicBilling = app.MapGroup("/api/license/public")
+            .WithTags("Licensing Public");
+
+        publicBilling.MapPost("/payment-request", async (
+            MarketingPaymentRequestCreateRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.CreateMarketingPaymentRequestAsync(request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .AllowAnonymous()
+        .WithName("CreateMarketingPaymentRequest")
+        .WithOpenApi();
+
+        publicBilling.MapPost("/payment-proof-upload", async (
+            IFormFile? file,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.UploadMarketingPaymentProofAsync(file, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .AllowAnonymous()
+        .DisableAntiforgery()
+        .WithName("UploadMarketingPaymentProof")
+        .WithOpenApi();
+
+        publicBilling.MapPost("/payment-submit", async (
+            MarketingPaymentSubmissionRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.SubmitMarketingPaymentAsync(request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .AllowAnonymous()
+        .WithName("SubmitMarketingPayment")
+        .WithOpenApi();
+
+        publicBilling.MapPost("/download-track", async (
+            MarketingLicenseDownloadTrackRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.TrackMarketingLicenseDownloadAsync(request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .AllowAnonymous()
+        .WithName("TrackMarketingLicenseDownload")
+        .WithOpenApi();
+
+        publicBilling.MapGet("/installer-download", async (
+            string token,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var redirectUrl = await licenseService.ResolveProtectedInstallerDownloadRedirectAsync(token, cancellationToken);
+                return Results.Redirect(redirectUrl, permanent: false);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .AllowAnonymous()
+        .WithName("ResolveProtectedInstallerDownload")
+        .WithOpenApi();
+
         var admin = app.MapGroup("/api/admin/licensing")
             .WithTags("Licensing Admin")
             .RequireAuthorization(SmartPosPolicies.SuperAdmin);

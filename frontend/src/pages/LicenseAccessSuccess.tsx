@@ -11,7 +11,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ApiError, fetchLicenseAccessSuccess, type LicenseAccessSuccessResponse } from "@/lib/api";
+import {
+  API_BASE_URL,
+  ApiError,
+  fetchLicenseAccessSuccess,
+  trackLicenseAccessDownload,
+  type LicenseAccessSuccessResponse,
+} from "@/lib/api";
+
+const installerDownloadUrl = (import.meta.env.VITE_INSTALLER_DOWNLOAD_URL || "").trim();
+const installerChecksumSha256 = (import.meta.env.VITE_INSTALLER_CHECKSUM_SHA256 || "").trim();
 
 const readKeyFromUrl = () => {
   if (typeof window === "undefined") {
@@ -45,6 +54,24 @@ const LicenseAccessSuccess = () => {
   const [manualCopyKey, setManualCopyKey] = useState<string | null>(null);
 
   const canLoad = useMemo(() => activationKey.trim().length > 0, [activationKey]);
+  const resolvedInstallerDownloadUrl = useMemo(() => {
+    const backendProvided = (data?.installer_download_url || "").trim();
+    const fallback = installerDownloadUrl;
+    const candidate = backendProvided || fallback;
+    if (!candidate) {
+      return "";
+    }
+
+    if (candidate.startsWith("/")) {
+      return `${API_BASE_URL}${candidate}`;
+    }
+
+    return candidate;
+  }, [data]);
+  const resolvedInstallerChecksum = useMemo(
+    () => (data?.installer_checksum_sha256 || "").trim() || installerChecksumSha256,
+    [data],
+  );
 
   const load = async (key: string) => {
     setIsLoading(true);
@@ -92,6 +119,19 @@ const LicenseAccessSuccess = () => {
 
     setManualCopyKey(key);
     toast.info("Clipboard unavailable. Copy manually from dialog.");
+  };
+
+  const trackInstallerDownloadClick = async () => {
+    const key = data?.activation_entitlement?.activation_entitlement_key?.trim() || activationKey.trim();
+    if (!key) {
+      return;
+    }
+
+    try {
+      await trackLicenseAccessDownload(key, "installer_download_button");
+    } catch (error) {
+      console.error("Failed to track installer download.", error);
+    }
   };
 
   return (
@@ -176,6 +216,20 @@ const LicenseAccessSuccess = () => {
                 <Button variant="outline" size="sm" onClick={() => void copyActivationKey()}>
                   Copy Key
                 </Button>
+                {resolvedInstallerDownloadUrl && (
+                  <Button asChild variant="outline" size="sm">
+                    <a
+                      href={resolvedInstallerDownloadUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={() => {
+                        void trackInstallerDownloadClick();
+                      }}
+                    >
+                      Download Installer
+                    </a>
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   onClick={() => {
@@ -185,6 +239,16 @@ const LicenseAccessSuccess = () => {
                   Open POS
                 </Button>
               </div>
+              {data.installer_download_protected && data.installer_download_expires_at && (
+                <p className="mt-2 text-[11px] text-muted-foreground">
+                  Download link expires: {formatDateTime(data.installer_download_expires_at)}
+                </p>
+              )}
+              {resolvedInstallerChecksum && (
+                <p className="mt-2 text-[11px] text-muted-foreground break-all">
+                  SHA-256: {resolvedInstallerChecksum}
+                </p>
+              )}
             </div>
 
             <div className="rounded-xl border border-border p-4 text-sm text-muted-foreground space-y-1">

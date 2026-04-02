@@ -943,7 +943,22 @@ export type LicenseAccessSuccessResponse = {
   seat_limit: number;
   entitlement_state: "active" | "consumed" | "expired" | "revoked" | string;
   can_activate: boolean;
+  installer_download_url?: string | null;
+  installer_download_expires_at?: string | null;
+  installer_download_protected?: boolean;
+  installer_checksum_sha256?: string | null;
   activation_entitlement: ActivationEntitlement;
+};
+
+export type LicenseAccessDownloadTrackResponse = {
+  tracked_at: string;
+  shop_code: string;
+  activation_entitlement_key: string;
+  source: string;
+  channel: string;
+  payment_id?: string | null;
+  invoice_id?: string | null;
+  invoice_number?: string | null;
 };
 
 export type CustomerLicensePortalDevice = {
@@ -1391,6 +1406,7 @@ async function computeBodyHash(body: BodyInit | null | undefined): Promise<strin
 
 type RequestExecutionOptions = {
   skipDeviceProof?: boolean;
+  deviceProofRecoveryAttempted?: boolean;
 };
 
 async function request<T>(path: string, init: RequestInit = {}, options: RequestExecutionOptions = {}) {
@@ -1399,12 +1415,13 @@ async function request<T>(path: string, init: RequestInit = {}, options: Request
   const licenseToken = getStoredLicenseToken();
   const method = (init.method || "GET").toUpperCase();
   const isMutation = method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE";
+  const isSensitiveMutation = isSensitiveMutationPath(path, method);
   const existingHeaders = new Headers(init.headers || {});
   if (isMutation && !existingHeaders.has("Idempotency-Key")) {
     existingHeaders.set("Idempotency-Key", createIdempotencyKey());
   }
 
-  if (!options.skipDeviceProof && isSensitiveMutationPath(path, method)) {
+  if (!options.skipDeviceProof && isSensitiveMutation) {
     const bodyHash = await computeBodyHash(init.body);
     if (bodyHash) {
       try {
@@ -1443,18 +1460,76 @@ async function request<T>(path: string, init: RequestInit = {}, options: Request
     }
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    credentials: "include",
-    ...init,
-    headers: {
-      ...(init.body && !isFormData ? { "Content-Type": "application/json" } : {}),
-      "X-Device-Code": deviceCode,
-      ...(licenseToken ? { "X-License-Token": licenseToken } : {}),
-      ...Object.fromEntries(existingHeaders.entries()),
-    },
-  });
+  try {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      credentials: "include",
+      ...init,
+      headers: {
+        ...(init.body && !isFormData ? { "Content-Type": "application/json" } : {}),
+        "X-Device-Code": deviceCode,
+        ...(licenseToken ? { "X-License-Token": licenseToken } : {}),
+        ...Object.fromEntries(existingHeaders.entries()),
+      },
+    });
 
-  return parseResponse<T>(response);
+    return await parseResponse<T>(response);
+  } catch (error) {
+    if (
+      error instanceof ApiError &&
+      error.code === "DEVICE_KEY_MISMATCH" &&
+      isSensitiveMutation &&
+      !options.skipDeviceProof &&
+      !options.deviceProofRecoveryAttempted
+    ) {
+      const retryHeaders = {
+        ...Object.fromEntries(new Headers(init.headers || {}).entries()),
+        "Idempotency-Key": existingHeaders.get("Idempotency-Key") || createIdempotencyKey(),
+      };
+
+      try {
+        return await request<T>(
+          path,
+          {
+            ...init,
+            headers: retryHeaders,
+          },
+          {
+            ...options,
+            skipDeviceProof: true,
+            deviceProofRecoveryAttempted: true,
+          }
+        );
+      } catch (retryError) {
+        if (
+          retryError instanceof ApiError &&
+          retryError.code === "DEVICE_PROOF_REQUIRED" &&
+          !path.startsWith("/api/admin")
+        ) {
+          await activateLicense({
+            deviceCode,
+            actor: "pos-web-ui",
+            reason: "device_proof_rebind",
+          });
+
+          return request<T>(
+            path,
+            {
+              ...init,
+              headers: retryHeaders,
+            },
+            {
+              ...options,
+              deviceProofRecoveryAttempted: true,
+            }
+          );
+        }
+
+        throw retryError;
+      }
+    }
+
+    throw error;
+  }
 }
 
 function mapBackendRole(role: string): "admin" | "manager" | "cashier" {
@@ -1841,6 +1916,25 @@ export async function fetchLicenseAccessSuccess(activationEntitlementKey: string
     activation_entitlement_key: normalizedKey,
   }).toString();
   return request<LicenseAccessSuccessResponse>(`/api/license/access/success?${query}`);
+}
+
+export async function trackLicenseAccessDownload(
+  activationEntitlementKey: string,
+  channel = "installer_download"
+) {
+  const normalizedKey = activationEntitlementKey.trim();
+  if (!normalizedKey) {
+    throw new Error("Activation entitlement key is required.");
+  }
+
+  return request<LicenseAccessDownloadTrackResponse>("/api/license/public/download-track", {
+    method: "POST",
+    body: JSON.stringify({
+      activation_entitlement_key: normalizedKey,
+      source: "license_access_success",
+      channel: normalizeOptionalString(channel) || "installer_download",
+    }),
+  });
 }
 
 export async function login(username: string, password: string, mfaCode?: string) {

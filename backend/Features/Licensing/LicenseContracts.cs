@@ -313,6 +313,18 @@ public sealed class LicenseAccessSuccessResponse
     [JsonPropertyName("can_activate")]
     public bool CanActivate { get; set; }
 
+    [JsonPropertyName("installer_download_url")]
+    public string? InstallerDownloadUrl { get; set; }
+
+    [JsonPropertyName("installer_download_expires_at")]
+    public DateTimeOffset? InstallerDownloadExpiresAt { get; set; }
+
+    [JsonPropertyName("installer_download_protected")]
+    public bool InstallerDownloadProtected { get; set; }
+
+    [JsonPropertyName("installer_checksum_sha256")]
+    public string? InstallerChecksumSha256 { get; set; }
+
     [JsonPropertyName("activation_entitlement")]
     public CustomerActivationEntitlementResponse ActivationEntitlement { get; set; } = new();
 }
@@ -935,6 +947,252 @@ public sealed class AdminAuditLogRow
     public string? ImmutablePreviousHash { get; set; }
 }
 
+public sealed class MarketingPaymentRequestCreateRequest
+{
+    [JsonPropertyName("shop_name")]
+    public string? ShopName { get; set; }
+
+    [JsonPropertyName("shop_code")]
+    public string? ShopCode { get; set; }
+
+    [JsonPropertyName("contact_name")]
+    public string? ContactName { get; set; }
+
+    [JsonPropertyName("contact_email")]
+    public string? ContactEmail { get; set; }
+
+    [JsonPropertyName("contact_phone")]
+    public string? ContactPhone { get; set; }
+
+    [JsonPropertyName("plan_code")]
+    public string? PlanCode { get; set; }
+
+    [JsonPropertyName("payment_method")]
+    public string? PaymentMethod { get; set; }
+
+    [JsonPropertyName("currency")]
+    public string? Currency { get; set; }
+
+    [JsonPropertyName("locale")]
+    public string? Locale { get; set; }
+
+    [JsonPropertyName("source")]
+    public string? Source { get; set; }
+
+    [JsonPropertyName("campaign")]
+    public string? Campaign { get; set; }
+
+    [JsonPropertyName("notes")]
+    public string? Notes { get; set; }
+}
+
+public sealed class MarketingPaymentInstructionsResponse
+{
+    [JsonPropertyName("payment_method")]
+    public string PaymentMethod { get; set; } = "bank_deposit";
+
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = string.Empty;
+
+    [JsonPropertyName("reference_hint")]
+    public string ReferenceHint { get; set; } = string.Empty;
+}
+
+public sealed class MarketingPaymentInvoiceResponse
+{
+    [JsonPropertyName("invoice_id")]
+    public Guid InvoiceId { get; set; }
+
+    [JsonPropertyName("invoice_number")]
+    public string InvoiceNumber { get; set; } = string.Empty;
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "open";
+
+    [JsonPropertyName("due_at")]
+    public DateTimeOffset DueAt { get; set; }
+}
+
+public sealed class MarketingPaymentRequestCreateResponse
+{
+    [JsonPropertyName("generated_at")]
+    public DateTimeOffset GeneratedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("shop_code")]
+    public string ShopCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("shop_name")]
+    public string ShopName { get; set; } = string.Empty;
+
+    [JsonPropertyName("contact_name")]
+    public string? ContactName { get; set; }
+
+    [JsonPropertyName("contact_email")]
+    public string? ContactEmail { get; set; }
+
+    [JsonPropertyName("contact_phone")]
+    public string? ContactPhone { get; set; }
+
+    [JsonPropertyName("marketing_plan_code")]
+    public string MarketingPlanCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("internal_plan_code")]
+    public string InternalPlanCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("requires_payment")]
+    public bool RequiresPayment { get; set; } = true;
+
+    [JsonPropertyName("amount_due")]
+    public decimal AmountDue { get; set; }
+
+    [JsonPropertyName("currency")]
+    public string Currency { get; set; } = "LKR";
+
+    [JsonPropertyName("invoice")]
+    public MarketingPaymentInvoiceResponse? Invoice { get; set; }
+
+    [JsonPropertyName("instructions")]
+    public MarketingPaymentInstructionsResponse Instructions { get; set; } = new();
+
+    [JsonPropertyName("next_step")]
+    public string NextStep { get; set; } = "await_customer_payment";
+}
+
+public sealed class MarketingPaymentSubmissionRequest
+{
+    [JsonPropertyName("invoice_id")]
+    public Guid? InvoiceId { get; set; }
+
+    [JsonPropertyName("invoice_number")]
+    public string? InvoiceNumber { get; set; }
+
+    [JsonPropertyName("payment_method")]
+    public string? PaymentMethod { get; set; }
+
+    [JsonPropertyName("amount")]
+    public decimal Amount { get; set; }
+
+    [JsonPropertyName("currency")]
+    public string? Currency { get; set; }
+
+    [JsonPropertyName("bank_reference")]
+    public string? BankReference { get; set; }
+
+    [JsonPropertyName("deposit_slip_url")]
+    public string? DepositSlipUrl { get; set; }
+
+    [JsonPropertyName("paid_at")]
+    public DateTimeOffset? PaidAt { get; set; }
+
+    [JsonPropertyName("contact_name")]
+    public string? ContactName { get; set; }
+
+    [JsonPropertyName("contact_email")]
+    public string? ContactEmail { get; set; }
+
+    [JsonPropertyName("contact_phone")]
+    public string? ContactPhone { get; set; }
+
+    [JsonPropertyName("notes")]
+    public string? Notes { get; set; }
+}
+
+public sealed class MarketingPaymentSubmissionResponse
+{
+    [JsonPropertyName("processed_at")]
+    public DateTimeOffset ProcessedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("shop_code")]
+    public string ShopCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("invoice_id")]
+    public Guid InvoiceId { get; set; }
+
+    [JsonPropertyName("invoice_number")]
+    public string InvoiceNumber { get; set; } = string.Empty;
+
+    [JsonPropertyName("invoice_status")]
+    public string InvoiceStatus { get; set; } = "pending_verification";
+
+    [JsonPropertyName("payment_id")]
+    public Guid PaymentId { get; set; }
+
+    [JsonPropertyName("payment_status")]
+    public string PaymentStatus { get; set; } = "pending_verification";
+
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = "Payment submitted and pending verification.";
+
+    [JsonPropertyName("next_step")]
+    public string NextStep { get; set; } = "await_admin_verification";
+}
+
+public sealed class MarketingPaymentProofUploadResponse
+{
+    [JsonPropertyName("uploaded_at")]
+    public DateTimeOffset UploadedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("proof_url")]
+    public string ProofUrl { get; set; } = string.Empty;
+
+    [JsonPropertyName("file_name")]
+    public string FileName { get; set; } = string.Empty;
+
+    [JsonPropertyName("content_type")]
+    public string ContentType { get; set; } = string.Empty;
+
+    [JsonPropertyName("size_bytes")]
+    public long SizeBytes { get; set; }
+
+    [JsonPropertyName("sha256")]
+    public string Sha256 { get; set; } = string.Empty;
+
+    [JsonPropertyName("scan_status")]
+    public string ScanStatus { get; set; } = "clean";
+
+    [JsonPropertyName("scan_message")]
+    public string? ScanMessage { get; set; }
+}
+
+public sealed class MarketingLicenseDownloadTrackRequest
+{
+    [JsonPropertyName("activation_entitlement_key")]
+    public string? ActivationEntitlementKey { get; set; }
+
+    [JsonPropertyName("source")]
+    public string? Source { get; set; }
+
+    [JsonPropertyName("channel")]
+    public string? Channel { get; set; }
+}
+
+public sealed class MarketingLicenseDownloadTrackResponse
+{
+    [JsonPropertyName("tracked_at")]
+    public DateTimeOffset TrackedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("shop_code")]
+    public string ShopCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("activation_entitlement_key")]
+    public string ActivationEntitlementKey { get; set; } = string.Empty;
+
+    [JsonPropertyName("source")]
+    public string Source { get; set; } = string.Empty;
+
+    [JsonPropertyName("channel")]
+    public string Channel { get; set; } = string.Empty;
+
+    [JsonPropertyName("payment_id")]
+    public Guid? PaymentId { get; set; }
+
+    [JsonPropertyName("invoice_id")]
+    public Guid? InvoiceId { get; set; }
+
+    [JsonPropertyName("invoice_number")]
+    public string? InvoiceNumber { get; set; }
+}
+
 public sealed class AdminManualBillingInvoiceCreateRequest
 {
     [JsonPropertyName("shop_code")]
@@ -1496,4 +1754,6 @@ internal static class LicenseErrorCodes
     public const string PaymentNotFound = "PAYMENT_NOT_FOUND";
     public const string InvalidPaymentStatus = "INVALID_PAYMENT_STATUS";
     public const string SecondApprovalRequired = "SECOND_APPROVAL_REQUIRED";
+    public const string RateLimitExceeded = "RATE_LIMIT_EXCEEDED";
+    public const string DuplicateSubmission = "DUPLICATE_SUBMISSION";
 }
