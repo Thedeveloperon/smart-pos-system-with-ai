@@ -48,6 +48,13 @@ cd "/Users/iroshwijesiri/Documents/SMART POS SYSTEM WITH AI/frontend"
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
+Optional (pilot rollout gate for POS keyboard shortcuts):
+
+```bash
+# default is enabled; set false to disable shortcuts, labels, and onboarding
+export VITE_POS_SHORTCUTS_ENABLED=true
+```
+
 ## 4. URLs
 
 - POS app: `http://127.0.0.1:5173/`
@@ -108,4 +115,31 @@ for (const [user, secret] of Object.entries(users)){
   console.log(`${user}: current=${code(secret,counter)} prev=${code(secret,counter-1)} next=${code(secret,counter+1)}`);
 }
 NODE
+```
+
+## 7. POS keyboard shortcuts
+
+These are enabled by default in cashier billing flow (desktop and laptop keyboards):
+
+- `F2`: focus product search
+- `F4`: hold current bill
+- `F8`: open cash workflow
+- `F9`: complete sale (only when valid)
+- `F1` or `?`: open shortcuts help
+- `Esc`: close shortcuts help dialog
+
+Behavior and safety:
+
+- Shortcuts are ignored while typing in input fields.
+- Shortcuts are suspended when POS dialogs/drawers are open.
+- Blocked actions show clear reasons (for example, `F9 blocked` when payment is insufficient).
+
+## 8. Cashier quick card text
+
+Use this exact text on a printed desk card for training:
+
+```text
+SMART POS SHORTCUTS
+F2 Search   F4 Hold   F8 Cash   F9 Complete
+F1/? Help   Esc Close Help
 ```
