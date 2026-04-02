@@ -66,6 +66,37 @@ public sealed class LicensingAlertMonitorTests
             message => message.Contains("Billing webhook failure spike detected", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void EvaluateAndEmitAlerts_WhenSecurityAnomaliesSpike_ShouldLogWarning()
+    {
+        var sink = new LogSink();
+        using var loggerFactory = LoggerFactory.Create(builder => builder.AddProvider(new SinkLoggerProvider(sink)));
+
+        var monitor = new LicensingAlertMonitor(
+            Options.Create(new LicenseOptions
+            {
+                Alerts = new LicenseAlertOptions
+                {
+                    Enabled = true,
+                    LicenseValidationSpikeThreshold = 99,
+                    WebhookFailureThreshold = 99,
+                    SecurityAnomalyThreshold = 2,
+                    WindowMinutes = 10,
+                    CooldownMinutes = 1,
+                    EvaluationIntervalSeconds = 30
+                }
+            }),
+            loggerFactory.CreateLogger<LicensingAlertMonitor>());
+
+        monitor.RecordSecurityAnomaly("auth_source_shift");
+        monitor.RecordSecurityAnomaly("auth_concurrent_devices");
+        monitor.EvaluateAndEmitAlerts();
+
+        Assert.Contains(
+            sink.WarningMessages,
+            message => message.Contains("Security anomaly spike detected", StringComparison.Ordinal));
+    }
+
     private sealed class LogSink
     {
         private readonly List<string> warningMessages = [];

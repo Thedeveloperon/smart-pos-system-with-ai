@@ -4,6 +4,7 @@ import type {
   CashSessionEntry,
   DenominationCount,
 } from "@/components/pos/cash-session/types";
+import { buildDeviceActivationProof, buildDeviceRequestProof } from "@/lib/deviceIdentity";
 
 function getDefaultApiBaseUrl() {
   if (typeof window !== "undefined") {
@@ -56,6 +57,7 @@ type BackendLicenseStatus = {
   state: "unprovisioned" | "active" | "grace" | "suspended" | "revoked";
   shop_id?: string | null;
   device_code: string;
+  device_key_fingerprint?: string | null;
   subscription_status?: "trialing" | "active" | "past_due" | "canceled" | null;
   plan?: string | null;
   seat_limit?: number | null;
@@ -63,8 +65,30 @@ type BackendLicenseStatus = {
   valid_until?: string | null;
   grace_until?: string | null;
   license_token?: string | null;
+  offline_grant_token?: string | null;
+  offline_grant_expires_at?: string | null;
+  offline_max_checkout_operations?: number | null;
+  offline_max_refund_operations?: number | null;
   blocked_actions?: string[];
   server_time: string;
+};
+
+type BackendProvisionChallengeResponse = {
+  challenge_id: string;
+  device_code: string;
+  nonce: string;
+  key_algorithm: string;
+  issued_at: string;
+  expires_at: string;
+};
+
+type BackendDeviceActionChallengeResponse = {
+  challenge_id: string;
+  device_code: string;
+  nonce: string;
+  key_algorithm: string;
+  issued_at: string;
+  expires_at: string;
 };
 
 export type LicenseState = BackendLicenseStatus["state"];
@@ -73,6 +97,7 @@ export type LicenseStatus = {
   state: LicenseState;
   shopId?: string | null;
   deviceCode: string;
+  deviceKeyFingerprint?: string | null;
   subscriptionStatus?: BackendLicenseStatus["subscription_status"];
   plan?: string | null;
   seatLimit?: number | null;
@@ -80,6 +105,10 @@ export type LicenseStatus = {
   validUntil?: Date | null;
   graceUntil?: Date | null;
   licenseToken?: string | null;
+  offlineGrantToken?: string | null;
+  offlineGrantExpiresAt?: Date | null;
+  offlineMaxCheckoutOperations?: number | null;
+  offlineMaxRefundOperations?: number | null;
   blockedActions: string[];
   serverTime: Date;
 };
@@ -89,11 +118,37 @@ export type ActivateLicenseRequest = {
   deviceName?: string;
   actor?: string;
   reason?: string;
+  activationEntitlementKey?: string;
 };
 
 const DEVICE_CODE_STORAGE_KEY = "smartpos-device-code";
-const LICENSE_TOKEN_STORAGE_KEY = "smartpos-license-token";
+const LEGACY_LICENSE_TOKEN_STORAGE_KEY = "smartpos-license-token";
 const DEFAULT_DEVICE_NAME = "RetailFlow POS Web";
+const DEVICE_NONCE_ID_HEADER = "X-Device-Nonce-Id";
+const DEVICE_SIGNATURE_HEADER = "X-Device-Signature";
+const DEVICE_TIMESTAMP_HEADER = "X-Device-Timestamp";
+let inMemoryLicenseToken: string | null = null;
+let hasMigratedLegacyLicenseToken = false;
+const OFFLINE_SYNC_MESSAGE_MAP: Record<string, string> = {
+  accepted: "Offline event accepted for processing.",
+  offline_event_synced: "Offline event synced successfully.",
+  duplicate_event_ignored: "Duplicate offline event ignored.",
+  stock_update_applied: "Stock update applied.",
+  stale_update_ignored_last_write_wins: "Stock update was stale and ignored.",
+  stock_conflict_inventory_not_found: "Inventory not found for this stock update.",
+  invalid_event_id: "Offline event ID is invalid.",
+  invalid_event_type: "Offline event type is invalid.",
+  invalid_payload_product_id: "Offline payload is missing a valid product.",
+  invalid_payload_quantity: "Offline payload is missing a valid quantity.",
+  offline_grant_required: "Offline grant is required. Reconnect and refresh license status.",
+  offline_grant_expired: "Offline grant expired. Reconnect and refresh license status.",
+  offline_grant_invalid: "Offline grant token is invalid. Reconnect and refresh license status.",
+  offline_grant_device_mismatch: "Offline grant belongs to a different device.",
+  offline_grant_device_key_mismatch: "Offline grant does not match this device key.",
+  offline_grant_limit_exceeded: "Offline grant operation limit reached.",
+  offline_grant_checkout_limit_exceeded: "Offline checkout limit reached for this grant window.",
+  offline_grant_refund_limit_exceeded: "Offline refund limit reached for this grant window.",
+};
 
 type BackendProductSearchItem = {
   id: string;
@@ -596,6 +651,11 @@ type SupportTriageReportResponse = {
   alerts: {
     validation_failures_in_window: number;
     webhook_failures_in_window: number;
+    security_anomalies_in_window: number;
+    auth_impossible_travel_signals_in_window: number;
+    auth_concurrent_device_signals_in_window: number;
+    sensitive_action_proof_failures_in_window: number;
+    devices_with_unusual_source_changes_in_window: number;
     top_validation_failures: {
       reason: string;
       count: number;
@@ -604,8 +664,17 @@ type SupportTriageReportResponse = {
       reason: string;
       count: number;
     }[];
+    top_security_anomalies: {
+      reason: string;
+      count: number;
+    }[];
+    top_sensitive_action_failure_sources: {
+      reason: string;
+      count: number;
+    }[];
     last_validation_alert_at?: string | null;
     last_webhook_alert_at?: string | null;
+    last_security_alert_at?: string | null;
   };
   recent_audit_events: {
     timestamp: string;
@@ -613,6 +682,10 @@ type SupportTriageReportResponse = {
     actor: string;
     device_code?: string | null;
     reason?: string | null;
+    source_ip?: string | null;
+    source_ip_prefix?: string | null;
+    source_user_agent_family?: string | null;
+    source_fingerprint?: string | null;
   }[];
 };
 
@@ -669,6 +742,46 @@ export type AdminDeviceActionResponse = {
   processed_at: string;
 };
 
+export type AdminDeviceSeatTransferResponse = {
+  device_code: string;
+  action: string;
+  source_shop_id: string;
+  source_shop_code: string;
+  target_shop_id: string;
+  target_shop_code: string;
+  status: string;
+  license_state: string;
+  valid_until?: string | null;
+  grace_until?: string | null;
+  processed_at: string;
+};
+
+export type AdminMassDeviceRevokeResponse = {
+  action: string;
+  requested_count: number;
+  revoked_count: number;
+  already_revoked_count: number;
+  items: AdminDeviceActionResponse[];
+  processed_at: string;
+};
+
+export type AdminEmergencyCommandEnvelopeResponse = {
+  command_id: string;
+  device_code: string;
+  action: "lock_device" | "revoke_token" | "force_reauth" | string;
+  envelope_token: string;
+  issued_at: string;
+  expires_at: string;
+};
+
+export type AdminEmergencyCommandExecuteResponse = {
+  device_code: string;
+  action: "lock_device" | "revoke_token" | "force_reauth" | string;
+  status: string;
+  revoked_token_sessions: number;
+  processed_at: string;
+};
+
 export type AdminLicenseResyncResponse = {
   shop_id: string;
   shop_code: string;
@@ -677,6 +790,351 @@ export type AdminLicenseResyncResponse = {
   reissued_devices: number;
   revoked_licenses: number;
   processed_at: string;
+};
+
+export type AdminManualBillingInvoiceRow = {
+  invoice_id: string;
+  shop_id: string;
+  shop_code: string;
+  invoice_number: string;
+  amount_due: number;
+  amount_paid: number;
+  currency: string;
+  status: "open" | "pending_verification" | "paid" | "overdue" | "canceled";
+  due_at: string;
+  notes?: string | null;
+  created_by?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+export type AdminManualBillingInvoicesResponse = {
+  generated_at: string;
+  count: number;
+  items: AdminManualBillingInvoiceRow[];
+};
+
+export type CreateAdminManualBillingInvoiceRequest = {
+  shop_code?: string;
+  invoice_number?: string;
+  amount_due: number;
+  currency?: string;
+  due_at?: string;
+  notes?: string;
+  actor?: string;
+  reason_code?: string;
+  actor_note?: string;
+};
+
+export type AdminManualBillingPaymentRow = {
+  payment_id: string;
+  shop_id: string;
+  shop_code: string;
+  invoice_id: string;
+  invoice_number: string;
+  method: "cash" | "bank_deposit" | "bank_transfer";
+  amount: number;
+  currency: string;
+  status: "pending_verification" | "verified" | "rejected";
+  bank_reference?: string | null;
+  deposit_slip_url?: string | null;
+  received_at: string;
+  notes?: string | null;
+  recorded_by?: string | null;
+  verified_by?: string | null;
+  verified_at?: string | null;
+  rejected_by?: string | null;
+  rejected_at?: string | null;
+  rejection_reason?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+export type AdminManualBillingPaymentsResponse = {
+  generated_at: string;
+  count: number;
+  items: AdminManualBillingPaymentRow[];
+};
+
+export type RecordAdminManualBillingPaymentRequest = {
+  invoice_id?: string;
+  invoice_number?: string;
+  method: "cash" | "bank_deposit" | "bank_transfer";
+  amount: number;
+  currency?: string;
+  bank_reference?: string;
+  deposit_slip_url?: string;
+  received_at?: string;
+  notes?: string;
+  actor?: string;
+  reason_code?: string;
+  actor_note?: string;
+};
+
+export type VerifyAdminManualBillingPaymentRequest = {
+  extend_days?: number;
+  plan?: string;
+  seat_limit?: number;
+  customer_email?: string;
+  actor?: string;
+  reason?: string;
+  reason_code: string;
+  actor_note: string;
+};
+
+export type RejectAdminManualBillingPaymentRequest = {
+  actor?: string;
+  reason?: string;
+  reason_code: string;
+  actor_note: string;
+};
+
+export type AdminManualBillingPaymentVerificationResponse = {
+  payment: AdminManualBillingPaymentRow;
+  invoice: AdminManualBillingInvoiceRow;
+  subscription_status: string;
+  plan: string;
+  seat_limit: number;
+  period_end: string;
+  activation_entitlement?: ActivationEntitlement | null;
+  access_delivery?: LicenseAccessDeliveryResponse | null;
+  processed_at: string;
+};
+
+export type ActivationEntitlement = {
+  entitlement_id: string;
+  shop_id: string;
+  shop_code: string;
+  activation_entitlement_key: string;
+  source: string;
+  source_reference?: string | null;
+  status: string;
+  max_activations: number;
+  activations_used: number;
+  issued_by?: string | null;
+  issued_at: string;
+  expires_at: string;
+  last_used_at?: string | null;
+  revoked_at?: string | null;
+};
+
+export type LicenseAccessEmailDeliveryResult = {
+  recipient_email?: string | null;
+  status: "sent" | "skipped" | "failed" | string;
+  reason?: string | null;
+  processed_at: string;
+};
+
+export type LicenseAccessDeliveryResponse = {
+  shop_id: string;
+  shop_code: string;
+  success_page_url: string;
+  email_delivery: LicenseAccessEmailDeliveryResult;
+  processed_at: string;
+};
+
+export type LicenseAccessSuccessResponse = {
+  generated_at: string;
+  shop_id: string;
+  shop_code: string;
+  shop_name: string;
+  subscription_status: string;
+  plan: string;
+  seat_limit: number;
+  entitlement_state: "active" | "consumed" | "expired" | "revoked" | string;
+  can_activate: boolean;
+  activation_entitlement: ActivationEntitlement;
+};
+
+export type CustomerLicensePortalDevice = {
+  provisioned_device_id: string;
+  device_code: string;
+  device_name: string;
+  device_status: "active" | "revoked" | string;
+  license_state: "unprovisioned" | "active" | "grace" | "suspended" | "revoked" | string;
+  assigned_at: string;
+  last_heartbeat_at?: string | null;
+  valid_until?: string | null;
+  grace_until?: string | null;
+  is_current_device: boolean;
+};
+
+export type CustomerLicensePortalResponse = {
+  generated_at: string;
+  shop_id: string;
+  shop_code: string;
+  shop_name: string;
+  subscription_status: string;
+  plan: string;
+  seat_limit: number;
+  active_seats: number;
+  self_service_deactivation_limit_per_day: number;
+  self_service_deactivations_used_today: number;
+  self_service_deactivations_remaining_today: number;
+  can_deactivate_more_devices_today: boolean;
+  latest_activation_entitlement?: ActivationEntitlement | null;
+  devices: CustomerLicensePortalDevice[];
+};
+
+export type CustomerSelfServiceDeviceDeactivationResponse = {
+  shop_id: string;
+  shop_code: string;
+  device_code: string;
+  status: string;
+  reason: string;
+  deactivations_used_today: number;
+  deactivation_limit_per_day: number;
+  deactivations_remaining_today: number;
+  processed_at: string;
+};
+
+export type AdminManualBillingReconciliationAlertRow = {
+  code: string;
+  severity: "info" | "warning" | "critical" | string;
+  message: string;
+  count: number;
+};
+
+export type AdminManualBillingReconciliationItemRow = {
+  payment_id: string;
+  shop_code: string;
+  invoice_number: string;
+  method: "bank_deposit" | "bank_transfer";
+  amount: number;
+  currency: string;
+  status: "pending_verification" | "verified" | "rejected";
+  bank_reference?: string | null;
+  received_at: string;
+  recorded_by?: string | null;
+  verified_by?: string | null;
+  mismatch_flags: string[];
+};
+
+export type AdminManualBillingDailyReconciliationResponse = {
+  date: string;
+  window_start: string;
+  window_end: string;
+  currency: string;
+  expected_bank_total?: number | null;
+  recorded_bank_total: number;
+  verified_bank_total: number;
+  pending_bank_total: number;
+  rejected_bank_total: number;
+  mismatch_amount?: number | null;
+  has_mismatch: boolean;
+  mismatch_reasons: string[];
+  alert_count: number;
+  alerts: AdminManualBillingReconciliationAlertRow[];
+  count: number;
+  items: AdminManualBillingReconciliationItemRow[];
+  generated_at: string;
+};
+
+export type AdminBillingStateReconciliationSubscriptionRow = {
+  shop_id: string;
+  shop_code: string;
+  subscription_id?: string | null;
+  customer_id?: string | null;
+  period_end: string;
+  previous_status: string;
+  reconciled_status: string;
+  reason: string;
+  applied: boolean;
+  error?: string | null;
+};
+
+export type AdminBillingStateReconciliationWebhookFailureRow = {
+  event_id: string;
+  event_type: string;
+  status: string;
+  shop_id?: string | null;
+  shop_code?: string | null;
+  subscription_id?: string | null;
+  last_error_code?: string | null;
+  received_at: string;
+  updated_at?: string | null;
+};
+
+export type RunAdminBillingStateReconciliationRequest = {
+  dry_run?: boolean;
+  take?: number;
+  webhook_failure_take?: number;
+  actor?: string;
+  reason?: string;
+  reason_code?: string;
+  actor_note?: string;
+};
+
+export type AdminBillingStateReconciliationRunResponse = {
+  generated_at: string;
+  source: string;
+  dry_run: boolean;
+  actor: string;
+  reason: string;
+  period_end_grace_hours: number;
+  webhook_failure_lookback_hours: number;
+  billing_subscriptions_scanned: number;
+  drift_candidates: number;
+  subscriptions_reconciled: number;
+  webhook_failures_detected: number;
+  subscription_updates: AdminBillingStateReconciliationSubscriptionRow[];
+  failed_webhook_events: AdminBillingStateReconciliationWebhookFailureRow[];
+};
+
+type BackendSyncEventsRequest = {
+  device_id?: string | null;
+  offline_grant_token?: string | null;
+  events: BackendSyncEventRequestItem[];
+};
+
+type BackendSyncEventRequestItem = {
+  event_id: string;
+  store_id?: string | null;
+  device_id?: string | null;
+  device_timestamp: string;
+  type: "sale" | "refund" | "stock_update";
+  payload: Record<string, unknown>;
+};
+
+type BackendSyncEventsResponse = {
+  results: BackendSyncEventResult[];
+};
+
+type BackendSyncEventResult = {
+  event_id: string;
+  status: string;
+  server_timestamp?: string | null;
+  message?: string | null;
+};
+
+export type SyncEventType = "sale" | "refund" | "stock_update";
+
+export type SyncEventRequestItem = {
+  eventId: string;
+  storeId?: string | null;
+  deviceId?: string | null;
+  deviceTimestamp: Date | string;
+  type: SyncEventType;
+  payload: Record<string, unknown>;
+};
+
+export type SyncEventResultStatus = "pending" | "synced" | "conflict" | "rejected";
+
+export type SyncEventResult = {
+  eventId: string;
+  status: SyncEventResultStatus;
+  serverTimestamp?: Date | null;
+  message?: string | null;
+  displayMessage?: string | null;
+};
+
+export type SyncEventsResponse = {
+  results: SyncEventResult[];
+};
+
+export type SyncEventsRequestOptions = {
+  deviceId?: string | null;
+  offlineGrantToken?: string | null;
 };
 
 type CreateSaleRequest = {
@@ -698,7 +1156,8 @@ function getStoredLicenseToken() {
     return null;
   }
 
-  const token = localStorage.getItem(LICENSE_TOKEN_STORAGE_KEY)?.trim();
+  migrateLegacyLicenseTokenOnce();
+  const token = inMemoryLicenseToken?.trim();
   return token || null;
 }
 
@@ -707,12 +1166,29 @@ function setStoredLicenseToken(token?: string | null) {
     return;
   }
 
+  migrateLegacyLicenseTokenOnce();
   if (!token || !token.trim()) {
-    localStorage.removeItem(LICENSE_TOKEN_STORAGE_KEY);
+    inMemoryLicenseToken = null;
+    localStorage.removeItem(LEGACY_LICENSE_TOKEN_STORAGE_KEY);
     return;
   }
 
-  localStorage.setItem(LICENSE_TOKEN_STORAGE_KEY, token.trim());
+  inMemoryLicenseToken = token.trim();
+  localStorage.removeItem(LEGACY_LICENSE_TOKEN_STORAGE_KEY);
+}
+
+function migrateLegacyLicenseTokenOnce() {
+  if (typeof window === "undefined" || hasMigratedLegacyLicenseToken) {
+    return;
+  }
+
+  hasMigratedLegacyLicenseToken = true;
+  const legacyToken = localStorage.getItem(LEGACY_LICENSE_TOKEN_STORAGE_KEY)?.trim();
+  if (legacyToken) {
+    inMemoryLicenseToken = legacyToken;
+  }
+
+  localStorage.removeItem(LEGACY_LICENSE_TOKEN_STORAGE_KEY);
 }
 
 function createIdempotencyKey() {
@@ -747,6 +1223,7 @@ function mapLicenseStatus(status: BackendLicenseStatus): LicenseStatus {
     state: status.state,
     shopId: status.shop_id ?? null,
     deviceCode: status.device_code || getAuthDeviceCode(),
+    deviceKeyFingerprint: status.device_key_fingerprint ?? null,
     subscriptionStatus: status.subscription_status ?? null,
     plan: status.plan ?? null,
     seatLimit: status.seat_limit ?? null,
@@ -754,9 +1231,68 @@ function mapLicenseStatus(status: BackendLicenseStatus): LicenseStatus {
     validUntil: status.valid_until ? new Date(status.valid_until) : null,
     graceUntil: status.grace_until ? new Date(status.grace_until) : null,
     licenseToken: status.license_token ?? null,
+    offlineGrantToken: status.offline_grant_token ?? null,
+    offlineGrantExpiresAt: status.offline_grant_expires_at ? new Date(status.offline_grant_expires_at) : null,
+    offlineMaxCheckoutOperations: status.offline_max_checkout_operations ?? null,
+    offlineMaxRefundOperations: status.offline_max_refund_operations ?? null,
     blockedActions: Array.isArray(status.blocked_actions) ? status.blocked_actions : [],
     serverTime: new Date(status.server_time),
   };
+}
+
+function normalizeOptionalString(value?: string | null) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function requiresOfflineGrant(events: SyncEventRequestItem[]) {
+  return events.some((item) => item.type === "sale" || item.type === "refund");
+}
+
+function normalizeSyncEventStatus(status: string): SyncEventResultStatus {
+  const normalized = status.trim().toLowerCase();
+  if (normalized === "pending" || normalized === "synced" || normalized === "conflict" || normalized === "rejected") {
+    return normalized;
+  }
+
+  return "rejected";
+}
+
+function mapSyncEventRequestItem(item: SyncEventRequestItem): BackendSyncEventRequestItem {
+  return {
+    event_id: item.eventId,
+    store_id: item.storeId ?? null,
+    device_id: item.deviceId ?? null,
+    device_timestamp:
+      typeof item.deviceTimestamp === "string"
+        ? item.deviceTimestamp
+        : item.deviceTimestamp.toISOString(),
+    type: item.type,
+    payload: item.payload ?? {},
+  };
+}
+
+function mapSyncEventResult(item: BackendSyncEventResult): SyncEventResult {
+  return {
+    eventId: item.event_id,
+    status: normalizeSyncEventStatus(item.status || ""),
+    serverTimestamp: item.server_timestamp ? new Date(item.server_timestamp) : null,
+    message: item.message ?? null,
+    displayMessage: mapOfflineSyncEventMessage(item.message),
+  };
+}
+
+export function mapOfflineSyncEventMessage(message?: string | null) {
+  const normalized = message?.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  if (OFFLINE_SYNC_MESSAGE_MAP[normalized]) {
+    return OFFLINE_SYNC_MESSAGE_MAP[normalized];
+  }
+
+  return normalized.replace(/_/g, " ");
 }
 
 async function parseResponse<T>(response: Response): Promise<T> {
@@ -797,7 +1333,67 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return raw as T;
 }
 
-async function request<T>(path: string, init: RequestInit = {}) {
+function isSensitiveMutationPath(path: string, method: string) {
+  if (method !== "POST" && method !== "PUT" && method !== "PATCH" && method !== "DELETE") {
+    return false;
+  }
+
+  return (
+    path.startsWith("/api/checkout") ||
+    path.startsWith("/api/refunds") ||
+    path.startsWith("/api/admin")
+  );
+}
+
+async function sha256Hex(bytes: Uint8Array) {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function computeBodyHash(body: BodyInit | null | undefined): Promise<string | null> {
+  if (typeof crypto === "undefined" || typeof crypto.subtle === "undefined") {
+    return null;
+  }
+
+  const encoder = new TextEncoder();
+  if (!body) {
+    return sha256Hex(encoder.encode(""));
+  }
+
+  if (typeof body === "string") {
+    return sha256Hex(encoder.encode(body));
+  }
+
+  if (body instanceof URLSearchParams) {
+    return sha256Hex(encoder.encode(body.toString()));
+  }
+
+  if (typeof Blob !== "undefined" && body instanceof Blob) {
+    return sha256Hex(new Uint8Array(await body.arrayBuffer()));
+  }
+
+  if (body instanceof ArrayBuffer) {
+    return sha256Hex(new Uint8Array(body));
+  }
+
+  if (ArrayBuffer.isView(body)) {
+    return sha256Hex(new Uint8Array(body.buffer, body.byteOffset, body.byteLength));
+  }
+
+  if (typeof FormData !== "undefined" && body instanceof FormData) {
+    return null;
+  }
+
+  return null;
+}
+
+type RequestExecutionOptions = {
+  skipDeviceProof?: boolean;
+};
+
+async function request<T>(path: string, init: RequestInit = {}, options: RequestExecutionOptions = {}) {
   const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
   const deviceCode = getAuthDeviceCode();
   const licenseToken = getStoredLicenseToken();
@@ -806,6 +1402,45 @@ async function request<T>(path: string, init: RequestInit = {}) {
   const existingHeaders = new Headers(init.headers || {});
   if (isMutation && !existingHeaders.has("Idempotency-Key")) {
     existingHeaders.set("Idempotency-Key", createIdempotencyKey());
+  }
+
+  if (!options.skipDeviceProof && isSensitiveMutationPath(path, method)) {
+    const bodyHash = await computeBodyHash(init.body);
+    if (bodyHash) {
+      try {
+        const challenge = await request<BackendDeviceActionChallengeResponse>(
+          "/api/security/challenge",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              device_code: deviceCode,
+            }),
+          },
+          { skipDeviceProof: true }
+        );
+
+        const timestampUnix = Math.floor(Date.now() / 1000);
+        const proof = await buildDeviceRequestProof({
+          nonceId: challenge.challenge_id,
+          nonce: challenge.nonce,
+          deviceCode,
+          timestampUnix,
+          method,
+          pathAndQuery: path,
+          bodyHash,
+        });
+
+        if (proof) {
+          existingHeaders.set(DEVICE_NONCE_ID_HEADER, challenge.challenge_id);
+          existingHeaders.set(DEVICE_SIGNATURE_HEADER, proof.signature);
+          existingHeaders.set(DEVICE_TIMESTAMP_HEADER, String(timestampUnix));
+        }
+      } catch (error) {
+        if (!(error instanceof ApiError) || error.status !== 404) {
+          throw error;
+        }
+      }
+    }
   }
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -1094,7 +1729,9 @@ export async function fetchLicenseStatus() {
   } catch (error) {
     if (
       error instanceof ApiError &&
-      (error.code === "INVALID_LICENSE_TOKEN" || error.code === "DEVICE_MISMATCH")
+      (error.code === "INVALID_LICENSE_TOKEN" ||
+        error.code === "DEVICE_MISMATCH" ||
+        error.code === "DEVICE_KEY_MISMATCH")
     ) {
       setStoredLicenseToken(null);
 
@@ -1109,11 +1746,47 @@ export async function fetchLicenseStatus() {
 }
 
 export async function activateLicense(requestBody: ActivateLicenseRequest = {}) {
+  const resolvedDeviceCode = requestBody.deviceCode || getAuthDeviceCode();
+  let proof:
+    | {
+        keyFingerprint: string;
+        publicKeySpki: string;
+        keyAlgorithm: string;
+        challengeId: string;
+        challengeSignature: string;
+      }
+    | null = null;
+
+  try {
+    const challenge = await request<BackendProvisionChallengeResponse>("/api/provision/challenge", {
+      method: "POST",
+      body: JSON.stringify({
+        device_code: resolvedDeviceCode,
+      }),
+    });
+
+    proof = await buildDeviceActivationProof(challenge.challenge_id, challenge.nonce, resolvedDeviceCode);
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 404) {
+      throw error;
+    }
+  }
+
   const payload = {
-    device_code: requestBody.deviceCode || getAuthDeviceCode(),
+    device_code: resolvedDeviceCode,
     device_name: requestBody.deviceName || DEFAULT_DEVICE_NAME,
     actor: requestBody.actor || "pos-web-ui",
     reason: requestBody.reason || null,
+    activation_entitlement_key: normalizeOptionalString(requestBody.activationEntitlementKey),
+    ...(proof
+      ? {
+          key_fingerprint: proof.keyFingerprint,
+          public_key_spki: proof.publicKeySpki,
+          key_algorithm: proof.keyAlgorithm,
+          challenge_id: proof.challengeId,
+          challenge_signature: proof.challengeSignature,
+        }
+      : {}),
   };
 
   const response = await request<BackendLicenseStatus>("/api/provision/activate", {
@@ -1140,6 +1813,34 @@ export async function heartbeatLicense(deviceCode?: string) {
   const status = mapLicenseStatus(response);
   setStoredLicenseToken(status.licenseToken);
   return status;
+}
+
+export async function fetchCustomerLicensePortal() {
+  return request<CustomerLicensePortalResponse>("/api/license/account/licenses");
+}
+
+export async function deactivateCustomerLicenseDevice(deviceCode: string, reason?: string) {
+  return request<CustomerSelfServiceDeviceDeactivationResponse>(
+    `/api/license/account/licenses/devices/${encodeURIComponent(deviceCode)}/deactivate`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        reason: normalizeOptionalString(reason),
+      }),
+    }
+  );
+}
+
+export async function fetchLicenseAccessSuccess(activationEntitlementKey: string) {
+  const normalizedKey = activationEntitlementKey.trim();
+  if (!normalizedKey) {
+    throw new Error("Activation entitlement key is required.");
+  }
+
+  const query = new URLSearchParams({
+    activation_entitlement_key: normalizedKey,
+  }).toString();
+  return request<LicenseAccessSuccessResponse>(`/api/license/access/success?${query}`);
 }
 
 export async function login(username: string, password: string, mfaCode?: string) {
@@ -1444,6 +2145,42 @@ export async function createRefund(requestBody: CreateRefundRequest) {
   });
 }
 
+export async function syncOfflineEvents(
+  events: SyncEventRequestItem[],
+  options: SyncEventsRequestOptions = {}
+) {
+  if (!Array.isArray(events) || events.length === 0) {
+    return { results: [] } satisfies SyncEventsResponse;
+  }
+
+  let offlineGrantToken = normalizeOptionalString(options.offlineGrantToken);
+  if (!offlineGrantToken && requiresOfflineGrant(events)) {
+    try {
+      const licenseStatus = await fetchLicenseStatus();
+      offlineGrantToken = normalizeOptionalString(licenseStatus.offlineGrantToken);
+    } catch (error) {
+      if (!(error instanceof ApiError)) {
+        throw error;
+      }
+    }
+  }
+
+  const payload: BackendSyncEventsRequest = {
+    device_id: options.deviceId ?? null,
+    offline_grant_token: offlineGrantToken,
+    events: events.map(mapSyncEventRequestItem),
+  };
+
+  const response = await request<BackendSyncEventsResponse>("/api/sync/events", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
+  return {
+    results: Array.isArray(response.results) ? response.results.map(mapSyncEventResult) : [],
+  } satisfies SyncEventsResponse;
+}
+
 function formatDateQueryValue(value: Date | string) {
   if (typeof value === "string") {
     return value.slice(0, 10);
@@ -1532,31 +2269,104 @@ export async function fetchAdminLicenseAuditLogs({
   return request<AdminAuditLogsResponse>(`/api/admin/licensing/audit-logs${query ? `?${query}` : ""}`);
 }
 
-export async function adminRevokeDevice(deviceCode: string, reason: string, actor = "support-ui") {
+export async function adminRevokeDevice(
+  deviceCode: string,
+  actorNote: string,
+  actor = "support-ui",
+  reasonCode = "manual_device_revoke"
+) {
   return request<AdminDeviceActionResponse>(`/api/admin/licensing/devices/${encodeURIComponent(deviceCode)}/revoke`, {
     method: "POST",
     body: JSON.stringify({
       actor,
-      reason,
+      reason_code: reasonCode,
+      actor_note: actorNote,
+      reason: actorNote,
     }),
   });
 }
 
-export async function adminReactivateDevice(deviceCode: string, reason: string, actor = "support-ui") {
+export async function adminDeactivateDevice(
+  deviceCode: string,
+  actorNote: string,
+  actor = "support-ui",
+  reasonCode = "manual_device_deactivate"
+) {
+  return request<AdminDeviceActionResponse>(`/api/admin/licensing/devices/${encodeURIComponent(deviceCode)}/deactivate`, {
+    method: "POST",
+    body: JSON.stringify({
+      actor,
+      reason_code: reasonCode,
+      actor_note: actorNote,
+      reason: actorNote,
+    }),
+  });
+}
+
+export async function adminReactivateDevice(
+  deviceCode: string,
+  actorNote: string,
+  actor = "support-ui",
+  reasonCode = "manual_device_reactivate"
+) {
   return request<AdminDeviceActionResponse>(`/api/admin/licensing/devices/${encodeURIComponent(deviceCode)}/reactivate`, {
     method: "POST",
     body: JSON.stringify({
       actor,
-      reason,
+      reason_code: reasonCode,
+      actor_note: actorNote,
+      reason: actorNote,
     }),
   });
+}
+
+export async function adminActivateDevice(
+  deviceCode: string,
+  actorNote: string,
+  actor = "support-ui",
+  reasonCode = "manual_device_activate"
+) {
+  return request<AdminDeviceActionResponse>(`/api/admin/licensing/devices/${encodeURIComponent(deviceCode)}/activate`, {
+    method: "POST",
+    body: JSON.stringify({
+      actor,
+      reason_code: reasonCode,
+      actor_note: actorNote,
+      reason: actorNote,
+    }),
+  });
+}
+
+export async function adminTransferDeviceSeat(
+  deviceCode: string,
+  targetShopCode: string,
+  actorNote: string,
+  actor = "support-ui",
+  reasonCode = "manual_transfer_seat"
+) {
+  return request<AdminDeviceSeatTransferResponse>(
+    `/api/admin/licensing/devices/${encodeURIComponent(deviceCode)}/transfer-seat`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        target_shop_code: targetShopCode,
+        actor,
+        reason_code: reasonCode,
+        actor_note: actorNote,
+        reason: actorNote,
+      }),
+    }
+  );
 }
 
 export async function adminExtendDeviceGrace(
   deviceCode: string,
   extendDays: number,
-  reason: string,
-  actor = "support-ui"
+  actorNote: string,
+  actor = "support-ui",
+  reasonCode = "manual_extend_grace",
+  stepUpApprovedBy?: string,
+  stepUpApprovalNote?: string
 ) {
   return request<AdminDeviceActionResponse>(
     `/api/admin/licensing/devices/${encodeURIComponent(deviceCode)}/extend-grace`,
@@ -1564,22 +2374,277 @@ export async function adminExtendDeviceGrace(
       method: "POST",
       body: JSON.stringify({
         actor,
-        reason,
+        reason_code: reasonCode,
+        actor_note: actorNote,
+        reason: actorNote,
+        step_up_approved_by: stepUpApprovedBy,
+        step_up_approval_note: stepUpApprovalNote,
         extend_days: Math.max(1, Math.min(30, Math.round(extendDays))),
       }),
     }
   );
 }
 
-export async function adminForceLicenseResync(shopCode: string, reason: string, actor = "support-ui") {
+export async function adminForceLicenseResync(
+  shopCode: string,
+  actorNote: string,
+  actor = "support-ui",
+  reasonCode = "manual_license_resync"
+) {
   return request<AdminLicenseResyncResponse>("/api/admin/licensing/resync", {
     method: "POST",
     body: JSON.stringify({
       shop_code: shopCode,
       actor,
-      reason,
+      reason_code: reasonCode,
+      actor_note: actorNote,
+      reason: actorNote,
     }),
   });
+}
+
+export async function adminMassRevokeDevices(
+  deviceCodes: string[],
+  actorNote: string,
+  actor = "support-ui",
+  reasonCode = "manual_mass_revoke",
+  stepUpApprovedBy?: string,
+  stepUpApprovalNote?: string
+) {
+  return request<AdminMassDeviceRevokeResponse>("/api/admin/licensing/devices/mass-revoke", {
+    method: "POST",
+    body: JSON.stringify({
+      device_codes: deviceCodes,
+      actor,
+      reason_code: reasonCode,
+      actor_note: actorNote,
+      step_up_approved_by: stepUpApprovedBy,
+      step_up_approval_note: stepUpApprovalNote,
+    }),
+  });
+}
+
+export async function createAdminEmergencyCommandEnvelope(
+  deviceCode: string,
+  action: "lock_device" | "revoke_token" | "force_reauth",
+  actorNote: string,
+  actor = "support-ui",
+  reasonCode = `emergency_${action}`
+) {
+  return request<AdminEmergencyCommandEnvelopeResponse>(
+    `/api/admin/licensing/devices/${encodeURIComponent(deviceCode)}/emergency/envelope`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        action,
+        actor,
+        reason_code: reasonCode,
+        actor_note: actorNote,
+      }),
+    }
+  );
+}
+
+export async function executeAdminEmergencyCommand(deviceCode: string, envelopeToken: string) {
+  return request<AdminEmergencyCommandExecuteResponse>(
+    `/api/admin/licensing/devices/${encodeURIComponent(deviceCode)}/emergency/execute`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        envelope_token: envelopeToken,
+      }),
+    }
+  );
+}
+
+export async function runAdminEmergencyAction(
+  deviceCode: string,
+  action: "lock_device" | "revoke_token" | "force_reauth",
+  actorNote: string,
+  actor = "support-ui"
+) {
+  const envelope = await createAdminEmergencyCommandEnvelope(deviceCode, action, actorNote, actor);
+  return executeAdminEmergencyCommand(deviceCode, envelope.envelope_token);
+}
+
+export async function exportAdminLicenseAuditLogs({
+  search,
+  action,
+  actor,
+  take = 200,
+  format = "csv",
+}: {
+  search?: string;
+  action?: string;
+  actor?: string;
+  take?: number;
+  format?: "csv" | "json";
+}) {
+  const params = new URLSearchParams();
+  if (search?.trim()) {
+    params.set("search", search.trim());
+  }
+
+  if (action?.trim()) {
+    params.set("action", action.trim());
+  }
+
+  if (actor?.trim()) {
+    params.set("actor", actor.trim());
+  }
+
+  params.set("take", String(Math.max(1, Math.min(500, Math.round(take)))));
+  params.set("format", format);
+  const query = params.toString();
+  const path = `/api/admin/licensing/audit-logs/export${query ? `?${query}` : ""}`;
+  const deviceCode = getAuthDeviceCode();
+  const licenseToken = getStoredLicenseToken();
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    credentials: "include",
+    headers: {
+      "X-Device-Code": deviceCode,
+      ...(licenseToken ? { "X-License-Token": licenseToken } : {}),
+    },
+  });
+  const content = await parseResponse<string | object>(response);
+  const contentDisposition = response.headers.get("content-disposition") || "";
+  const filenameMatch = /filename=\"?([^\";]+)\"?/i.exec(contentDisposition);
+  const fallbackFileName = `license-audit-logs.${format}`;
+  return {
+    filename: filenameMatch?.[1] || fallbackFileName,
+    mimeType: response.headers.get("content-type") || (format === "json" ? "application/json" : "text/csv"),
+    content: typeof content === "string" ? content : JSON.stringify(content, null, 2),
+  };
+}
+
+export async function fetchAdminManualBillingInvoices({
+  search,
+  status,
+  take = 50,
+}: {
+  search?: string;
+  status?: "open" | "pending_verification" | "paid" | "overdue" | "canceled";
+  take?: number;
+} = {}) {
+  const params = new URLSearchParams();
+  if (search?.trim()) {
+    params.set("search", search.trim());
+  }
+
+  if (status?.trim()) {
+    params.set("status", status.trim());
+  }
+
+  params.set("take", String(Math.max(1, Math.min(200, Math.round(take)))));
+  const query = params.toString();
+  return request<AdminManualBillingInvoicesResponse>(`/api/admin/licensing/billing/invoices${query ? `?${query}` : ""}`);
+}
+
+export async function createAdminManualBillingInvoice(
+  payload: CreateAdminManualBillingInvoiceRequest
+) {
+  return request<AdminManualBillingInvoiceRow>("/api/admin/licensing/billing/invoices", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchAdminManualBillingPayments({
+  search,
+  status,
+  take = 50,
+}: {
+  search?: string;
+  status?: "pending_verification" | "verified" | "rejected";
+  take?: number;
+} = {}) {
+  const params = new URLSearchParams();
+  if (search?.trim()) {
+    params.set("search", search.trim());
+  }
+
+  if (status?.trim()) {
+    params.set("status", status.trim());
+  }
+
+  params.set("take", String(Math.max(1, Math.min(200, Math.round(take)))));
+  const query = params.toString();
+  return request<AdminManualBillingPaymentsResponse>(`/api/admin/licensing/billing/payments${query ? `?${query}` : ""}`);
+}
+
+export async function fetchAdminManualBillingDailyReconciliation({
+  date,
+  currency = "LKR",
+  expectedTotal,
+  take = 50,
+}: {
+  date?: string;
+  currency?: string;
+  expectedTotal?: number;
+  take?: number;
+} = {}) {
+  const params = new URLSearchParams();
+  if (date?.trim()) {
+    params.set("date", date.trim());
+  }
+
+  if (currency?.trim()) {
+    params.set("currency", currency.trim());
+  }
+
+  if (typeof expectedTotal === "number" && Number.isFinite(expectedTotal)) {
+    params.set("expected_total", String(expectedTotal));
+  }
+
+  params.set("take", String(Math.max(1, Math.min(200, Math.round(take)))));
+  const query = params.toString();
+  return request<AdminManualBillingDailyReconciliationResponse>(
+    `/api/admin/licensing/billing/reconciliation/daily${query ? `?${query}` : ""}`
+  );
+}
+
+export async function runAdminBillingStateReconciliation(
+  payload: RunAdminBillingStateReconciliationRequest
+) {
+  return request<AdminBillingStateReconciliationRunResponse>("/api/admin/licensing/billing/reconciliation/run", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function recordAdminManualBillingPayment(
+  payload: RecordAdminManualBillingPaymentRequest
+) {
+  return request<AdminManualBillingPaymentRow>("/api/admin/licensing/billing/payments/record", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function verifyAdminManualBillingPayment(
+  paymentId: string,
+  payload: VerifyAdminManualBillingPaymentRequest
+) {
+  return request<AdminManualBillingPaymentVerificationResponse>(
+    `/api/admin/licensing/billing/payments/${encodeURIComponent(paymentId)}/verify`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
+export async function rejectAdminManualBillingPayment(
+  paymentId: string,
+  payload: RejectAdminManualBillingPaymentRequest
+) {
+  return request<AdminManualBillingPaymentRow>(
+    `/api/admin/licensing/billing/payments/${encodeURIComponent(paymentId)}/reject`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }
+  );
 }
 
 export async function createPurchaseOcrDraft(file: File, supplierHint?: string) {

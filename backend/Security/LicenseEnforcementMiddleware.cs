@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using SmartPos.Backend.Features.Licensing;
 
@@ -25,6 +26,12 @@ public sealed class LicenseEnforcementMiddleware(RequestDelegate next)
 
         var hasAuthorizeMetadata = endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>().Count > 0;
         if (!hasAuthorizeMetadata)
+        {
+            await next(httpContext);
+            return;
+        }
+
+        if (IsSuperAdminPrincipal(httpContext.User))
         {
             await next(httpContext);
             return;
@@ -70,9 +77,18 @@ public sealed class LicenseEnforcementMiddleware(RequestDelegate next)
     {
         return path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase)
                || path.StartsWithSegments("/api/auth", StringComparison.OrdinalIgnoreCase)
+               || path.StartsWithSegments("/api/security/challenge", StringComparison.OrdinalIgnoreCase)
                || path.StartsWithSegments("/api/admin", StringComparison.OrdinalIgnoreCase)
                || path.StartsWithSegments("/api/license/status", StringComparison.OrdinalIgnoreCase)
                || path.StartsWithSegments("/api/license/heartbeat", StringComparison.OrdinalIgnoreCase)
                || path.StartsWithSegments("/api/provision/activate", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSuperAdminPrincipal(ClaimsPrincipal principal)
+    {
+        return principal.IsInRole(SmartPosRoles.SuperAdmin) ||
+               principal.IsInRole(SmartPosRoles.Support) ||
+               principal.IsInRole(SmartPosRoles.BillingAdmin) ||
+               principal.IsInRole(SmartPosRoles.SecurityAdmin);
     }
 }

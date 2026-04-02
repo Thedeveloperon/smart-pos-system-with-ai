@@ -313,17 +313,41 @@ public sealed class SupportLicenseAlertSummary
     [JsonPropertyName("webhook_failures_in_window")]
     public int WebhookFailuresInWindow { get; set; }
 
+    [JsonPropertyName("security_anomalies_in_window")]
+    public int SecurityAnomaliesInWindow { get; set; }
+
+    [JsonPropertyName("auth_impossible_travel_signals_in_window")]
+    public int AuthImpossibleTravelSignalsInWindow { get; set; }
+
+    [JsonPropertyName("auth_concurrent_device_signals_in_window")]
+    public int AuthConcurrentDeviceSignalsInWindow { get; set; }
+
+    [JsonPropertyName("sensitive_action_proof_failures_in_window")]
+    public int SensitiveActionProofFailuresInWindow { get; set; }
+
+    [JsonPropertyName("devices_with_unusual_source_changes_in_window")]
+    public int DevicesWithUnusualSourceChangesInWindow { get; set; }
+
     [JsonPropertyName("top_validation_failures")]
     public List<SupportAlertBreakdownRow> TopValidationFailures { get; set; } = [];
 
     [JsonPropertyName("top_webhook_failures")]
     public List<SupportAlertBreakdownRow> TopWebhookFailures { get; set; } = [];
 
+    [JsonPropertyName("top_security_anomalies")]
+    public List<SupportAlertBreakdownRow> TopSecurityAnomalies { get; set; } = [];
+
+    [JsonPropertyName("top_sensitive_action_failure_sources")]
+    public List<SupportAlertBreakdownRow> TopSensitiveActionFailureSources { get; set; } = [];
+
     [JsonPropertyName("last_validation_alert_at")]
     public DateTimeOffset? LastValidationAlertAt { get; set; }
 
     [JsonPropertyName("last_webhook_alert_at")]
     public DateTimeOffset? LastWebhookAlertAt { get; set; }
+
+    [JsonPropertyName("last_security_alert_at")]
+    public DateTimeOffset? LastSecurityAlertAt { get; set; }
 }
 
 public sealed class SupportAlertBreakdownRow
@@ -351,4 +375,16 @@ public sealed class SupportLicenseAuditEventRow
 
     [JsonPropertyName("reason")]
     public string? Reason { get; set; }
+
+    [JsonPropertyName("source_ip")]
+    public string? SourceIp { get; set; }
+
+    [JsonPropertyName("source_ip_prefix")]
+    public string? SourceIpPrefix { get; set; }
+
+    [JsonPropertyName("source_user_agent_family")]
+    public string? SourceUserAgentFamily { get; set; }
+
+    [JsonPropertyName("source_fingerprint")]
+    public string? SourceFingerprint { get; set; }
 }

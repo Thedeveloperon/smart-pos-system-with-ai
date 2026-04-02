@@ -1,21 +1,26 @@
 import type { LicenseState, LicenseStatus } from "@/lib/api";
 
 const CACHE_KEY = "smartpos-license-cache-v1";
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 2;
 const CLOCK_ROLLBACK_TOLERANCE_MS = 5 * 60 * 1000;
+const SERVER_DELTA_DRIFT_TOLERANCE_MS = 2 * 60 * 1000;
 const SUSPENDED_BLOCKED_ACTIONS = ["checkout", "refund"];
 
 type PersistedLicenseStatus = {
   state: LicenseState;
   shop_id?: string | null;
   device_code: string;
+  device_key_fingerprint?: string | null;
   subscription_status?: "trialing" | "active" | "past_due" | "canceled" | null;
   plan?: string | null;
   seat_limit?: number | null;
   active_seats?: number | null;
   valid_until?: string | null;
   grace_until?: string | null;
-  license_token?: string | null;
+  offline_grant_token?: string | null;
+  offline_grant_expires_at?: string | null;
+  offline_max_checkout_operations?: number | null;
+  offline_max_refund_operations?: number | null;
   blocked_actions: string[];
   server_time: string;
 };
@@ -28,6 +33,7 @@ type CachedLicenseEnvelope = {
   device_code: string;
   validated_server_time: string;
   validated_client_time: number;
+  validated_server_delta_ms: number;
   last_client_seen_time: number;
 };
 
@@ -145,13 +151,17 @@ function toPersistedStatus(status: LicenseStatus): PersistedLicenseStatus {
     state: status.state,
     shop_id: status.shopId ?? null,
     device_code: status.deviceCode,
+    device_key_fingerprint: status.deviceKeyFingerprint ?? null,
     subscription_status: status.subscriptionStatus ?? null,
     plan: status.plan ?? null,
     seat_limit: status.seatLimit ?? null,
     active_seats: status.activeSeats ?? null,
     valid_until: status.validUntil ? status.validUntil.toISOString() : null,
     grace_until: status.graceUntil ? status.graceUntil.toISOString() : null,
-    license_token: status.licenseToken ?? null,
+    offline_grant_token: status.offlineGrantToken ?? null,
+    offline_grant_expires_at: status.offlineGrantExpiresAt ? status.offlineGrantExpiresAt.toISOString() : null,
+    offline_max_checkout_operations: status.offlineMaxCheckoutOperations ?? null,
+    offline_max_refund_operations: status.offlineMaxRefundOperations ?? null,
     blocked_actions: Array.isArray(status.blockedActions) ? status.blockedActions : [],
     server_time: status.serverTime.toISOString(),
   };
@@ -162,13 +172,18 @@ function fromPersistedStatus(payload: PersistedLicenseStatus): LicenseStatus {
     state: payload.state,
     shopId: payload.shop_id ?? null,
     deviceCode: payload.device_code,
+    deviceKeyFingerprint: payload.device_key_fingerprint ?? null,
     subscriptionStatus: payload.subscription_status ?? null,
     plan: payload.plan ?? null,
     seatLimit: payload.seat_limit ?? null,
     activeSeats: payload.active_seats ?? null,
     validUntil: payload.valid_until ? new Date(payload.valid_until) : null,
     graceUntil: payload.grace_until ? new Date(payload.grace_until) : null,
-    licenseToken: payload.license_token ?? null,
+    licenseToken: null,
+    offlineGrantToken: payload.offline_grant_token ?? null,
+    offlineGrantExpiresAt: payload.offline_grant_expires_at ? new Date(payload.offline_grant_expires_at) : null,
+    offlineMaxCheckoutOperations: payload.offline_max_checkout_operations ?? null,
+    offlineMaxRefundOperations: payload.offline_max_refund_operations ?? null,
     blockedActions: payload.blocked_actions ?? [],
     serverTime: new Date(payload.server_time),
   };
@@ -220,6 +235,10 @@ function createRollbackBlockedStatus(deviceCode: string): LicenseStatus {
     validUntil: null,
     graceUntil: null,
     licenseToken: null,
+    offlineGrantToken: null,
+    offlineGrantExpiresAt: null,
+    offlineMaxCheckoutOperations: null,
+    offlineMaxRefundOperations: null,
     blockedActions: [...SUSPENDED_BLOCKED_ACTIONS],
     serverTime: new Date(),
   };
@@ -241,6 +260,7 @@ export async function saveCachedLicenseStatus(status: LicenseStatus) {
     device_code: status.deviceCode,
     validated_server_time: status.serverTime.toISOString(),
     validated_client_time: clientTime,
+    validated_server_delta_ms: status.serverTime.getTime() - clientTime,
     last_client_seen_time: clientTime,
   };
 
@@ -288,7 +308,40 @@ export async function loadCachedLicenseStatus(deviceCode: string): Promise<Cache
     const estimatedServerTime = new Date(
       new Date(envelope.validated_server_time).getTime() + elapsedSinceValidation
     );
-    const offlineStatus = clampOfflineState(cachedStatus, estimatedServerTime);
+    const expectedDeltaMs = envelope.validated_server_delta_ms;
+    const observedDeltaMs = estimatedServerTime.getTime() - now;
+    if (Math.abs(observedDeltaMs - expectedDeltaMs) > SERVER_DELTA_DRIFT_TOLERANCE_MS) {
+      localStorage.removeItem(CACHE_KEY);
+      return {
+        status: createRollbackBlockedStatus(deviceCode),
+        warning: "System clock drift exceeded allowed tolerance. Online license validation is required.",
+        lastValidatedAtServer: new Date(envelope.validated_server_time),
+        lastValidatedAtClient: new Date(envelope.validated_client_time),
+      };
+    }
+
+    let offlineStatus = clampOfflineState(cachedStatus, estimatedServerTime);
+    let warning = `Using cached license (last validated ${new Date(envelope.validated_server_time).toLocaleString()}).`;
+    if (offlineStatus.state === "active" || offlineStatus.state === "grace") {
+      const grantExpiresAtMs = cachedStatus.offlineGrantExpiresAt?.getTime();
+      if (!grantExpiresAtMs) {
+        offlineStatus = {
+          ...offlineStatus,
+          state: "suspended",
+          blockedActions: [...SUSPENDED_BLOCKED_ACTIONS],
+          serverTime: estimatedServerTime,
+        };
+        warning = "Offline grant is missing. Online license validation is required.";
+      } else if (estimatedServerTime.getTime() > grantExpiresAtMs) {
+        offlineStatus = {
+          ...offlineStatus,
+          state: "suspended",
+          blockedActions: [...SUSPENDED_BLOCKED_ACTIONS],
+          serverTime: estimatedServerTime,
+        };
+        warning = "Offline grant expired. Online license validation is required.";
+      }
+    }
 
     const touchedEnvelope: CachedLicenseEnvelope = {
       ...envelope,
@@ -298,7 +351,7 @@ export async function loadCachedLicenseStatus(deviceCode: string): Promise<Cache
 
     return {
       status: offlineStatus,
-      warning: `Using cached license (last validated ${new Date(envelope.validated_server_time).toLocaleString()}).`,
+      warning,
       lastValidatedAtServer: new Date(envelope.validated_server_time),
       lastValidatedAtClient: new Date(envelope.validated_client_time),
     };

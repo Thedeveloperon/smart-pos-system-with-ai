@@ -1,18 +1,24 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Net;
+using System.Net.Mail;
 using System.Text;
 using System.Text.Json;
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Infrastructure;
+using SmartPos.Backend.Security;
 
 namespace SmartPos.Backend.Features.Licensing;
 
 public sealed class LicenseService(
     SmartPosDbContext dbContext,
     IOptions<LicenseOptions> optionsAccessor,
-    LicensingMetrics metrics)
+    LicensingMetrics metrics,
+    IHttpContextAccessor httpContextAccessor,
+    ILicensingAlertMonitor licensingAlertMonitor)
 {
     private static readonly HashSet<string> SupportedBillingWebhookEvents = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -25,6 +31,44 @@ public sealed class LicenseService(
     private const string WebhookEventStatusProcessed = "processed";
     private const string WebhookEventStatusFailed = "failed";
     private const string EncryptedValuePrefix = "enc:v1:";
+    private const string DefaultDeviceKeyAlgorithm = "ECDSA_P256_SHA256";
+    private const int DefaultManualPaymentExtensionDays = 30;
+    private const string BankReconciliationMissingReferenceCode = "BANK_REFERENCE_MISSING";
+    private const string BankReconciliationDuplicateReferenceCode = "BANK_REFERENCE_DUPLICATE";
+    private const string BankReconciliationExpectedTotalMismatchCode = "BANK_TOTAL_MISMATCH";
+    private const string BillingReconciliationDriftReasonCode = "period_end_elapsed_without_webhook";
+    private const string EmergencyActionLockDevice = "lock_device";
+    private const string EmergencyActionRevokeToken = "revoke_token";
+    private const string EmergencyActionForceReauth = "force_reauth";
+    private static readonly HashSet<string> EmergencyActions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        EmergencyActionLockDevice,
+        EmergencyActionRevokeToken,
+        EmergencyActionForceReauth
+    };
+
+    private enum TokenRotationMode
+    {
+        Immediate = 1,
+        Overlap = 2
+    }
+
+    private enum TokenValidationPurpose
+    {
+        General = 1,
+        Heartbeat = 2
+    }
+
+    private readonly record struct ManualOverrideContext(
+        string Actor,
+        string ReasonCode,
+        string ActorNote,
+        string AuditReason);
+
+    private readonly record struct StepUpApprovalContext(
+        string ApprovedBy,
+        string ApprovalNote,
+        bool Applied);
 
     private static readonly JsonSerializerOptions TokenSerializerOptions = new()
     {
@@ -33,6 +77,40 @@ public sealed class LicenseService(
 
     private readonly LicenseOptions options = optionsAccessor.Value;
     private readonly Dictionary<string, LicensePlanDefinition> planCatalog = BuildPlanCatalog(optionsAccessor.Value);
+
+    public async Task<ProvisionChallengeResponse> CreateActivationChallengeAsync(
+        ProvisionChallengeRequest request,
+        CancellationToken cancellationToken)
+    {
+        var deviceCode = NormalizeDeviceCode(request.DeviceCode);
+        if (string.IsNullOrWhiteSpace(deviceCode))
+        {
+            throw new LicenseException(LicenseErrorCodes.Unprovisioned, "device_code is required.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var ttlSeconds = Math.Clamp(options.DeviceChallengeTtlSeconds, 30, 900);
+        var challenge = new DeviceKeyChallenge
+        {
+            DeviceCode = deviceCode,
+            Nonce = Base64UrlEncode(RandomNumberGenerator.GetBytes(32)),
+            CreatedAtUtc = now,
+            ExpiresAtUtc = now.AddSeconds(ttlSeconds)
+        };
+
+        dbContext.DeviceKeyChallenges.Add(challenge);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new ProvisionChallengeResponse
+        {
+            ChallengeId = challenge.Id.ToString(),
+            DeviceCode = deviceCode,
+            Nonce = challenge.Nonce,
+            KeyAlgorithm = DefaultDeviceKeyAlgorithm,
+            IssuedAt = challenge.CreatedAtUtc,
+            ExpiresAt = challenge.ExpiresAtUtc
+        };
+    }
 
     public async Task<LicenseStatusResponse> ActivateAsync(
         ProvisionActivateRequest request,
@@ -45,7 +123,38 @@ public sealed class LicenseService(
         }
 
         var now = DateTimeOffset.UtcNow;
-        var shop = await GetOrCreateDefaultShopAsync(now, cancellationToken);
+        var requestSource = ResolveRequestSourceContext();
+        var existingDevice = await dbContext.ProvisionedDevices
+            .FirstOrDefaultAsync(x => x.DeviceCode == deviceCode, cancellationToken);
+        var activationEntitlement = await ResolveActivationEntitlementForActivationAsync(
+            request.ActivationEntitlementKey,
+            now,
+            cancellationToken);
+
+        Shop shop;
+        if (existingDevice is not null)
+        {
+            shop = await dbContext.Shops
+                .FirstOrDefaultAsync(x => x.Id == existingDevice.ShopId, cancellationToken)
+                ?? throw new LicenseException(
+                    LicenseErrorCodes.InvalidActivationEntitlement,
+                    "Device is linked to an unknown shop.",
+                    StatusCodes.Status403Forbidden);
+
+            if (activationEntitlement is not null &&
+                activationEntitlement.Entitlement.ShopId != shop.Id)
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.InvalidActivationEntitlement,
+                    "activation_entitlement_key does not belong to this device shop.",
+                    StatusCodes.Status403Forbidden);
+            }
+        }
+        else
+        {
+            shop = activationEntitlement?.Shop ?? await GetOrCreateDefaultShopAsync(now, cancellationToken);
+        }
+
         var subscription = await GetOrCreateSubscriptionAsync(shop, now, cancellationToken);
         if (subscription.Status == SubscriptionStatus.Canceled)
         {
@@ -55,8 +164,12 @@ public sealed class LicenseService(
                 StatusCodes.Status403Forbidden);
         }
 
-        var existingDevice = await dbContext.ProvisionedDevices
-            .FirstOrDefaultAsync(x => x.DeviceCode == deviceCode, cancellationToken);
+        var deviceKeyProof = await ResolveAndValidateDeviceKeyProofAsync(
+            request,
+            existingDevice,
+            deviceCode,
+            now,
+            cancellationToken);
 
         var seatLimit = ResolveSeatLimit(subscription);
         var activeSeats = await dbContext.ProvisionedDevices
@@ -74,6 +187,11 @@ public sealed class LicenseService(
                 StatusCodes.Status409Conflict);
         }
 
+        if (activationEntitlement is not null && requiresSeat)
+        {
+            ConsumeActivationEntitlement(activationEntitlement.Entitlement, now);
+        }
+
         var appDevice = await dbContext.Devices
             .AsNoTracking()
             .FirstOrDefaultAsync(x => x.DeviceCode == deviceCode, cancellationToken);
@@ -89,6 +207,10 @@ public sealed class LicenseService(
                 Status = ProvisionedDeviceStatus.Active,
                 AssignedAtUtc = now,
                 LastHeartbeatAtUtc = now,
+                DeviceKeyFingerprint = deviceKeyProof?.Fingerprint,
+                DevicePublicKeySpki = deviceKeyProof?.PublicKeySpki,
+                DeviceKeyAlgorithm = deviceKeyProof?.KeyAlgorithm,
+                DeviceKeyRegisteredAtUtc = deviceKeyProof is null ? null : now,
                 Shop = shop
             };
             dbContext.ProvisionedDevices.Add(existingDevice);
@@ -101,9 +223,22 @@ public sealed class LicenseService(
             existingDevice.AssignedAtUtc = now;
             existingDevice.RevokedAtUtc = null;
             existingDevice.LastHeartbeatAtUtc = now;
+            if (deviceKeyProof is not null)
+            {
+                existingDevice.DeviceKeyFingerprint = deviceKeyProof.Fingerprint;
+                existingDevice.DevicePublicKeySpki = deviceKeyProof.PublicKeySpki;
+                existingDevice.DeviceKeyAlgorithm = deviceKeyProof.KeyAlgorithm;
+                existingDevice.DeviceKeyRegisteredAtUtc ??= now;
+            }
         }
 
-        var issuedLicense = await IssueLicenseAsync(shop, existingDevice, subscription, now, cancellationToken);
+        var issuedLicense = await IssueLicenseAsync(
+            shop,
+            existingDevice,
+            subscription,
+            now,
+            TokenRotationMode.Immediate,
+            cancellationToken);
         if (requiresSeat)
         {
             await ForceReissueLicensesForShopAsync(
@@ -128,7 +263,15 @@ public sealed class LicenseService(
                 device_code = deviceCode,
                 seat_limit = seatLimit,
                 active_seats = activeSeats + (requiresSeat ? 1 : 0),
-                subscription_status = subscription.Status.ToString().ToLowerInvariant()
+                subscription_status = subscription.Status.ToString().ToLowerInvariant(),
+                source_ip = requestSource.SourceIp,
+                source_ip_prefix = requestSource.SourceIpPrefix,
+                source_forwarded_for = requestSource.ForwardedFor,
+                source_user_agent = requestSource.UserAgent,
+                source_user_agent_family = requestSource.UserAgentFamily,
+                source_fingerprint = requestSource.SourceFingerprint,
+                activation_entitlement_id = activationEntitlement?.Entitlement.Id,
+                activation_entitlement_source = activationEntitlement?.Entitlement.Source
             })
         });
 
@@ -136,7 +279,7 @@ public sealed class LicenseService(
         metrics.RecordActivation();
 
         var status = await ResolveStatusSnapshotAsync(deviceCode, issuedLicense.PlainToken, strictTokenValidation: true, cancellationToken);
-        return ToResponse(status with { LicenseToken = issuedLicense.PlainToken });
+        return CreateResponse(status with { LicenseToken = issuedLicense.PlainToken });
     }
 
     public async Task<LicenseStatusResponse> DeactivateAsync(
@@ -150,6 +293,7 @@ public sealed class LicenseService(
         }
 
         var now = DateTimeOffset.UtcNow;
+        var requestSource = ResolveRequestSourceContext();
         var provisionedDevice = await dbContext.ProvisionedDevices
             .FirstOrDefaultAsync(x => x.DeviceCode == deviceCode, cancellationToken)
             ?? throw new LicenseException(
@@ -162,15 +306,35 @@ public sealed class LicenseService(
         provisionedDevice.RevokedAtUtc = now;
         provisionedDevice.LastHeartbeatAtUtc = now;
 
-        var activeLicenses = await dbContext.Licenses
-            .Where(x => x.ProvisionedDeviceId == provisionedDevice.Id && x.Status == LicenseRecordStatus.Active)
-            .ToListAsync(cancellationToken);
+        List<LicenseRecord> activeLicenses;
+        if (dbContext.Database.IsSqlite())
+        {
+            activeLicenses = (await dbContext.Licenses
+                    .Where(x => x.ProvisionedDeviceId == provisionedDevice.Id &&
+                                x.Status == LicenseRecordStatus.Active)
+                    .ToListAsync(cancellationToken))
+                .Where(x => !x.RevokedAtUtc.HasValue || x.RevokedAtUtc > now)
+                .ToList();
+        }
+        else
+        {
+            activeLicenses = await dbContext.Licenses
+                .Where(x => x.ProvisionedDeviceId == provisionedDevice.Id &&
+                            x.Status == LicenseRecordStatus.Active &&
+                            (!x.RevokedAtUtc.HasValue || x.RevokedAtUtc > now))
+                .ToListAsync(cancellationToken);
+        }
 
         foreach (var activeLicense in activeLicenses)
         {
             activeLicense.Status = LicenseRecordStatus.Revoked;
             activeLicense.RevokedAtUtc = now;
         }
+
+        await RevokeTokenSessionsForLicensesAsync(
+            activeLicenses.Select(x => x.Id),
+            now,
+            cancellationToken);
 
         dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
         {
@@ -179,7 +343,16 @@ public sealed class LicenseService(
             Action = "provision_deactivate",
             Actor = string.IsNullOrWhiteSpace(request.Actor) ? "system" : request.Actor.Trim(),
             Reason = request.Reason,
-            MetadataJson = JsonSerializer.Serialize(new { device_code = deviceCode })
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                device_code = deviceCode,
+                source_ip = requestSource.SourceIp,
+                source_ip_prefix = requestSource.SourceIpPrefix,
+                source_forwarded_for = requestSource.ForwardedFor,
+                source_user_agent = requestSource.UserAgent,
+                source_user_agent_family = requestSource.UserAgentFamily,
+                source_fingerprint = requestSource.SourceFingerprint
+            })
         });
 
         if (wasActive)
@@ -201,7 +374,7 @@ public sealed class LicenseService(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         var status = await ResolveStatusSnapshotAsync(deviceCode, null, strictTokenValidation: false, cancellationToken);
-        return ToResponse(status);
+        return CreateResponse(status);
     }
 
     public async Task<LicenseStatusResponse> GetStatusAsync(
@@ -226,7 +399,7 @@ public sealed class LicenseService(
             strictTokenValidation: !string.IsNullOrWhiteSpace(licenseToken),
             cancellationToken);
 
-        return ToResponse(snapshot);
+        return CreateResponse(snapshot);
     }
 
     public async Task<LicenseStatusResponse> HeartbeatAsync(
@@ -245,11 +418,13 @@ public sealed class LicenseService(
         }
 
         var now = DateTimeOffset.UtcNow;
+        var requestSource = ResolveRequestSourceContext();
         var currentStatus = await ResolveStatusSnapshotAsync(
             deviceCode,
             request.LicenseToken,
             strictTokenValidation: true,
-            cancellationToken);
+            cancellationToken,
+            tokenValidationPurpose: TokenValidationPurpose.Heartbeat);
 
         if (currentStatus.State == LicenseState.Unprovisioned)
         {
@@ -295,6 +470,7 @@ public sealed class LicenseService(
             provisionedDevice,
             subscription,
             now,
+            TokenRotationMode.Overlap,
             cancellationToken);
 
         dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
@@ -306,14 +482,20 @@ public sealed class LicenseService(
             MetadataJson = JsonSerializer.Serialize(new
             {
                 device_code = deviceCode,
-                issued_license_id = refreshedLicense.Record.Id
+                issued_license_id = refreshedLicense.Record.Id,
+                source_ip = requestSource.SourceIp,
+                source_ip_prefix = requestSource.SourceIpPrefix,
+                source_forwarded_for = requestSource.ForwardedFor,
+                source_user_agent = requestSource.UserAgent,
+                source_user_agent_family = requestSource.UserAgentFamily,
+                source_fingerprint = requestSource.SourceFingerprint
             })
         });
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
         var status = await ResolveStatusSnapshotAsync(deviceCode, refreshedLicense.PlainToken, strictTokenValidation: true, cancellationToken);
-        return ToResponse(status with { LicenseToken = refreshedLicense.PlainToken });
+        return CreateResponse(status with { LicenseToken = refreshedLicense.PlainToken });
     }
 
     public async Task<BillingProviderIdsResponse> UpsertBillingProviderIdsAsync(
@@ -476,6 +658,9 @@ public sealed class LicenseService(
             var previousPlan = subscription.Plan;
             var previousPeriodStart = subscription.PeriodStartUtc;
             var previousPeriodEnd = subscription.PeriodEndUtc;
+            var webhookActor = string.IsNullOrWhiteSpace(request.Actor) ? "billing-webhook" : request.Actor.Trim();
+            CustomerActivationEntitlementResponse? activationEntitlementResponse = null;
+            LicenseAccessDeliveryResponse? accessDeliveryResponse = null;
 
             switch (eventType)
             {
@@ -532,22 +717,48 @@ public sealed class LicenseService(
                 previousPeriodEnd,
                 subscription);
 
-            var shopCode = await dbContext.Shops
-                .Where(x => x.Id == subscription.ShopId)
-                .Select(x => x.Code)
-                .FirstOrDefaultAsync(cancellationToken);
+            var shop = await dbContext.Shops
+                .FirstOrDefaultAsync(x => x.Id == subscription.ShopId, cancellationToken)
+                ?? throw new LicenseException(
+                    LicenseErrorCodes.InvalidWebhook,
+                    "Webhook subscription references an unknown shop.",
+                    StatusCodes.Status400BadRequest);
+            var shopCode = shop.Code;
+            if (string.Equals(eventType, "invoice.paid", StringComparison.OrdinalIgnoreCase))
+            {
+                activationEntitlementResponse = await IssueActivationEntitlementAsync(
+                    shop,
+                    ResolveSeatLimit(subscription),
+                    "billing_webhook_invoice_paid",
+                    providerEventId,
+                    webhookActor,
+                    now,
+                    cancellationToken);
+                accessDeliveryResponse = await DeliverAccessDetailsAsync(
+                    shop,
+                    activationEntitlementResponse,
+                    request.CustomerEmail,
+                    "billing_webhook_invoice_paid",
+                    providerEventId,
+                    webhookActor,
+                    now,
+                    cancellationToken);
+            }
 
             dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
             {
                 ShopId = subscription.ShopId,
                 Action = "billing_webhook_processed",
-                Actor = string.IsNullOrWhiteSpace(request.Actor) ? "billing-webhook" : request.Actor.Trim(),
+                Actor = webhookActor,
                 MetadataJson = JsonSerializer.Serialize(new
                 {
                     event_id = providerEventId,
                     event_type = eventType,
                     occurred_at = request.OccurredAt,
                     shop_code = shopCode,
+                    activation_entitlement_id = activationEntitlementResponse?.EntitlementId,
+                    access_delivery_email_status = accessDeliveryResponse?.EmailDelivery.Status,
+                    access_delivery_success_page_url = accessDeliveryResponse?.SuccessPageUrl,
                     previous = new
                     {
                         subscription_status = previousState.Status.ToString().ToLowerInvariant(),
@@ -574,10 +785,10 @@ public sealed class LicenseService(
             if (shouldForceReissue)
             {
                 await ForceReissueLicensesForShopAsync(
-                    await dbContext.Shops.FirstAsync(x => x.Id == subscription.ShopId, cancellationToken),
+                    shop,
                     subscription,
                     now,
-                    string.IsNullOrWhiteSpace(request.Actor) ? "billing-webhook" : request.Actor.Trim(),
+                    webhookActor,
                     "subscription_status_or_plan_changed",
                     excludedProvisionedDeviceId: null,
                     cancellationToken);
@@ -602,6 +813,8 @@ public sealed class LicenseService(
                 SubscriptionStatus = subscription.Status.ToString().ToLowerInvariant(),
                 Plan = subscription.Plan,
                 PeriodEnd = subscription.PeriodEndUtc,
+                ActivationEntitlement = activationEntitlementResponse,
+                AccessDelivery = accessDeliveryResponse,
                 ProcessedAt = now
             };
         }
@@ -783,6 +996,256 @@ public sealed class LicenseService(
             PeriodStart = subscription.PeriodStartUtc,
             PeriodEnd = subscription.PeriodEndUtc,
             ReconciledAt = now
+        };
+    }
+
+    public async Task<CustomerActivationEntitlementResponse> GetLatestActivationEntitlementAsync(
+        string? shopCode,
+        CancellationToken cancellationToken)
+    {
+        var resolvedShopCode = ResolveShopCode(shopCode);
+        var shop = await dbContext.Shops
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Code == resolvedShopCode, cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.ActivationEntitlementNotFound,
+                "No activation entitlement was found for this shop.",
+                StatusCodes.Status404NotFound);
+
+        var entitlement = (await dbContext.CustomerActivationEntitlements
+                .AsNoTracking()
+                .Where(x => x.ShopId == shop.Id)
+                .ToListAsync(cancellationToken))
+            .OrderByDescending(x => x.IssuedAtUtc)
+            .FirstOrDefault()
+            ?? throw new LicenseException(
+                LicenseErrorCodes.ActivationEntitlementNotFound,
+                "No activation entitlement was found for this shop.",
+                StatusCodes.Status404NotFound);
+
+        return MapActivationEntitlementResponse(entitlement, shop.Code);
+    }
+
+    public async Task<LicenseAccessSuccessResponse> GetLicenseAccessSuccessAsync(
+        string activationEntitlementKey,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var resolved = await ResolveActivationEntitlementByPresentedKeyAsync(
+            activationEntitlementKey,
+            cancellationToken);
+        var subscription = await GetLatestSubscriptionAsync(resolved.Shop.Id, cancellationToken);
+        var seatLimit = subscription is null ? Math.Max(1, options.TrialSeatLimit) : ResolveSeatLimit(subscription);
+        var entitlementState = DetermineEntitlementState(resolved.Entitlement, now);
+        var activationEntitlement = MapActivationEntitlementResponse(
+            resolved.Entitlement,
+            resolved.Shop.Code);
+
+        return new LicenseAccessSuccessResponse
+        {
+            GeneratedAt = now,
+            ShopId = resolved.Shop.Id,
+            ShopCode = resolved.Shop.Code,
+            ShopName = resolved.Shop.Name,
+            SubscriptionStatus = (subscription?.Status ?? SubscriptionStatus.Trialing).ToString().ToLowerInvariant(),
+            Plan = subscription?.Plan ?? ResolvePlanCode(options.DefaultPlan),
+            SeatLimit = seatLimit,
+            EntitlementState = entitlementState,
+            CanActivate = string.Equals(entitlementState, "active", StringComparison.Ordinal),
+            ActivationEntitlement = activationEntitlement
+        };
+    }
+
+    public async Task<CustomerLicensePortalResponse> GetCustomerLicensePortalAsync(
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var context = await ResolveCurrentShopContextAsync(now, cancellationToken);
+        var shop = context.Shop;
+        var subscription = await GetLatestSubscriptionAsync(shop.Id, cancellationToken);
+        var seatLimit = subscription is null ? Math.Max(1, options.TrialSeatLimit) : ResolveSeatLimit(subscription);
+
+        var devices = (await dbContext.ProvisionedDevices
+                .AsNoTracking()
+                .Where(x => x.ShopId == shop.Id)
+                .ToListAsync(cancellationToken))
+            .OrderByDescending(x => x.LastHeartbeatAtUtc ?? x.AssignedAtUtc)
+            .ThenBy(x => x.DeviceCode, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var latestLicenseByDevice = new Dictionary<Guid, LicenseRecord>();
+        var deviceIds = devices.Select(x => x.Id).Distinct().ToList();
+        if (deviceIds.Count > 0)
+        {
+            latestLicenseByDevice = (await dbContext.Licenses
+                    .AsNoTracking()
+                    .Where(x => deviceIds.Contains(x.ProvisionedDeviceId))
+                    .ToListAsync(cancellationToken))
+                .GroupBy(x => x.ProvisionedDeviceId)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group
+                        .OrderByDescending(x => x.IssuedAtUtc)
+                        .First());
+        }
+
+        var latestEntitlement = (await dbContext.CustomerActivationEntitlements
+                .AsNoTracking()
+                .Where(x => x.ShopId == shop.Id)
+                .ToListAsync(cancellationToken))
+            .OrderByDescending(x => x.IssuedAtUtc)
+            .FirstOrDefault();
+
+        var activeSeats = devices.Count(x => x.Status == ProvisionedDeviceStatus.Active);
+        var deactivationLimitPerDay = Math.Max(0, options.SelfServiceDeviceDeactivationMaxPerDay);
+        var deactivationsUsedToday = await CountSelfServiceDeactivationsUsedTodayAsync(shop.Id, now, cancellationToken);
+        var remaining = Math.Max(0, deactivationLimitPerDay - deactivationsUsedToday);
+
+        return new CustomerLicensePortalResponse
+        {
+            GeneratedAt = now,
+            ShopId = shop.Id,
+            ShopCode = shop.Code,
+            ShopName = shop.Name,
+            SubscriptionStatus = (subscription?.Status ?? SubscriptionStatus.Trialing).ToString().ToLowerInvariant(),
+            Plan = subscription?.Plan ?? ResolvePlanCode(options.DefaultPlan),
+            SeatLimit = seatLimit,
+            ActiveSeats = activeSeats,
+            SelfServiceDeactivationLimitPerDay = deactivationLimitPerDay,
+            SelfServiceDeactivationsUsedToday = deactivationsUsedToday,
+            SelfServiceDeactivationsRemainingToday = remaining,
+            CanDeactivateMoreDevicesToday = remaining > 0,
+            LatestActivationEntitlement = latestEntitlement is null
+                ? null
+                : MapActivationEntitlementResponse(latestEntitlement, shop.Code),
+            Devices = devices
+                .Select(device =>
+                {
+                    latestLicenseByDevice.TryGetValue(device.Id, out var latestLicense);
+                    var licenseState = latestLicense is null
+                        ? (device.Status == ProvisionedDeviceStatus.Revoked
+                            ? LicenseState.Revoked
+                            : LicenseState.Unprovisioned)
+                        : DetermineState(device, subscription, latestLicense, now);
+                    return new CustomerLicensePortalDeviceRow
+                    {
+                        ProvisionedDeviceId = device.Id,
+                        DeviceCode = device.DeviceCode,
+                        DeviceName = device.Name,
+                        DeviceStatus = device.Status.ToString().ToLowerInvariant(),
+                        LicenseState = licenseState.ToString().ToLowerInvariant(),
+                        AssignedAt = device.AssignedAtUtc,
+                        LastHeartbeatAt = device.LastHeartbeatAtUtc,
+                        ValidUntil = latestLicense?.ValidUntil,
+                        GraceUntil = latestLicense?.GraceUntil,
+                        IsCurrentDevice = !string.IsNullOrWhiteSpace(context.CurrentDeviceCode) &&
+                                          string.Equals(context.CurrentDeviceCode, device.DeviceCode, StringComparison.Ordinal)
+                    };
+                })
+                .ToList()
+        };
+    }
+
+    public async Task<CustomerSelfServiceDeviceDeactivationResponse> DeactivateDeviceViaSelfServiceAsync(
+        string deviceCode,
+        CustomerSelfServiceDeviceDeactivationRequest request,
+        CancellationToken cancellationToken)
+    {
+        var normalizedDeviceCode = NormalizeDeviceCode(deviceCode);
+        if (string.IsNullOrWhiteSpace(normalizedDeviceCode))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "device_code is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var context = await ResolveCurrentShopContextAsync(now, cancellationToken);
+        var targetDevice = await dbContext.ProvisionedDevices
+            .FirstOrDefaultAsync(
+                x => x.ShopId == context.Shop.Id && x.DeviceCode == normalizedDeviceCode,
+                cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.Unprovisioned,
+                "Device is not provisioned for your shop.",
+                StatusCodes.Status404NotFound);
+
+        if (targetDevice.Status != ProvisionedDeviceStatus.Active)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Only active devices can be deactivated.",
+                StatusCodes.Status409Conflict);
+        }
+
+        var deactivationLimitPerDay = Math.Max(0, options.SelfServiceDeviceDeactivationMaxPerDay);
+        if (deactivationLimitPerDay <= 0)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.SelfServiceDeactivationLimitReached,
+                "Self-service device deactivation is disabled.",
+                StatusCodes.Status409Conflict);
+        }
+
+        var deactivationsUsedToday = await CountSelfServiceDeactivationsUsedTodayAsync(context.Shop.Id, now, cancellationToken);
+        if (deactivationsUsedToday >= deactivationLimitPerDay)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.SelfServiceDeactivationLimitReached,
+                "Daily self-service device deactivation limit reached.",
+                StatusCodes.Status409Conflict);
+        }
+
+        if (!string.IsNullOrWhiteSpace(context.CurrentDeviceCode) &&
+            string.Equals(context.CurrentDeviceCode, normalizedDeviceCode, StringComparison.Ordinal))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Current device cannot be self-deactivated from this session.",
+                StatusCodes.Status409Conflict);
+        }
+
+        var actor = ResolveCurrentAdminActor();
+        var reason = NormalizeOptionalValue(request.Reason) ?? "self_service_seat_recovery";
+        await DeactivateAsync(new ProvisionDeactivateRequest
+        {
+            DeviceCode = normalizedDeviceCode,
+            Actor = actor,
+            Reason = reason
+        }, cancellationToken);
+
+        deactivationsUsedToday++;
+        var remaining = Math.Max(0, deactivationLimitPerDay - deactivationsUsedToday);
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = context.Shop.Id,
+            ProvisionedDeviceId = targetDevice.Id,
+            Action = "self_service_device_deactivate",
+            Actor = actor,
+            Reason = reason,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                device_code = normalizedDeviceCode,
+                deactivations_used_today = deactivationsUsedToday,
+                deactivation_limit_per_day = deactivationLimitPerDay,
+                deactivations_remaining_today = remaining
+            }),
+            CreatedAtUtc = now
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new CustomerSelfServiceDeviceDeactivationResponse
+        {
+            ShopId = context.Shop.Id,
+            ShopCode = context.Shop.Code,
+            DeviceCode = normalizedDeviceCode,
+            Status = ProvisionedDeviceStatus.Revoked.ToString().ToLowerInvariant(),
+            Reason = reason,
+            DeactivationsUsedToday = deactivationsUsedToday,
+            DeactivationLimitPerDay = deactivationLimitPerDay,
+            DeactivationsRemainingToday = remaining,
+            ProcessedAt = now
         };
     }
 
@@ -977,6 +1440,69 @@ public sealed class LicenseService(
         };
     }
 
+    public async Task<string> ExportAdminAuditLogsCsvAsync(
+        string? search,
+        string? action,
+        string? actor,
+        int take,
+        CancellationToken cancellationToken)
+    {
+        var response = await GetAdminAuditLogsAsync(
+            search,
+            action,
+            actor,
+            take,
+            cancellationToken);
+        var builder = new StringBuilder();
+        builder.AppendLine("id,timestamp,shop_id,device_id,action,actor,reason,is_manual_override,immutable_hash,immutable_previous_hash,metadata_json");
+        foreach (var item in response.Items)
+        {
+            builder.Append(EscapeCsv(item.Id.ToString()));
+            builder.Append(',');
+            builder.Append(EscapeCsv(item.Timestamp.ToString("O")));
+            builder.Append(',');
+            builder.Append(EscapeCsv(item.ShopId?.ToString()));
+            builder.Append(',');
+            builder.Append(EscapeCsv(item.ProvisionedDeviceId?.ToString()));
+            builder.Append(',');
+            builder.Append(EscapeCsv(item.Action));
+            builder.Append(',');
+            builder.Append(EscapeCsv(item.Actor));
+            builder.Append(',');
+            builder.Append(EscapeCsv(item.Reason));
+            builder.Append(',');
+            builder.Append(EscapeCsv(item.IsManualOverride ? "true" : "false"));
+            builder.Append(',');
+            builder.Append(EscapeCsv(item.ImmutableHash));
+            builder.Append(',');
+            builder.Append(EscapeCsv(item.ImmutablePreviousHash));
+            builder.Append(',');
+            builder.Append(EscapeCsv(item.MetadataJson));
+            builder.AppendLine();
+        }
+
+        return builder.ToString();
+    }
+
+    public async Task<string> ExportAdminAuditLogsJsonAsync(
+        string? search,
+        string? action,
+        string? actor,
+        int take,
+        CancellationToken cancellationToken)
+    {
+        var response = await GetAdminAuditLogsAsync(
+            search,
+            action,
+            actor,
+            take,
+            cancellationToken);
+        return JsonSerializer.Serialize(response, new JsonSerializerOptions
+        {
+            WriteIndented = true
+        });
+    }
+
     public async Task<AdminDeviceActionResponse> RevokeDeviceAsAdminAsync(
         string deviceCode,
         AdminDeviceActionRequest request,
@@ -991,13 +1517,17 @@ public sealed class LicenseService(
                 StatusCodes.Status400BadRequest);
         }
 
-        var actor = string.IsNullOrWhiteSpace(request.Actor) ? "support-admin" : request.Actor.Trim();
-        var reason = NormalizeOptionalValue(request.Reason) ?? "manual_device_revoke";
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Reason,
+            defaultActor: "support-admin",
+            defaultReasonCode: "manual_device_revoke");
         var status = await DeactivateAsync(new ProvisionDeactivateRequest
         {
             DeviceCode = normalizedDeviceCode,
-            Actor = actor,
-            Reason = reason
+            Actor = overrideContext.Actor,
+            Reason = overrideContext.ActorNote
         }, cancellationToken);
 
         var provisionedDevice = await dbContext.ProvisionedDevices
@@ -1008,9 +1538,14 @@ public sealed class LicenseService(
             provisionedDevice.ShopId,
             provisionedDevice.Id,
             "manual_override_device_revoke",
-            actor,
-            reason,
-            new { device_code = normalizedDeviceCode },
+            overrideContext.Actor,
+            overrideContext.AuditReason,
+            new
+            {
+                device_code = normalizedDeviceCode,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            },
             DateTimeOffset.UtcNow,
             cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -1020,6 +1555,66 @@ public sealed class LicenseService(
             ShopId = provisionedDevice.ShopId,
             DeviceCode = normalizedDeviceCode,
             Action = "revoke",
+            Status = ProvisionedDeviceStatus.Revoked.ToString().ToLowerInvariant(),
+            LicenseState = status.State,
+            ValidUntil = status.ValidUntil,
+            GraceUntil = status.GraceUntil,
+            ProcessedAt = DateTimeOffset.UtcNow
+        };
+    }
+
+    public async Task<AdminDeviceActionResponse> DeactivateDeviceAsAdminAsync(
+        string deviceCode,
+        AdminDeviceActionRequest request,
+        CancellationToken cancellationToken)
+    {
+        var normalizedDeviceCode = NormalizeDeviceCode(deviceCode);
+        if (string.IsNullOrWhiteSpace(normalizedDeviceCode))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "device_code is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Reason,
+            defaultActor: "support-admin",
+            defaultReasonCode: "manual_device_deactivate");
+        var status = await DeactivateAsync(new ProvisionDeactivateRequest
+        {
+            DeviceCode = normalizedDeviceCode,
+            Actor = overrideContext.Actor,
+            Reason = overrideContext.ActorNote
+        }, cancellationToken);
+
+        var provisionedDevice = await dbContext.ProvisionedDevices
+            .AsNoTracking()
+            .FirstAsync(x => x.DeviceCode == normalizedDeviceCode, cancellationToken);
+
+        await AddManualOverrideAuditLogAsync(
+            provisionedDevice.ShopId,
+            provisionedDevice.Id,
+            "manual_override_device_deactivate",
+            overrideContext.Actor,
+            overrideContext.AuditReason,
+            new
+            {
+                device_code = normalizedDeviceCode,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            },
+            DateTimeOffset.UtcNow,
+            cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new AdminDeviceActionResponse
+        {
+            ShopId = provisionedDevice.ShopId,
+            DeviceCode = normalizedDeviceCode,
+            Action = "deactivate",
             Status = ProvisionedDeviceStatus.Revoked.ToString().ToLowerInvariant(),
             LicenseState = status.State,
             ValidUntil = status.ValidUntil,
@@ -1042,13 +1637,17 @@ public sealed class LicenseService(
                 StatusCodes.Status400BadRequest);
         }
 
-        var actor = string.IsNullOrWhiteSpace(request.Actor) ? "support-admin" : request.Actor.Trim();
-        var reason = NormalizeOptionalValue(request.Reason) ?? "manual_device_reactivate";
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Reason,
+            defaultActor: "support-admin",
+            defaultReasonCode: "manual_device_reactivate");
         var status = await ActivateAsync(new ProvisionActivateRequest
         {
             DeviceCode = normalizedDeviceCode,
-            Actor = actor,
-            Reason = reason
+            Actor = overrideContext.Actor,
+            Reason = overrideContext.ActorNote
         }, cancellationToken);
 
         var provisionedDevice = await dbContext.ProvisionedDevices
@@ -1059,9 +1658,14 @@ public sealed class LicenseService(
             provisionedDevice.ShopId,
             provisionedDevice.Id,
             "manual_override_device_reactivate",
-            actor,
-            reason,
-            new { device_code = normalizedDeviceCode },
+            overrideContext.Actor,
+            overrideContext.AuditReason,
+            new
+            {
+                device_code = normalizedDeviceCode,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            },
             DateTimeOffset.UtcNow,
             cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -1079,6 +1683,586 @@ public sealed class LicenseService(
         };
     }
 
+    public async Task<AdminDeviceActionResponse> ActivateDeviceAsAdminAsync(
+        string deviceCode,
+        AdminDeviceActionRequest request,
+        CancellationToken cancellationToken)
+    {
+        var normalizedDeviceCode = NormalizeDeviceCode(deviceCode);
+        if (string.IsNullOrWhiteSpace(normalizedDeviceCode))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "device_code is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Reason,
+            defaultActor: "support-admin",
+            defaultReasonCode: "manual_device_activate");
+        var status = await ActivateAsync(new ProvisionActivateRequest
+        {
+            DeviceCode = normalizedDeviceCode,
+            Actor = overrideContext.Actor,
+            Reason = overrideContext.ActorNote
+        }, cancellationToken);
+
+        var provisionedDevice = await dbContext.ProvisionedDevices
+            .AsNoTracking()
+            .FirstAsync(x => x.DeviceCode == normalizedDeviceCode, cancellationToken);
+
+        await AddManualOverrideAuditLogAsync(
+            provisionedDevice.ShopId,
+            provisionedDevice.Id,
+            "manual_override_device_activate",
+            overrideContext.Actor,
+            overrideContext.AuditReason,
+            new
+            {
+                device_code = normalizedDeviceCode,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            },
+            DateTimeOffset.UtcNow,
+            cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new AdminDeviceActionResponse
+        {
+            ShopId = provisionedDevice.ShopId,
+            DeviceCode = normalizedDeviceCode,
+            Action = "activate",
+            Status = ProvisionedDeviceStatus.Active.ToString().ToLowerInvariant(),
+            LicenseState = status.State,
+            ValidUntil = status.ValidUntil,
+            GraceUntil = status.GraceUntil,
+            ProcessedAt = DateTimeOffset.UtcNow
+        };
+    }
+
+    public async Task<AdminDeviceSeatTransferResponse> TransferDeviceSeatAsAdminAsync(
+        string deviceCode,
+        AdminDeviceSeatTransferRequest request,
+        CancellationToken cancellationToken)
+    {
+        var normalizedDeviceCode = NormalizeDeviceCode(deviceCode);
+        if (string.IsNullOrWhiteSpace(normalizedDeviceCode))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "device_code is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var normalizedTargetShopCode = ResolveShopCode(request.TargetShopCode);
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Reason,
+            defaultActor: "support-admin",
+            defaultReasonCode: "manual_transfer_seat");
+
+        var now = DateTimeOffset.UtcNow;
+        var provisionedDevice = await dbContext.ProvisionedDevices
+            .FirstOrDefaultAsync(x => x.DeviceCode == normalizedDeviceCode, cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.Unprovisioned,
+                "Device is not provisioned.",
+                StatusCodes.Status404NotFound);
+
+        if (provisionedDevice.Status != ProvisionedDeviceStatus.Active)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Only active devices can be transferred.",
+                StatusCodes.Status409Conflict);
+        }
+
+        var sourceShop = await dbContext.Shops
+            .FirstOrDefaultAsync(x => x.Id == provisionedDevice.ShopId, cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Device is linked to an unknown source shop.",
+                StatusCodes.Status409Conflict);
+        var sourceSubscription = await GetOrCreateSubscriptionAsync(sourceShop, now, cancellationToken);
+
+        var targetShop = await GetOrCreateShopAsync(normalizedTargetShopCode, now, cancellationToken);
+        if (targetShop.Id == sourceShop.Id)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "target_shop_code must be different from the current shop.",
+                StatusCodes.Status409Conflict);
+        }
+
+        var targetSubscription = await GetOrCreateSubscriptionAsync(targetShop, now, cancellationToken);
+        if (targetSubscription.Status == SubscriptionStatus.Canceled)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.Revoked,
+                "Cannot transfer a device to a canceled subscription shop.",
+                StatusCodes.Status409Conflict);
+        }
+
+        var targetSeatLimit = ResolveSeatLimit(targetSubscription);
+        var targetActiveSeats = await dbContext.ProvisionedDevices
+            .CountAsync(
+                x => x.ShopId == targetShop.Id &&
+                     x.Status == ProvisionedDeviceStatus.Active &&
+                     x.Id != provisionedDevice.Id,
+                cancellationToken);
+        if (targetActiveSeats >= targetSeatLimit)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.SeatLimitExceeded,
+                "Target shop seat limit has been reached.",
+                StatusCodes.Status409Conflict);
+        }
+
+        var sourceShopId = sourceShop.Id;
+        var sourceShopCode = sourceShop.Code;
+        provisionedDevice.ShopId = targetShop.Id;
+        provisionedDevice.Shop = targetShop;
+        provisionedDevice.AssignedAtUtc = now;
+        provisionedDevice.LastHeartbeatAtUtc = now;
+
+        var movedDeviceLicense = await IssueLicenseAsync(
+            targetShop,
+            provisionedDevice,
+            targetSubscription,
+            now,
+            TokenRotationMode.Immediate,
+            cancellationToken);
+
+        await ForceReissueLicensesForShopAsync(
+            sourceShop,
+            sourceSubscription,
+            now,
+            overrideContext.Actor,
+            "seat_transfer",
+            excludedProvisionedDeviceId: null,
+            cancellationToken);
+        await ForceReissueLicensesForShopAsync(
+            targetShop,
+            targetSubscription,
+            now,
+            overrideContext.Actor,
+            "seat_transfer",
+            excludedProvisionedDeviceId: provisionedDevice.Id,
+            cancellationToken);
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = targetShop.Id,
+            ProvisionedDeviceId = provisionedDevice.Id,
+            Action = "device_seat_transferred",
+            Actor = overrideContext.Actor,
+            Reason = overrideContext.AuditReason,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                device_code = normalizedDeviceCode,
+                source_shop_id = sourceShopId,
+                source_shop_code = sourceShopCode,
+                target_shop_id = targetShop.Id,
+                target_shop_code = targetShop.Code,
+                target_seat_limit = targetSeatLimit,
+                target_active_seats_after_transfer = targetActiveSeats + 1,
+                moved_device_license_id = movedDeviceLicense.Record.Id,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            })
+        });
+
+        await AddManualOverrideAuditLogAsync(
+            targetShop.Id,
+            provisionedDevice.Id,
+            "manual_override_transfer_seat",
+            overrideContext.Actor,
+            overrideContext.AuditReason,
+            new
+            {
+                device_code = normalizedDeviceCode,
+                source_shop_id = sourceShopId,
+                source_shop_code = sourceShopCode,
+                target_shop_id = targetShop.Id,
+                target_shop_code = targetShop.Code,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            },
+            now,
+            cancellationToken);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var status = await ResolveStatusSnapshotAsync(
+            normalizedDeviceCode,
+            movedDeviceLicense.PlainToken,
+            strictTokenValidation: true,
+            cancellationToken);
+
+        return new AdminDeviceSeatTransferResponse
+        {
+            DeviceCode = normalizedDeviceCode,
+            Action = "transfer_seat",
+            SourceShopId = sourceShopId,
+            SourceShopCode = sourceShopCode,
+            TargetShopId = targetShop.Id,
+            TargetShopCode = targetShop.Code,
+            Status = provisionedDevice.Status.ToString().ToLowerInvariant(),
+            LicenseState = status.State.ToString().ToLowerInvariant(),
+            ValidUntil = status.ValidUntil,
+            GraceUntil = status.GraceUntil,
+            ProcessedAt = now
+        };
+    }
+
+    public async Task<AdminMassDeviceRevokeResponse> MassRevokeDevicesAsAdminAsync(
+        AdminMassDeviceRevokeRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var deviceCodes = request.DeviceCodes
+            .Select(NormalizeDeviceCode)
+            .Where(code => !string.IsNullOrWhiteSpace(code))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (deviceCodes.Count == 0)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "device_codes must contain at least one device_code.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        if (deviceCodes.Count > 100)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "device_codes supports up to 100 devices per request.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote,
+            defaultActor: "security-admin",
+            defaultReasonCode: "manual_mass_revoke");
+        var requiresStepUp = options.RequireStepUpApprovalForHighRiskAdminActions &&
+                             deviceCodes.Count >= Math.Max(2, options.HighRiskMassRevokeThreshold);
+        var stepUpApproval = ResolveStepUpApproval(
+            requiresStepUp,
+            request.StepUpApprovedBy,
+            request.StepUpApprovalNote,
+            "mass_revoke_high_risk");
+        var now = DateTimeOffset.UtcNow;
+        var items = new List<AdminDeviceActionResponse>(deviceCodes.Count);
+        var alreadyRevokedCount = 0;
+
+        foreach (var code in deviceCodes)
+        {
+            var existing = await dbContext.ProvisionedDevices
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.DeviceCode == code, cancellationToken)
+                ?? throw new LicenseException(
+                    LicenseErrorCodes.Unprovisioned,
+                    $"Device '{code}' is not provisioned.",
+                    StatusCodes.Status404NotFound);
+
+            if (existing.Status == ProvisionedDeviceStatus.Revoked)
+            {
+                var snapshot = await ResolveStatusSnapshotAsync(
+                    code,
+                    null,
+                    strictTokenValidation: false,
+                    cancellationToken);
+                items.Add(new AdminDeviceActionResponse
+                {
+                    ShopId = existing.ShopId,
+                    DeviceCode = code,
+                    Action = "revoke",
+                    Status = ProvisionedDeviceStatus.Revoked.ToString().ToLowerInvariant(),
+                    LicenseState = snapshot.State.ToString().ToLowerInvariant(),
+                    ValidUntil = snapshot.ValidUntil,
+                    GraceUntil = snapshot.GraceUntil,
+                    ProcessedAt = now
+                });
+                alreadyRevokedCount += 1;
+                continue;
+            }
+
+            var actionResponse = await RevokeDeviceAsAdminAsync(
+                code,
+                new AdminDeviceActionRequest
+                {
+                    Actor = overrideContext.Actor,
+                    ReasonCode = overrideContext.ReasonCode,
+                    ActorNote = overrideContext.ActorNote
+                },
+                cancellationToken);
+            items.Add(actionResponse);
+        }
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            Action = "admin_mass_revoke_executed",
+            Actor = overrideContext.Actor,
+            Reason = overrideContext.AuditReason,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                requested_count = deviceCodes.Count,
+                revoked_count = items.Count - alreadyRevokedCount,
+                already_revoked_count = alreadyRevokedCount,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote,
+                step_up_required = requiresStepUp,
+                step_up_applied = stepUpApproval.Applied,
+                step_up_approved_by = stepUpApproval.Applied ? stepUpApproval.ApprovedBy : null,
+                devices = deviceCodes
+            }),
+            CreatedAtUtc = now
+        });
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new AdminMassDeviceRevokeResponse
+        {
+            RequestedCount = deviceCodes.Count,
+            RevokedCount = items.Count - alreadyRevokedCount,
+            AlreadyRevokedCount = alreadyRevokedCount,
+            Items = items,
+            ProcessedAt = now
+        };
+    }
+
+    public async Task<AdminEmergencyCommandEnvelopeResponse> CreateEmergencyCommandEnvelopeAsAdminAsync(
+        string deviceCode,
+        AdminEmergencyCommandEnvelopeRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var normalizedDeviceCode = NormalizeDeviceCode(deviceCode);
+        if (string.IsNullOrWhiteSpace(normalizedDeviceCode))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "device_code is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var normalizedAction = NormalizeEmergencyAction(request.Action);
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote,
+            defaultActor: "security-admin",
+            defaultReasonCode: $"emergency_{normalizedAction}");
+        var now = DateTimeOffset.UtcNow;
+        var provisionedDevice = await dbContext.ProvisionedDevices
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.DeviceCode == normalizedDeviceCode, cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.Unprovisioned,
+                "Device is not provisioned.",
+                StatusCodes.Status404NotFound);
+
+        var ttlSeconds = Math.Clamp(
+            request.TtlSeconds ?? options.EmergencyCommandEnvelopeTtlSeconds,
+            30,
+            600);
+        var challenge = new DeviceActionChallenge
+        {
+            DeviceCode = normalizedDeviceCode,
+            Nonce = Base64UrlEncode(RandomNumberGenerator.GetBytes(24)),
+            CreatedAtUtc = now,
+            ExpiresAtUtc = now.AddSeconds(ttlSeconds)
+        };
+        dbContext.DeviceActionChallenges.Add(challenge);
+
+        var payload = new EmergencyCommandEnvelopePayload
+        {
+            CommandId = challenge.Id,
+            DeviceCode = normalizedDeviceCode,
+            Action = normalizedAction,
+            Nonce = challenge.Nonce,
+            Actor = overrideContext.Actor,
+            ReasonCode = overrideContext.ReasonCode,
+            ActorNote = overrideContext.ActorNote,
+            IssuedAtUnix = now.ToUnixTimeSeconds(),
+            ExpiresAtUnix = challenge.ExpiresAtUtc.ToUnixTimeSeconds()
+        };
+        var envelopeToken = SignEmergencyCommandEnvelope(payload);
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = provisionedDevice.ShopId,
+            ProvisionedDeviceId = provisionedDevice.Id,
+            Action = "admin_emergency_command_envelope_issued",
+            Actor = overrideContext.Actor,
+            Reason = overrideContext.AuditReason,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                command_id = challenge.Id,
+                device_code = normalizedDeviceCode,
+                action = normalizedAction,
+                expires_at = challenge.ExpiresAtUtc,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            }),
+            CreatedAtUtc = now
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new AdminEmergencyCommandEnvelopeResponse
+        {
+            CommandId = challenge.Id.ToString(),
+            DeviceCode = normalizedDeviceCode,
+            Action = normalizedAction,
+            EnvelopeToken = envelopeToken,
+            IssuedAt = now,
+            ExpiresAt = challenge.ExpiresAtUtc
+        };
+    }
+
+    public async Task<AdminEmergencyCommandExecuteResponse> ExecuteEmergencyCommandAsAdminAsync(
+        string deviceCode,
+        AdminEmergencyCommandExecuteRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var normalizedDeviceCode = NormalizeDeviceCode(deviceCode);
+        if (string.IsNullOrWhiteSpace(normalizedDeviceCode))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "device_code is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var token = NormalizeOptionalValue(request.EnvelopeToken);
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "envelope_token is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var payload = ParseAndValidateEmergencyCommandEnvelope(token);
+        if (!string.Equals(payload.DeviceCode, normalizedDeviceCode, StringComparison.Ordinal))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Command envelope does not match the requested device_code.",
+                StatusCodes.Status409Conflict);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (DateTimeOffset.FromUnixTimeSeconds(payload.ExpiresAtUnix) <= now)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.ChallengeExpired,
+                "Command envelope has expired.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        var challenge = await dbContext.DeviceActionChallenges
+            .FirstOrDefaultAsync(x => x.Id == payload.CommandId, cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.InvalidDeviceProof,
+                "Command envelope nonce is invalid.",
+                StatusCodes.Status403Forbidden);
+        if (!string.Equals(challenge.DeviceCode, normalizedDeviceCode, StringComparison.Ordinal) ||
+            !string.Equals(challenge.Nonce, payload.Nonce, StringComparison.Ordinal))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidDeviceProof,
+                "Command envelope nonce binding is invalid.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        if (challenge.ConsumedAtUtc.HasValue)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.ChallengeConsumed,
+                "Command envelope has already been used.",
+                StatusCodes.Status409Conflict);
+        }
+
+        if (challenge.ExpiresAtUtc <= now)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.ChallengeExpired,
+                "Command envelope nonce has expired.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        challenge.ConsumedAtUtc = now;
+
+        var revokedTokenSessions = 0;
+        var normalizedAction = NormalizeEmergencyAction(payload.Action);
+        if (string.Equals(normalizedAction, EmergencyActionLockDevice, StringComparison.Ordinal))
+        {
+            await DeactivateDeviceAsAdminAsync(
+                normalizedDeviceCode,
+                new AdminDeviceActionRequest
+                {
+                    Actor = payload.Actor,
+                    ReasonCode = payload.ReasonCode,
+                    ActorNote = payload.ActorNote
+                },
+                cancellationToken);
+        }
+        else
+        {
+            revokedTokenSessions = await RevokeDeviceTokenSessionsAsAdminAsync(
+                normalizedDeviceCode,
+                payload.Actor,
+                payload.ReasonCode,
+                payload.ActorNote,
+                string.Equals(normalizedAction, EmergencyActionRevokeToken, StringComparison.Ordinal)
+                    ? "manual_override_emergency_revoke_token"
+                    : "manual_override_emergency_force_reauth",
+                string.Equals(normalizedAction, EmergencyActionRevokeToken, StringComparison.Ordinal)
+                    ? "device_tokens_revoked"
+                    : "device_force_reauth_triggered",
+                now,
+                cancellationToken);
+        }
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            Action = "admin_emergency_command_executed",
+            Actor = payload.Actor,
+            Reason = payload.ReasonCode,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                command_id = payload.CommandId,
+                action = normalizedAction,
+                device_code = normalizedDeviceCode,
+                revoked_token_sessions = revokedTokenSessions,
+                reason_code = payload.ReasonCode,
+                actor_note = payload.ActorNote
+            }),
+            CreatedAtUtc = now
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new AdminEmergencyCommandExecuteResponse
+        {
+            DeviceCode = normalizedDeviceCode,
+            Action = normalizedAction,
+            Status = "completed",
+            RevokedTokenSessions = revokedTokenSessions,
+            ProcessedAt = now
+        };
+    }
+
     public async Task<AdminDeviceActionResponse> ExtendGraceAsAdminAsync(
         string deviceCode,
         AdminDeviceGraceExtensionRequest request,
@@ -1093,17 +2277,20 @@ public sealed class LicenseService(
                 StatusCodes.Status400BadRequest);
         }
 
-        var reason = NormalizeOptionalValue(request.Reason);
-        if (string.IsNullOrWhiteSpace(reason))
-        {
-            throw new LicenseException(
-                LicenseErrorCodes.InvalidAdminRequest,
-                "reason is required when extending grace.",
-                StatusCodes.Status400BadRequest);
-        }
-
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Reason,
+            defaultActor: "support-admin",
+            defaultReasonCode: "manual_extend_grace");
         var extendDays = Math.Clamp(request.ExtendDays, 1, 30);
-        var actor = string.IsNullOrWhiteSpace(request.Actor) ? "support-admin" : request.Actor.Trim();
+        var requiresStepUp = options.RequireStepUpApprovalForHighRiskAdminActions &&
+                             extendDays >= Math.Max(1, options.HighRiskGraceExtensionDaysThreshold);
+        var stepUpApproval = ResolveStepUpApproval(
+            requiresStepUp,
+            request.StepUpApprovedBy,
+            request.StepUpApprovalNote,
+            "extend_grace_high_risk");
         var now = DateTimeOffset.UtcNow;
 
         var provisionedDevice = await dbContext.ProvisionedDevices
@@ -1121,9 +2308,24 @@ public sealed class LicenseService(
                 StatusCodes.Status409Conflict);
         }
 
-        var activeLicenses = await dbContext.Licenses
-            .Where(x => x.ProvisionedDeviceId == provisionedDevice.Id && x.Status == LicenseRecordStatus.Active)
-            .ToListAsync(cancellationToken);
+        List<LicenseRecord> activeLicenses;
+        if (dbContext.Database.IsSqlite())
+        {
+            activeLicenses = (await dbContext.Licenses
+                    .Where(x => x.ProvisionedDeviceId == provisionedDevice.Id &&
+                                x.Status == LicenseRecordStatus.Active)
+                    .ToListAsync(cancellationToken))
+                .Where(x => !x.RevokedAtUtc.HasValue || x.RevokedAtUtc > now)
+                .ToList();
+        }
+        else
+        {
+            activeLicenses = await dbContext.Licenses
+                .Where(x => x.ProvisionedDeviceId == provisionedDevice.Id &&
+                            x.Status == LicenseRecordStatus.Active &&
+                            (!x.RevokedAtUtc.HasValue || x.RevokedAtUtc > now))
+                .ToListAsync(cancellationToken);
+        }
 
         if (activeLicenses.Count == 0)
         {
@@ -1147,14 +2349,19 @@ public sealed class LicenseService(
             ShopId = provisionedDevice.ShopId,
             ProvisionedDeviceId = provisionedDevice.Id,
             Action = "device_grace_extended",
-            Actor = actor,
-            Reason = reason,
+            Actor = overrideContext.Actor,
+            Reason = overrideContext.AuditReason,
             MetadataJson = JsonSerializer.Serialize(new
             {
                 device_code = normalizedDeviceCode,
                 extend_days = extendDays,
                 previous_grace_until = previousGraceUntil,
-                updated_grace_until = updatedGraceUntil
+                updated_grace_until = updatedGraceUntil,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote,
+                step_up_required = requiresStepUp,
+                step_up_applied = stepUpApproval.Applied,
+                step_up_approved_by = stepUpApproval.Applied ? stepUpApproval.ApprovedBy : null
             })
         });
 
@@ -1162,14 +2369,19 @@ public sealed class LicenseService(
             provisionedDevice.ShopId,
             provisionedDevice.Id,
             "manual_override_extend_grace",
-            actor,
-            reason,
+            overrideContext.Actor,
+            overrideContext.AuditReason,
             new
             {
                 device_code = normalizedDeviceCode,
                 extend_days = extendDays,
                 previous_grace_until = previousGraceUntil,
-                updated_grace_until = updatedGraceUntil
+                updated_grace_until = updatedGraceUntil,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote,
+                step_up_required = requiresStepUp,
+                step_up_applied = stepUpApproval.Applied,
+                step_up_approved_by = stepUpApproval.Applied ? stepUpApproval.ApprovedBy : null
             },
             now,
             cancellationToken);
@@ -1202,8 +2414,12 @@ public sealed class LicenseService(
         ArgumentNullException.ThrowIfNull(request);
 
         var now = DateTimeOffset.UtcNow;
-        var actor = string.IsNullOrWhiteSpace(request.Actor) ? "security-admin" : request.Actor.Trim();
-        var reason = NormalizeOptionalValue(request.Reason) ?? "manual_license_resync";
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Reason,
+            defaultActor: "security-admin",
+            defaultReasonCode: "manual_license_resync");
 
         var shop = await GetOrCreateShopAsync(request.ShopCode, now, cancellationToken);
         var subscription = await GetOrCreateSubscriptionAsync(shop, now, cancellationToken);
@@ -1211,7 +2427,7 @@ public sealed class LicenseService(
             shop,
             subscription,
             now,
-            actor,
+            overrideContext.Actor,
             "manual_resync",
             excludedProvisionedDeviceId: null,
             cancellationToken);
@@ -1220,14 +2436,16 @@ public sealed class LicenseService(
             shop.Id,
             null,
             "manual_override_force_resync",
-            actor,
-            reason,
+            overrideContext.Actor,
+            overrideContext.AuditReason,
             new
             {
                 shop_code = shop.Code,
                 reissued_devices = outcome.ReissuedCount,
                 revoked_licenses = outcome.RevokedCount,
-                active_devices = outcome.ActiveDeviceCount
+                active_devices = outcome.ActiveDeviceCount,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
             },
             now,
             cancellationToken);
@@ -1243,6 +2461,1217 @@ public sealed class LicenseService(
             ReissuedDevices = outcome.ReissuedCount,
             RevokedLicenses = outcome.RevokedCount,
             ProcessedAt = now
+        };
+    }
+
+    public async Task<AdminManualBillingInvoicesResponse> GetAdminManualInvoicesAsync(
+        string? search,
+        string? status,
+        int take,
+        CancellationToken cancellationToken)
+    {
+        var normalizedSearch = NormalizeOptionalValue(search)?.ToLowerInvariant();
+        var statusFilter = ParseManualBillingInvoiceStatus(status);
+        var normalizedTake = Math.Clamp(take, 1, 200);
+
+        var query = dbContext.ManualBillingInvoices
+            .AsNoTracking();
+
+        if (statusFilter.HasValue)
+        {
+            query = query.Where(x => x.Status == statusFilter.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedSearch))
+        {
+            query = query.Where(x =>
+                x.InvoiceNumber.ToLower().Contains(normalizedSearch) ||
+                (x.Notes != null && x.Notes.ToLower().Contains(normalizedSearch)) ||
+                (x.CreatedBy != null && x.CreatedBy.ToLower().Contains(normalizedSearch)));
+        }
+
+        List<ManualBillingInvoice> invoices;
+        if (dbContext.Database.IsSqlite())
+        {
+            invoices = (await query.ToListAsync(cancellationToken))
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Take(normalizedTake)
+                .ToList();
+        }
+        else
+        {
+            invoices = await query
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Take(normalizedTake)
+                .ToListAsync(cancellationToken);
+        }
+
+        var shopCodeById = await dbContext.Shops
+            .AsNoTracking()
+            .Where(x => invoices.Select(invoice => invoice.ShopId).Distinct().Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, x => x.Code, cancellationToken);
+
+        return new AdminManualBillingInvoicesResponse
+        {
+            GeneratedAt = DateTimeOffset.UtcNow,
+            Count = invoices.Count,
+            Items = invoices
+                .Select(x => MapManualBillingInvoiceRow(
+                    x,
+                    shopCodeById.TryGetValue(x.ShopId, out var shopCode) ? shopCode : ResolveShopCode(null)))
+                .ToList()
+        };
+    }
+
+    public async Task<AdminManualBillingInvoiceRow> CreateManualInvoiceAsAdminAsync(
+        AdminManualBillingInvoiceCreateRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.AmountDue <= 0m)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "amount_due must be greater than zero.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Notes,
+            defaultActor: "support-admin",
+            defaultReasonCode: "manual_billing_invoice_created");
+        var actor = overrideContext.Actor;
+        var shop = await GetOrCreateShopAsync(request.ShopCode, now, cancellationToken);
+        var invoiceNumber = await ResolveManualBillingInvoiceNumberAsync(
+            shop.Id,
+            shop.Code,
+            request.InvoiceNumber,
+            now,
+            cancellationToken);
+        var dueAt = request.DueAt ?? now.AddDays(7);
+        var normalizedCurrency = ResolveCurrency(request.Currency);
+        var normalizedNotes = NormalizeOptionalValue(request.Notes);
+
+        var invoice = new ManualBillingInvoice
+        {
+            ShopId = shop.Id,
+            Shop = shop,
+            InvoiceNumber = invoiceNumber,
+            AmountDue = decimal.Round(request.AmountDue, 2),
+            AmountPaid = 0m,
+            Currency = normalizedCurrency,
+            Status = ManualBillingInvoiceStatus.Open,
+            DueAtUtc = dueAt,
+            Notes = normalizedNotes,
+            CreatedBy = actor,
+            CreatedAtUtc = now
+        };
+
+        dbContext.ManualBillingInvoices.Add(invoice);
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = shop.Id,
+            Action = "manual_invoice_created",
+            Actor = actor,
+            Reason = overrideContext.AuditReason,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                invoice_id = invoice.Id,
+                invoice_number = invoice.InvoiceNumber,
+                amount_due = invoice.AmountDue,
+                currency = invoice.Currency,
+                due_at = invoice.DueAtUtc,
+                notes = invoice.Notes,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            })
+        });
+
+        await AddManualOverrideAuditLogAsync(
+            shop.Id,
+            null,
+            "manual_override_invoice_create",
+            actor,
+            overrideContext.AuditReason,
+            new
+            {
+                invoice_id = invoice.Id,
+                invoice_number = invoice.InvoiceNumber,
+                amount_due = invoice.AmountDue,
+                currency = invoice.Currency,
+                due_at = invoice.DueAtUtc,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            },
+            now,
+            cancellationToken);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return MapManualBillingInvoiceRow(invoice, shop.Code);
+    }
+
+    public async Task<AdminManualBillingPaymentsResponse> GetAdminManualPaymentsAsync(
+        string? search,
+        string? status,
+        int take,
+        CancellationToken cancellationToken)
+    {
+        var normalizedSearch = NormalizeOptionalValue(search)?.ToLowerInvariant();
+        var statusFilter = ParseManualBillingPaymentStatus(status);
+        var normalizedTake = Math.Clamp(take, 1, 200);
+
+        var query = dbContext.ManualBillingPayments
+            .AsNoTracking();
+
+        if (statusFilter.HasValue)
+        {
+            query = query.Where(x => x.Status == statusFilter.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedSearch))
+        {
+            query = query.Where(x =>
+                (x.BankReference != null && x.BankReference.ToLower().Contains(normalizedSearch)) ||
+                (x.Notes != null && x.Notes.ToLower().Contains(normalizedSearch)) ||
+                (x.RecordedBy != null && x.RecordedBy.ToLower().Contains(normalizedSearch)) ||
+                (x.VerifiedBy != null && x.VerifiedBy.ToLower().Contains(normalizedSearch)) ||
+                (x.RejectedBy != null && x.RejectedBy.ToLower().Contains(normalizedSearch)));
+        }
+
+        List<ManualBillingPayment> payments;
+        if (dbContext.Database.IsSqlite())
+        {
+            payments = (await query.ToListAsync(cancellationToken))
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Take(normalizedTake)
+                .ToList();
+        }
+        else
+        {
+            payments = await query
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Take(normalizedTake)
+                .ToListAsync(cancellationToken);
+        }
+
+        var invoiceIds = payments
+            .Select(x => x.InvoiceId)
+            .Distinct()
+            .ToList();
+        var invoices = await dbContext.ManualBillingInvoices
+            .AsNoTracking()
+            .Where(x => invoiceIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+        var shopCodeById = await dbContext.Shops
+            .AsNoTracking()
+            .Where(x => payments.Select(payment => payment.ShopId).Distinct().Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, x => x.Code, cancellationToken);
+
+        return new AdminManualBillingPaymentsResponse
+        {
+            GeneratedAt = DateTimeOffset.UtcNow,
+            Count = payments.Count,
+            Items = payments
+                .Select(payment =>
+                {
+                    var shopCode = shopCodeById.TryGetValue(payment.ShopId, out var code)
+                        ? code
+                        : ResolveShopCode(null);
+                    var invoiceNumber = invoices.TryGetValue(payment.InvoiceId, out var invoice)
+                        ? invoice.InvoiceNumber
+                        : string.Empty;
+                    return MapManualBillingPaymentRow(payment, shopCode, invoiceNumber);
+                })
+                .ToList()
+        };
+    }
+
+    public async Task<AdminManualBillingPaymentRow> RecordManualPaymentAsAdminAsync(
+        AdminManualBillingPaymentRecordRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.Amount <= 0m)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "amount must be greater than zero.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Notes,
+            defaultActor: "support-admin",
+            defaultReasonCode: "manual_payment_pending_verification");
+        var actor = overrideContext.Actor;
+        var invoice = await ResolveManualBillingInvoiceForPaymentAsync(request, cancellationToken);
+        if (invoice.Status is ManualBillingInvoiceStatus.Paid or ManualBillingInvoiceStatus.Canceled)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidPaymentStatus,
+                "Cannot record a payment for an invoice that is already closed.",
+                StatusCodes.Status409Conflict);
+        }
+
+        var payment = new ManualBillingPayment
+        {
+            ShopId = invoice.ShopId,
+            Shop = invoice.Shop,
+            InvoiceId = invoice.Id,
+            Invoice = invoice,
+            Method = ParseManualBillingPaymentMethod(request.Method),
+            Amount = decimal.Round(request.Amount, 2),
+            Currency = ResolveCurrency(request.Currency ?? invoice.Currency),
+            Status = ManualBillingPaymentStatus.PendingVerification,
+            BankReference = NormalizeOptionalValue(request.BankReference),
+            DepositSlipUrl = NormalizeOptionalValue(request.DepositSlipUrl),
+            ReceivedAtUtc = request.ReceivedAt ?? now,
+            Notes = NormalizeOptionalValue(request.Notes),
+            RecordedBy = actor,
+            CreatedAtUtc = now
+        };
+
+        dbContext.ManualBillingPayments.Add(payment);
+        invoice.Status = ManualBillingInvoiceStatus.PendingVerification;
+        invoice.UpdatedAtUtc = now;
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = invoice.ShopId,
+            Action = "manual_payment_recorded",
+            Actor = actor,
+            Reason = overrideContext.AuditReason,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                payment_id = payment.Id,
+                invoice_id = invoice.Id,
+                invoice_number = invoice.InvoiceNumber,
+                method = payment.Method.ToString().ToLowerInvariant(),
+                amount = payment.Amount,
+                currency = payment.Currency,
+                bank_reference = payment.BankReference,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            })
+        });
+
+        await AddManualOverrideAuditLogAsync(
+            invoice.ShopId,
+            null,
+            "manual_override_payment_record",
+            actor,
+            overrideContext.AuditReason,
+            new
+            {
+                payment_id = payment.Id,
+                invoice_id = invoice.Id,
+                invoice_number = invoice.InvoiceNumber,
+                amount = payment.Amount,
+                currency = payment.Currency,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            },
+            now,
+            cancellationToken);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return MapManualBillingPaymentRow(payment, invoice.Shop.Code, invoice.InvoiceNumber);
+    }
+
+    public async Task<AdminManualBillingPaymentVerificationResponse> VerifyManualPaymentAsAdminAsync(
+        Guid paymentId,
+        AdminManualBillingPaymentVerifyRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (paymentId == Guid.Empty)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "payment_id is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Reason,
+            defaultActor: "billing-admin",
+            defaultReasonCode: "manual_payment_verified");
+        var actor = overrideContext.Actor;
+        var payment = await dbContext.ManualBillingPayments
+            .Include(x => x.Invoice)
+            .ThenInclude(x => x.Shop)
+            .FirstOrDefaultAsync(x => x.Id == paymentId, cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.PaymentNotFound,
+                "Manual payment was not found.",
+                StatusCodes.Status404NotFound);
+
+        if (payment.Status != ManualBillingPaymentStatus.PendingVerification)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidPaymentStatus,
+                "Only pending-verification payments can be verified.",
+                StatusCodes.Status409Conflict);
+        }
+
+        var invoice = payment.Invoice;
+        if (invoice.Status == ManualBillingInvoiceStatus.Canceled)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidPaymentStatus,
+                "Cannot verify a payment for a canceled invoice.",
+                StatusCodes.Status409Conflict);
+        }
+
+        var highValueSecondApprovalThreshold = Math.Max(0m, options.HighValuePaymentSecondApprovalThreshold);
+        if (options.RequireSecondApprovalForHighValuePayments &&
+            payment.Amount >= highValueSecondApprovalThreshold &&
+            !string.IsNullOrWhiteSpace(payment.RecordedBy) &&
+            string.Equals(payment.RecordedBy.Trim(), actor, StringComparison.OrdinalIgnoreCase))
+        {
+            licensingAlertMonitor.RecordSecurityAnomaly("manual_payment_second_approval_required");
+            throw new LicenseException(
+                LicenseErrorCodes.SecondApprovalRequired,
+                $"Payments of {highValueSecondApprovalThreshold:0.00} or more require a different approver than the recorder.",
+                StatusCodes.Status409Conflict);
+        }
+
+        decimal verifiedAmountBefore;
+        if (dbContext.Database.IsSqlite())
+        {
+            verifiedAmountBefore = (await dbContext.ManualBillingPayments
+                    .AsNoTracking()
+                    .Where(x => x.InvoiceId == invoice.Id && x.Status == ManualBillingPaymentStatus.Verified)
+                    .ToListAsync(cancellationToken))
+                .Sum(x => x.Amount);
+        }
+        else
+        {
+            verifiedAmountBefore = await dbContext.ManualBillingPayments
+                .AsNoTracking()
+                .Where(x => x.InvoiceId == invoice.Id && x.Status == ManualBillingPaymentStatus.Verified)
+                .SumAsync(x => x.Amount, cancellationToken);
+        }
+
+        var verifiedAmountAfter = decimal.Round(verifiedAmountBefore + payment.Amount, 2);
+        if (verifiedAmountAfter < invoice.AmountDue)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Verified total is below the invoice due amount.",
+                StatusCodes.Status409Conflict);
+        }
+
+        payment.Status = ManualBillingPaymentStatus.Verified;
+        payment.VerifiedBy = actor;
+        payment.VerifiedAtUtc = now;
+        payment.RejectedBy = null;
+        payment.RejectedAtUtc = null;
+        payment.RejectionReason = null;
+        payment.UpdatedAtUtc = now;
+
+        invoice.AmountPaid = verifiedAmountAfter;
+        invoice.Status = ManualBillingInvoiceStatus.Paid;
+        invoice.UpdatedAtUtc = now;
+
+        var subscription = await GetOrCreateSubscriptionAsync(invoice.Shop, now, cancellationToken);
+        var previousSubscriptionStatus = subscription.Status;
+        var previousPlan = subscription.Plan;
+        var previousPeriodEnd = subscription.PeriodEndUtc;
+
+        if (!string.IsNullOrWhiteSpace(request.Plan))
+        {
+            subscription.Plan = ResolvePlanCode(request.Plan);
+        }
+
+        if (request.SeatLimit.HasValue && request.SeatLimit.Value > 0)
+        {
+            subscription.SeatLimit = request.SeatLimit.Value;
+        }
+        else if (subscription.SeatLimit <= 0)
+        {
+            subscription.SeatLimit = ResolveSeatLimitFromPlan(subscription.Plan);
+        }
+
+        subscription.Status = SubscriptionStatus.Active;
+        subscription.FeatureFlagsJson = ResolveFeatureFlagsJson(subscription.Plan);
+
+        var extendDays = Math.Clamp(
+            request.ExtendDays <= 0 ? DefaultManualPaymentExtensionDays : request.ExtendDays,
+            1,
+            365);
+        var periodBaseline = subscription.PeriodEndUtc > now ? subscription.PeriodEndUtc : now;
+        subscription.PeriodStartUtc = now;
+        subscription.PeriodEndUtc = periodBaseline.AddDays(extendDays);
+        subscription.UpdatedAtUtc = now;
+
+        var activationEntitlement = await IssueActivationEntitlementAsync(
+            invoice.Shop,
+            ResolveSeatLimit(subscription),
+            "manual_payment_verified",
+            payment.Id.ToString("N"),
+            actor,
+            now,
+            cancellationToken);
+        var accessDelivery = await DeliverAccessDetailsAsync(
+            invoice.Shop,
+            activationEntitlement,
+            request.CustomerEmail,
+            "manual_payment_verified",
+            payment.Id.ToString("N"),
+            actor,
+            now,
+            cancellationToken);
+
+        var reissueOutcome = await ForceReissueLicensesForShopAsync(
+            invoice.Shop,
+            subscription,
+            now,
+            actor,
+            "manual_payment_verified",
+            excludedProvisionedDeviceId: null,
+            cancellationToken);
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = invoice.ShopId,
+            Action = "manual_payment_verified",
+            Actor = actor,
+            Reason = overrideContext.AuditReason,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                payment_id = payment.Id,
+                invoice_id = invoice.Id,
+                invoice_number = invoice.InvoiceNumber,
+                payment_amount = payment.Amount,
+                amount_due = invoice.AmountDue,
+                amount_paid = invoice.AmountPaid,
+                extend_days = extendDays,
+                previous_subscription_status = previousSubscriptionStatus.ToString().ToLowerInvariant(),
+                previous_plan = previousPlan,
+                previous_period_end = previousPeriodEnd,
+                current_subscription_status = subscription.Status.ToString().ToLowerInvariant(),
+                current_plan = subscription.Plan,
+                current_period_end = subscription.PeriodEndUtc,
+                activation_entitlement_id = activationEntitlement?.EntitlementId,
+                access_delivery_email_status = accessDelivery?.EmailDelivery.Status,
+                access_delivery_success_page_url = accessDelivery?.SuccessPageUrl,
+                reissued_devices = reissueOutcome.ReissuedCount,
+                revoked_licenses = reissueOutcome.RevokedCount,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            })
+        });
+
+        await AddManualOverrideAuditLogAsync(
+            invoice.ShopId,
+            null,
+            "manual_override_payment_verify",
+            actor,
+            overrideContext.AuditReason,
+            new
+            {
+                payment_id = payment.Id,
+                invoice_id = invoice.Id,
+                invoice_number = invoice.InvoiceNumber,
+                amount_due = invoice.AmountDue,
+                amount_paid = invoice.AmountPaid,
+                extend_days = extendDays,
+                subscription_status = subscription.Status.ToString().ToLowerInvariant(),
+                plan = subscription.Plan,
+                period_end = subscription.PeriodEndUtc,
+                activation_entitlement_id = activationEntitlement?.EntitlementId,
+                access_delivery_email_status = accessDelivery?.EmailDelivery.Status,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            },
+            now,
+            cancellationToken);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new AdminManualBillingPaymentVerificationResponse
+        {
+            Payment = MapManualBillingPaymentRow(payment, invoice.Shop.Code, invoice.InvoiceNumber),
+            Invoice = MapManualBillingInvoiceRow(invoice, invoice.Shop.Code),
+            SubscriptionStatus = subscription.Status.ToString().ToLowerInvariant(),
+            Plan = subscription.Plan,
+            SeatLimit = ResolveSeatLimit(subscription),
+            PeriodEnd = subscription.PeriodEndUtc,
+            ActivationEntitlement = activationEntitlement,
+            AccessDelivery = accessDelivery,
+            ProcessedAt = now
+        };
+    }
+
+    public async Task<AdminManualBillingPaymentRow> RejectManualPaymentAsAdminAsync(
+        Guid paymentId,
+        AdminManualBillingPaymentRejectRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (paymentId == Guid.Empty)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "payment_id is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Reason,
+            defaultActor: "billing-admin",
+            defaultReasonCode: "manual_payment_rejected");
+        var actor = overrideContext.Actor;
+        var payment = await dbContext.ManualBillingPayments
+            .Include(x => x.Invoice)
+            .ThenInclude(x => x.Shop)
+            .FirstOrDefaultAsync(x => x.Id == paymentId, cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.PaymentNotFound,
+                "Manual payment was not found.",
+                StatusCodes.Status404NotFound);
+
+        if (payment.Status != ManualBillingPaymentStatus.PendingVerification)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidPaymentStatus,
+                "Only pending-verification payments can be rejected.",
+                StatusCodes.Status409Conflict);
+        }
+
+        payment.Status = ManualBillingPaymentStatus.Rejected;
+        payment.RejectedBy = actor;
+        payment.RejectedAtUtc = now;
+        payment.RejectionReason = overrideContext.ActorNote;
+        payment.VerifiedBy = null;
+        payment.VerifiedAtUtc = null;
+        payment.UpdatedAtUtc = now;
+
+        var invoice = payment.Invoice;
+        var hasOtherPending = await dbContext.ManualBillingPayments
+            .AsNoTracking()
+            .AnyAsync(
+                x => x.InvoiceId == invoice.Id &&
+                     x.Id != payment.Id &&
+                     x.Status == ManualBillingPaymentStatus.PendingVerification,
+                cancellationToken);
+        invoice.Status = hasOtherPending ? ManualBillingInvoiceStatus.PendingVerification : ManualBillingInvoiceStatus.Open;
+        invoice.UpdatedAtUtc = now;
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = invoice.ShopId,
+            Action = "manual_payment_rejected",
+            Actor = actor,
+            Reason = overrideContext.AuditReason,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                payment_id = payment.Id,
+                invoice_id = invoice.Id,
+                invoice_number = invoice.InvoiceNumber,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            })
+        });
+
+        await AddManualOverrideAuditLogAsync(
+            invoice.ShopId,
+            null,
+            "manual_override_payment_reject",
+            actor,
+            overrideContext.AuditReason,
+            new
+            {
+                payment_id = payment.Id,
+                invoice_id = invoice.Id,
+                invoice_number = invoice.InvoiceNumber,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            },
+            now,
+            cancellationToken);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return MapManualBillingPaymentRow(payment, invoice.Shop.Code, invoice.InvoiceNumber);
+    }
+
+    public async Task<AdminManualBillingDailyReconciliationResponse> GetDailyManualBankReconciliationAsync(
+        string? date,
+        string? currency,
+        decimal? expectedTotal,
+        int take,
+        CancellationToken cancellationToken)
+    {
+        var reconciliationDate = ResolveReconciliationDate(date);
+        var now = DateTimeOffset.UtcNow;
+        var windowStart = new DateTimeOffset(
+            reconciliationDate.Year,
+            reconciliationDate.Month,
+            reconciliationDate.Day,
+            0,
+            0,
+            0,
+            TimeSpan.Zero);
+        var windowEnd = windowStart.AddDays(1);
+        var normalizedCurrency = ResolveCurrency(currency);
+        var normalizedTake = Math.Clamp(take, 1, 200);
+        var normalizedExpectedTotal = expectedTotal.HasValue ? decimal.Round(expectedTotal.Value, 2) : (decimal?)null;
+        if (normalizedExpectedTotal.HasValue && normalizedExpectedTotal.Value < 0m)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "expected_total cannot be negative.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        List<ManualBillingPayment> dailyPayments;
+        if (dbContext.Database.IsSqlite())
+        {
+            dailyPayments = (await dbContext.ManualBillingPayments
+                    .AsNoTracking()
+                    .ToListAsync(cancellationToken))
+                .Where(x =>
+                    x.ReceivedAtUtc >= windowStart &&
+                    x.ReceivedAtUtc < windowEnd &&
+                    string.Equals(x.Currency, normalizedCurrency, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+        else
+        {
+            dailyPayments = await dbContext.ManualBillingPayments
+                .AsNoTracking()
+                .Where(x =>
+                    x.ReceivedAtUtc >= windowStart &&
+                    x.ReceivedAtUtc < windowEnd &&
+                    x.Currency == normalizedCurrency)
+                .ToListAsync(cancellationToken);
+        }
+        var bankPayments = dailyPayments
+            .Where(x => x.Method != ManualBillingPaymentMethod.Cash)
+            .OrderByDescending(x => x.ReceivedAtUtc)
+            .ThenByDescending(x => x.CreatedAtUtc)
+            .ToList();
+
+        var invoiceById = await dbContext.ManualBillingInvoices
+            .AsNoTracking()
+            .Where(x => bankPayments.Select(payment => payment.InvoiceId).Distinct().Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+        var shopCodeById = await dbContext.Shops
+            .AsNoTracking()
+            .Where(x => bankPayments.Select(payment => payment.ShopId).Distinct().Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, x => x.Code, cancellationToken);
+
+        var duplicateReferenceGroups = bankPayments
+            .Where(x => !string.IsNullOrWhiteSpace(x.BankReference))
+            .GroupBy(x => x.BankReference!.Trim().ToUpperInvariant())
+            .Where(group => group.Count() > 1)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var duplicateReferenceKeys = duplicateReferenceGroups.Keys.ToHashSet(StringComparer.Ordinal);
+        var duplicateReferenceCount = duplicateReferenceGroups.Values.Sum();
+        var missingReferenceCount = bankPayments.Count(x => string.IsNullOrWhiteSpace(x.BankReference));
+
+        var recordedBankTotal = decimal.Round(bankPayments.Sum(x => x.Amount), 2);
+        var verifiedBankTotal = decimal.Round(
+            bankPayments.Where(x => x.Status == ManualBillingPaymentStatus.Verified).Sum(x => x.Amount),
+            2);
+        var pendingBankTotal = decimal.Round(
+            bankPayments.Where(x => x.Status == ManualBillingPaymentStatus.PendingVerification).Sum(x => x.Amount),
+            2);
+        var rejectedBankTotal = decimal.Round(
+            bankPayments.Where(x => x.Status == ManualBillingPaymentStatus.Rejected).Sum(x => x.Amount),
+            2);
+        var pendingVerificationCount = bankPayments.Count(x => x.Status == ManualBillingPaymentStatus.PendingVerification);
+
+        var mismatchAmount = normalizedExpectedTotal.HasValue
+            ? decimal.Round(verifiedBankTotal - normalizedExpectedTotal.Value, 2)
+            : (decimal?)null;
+        var mismatchTolerance = Math.Max(0m, options.BankReconciliationMismatchToleranceAmount);
+        var hasExpectedTotalMismatch = mismatchAmount.HasValue && decimal.Abs(mismatchAmount.Value) > mismatchTolerance;
+
+        var alerts = new List<AdminManualBillingReconciliationAlertRow>();
+        var mismatchReasons = new List<string>();
+
+        if (missingReferenceCount > 0)
+        {
+            mismatchReasons.Add("missing_bank_reference");
+            alerts.Add(new AdminManualBillingReconciliationAlertRow
+            {
+                Code = BankReconciliationMissingReferenceCode,
+                Severity = "warning",
+                Count = missingReferenceCount,
+                Message = $"{missingReferenceCount} bank payment(s) are missing a bank reference."
+            });
+        }
+
+        if (duplicateReferenceGroups.Count > 0)
+        {
+            mismatchReasons.Add("duplicate_bank_reference");
+            var duplicateReferencePreview = string.Join(", ", duplicateReferenceGroups.Keys.OrderBy(x => x).Take(3));
+            alerts.Add(new AdminManualBillingReconciliationAlertRow
+            {
+                Code = BankReconciliationDuplicateReferenceCode,
+                Severity = "critical",
+                Count = duplicateReferenceCount,
+                Message = $"Duplicate bank references detected ({duplicateReferencePreview})."
+            });
+        }
+
+        if (pendingVerificationCount > 0)
+        {
+            alerts.Add(new AdminManualBillingReconciliationAlertRow
+            {
+                Code = "BANK_PENDING_VERIFICATION",
+                Severity = "info",
+                Count = pendingVerificationCount,
+                Message = $"{pendingVerificationCount} bank payment(s) are still pending verification."
+            });
+        }
+
+        if (hasExpectedTotalMismatch)
+        {
+            mismatchReasons.Add("expected_bank_total_mismatch");
+            alerts.Add(new AdminManualBillingReconciliationAlertRow
+            {
+                Code = BankReconciliationExpectedTotalMismatchCode,
+                Severity = "critical",
+                Count = 1,
+                Message =
+                    $"Verified total ({verifiedBankTotal:0.00}) does not match expected total ({normalizedExpectedTotal:0.00})."
+            });
+        }
+
+        var hasMismatch = mismatchReasons.Count > 0;
+        var actor = ResolveCurrentAdminActor();
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            Action = "manual_bank_reconciliation_generated",
+            Actor = actor,
+            Reason = hasMismatch ? "mismatch_detected" : "ok",
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                date = reconciliationDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                window_start = windowStart,
+                window_end = windowEnd,
+                currency = normalizedCurrency,
+                expected_bank_total = normalizedExpectedTotal,
+                recorded_bank_total = recordedBankTotal,
+                verified_bank_total = verifiedBankTotal,
+                pending_bank_total = pendingBankTotal,
+                rejected_bank_total = rejectedBankTotal,
+                mismatch_amount = mismatchAmount,
+                mismatch_reasons = mismatchReasons,
+                alert_count = alerts.Count
+            }),
+            CreatedAtUtc = now
+        });
+
+        if (hasMismatch)
+        {
+            licensingAlertMonitor.RecordSecurityAnomaly("manual_billing_reconciliation_mismatch");
+            dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+            {
+                Action = "manual_bank_reconciliation_mismatch",
+                Actor = actor,
+                Reason = string.Join(",", mismatchReasons),
+                MetadataJson = JsonSerializer.Serialize(new
+                {
+                    date = reconciliationDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    currency = normalizedCurrency,
+                    mismatch_amount = mismatchAmount,
+                    mismatch_reasons = mismatchReasons
+                }),
+                CreatedAtUtc = now
+            });
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var itemRows = bankPayments
+            .Take(normalizedTake)
+            .Select(payment =>
+            {
+                var mismatchFlags = new List<string>();
+                if (string.IsNullOrWhiteSpace(payment.BankReference))
+                {
+                    mismatchFlags.Add("missing_bank_reference");
+                }
+                else
+                {
+                    var normalizedBankReference = payment.BankReference.Trim().ToUpperInvariant();
+                    if (duplicateReferenceKeys.Contains(normalizedBankReference))
+                    {
+                        mismatchFlags.Add("duplicate_bank_reference");
+                    }
+                }
+
+                if (payment.Status == ManualBillingPaymentStatus.PendingVerification)
+                {
+                    mismatchFlags.Add("pending_verification");
+                }
+
+                return new AdminManualBillingReconciliationItemRow
+                {
+                    PaymentId = payment.Id,
+                    ShopCode = shopCodeById.TryGetValue(payment.ShopId, out var shopCode)
+                        ? shopCode
+                        : ResolveShopCode(null),
+                    InvoiceNumber = invoiceById.TryGetValue(payment.InvoiceId, out var invoice)
+                        ? invoice.InvoiceNumber
+                        : string.Empty,
+                    Method = MapManualBillingPaymentMethodValue(payment.Method),
+                    Amount = payment.Amount,
+                    Currency = payment.Currency,
+                    Status = MapManualBillingPaymentStatusValue(payment.Status),
+                    BankReference = payment.BankReference,
+                    ReceivedAt = payment.ReceivedAtUtc,
+                    RecordedBy = payment.RecordedBy,
+                    VerifiedBy = payment.VerifiedBy,
+                    MismatchFlags = mismatchFlags
+                };
+            })
+            .ToList();
+
+        return new AdminManualBillingDailyReconciliationResponse
+        {
+            Date = reconciliationDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            WindowStart = windowStart,
+            WindowEnd = windowEnd,
+            Currency = normalizedCurrency,
+            ExpectedBankTotal = normalizedExpectedTotal,
+            RecordedBankTotal = recordedBankTotal,
+            VerifiedBankTotal = verifiedBankTotal,
+            PendingBankTotal = pendingBankTotal,
+            RejectedBankTotal = rejectedBankTotal,
+            MismatchAmount = mismatchAmount,
+            HasMismatch = hasMismatch,
+            MismatchReasons = mismatchReasons,
+            AlertCount = alerts.Count,
+            Alerts = alerts,
+            Count = itemRows.Count,
+            Items = itemRows,
+            GeneratedAt = now
+        };
+    }
+
+    public async Task<AdminBillingStateReconciliationRunResponse> RunBillingStateReconciliationAsAdminAsync(
+        AdminBillingStateReconciliationRunRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var actor = NormalizeOptionalValue(request.Actor) ?? ResolveCurrentAdminActor();
+        var reason = NormalizeReasonCode(request.ReasonCode)
+                     ?? NormalizeOptionalValue(request.Reason)
+                     ?? "manual_admin_billing_reconciliation";
+        var actorNote = NormalizeOptionalValue(request.ActorNote);
+
+        return await RunBillingStateReconciliationCoreAsync(
+            source: "manual_admin",
+            dryRun: request.DryRun,
+            actor: actor,
+            reason: string.IsNullOrWhiteSpace(actorNote) ? reason : $"{reason}:{actorNote}",
+            take: request.Take ?? options.BillingReconciliationTake,
+            webhookFailureTake: request.WebhookFailureTake ?? options.BillingReconciliationWebhookFailureTake,
+            emitAuditWhenNoFindings: true,
+            cancellationToken);
+    }
+
+    public async Task<AdminBillingStateReconciliationRunResponse> RunScheduledBillingStateReconciliationAsync(
+        CancellationToken cancellationToken)
+    {
+        return await RunBillingStateReconciliationCoreAsync(
+            source: "scheduled_job",
+            dryRun: false,
+            actor: "billing-reconciliation-job",
+            reason: "scheduled_billing_reconciliation",
+            take: options.BillingReconciliationTake,
+            webhookFailureTake: options.BillingReconciliationWebhookFailureTake,
+            emitAuditWhenNoFindings: false,
+            cancellationToken);
+    }
+
+    private async Task<AdminBillingStateReconciliationRunResponse> RunBillingStateReconciliationCoreAsync(
+        string source,
+        bool dryRun,
+        string actor,
+        string reason,
+        int take,
+        int webhookFailureTake,
+        bool emitAuditWhenNoFindings,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var normalizedSource = NormalizeOptionalValue(source) ?? "manual_admin";
+        var normalizedActor = NormalizeOptionalValue(actor) ?? "billing-reconciliation";
+        var normalizedReason = NormalizeOptionalValue(reason) ?? "billing_reconciliation";
+        var normalizedTake = Math.Clamp(take, 1, 500);
+        var normalizedWebhookFailureTake = Math.Clamp(webhookFailureTake, 1, 500);
+        var periodEndGraceHours = Math.Clamp(options.BillingReconciliationPeriodEndGraceHours, 0, 168);
+        var webhookFailureLookbackHours = Math.Clamp(options.BillingReconciliationWebhookFailureLookbackHours, 1, 720);
+        var driftCutoff = now.AddHours(-periodEndGraceHours);
+        var webhookFailureWindowStart = now.AddHours(-webhookFailureLookbackHours);
+
+        var billingSubscriptionsQuery = dbContext.Subscriptions
+            .AsNoTracking()
+            .Where(x => x.BillingSubscriptionId != null || x.BillingCustomerId != null);
+
+        var billingSubscriptionsScanned = await billingSubscriptionsQuery.CountAsync(cancellationToken);
+
+        List<BillingReconciliationDriftCandidate> driftCandidates;
+        if (dbContext.Database.IsSqlite())
+        {
+            driftCandidates = (await billingSubscriptionsQuery
+                    .Select(x => new BillingReconciliationDriftCandidate(
+                        x.ShopId,
+                        x.BillingSubscriptionId,
+                        x.BillingCustomerId,
+                        x.PeriodEndUtc,
+                        x.Status,
+                        x.CreatedAtUtc))
+                    .ToListAsync(cancellationToken))
+                .Where(x =>
+                    (x.Status == SubscriptionStatus.Active || x.Status == SubscriptionStatus.Trialing) &&
+                    x.PeriodEndUtc <= driftCutoff)
+                .OrderBy(x => x.PeriodEndUtc)
+                .ThenBy(x => x.CreatedAtUtc)
+                .Take(normalizedTake)
+                .ToList();
+        }
+        else
+        {
+            driftCandidates = await billingSubscriptionsQuery
+                .Where(x =>
+                    x.PeriodEndUtc <= driftCutoff &&
+                    (x.Status == SubscriptionStatus.Active || x.Status == SubscriptionStatus.Trialing))
+                .OrderBy(x => x.PeriodEndUtc)
+                .ThenBy(x => x.CreatedAtUtc)
+                .Select(x => new BillingReconciliationDriftCandidate(
+                    x.ShopId,
+                    x.BillingSubscriptionId,
+                    x.BillingCustomerId,
+                    x.PeriodEndUtc,
+                    x.Status,
+                    x.CreatedAtUtc))
+                .Take(normalizedTake)
+                .ToListAsync(cancellationToken);
+        }
+
+        var driftCandidateShopIds = driftCandidates
+            .Select(candidate => candidate.ShopId)
+            .Distinct()
+            .ToList();
+
+        var shopCodeById = driftCandidateShopIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await dbContext.Shops
+                .AsNoTracking()
+                .Where(x => driftCandidateShopIds.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, x => x.Code, cancellationToken);
+
+        var subscriptionUpdates = new List<AdminBillingStateReconciliationSubscriptionRow>();
+        var subscriptionsReconciled = 0;
+
+        foreach (var candidate in driftCandidates)
+        {
+            var shopCode = shopCodeById.TryGetValue(candidate.ShopId, out var resolvedShopCode)
+                ? resolvedShopCode
+                : ResolveShopCode(null);
+            var row = new AdminBillingStateReconciliationSubscriptionRow
+            {
+                ShopId = candidate.ShopId,
+                ShopCode = shopCode,
+                SubscriptionId = candidate.BillingSubscriptionId,
+                CustomerId = candidate.BillingCustomerId,
+                PeriodEnd = candidate.PeriodEndUtc,
+                PreviousStatus = candidate.Status.ToString().ToLowerInvariant(),
+                ReconciledStatus = "past_due",
+                Reason = BillingReconciliationDriftReasonCode,
+                Applied = false
+            };
+
+            if (!dryRun)
+            {
+                try
+                {
+                    var reconciliation = await ReconcileSubscriptionStateAsync(
+                        new SubscriptionReconciliationRequest
+                        {
+                            ReconciliationId = $"billing-drift-{Guid.NewGuid():N}",
+                            ShopCode = shopCode,
+                            CustomerId = candidate.BillingCustomerId,
+                            SubscriptionId = candidate.BillingSubscriptionId,
+                            SubscriptionStatus = "past_due",
+                            Actor = normalizedActor,
+                            Reason = normalizedReason
+                        },
+                        cancellationToken);
+                    row.ReconciledStatus = string.Equals(
+                        reconciliation.SubscriptionStatus,
+                        "pastdue",
+                        StringComparison.OrdinalIgnoreCase)
+                        ? "past_due"
+                        : reconciliation.SubscriptionStatus;
+                    row.Applied = true;
+                    subscriptionsReconciled += 1;
+                }
+                catch (Exception ex)
+                {
+                    row.Error = TruncateAccessDeliveryReason(ex.Message);
+                }
+            }
+
+            subscriptionUpdates.Add(row);
+        }
+
+        List<BillingWebhookEvent> failedWebhookEventsSource;
+        if (dbContext.Database.IsSqlite())
+        {
+            failedWebhookEventsSource = (await dbContext.BillingWebhookEvents
+                    .AsNoTracking()
+                    .ToListAsync(cancellationToken))
+                .Where(x =>
+                    string.Equals(x.Status, WebhookEventStatusFailed, StringComparison.OrdinalIgnoreCase) &&
+                    x.ReceivedAtUtc >= webhookFailureWindowStart)
+                .OrderByDescending(x => x.ReceivedAtUtc)
+                .ThenByDescending(x => x.UpdatedAtUtc)
+                .Take(normalizedWebhookFailureTake)
+                .ToList();
+        }
+        else
+        {
+            failedWebhookEventsSource = await dbContext.BillingWebhookEvents
+                .AsNoTracking()
+                .Where(x =>
+                    x.Status == WebhookEventStatusFailed &&
+                    x.ReceivedAtUtc >= webhookFailureWindowStart)
+                .OrderByDescending(x => x.ReceivedAtUtc)
+                .ThenByDescending(x => x.UpdatedAtUtc)
+                .Take(normalizedWebhookFailureTake)
+                .ToListAsync(cancellationToken);
+        }
+
+        var failedWebhookShopIds = failedWebhookEventsSource
+            .Where(entry => entry.ShopId.HasValue)
+            .Select(entry => entry.ShopId!.Value)
+            .Distinct()
+            .ToList();
+
+        var failedWebhookShopCodeById = failedWebhookShopIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await dbContext.Shops
+                .AsNoTracking()
+                .Where(x => failedWebhookShopIds.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, x => x.Code, cancellationToken);
+
+        var failedWebhookRows = failedWebhookEventsSource
+            .Select(entry => new AdminBillingStateReconciliationWebhookFailureRow
+            {
+                EventId = entry.ProviderEventId,
+                EventType = entry.EventType,
+                Status = entry.Status,
+                ShopId = entry.ShopId,
+                ShopCode = entry.ShopId.HasValue && failedWebhookShopCodeById.TryGetValue(entry.ShopId.Value, out var shopCode)
+                    ? shopCode
+                    : null,
+                SubscriptionId = entry.BillingSubscriptionId,
+                LastErrorCode = entry.LastErrorCode,
+                ReceivedAt = entry.ReceivedAtUtc,
+                UpdatedAt = entry.UpdatedAtUtc
+            })
+            .ToList();
+
+        if (!dryRun)
+        {
+            foreach (var failedWebhookRow in failedWebhookRows)
+            {
+                licensingAlertMonitor.RecordWebhookFailure(
+                    failedWebhookRow.EventType,
+                    failedWebhookRow.LastErrorCode);
+            }
+        }
+
+        var hasFindings = subscriptionUpdates.Count > 0 || failedWebhookRows.Count > 0;
+        if (emitAuditWhenNoFindings || hasFindings)
+        {
+            dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+            {
+                Action = dryRun
+                    ? "billing_webhook_reconciliation_previewed"
+                    : "billing_webhook_reconciliation_run",
+                Actor = normalizedActor,
+                Reason = normalizedReason,
+                MetadataJson = JsonSerializer.Serialize(new
+                {
+                    source = normalizedSource,
+                    dry_run = dryRun,
+                    period_end_grace_hours = periodEndGraceHours,
+                    webhook_failure_lookback_hours = webhookFailureLookbackHours,
+                    billing_subscriptions_scanned = billingSubscriptionsScanned,
+                    drift_candidates = subscriptionUpdates.Count,
+                    subscriptions_reconciled = subscriptionsReconciled,
+                    webhook_failures_detected = failedWebhookRows.Count,
+                    subscription_updates = subscriptionUpdates
+                        .Take(20)
+                        .Select(update => new
+                        {
+                            shop_code = update.ShopCode,
+                            subscription_id = update.SubscriptionId,
+                            customer_id = update.CustomerId,
+                            period_end = update.PeriodEnd,
+                            previous_status = update.PreviousStatus,
+                            reconciled_status = update.ReconciledStatus,
+                            applied = update.Applied,
+                            error = update.Error
+                        }),
+                    failed_webhook_events = failedWebhookRows
+                        .Take(20)
+                        .Select(entry => new
+                        {
+                            event_id = entry.EventId,
+                            event_type = entry.EventType,
+                            status = entry.Status,
+                            shop_code = entry.ShopCode,
+                            subscription_id = entry.SubscriptionId,
+                            last_error_code = entry.LastErrorCode,
+                            received_at = entry.ReceivedAt
+                        })
+                }),
+                CreatedAtUtc = now
+            });
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        return new AdminBillingStateReconciliationRunResponse
+        {
+            GeneratedAt = now,
+            Source = normalizedSource,
+            DryRun = dryRun,
+            Actor = normalizedActor,
+            Reason = normalizedReason,
+            PeriodEndGraceHours = periodEndGraceHours,
+            WebhookFailureLookbackHours = webhookFailureLookbackHours,
+            BillingSubscriptionsScanned = billingSubscriptionsScanned,
+            DriftCandidates = subscriptionUpdates.Count,
+            SubscriptionsReconciled = subscriptionsReconciled,
+            WebhookFailuresDetected = failedWebhookRows.Count,
+            SubscriptionUpdates = subscriptionUpdates,
+            FailedWebhookEvents = failedWebhookRows
         };
     }
 
@@ -1291,11 +3720,7 @@ public sealed class LicenseService(
                 StatusCodes.Status401Unauthorized);
         }
 
-        var signingSecret = options.WebhookSecurity.SigningSecret;
-        if (string.IsNullOrWhiteSpace(signingSecret))
-        {
-            throw new InvalidOperationException("Licensing webhook signing secret is not configured.");
-        }
+        var signingSecret = ResolveWebhookSigningSecret();
 
         var signedPayload = $"{timestamp}.{payload}";
         var expectedSignatureBytes = ComputeHmacSha256(Encoding.UTF8.GetBytes(signingSecret), signedPayload);
@@ -1395,7 +3820,7 @@ public sealed class LicenseService(
         return NormalizeDeviceCode(claimValue);
     }
 
-    public string? ResolveLicenseToken(HttpContext httpContext)
+    public string? ResolveLicenseToken(HttpContext httpContext, bool includeCookie = true)
     {
         if (httpContext.Request.Headers.TryGetValue("X-License-Token", out var headerToken))
         {
@@ -1403,7 +3828,169 @@ public sealed class LicenseService(
             return string.IsNullOrWhiteSpace(token) ? null : token;
         }
 
+        if (includeCookie &&
+            options.TokenCookieEnabled &&
+            httpContext.Request.Cookies.TryGetValue(ResolveLicenseTokenCookieName(), out var cookieToken))
+        {
+            var token = cookieToken?.Trim();
+            return string.IsNullOrWhiteSpace(token) ? null : token;
+        }
+
         return null;
+    }
+
+    public void WriteLicenseTokenCookie(HttpContext httpContext, string? token, DateTimeOffset? expiresAtUtc = null)
+    {
+        if (!options.TokenCookieEnabled)
+        {
+            return;
+        }
+
+        var cookieName = ResolveLicenseTokenCookieName();
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            httpContext.Response.Cookies.Delete(cookieName, BuildLicenseTokenCookieOptions(expiresAtUtc: null));
+            return;
+        }
+
+        var cookieOptions = BuildLicenseTokenCookieOptions(expiresAtUtc);
+        httpContext.Response.Cookies.Append(cookieName, token.Trim(), cookieOptions);
+    }
+
+    private CookieOptions BuildLicenseTokenCookieOptions(DateTimeOffset? expiresAtUtc)
+    {
+        return new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = options.TokenCookieSecure,
+            SameSite = ResolveTokenCookieSameSite(options.TokenCookieSameSite),
+            Path = string.IsNullOrWhiteSpace(options.TokenCookiePath) ? "/" : options.TokenCookiePath.Trim(),
+            Expires = expiresAtUtc?.UtcDateTime
+        };
+    }
+
+    private static SameSiteMode ResolveTokenCookieSameSite(string? configured)
+    {
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            return SameSiteMode.Lax;
+        }
+
+        return configured.Trim().ToLowerInvariant() switch
+        {
+            "strict" => SameSiteMode.Strict,
+            "none" => SameSiteMode.None,
+            _ => SameSiteMode.Lax
+        };
+    }
+
+    private string ResolveLicenseTokenCookieName()
+    {
+        var configuredName = NormalizeOptionalValue(options.TokenCookieName);
+        return string.IsNullOrWhiteSpace(configuredName) ? "smartpos_license" : configuredName;
+    }
+
+    public async Task<OfflineGrantValidationSnapshot> ValidateOfflineGrantForSyncAsync(
+        string? offlineGrantToken,
+        string deviceCode,
+        CancellationToken cancellationToken)
+    {
+        var normalizedDeviceCode = NormalizeDeviceCode(deviceCode);
+        if (string.IsNullOrWhiteSpace(normalizedDeviceCode))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.OfflineGrantRequired,
+                "Device code is required for offline grant validation.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        var rawToken = NormalizeOptionalValue(offlineGrantToken);
+        if (string.IsNullOrWhiteSpace(rawToken))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.OfflineGrantRequired,
+                "offline_grant_token is required for offline checkout/refund sync.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        var payload = ParseAndValidateOfflineGrantToken(rawToken);
+        if (!string.Equals(payload.Type, "offline_grant", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidToken,
+                "offline_grant_token payload type is invalid.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        if (!string.Equals(payload.DeviceCode, normalizedDeviceCode, StringComparison.Ordinal))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.DeviceMismatch,
+                "offline_grant_token does not belong to the current device.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        var provisionedDevice = await dbContext.ProvisionedDevices
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.DeviceCode == normalizedDeviceCode, cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.Unprovisioned,
+                "Device is not provisioned.",
+                StatusCodes.Status403Forbidden);
+
+        if (payload.ShopId != provisionedDevice.ShopId)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidToken,
+                "offline_grant_token is not valid for this shop.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        if (!string.IsNullOrWhiteSpace(provisionedDevice.DeviceKeyFingerprint))
+        {
+            var payloadFingerprint = NormalizeOptionalValue(payload.DeviceKeyFingerprint);
+            if (string.IsNullOrWhiteSpace(payloadFingerprint) ||
+                !string.Equals(
+                    NormalizeKeyFingerprint(provisionedDevice.DeviceKeyFingerprint),
+                    NormalizeKeyFingerprint(payloadFingerprint),
+                    StringComparison.Ordinal))
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.DeviceKeyMismatch,
+                    "offline_grant_token device key binding is invalid.",
+                    StatusCodes.Status403Forbidden);
+            }
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (payload.ExpiresAt <= now)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.OfflineGrantExpired,
+                "offline_grant_token has expired.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        var existingEvents = await dbContext.OfflineEvents
+            .AsNoTracking()
+            .Where(x => x.OfflineGrantId == payload.GrantId &&
+                        x.Status != OfflineEventStatus.Rejected)
+            .ToListAsync(cancellationToken);
+
+        var usedCheckoutOperations = existingEvents.Count(x => x.Type == OfflineEventType.Sale);
+        var usedRefundOperations = existingEvents.Count(x => x.Type == OfflineEventType.Refund);
+
+        return new OfflineGrantValidationSnapshot(
+            payload.GrantId,
+            payload.ShopId,
+            payload.DeviceCode,
+            payload.DeviceKeyFingerprint,
+            payload.IssuedAt,
+            payload.ExpiresAt,
+            Math.Max(0, payload.MaxCheckoutOperations),
+            Math.Max(0, payload.MaxRefundOperations),
+            usedCheckoutOperations,
+            usedRefundOperations);
     }
 
     public bool IsBlockedWhenSuspended(PathString requestPath, string method)
@@ -1419,11 +4006,140 @@ public sealed class LicenseService(
 
     public bool IsEnforcementEnabled() => options.EnforceProtectedRoutes;
 
+    private async Task<DeviceKeyBindingProof?> ResolveAndValidateDeviceKeyProofAsync(
+        ProvisionActivateRequest request,
+        ProvisionedDevice? existingDevice,
+        string deviceCode,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var hasAnyProofField =
+            !string.IsNullOrWhiteSpace(request.ChallengeId) ||
+            !string.IsNullOrWhiteSpace(request.ChallengeSignature) ||
+            !string.IsNullOrWhiteSpace(request.PublicKeySpki) ||
+            !string.IsNullOrWhiteSpace(request.KeyFingerprint);
+
+        var hasExistingBinding = !string.IsNullOrWhiteSpace(existingDevice?.DeviceKeyFingerprint);
+        var requiresProof = options.RequireDeviceKeyBinding || hasExistingBinding || !options.AllowLegacyActivationWithoutDeviceKey;
+
+        if (!requiresProof && !hasAnyProofField)
+        {
+            return null;
+        }
+
+        var challengeIdRaw = NormalizeOptionalValue(request.ChallengeId);
+        var challengeSignatureRaw = NormalizeOptionalValue(request.ChallengeSignature);
+        var publicKeySpkiRaw = NormalizeOptionalValue(request.PublicKeySpki);
+        var keyFingerprintRaw = NormalizeOptionalValue(request.KeyFingerprint);
+
+        if (string.IsNullOrWhiteSpace(challengeIdRaw) ||
+            string.IsNullOrWhiteSpace(challengeSignatureRaw) ||
+            string.IsNullOrWhiteSpace(publicKeySpkiRaw))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidDeviceProof,
+                "Device key proof is required for activation.");
+        }
+
+        if (!Guid.TryParse(challengeIdRaw, out var challengeId))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidDeviceProof,
+                "challenge_id is invalid.");
+        }
+
+        var challenge = await dbContext.DeviceKeyChallenges
+            .FirstOrDefaultAsync(x => x.Id == challengeId, cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.InvalidDeviceProof,
+                "challenge_id is unknown.");
+
+        if (!string.Equals(challenge.DeviceCode, deviceCode, StringComparison.Ordinal))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidDeviceProof,
+                "challenge_id does not belong to this device_code.");
+        }
+
+        if (challenge.ConsumedAtUtc.HasValue)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.ChallengeConsumed,
+                "challenge_id was already used.",
+                StatusCodes.Status409Conflict);
+        }
+
+        if (challenge.ExpiresAtUtc < now)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.ChallengeExpired,
+                "challenge_id has expired.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        byte[] signatureBytes;
+        byte[] publicKeySpkiBytes;
+        try
+        {
+            signatureBytes = Base64UrlDecode(challengeSignatureRaw);
+            publicKeySpkiBytes = Base64UrlDecode(publicKeySpkiRaw);
+        }
+        catch (FormatException)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidDeviceProof,
+                "challenge signature or public key format is invalid.");
+        }
+
+        var computedFingerprint = ComputeDeviceKeyFingerprint(publicKeySpkiBytes);
+        if (!string.IsNullOrWhiteSpace(keyFingerprintRaw) &&
+            !string.Equals(
+                NormalizeKeyFingerprint(keyFingerprintRaw),
+                computedFingerprint,
+                StringComparison.Ordinal))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidDeviceProof,
+                "key_fingerprint does not match public_key_spki.");
+        }
+
+        var activationPayload = BuildActivationChallengePayload(challenge.Id, challenge.Nonce, deviceCode);
+        var payloadBytes = Encoding.UTF8.GetBytes(activationPayload);
+        if (!VerifyDeviceKeySignature(payloadBytes, signatureBytes, publicKeySpkiBytes))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidDeviceProof,
+                "challenge signature verification failed.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        if (!string.IsNullOrWhiteSpace(existingDevice?.DeviceKeyFingerprint) &&
+            !string.Equals(
+                NormalizeKeyFingerprint(existingDevice.DeviceKeyFingerprint),
+                computedFingerprint,
+                StringComparison.Ordinal))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.DeviceKeyMismatch,
+                "Device key does not match existing key binding.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        challenge.ConsumedAtUtc = now;
+
+        return new DeviceKeyBindingProof(
+            computedFingerprint,
+            publicKeySpkiRaw,
+            ResolveDeviceKeyAlgorithm(request.KeyAlgorithm),
+            challenge.Id);
+    }
+
     private async Task<LicenseStatusSnapshot> ResolveStatusSnapshotAsync(
         string deviceCode,
         string? licenseToken,
         bool strictTokenValidation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TokenValidationPurpose tokenValidationPurpose = TokenValidationPurpose.General)
     {
         var now = DateTimeOffset.UtcNow;
         var normalizedDeviceCode = NormalizeDeviceCode(deviceCode);
@@ -1443,6 +4159,7 @@ public sealed class LicenseService(
             provisionedDevice,
             licenseToken,
             strictTokenValidation,
+            tokenValidationPurpose,
             cancellationToken);
 
         if (licenseRecord is null)
@@ -1453,7 +4170,8 @@ public sealed class LicenseService(
                 SubscriptionStatus = subscription?.Status,
                 Plan = subscription?.Plan,
                 SeatLimit = subscription is null ? null : ResolveSeatLimit(subscription),
-                ActiveSeats = await CountActiveSeatsAsync(provisionedDevice.ShopId, cancellationToken)
+                ActiveSeats = await CountActiveSeatsAsync(provisionedDevice.ShopId, cancellationToken),
+                DeviceKeyFingerprint = provisionedDevice.DeviceKeyFingerprint
             };
         }
 
@@ -1477,6 +4195,7 @@ public sealed class LicenseService(
             ValidUntil = licenseRecord.ValidUntil,
             GraceUntil = licenseRecord.GraceUntil,
             LicenseToken = UnprotectSensitiveValue(licenseRecord.Token),
+            DeviceKeyFingerprint = provisionedDevice.DeviceKeyFingerprint,
             BlockedActions = blockedActions,
             ServerTime = now
         };
@@ -1492,6 +4211,7 @@ public sealed class LicenseService(
         ProvisionedDevice provisionedDevice,
         string? licenseToken,
         bool strictTokenValidation,
+        TokenValidationPurpose tokenValidationPurpose,
         CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(licenseToken))
@@ -1515,6 +4235,22 @@ public sealed class LicenseService(
                     StatusCodes.Status403Forbidden);
             }
 
+            if (!string.IsNullOrWhiteSpace(provisionedDevice.DeviceKeyFingerprint))
+            {
+                var payloadFingerprint = NormalizeOptionalValue(payload.DeviceKeyFingerprint);
+                if (string.IsNullOrWhiteSpace(payloadFingerprint) ||
+                    !string.Equals(
+                        NormalizeKeyFingerprint(payloadFingerprint),
+                        NormalizeKeyFingerprint(provisionedDevice.DeviceKeyFingerprint),
+                        StringComparison.Ordinal))
+                {
+                    throw new LicenseException(
+                        LicenseErrorCodes.DeviceKeyMismatch,
+                        "license_token device key binding is invalid.",
+                        StatusCodes.Status403Forbidden);
+                }
+            }
+
             var record = await dbContext.Licenses
                 .AsNoTracking()
                 .FirstOrDefaultAsync(
@@ -1531,6 +4267,18 @@ public sealed class LicenseService(
                 throw new LicenseException(
                     LicenseErrorCodes.InvalidToken,
                     "license_token signature metadata mismatch.",
+                    StatusCodes.Status403Forbidden);
+            }
+
+            await ValidateTokenSessionAsync(payload, provisionedDevice, tokenValidationPurpose, cancellationToken);
+
+            var now = DateTimeOffset.UtcNow;
+            if (record.Status == LicenseRecordStatus.Revoked ||
+                (record.RevokedAtUtc.HasValue && now >= record.RevokedAtUtc.Value))
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.TokenReplayDetected,
+                    "license_token has been rotated or revoked.",
                     StatusCodes.Status403Forbidden);
             }
 
@@ -1562,6 +4310,32 @@ public sealed class LicenseService(
                 throw new LicenseException(
                     LicenseErrorCodes.InvalidToken,
                     "Stored license token has invalid binding.",
+                    StatusCodes.Status403Forbidden);
+            }
+
+            if (!string.IsNullOrWhiteSpace(provisionedDevice.DeviceKeyFingerprint))
+            {
+                var payloadFingerprint = NormalizeOptionalValue(payload.DeviceKeyFingerprint);
+                if (string.IsNullOrWhiteSpace(payloadFingerprint) ||
+                    !string.Equals(
+                        NormalizeKeyFingerprint(payloadFingerprint),
+                        NormalizeKeyFingerprint(provisionedDevice.DeviceKeyFingerprint),
+                        StringComparison.Ordinal))
+                {
+                    throw new LicenseException(
+                        LicenseErrorCodes.DeviceKeyMismatch,
+                        "Stored license token has invalid device key binding.",
+                        StatusCodes.Status403Forbidden);
+                }
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            if (latestRecord.Status == LicenseRecordStatus.Revoked ||
+                (latestRecord.RevokedAtUtc.HasValue && now >= latestRecord.RevokedAtUtc.Value))
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.TokenReplayDetected,
+                    "Stored license token has been rotated or revoked.",
                     StatusCodes.Status403Forbidden);
             }
         }
@@ -1655,10 +4429,11 @@ public sealed class LicenseService(
         ProvisionedDevice provisionedDevice,
         Subscription subscription,
         DateTimeOffset now,
+        TokenRotationMode rotationMode,
         CancellationToken cancellationToken)
     {
         var activeSigningKey = ResolveActiveSigningKey();
-        var validUntil = now.AddHours(Math.Max(1, options.TokenTtlHours));
+        var validUntil = now.Add(ResolveTokenTtl());
         if (subscription.PeriodEndUtc < validUntil)
         {
             validUntil = subscription.PeriodEndUtc;
@@ -1687,6 +4462,7 @@ public sealed class LicenseService(
             ProvisionedDevice = provisionedDevice
         };
 
+        var jti = GenerateTokenJti();
         var tokenPayload = new LicenseTokenPayload
         {
             LicenseId = record.Id,
@@ -1697,7 +4473,9 @@ public sealed class LicenseService(
             KeyId = record.SignatureKeyId,
             SubscriptionStatus = subscription.Status.ToString().ToLowerInvariant(),
             Plan = ResolvePlanCode(subscription.Plan),
-            SeatLimit = ResolveSeatLimit(subscription)
+            SeatLimit = ResolveSeatLimit(subscription),
+            DeviceKeyFingerprint = NormalizeOptionalValue(provisionedDevice.DeviceKeyFingerprint),
+            Jti = jti
         };
 
         var token = SignToken(tokenPayload, activeSigningKey);
@@ -1712,13 +4490,94 @@ public sealed class LicenseService(
                         x.Id != record.Id)
             .ToListAsync(cancellationToken);
 
-        foreach (var staleLicense in staleActiveLicenses)
+        if (rotationMode == TokenRotationMode.Overlap)
         {
-            staleLicense.Status = LicenseRecordStatus.Revoked;
-            staleLicense.RevokedAtUtc = now;
+            var overlapUntil = now.Add(ResolveRotationOverlapWindow());
+            foreach (var staleLicense in staleActiveLicenses)
+            {
+                var rejectAt = staleLicense.ValidUntil < overlapUntil
+                    ? staleLicense.ValidUntil
+                    : overlapUntil;
+                staleLicense.RevokedAtUtc = staleLicense.RevokedAtUtc.HasValue && staleLicense.RevokedAtUtc.Value < rejectAt
+                    ? staleLicense.RevokedAtUtc
+                    : rejectAt;
+            }
+        }
+        else
+        {
+            foreach (var staleLicense in staleActiveLicenses)
+            {
+                staleLicense.Status = LicenseRecordStatus.Revoked;
+                staleLicense.RevokedAtUtc = now;
+            }
+        }
+
+        dbContext.LicenseTokenSessions.Add(new LicenseTokenSession
+        {
+            ShopId = shop.Id,
+            ProvisionedDeviceId = provisionedDevice.Id,
+            LicenseId = record.Id,
+            Jti = jti,
+            IssuedAtUtc = now,
+            ExpiresAtUtc = validUntil,
+            RejectAfterUtc = validUntil
+        });
+
+        var staleTokenSessions = (await dbContext.LicenseTokenSessions
+                .Where(x => x.ProvisionedDeviceId == provisionedDevice.Id &&
+                            x.Jti != jti)
+                .ToListAsync(cancellationToken))
+            .Where(x => x.RejectAfterUtc > now)
+            .ToList();
+
+        if (rotationMode == TokenRotationMode.Overlap)
+        {
+            var overlapUntil = now.Add(ResolveRotationOverlapWindow());
+            foreach (var staleSession in staleTokenSessions)
+            {
+                var rejectAfter = staleSession.ExpiresAtUtc < overlapUntil
+                    ? staleSession.ExpiresAtUtc
+                    : overlapUntil;
+                if (staleSession.RejectAfterUtc > rejectAfter)
+                {
+                    staleSession.RejectAfterUtc = rejectAfter;
+                }
+
+                staleSession.RevokedAtUtc = now;
+                staleSession.ReplacedByJti = jti;
+            }
+        }
+        else
+        {
+            foreach (var staleSession in staleTokenSessions)
+            {
+                staleSession.RejectAfterUtc = now;
+                staleSession.RevokedAtUtc = now;
+                staleSession.ReplacedByJti = jti;
+            }
         }
 
         return new IssuedLicenseResult(record, token);
+    }
+
+    private TimeSpan ResolveTokenTtl()
+    {
+        var configuredMinutes = options.TokenTtlMinutes > 0
+            ? options.TokenTtlMinutes
+            : Math.Max(1, options.TokenTtlHours) * 60;
+        var normalizedMinutes = Math.Clamp(configuredMinutes, 10, 15);
+        return TimeSpan.FromMinutes(normalizedMinutes);
+    }
+
+    private TimeSpan ResolveRotationOverlapWindow()
+    {
+        var overlapSeconds = Math.Clamp(options.TokenRotationOverlapSeconds, 0, 300);
+        return TimeSpan.FromSeconds(overlapSeconds);
+    }
+
+    private static string GenerateTokenJti()
+    {
+        return Base64UrlEncode(RandomNumberGenerator.GetBytes(24));
     }
 
     private LicenseState DetermineState(
@@ -1727,7 +4586,9 @@ public sealed class LicenseService(
         LicenseRecord license,
         DateTimeOffset now)
     {
-        if (device.Status == ProvisionedDeviceStatus.Revoked || license.Status == LicenseRecordStatus.Revoked)
+        if (device.Status == ProvisionedDeviceStatus.Revoked ||
+            license.Status == LicenseRecordStatus.Revoked ||
+            (license.RevokedAtUtc.HasValue && now >= license.RevokedAtUtc.Value))
         {
             return LicenseState.Revoked;
         }
@@ -1981,6 +4842,32 @@ public sealed class LicenseService(
             .CountAsync(x => x.ShopId == shopId && x.Status == ProvisionedDeviceStatus.Active, cancellationToken);
     }
 
+    private async Task RevokeTokenSessionsForLicensesAsync(
+        IEnumerable<Guid> licenseIds,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var normalizedIds = licenseIds
+            .Distinct()
+            .ToList();
+        if (normalizedIds.Count == 0)
+        {
+            return;
+        }
+
+        var sessions = (await dbContext.LicenseTokenSessions
+                .Where(x => normalizedIds.Contains(x.LicenseId))
+                .ToListAsync(cancellationToken))
+            .Where(x => x.RejectAfterUtc > now)
+            .ToList();
+
+        foreach (var session in sessions)
+        {
+            session.RejectAfterUtc = now;
+            session.RevokedAtUtc = now;
+        }
+    }
+
     private async Task<LicenseReissueOutcome> ForceReissueLicensesForShopAsync(
         Shop shop,
         Subscription subscription,
@@ -2010,12 +4897,23 @@ public sealed class LicenseService(
                 activeLicense.RevokedAtUtc = now;
                 revokedCount++;
             }
+
+            await RevokeTokenSessionsForLicensesAsync(
+                activeLicenses.Select(x => x.Id),
+                now,
+                cancellationToken);
         }
         else
         {
             foreach (var device in activeDevices)
             {
-                await IssueLicenseAsync(shop, device, subscription, now, cancellationToken);
+                await IssueLicenseAsync(
+                    shop,
+                    device,
+                    subscription,
+                    now,
+                    TokenRotationMode.Immediate,
+                    cancellationToken);
                 reissuedCount++;
             }
         }
@@ -2113,6 +5011,687 @@ public sealed class LicenseService(
                || previousPeriodEnd != current.PeriodEndUtc;
     }
 
+    private async Task ValidateTokenSessionAsync(
+        LicenseTokenPayload payload,
+        ProvisionedDevice provisionedDevice,
+        TokenValidationPurpose validationPurpose,
+        CancellationToken cancellationToken)
+    {
+        var tokenJti = NormalizeOptionalValue(payload.Jti);
+        if (string.IsNullOrWhiteSpace(tokenJti))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidToken,
+                "license_token is missing jti.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        var session = await dbContext.LicenseTokenSessions
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Jti == tokenJti, cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.TokenReplayDetected,
+                "license_token jti is unknown or no longer valid.",
+                StatusCodes.Status403Forbidden);
+
+        if (session.LicenseId != payload.LicenseId ||
+            session.ProvisionedDeviceId != provisionedDevice.Id ||
+            session.ShopId != provisionedDevice.ShopId)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidToken,
+                "license_token jti binding is invalid.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (session.RejectAfterUtc <= now)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.TokenReplayDetected,
+                "license_token jti was rotated or revoked.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        if (validationPurpose == TokenValidationPurpose.Heartbeat &&
+            (!string.IsNullOrWhiteSpace(session.ReplacedByJti) || session.RevokedAtUtc.HasValue))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.TokenReplayDetected,
+                "license_token was already rotated and cannot be used for heartbeat renewal.",
+                StatusCodes.Status403Forbidden);
+        }
+    }
+
+    private async Task<ManualBillingInvoice> ResolveManualBillingInvoiceForPaymentAsync(
+        AdminManualBillingPaymentRecordRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request.InvoiceId.HasValue && request.InvoiceId.Value != Guid.Empty)
+        {
+            return await dbContext.ManualBillingInvoices
+                .Include(x => x.Shop)
+                .FirstOrDefaultAsync(x => x.Id == request.InvoiceId.Value, cancellationToken)
+                ?? throw new LicenseException(
+                    LicenseErrorCodes.InvoiceNotFound,
+                    "Manual billing invoice was not found.",
+                    StatusCodes.Status404NotFound);
+        }
+
+        var invoiceNumber = NormalizeOptionalValue(request.InvoiceNumber);
+        if (string.IsNullOrWhiteSpace(invoiceNumber))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "invoice_id or invoice_number is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var matches = await dbContext.ManualBillingInvoices
+            .Include(x => x.Shop)
+            .Where(x => x.InvoiceNumber.ToLower() == invoiceNumber.ToLower())
+            .Take(2)
+            .ToListAsync(cancellationToken);
+
+        if (matches.Count == 0)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvoiceNotFound,
+                "Manual billing invoice was not found.",
+                StatusCodes.Status404NotFound);
+        }
+
+        if (matches.Count > 1)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "invoice_number is ambiguous across shops. Provide invoice_id.",
+                StatusCodes.Status409Conflict);
+        }
+
+        return matches[0];
+    }
+
+    private async Task<string> ResolveManualBillingInvoiceNumberAsync(
+        Guid shopId,
+        string shopCode,
+        string? requestedInvoiceNumber,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var normalizedInvoiceNumber = NormalizeOptionalValue(requestedInvoiceNumber);
+        if (!string.IsNullOrWhiteSpace(normalizedInvoiceNumber))
+        {
+            var exists = await dbContext.ManualBillingInvoices
+                .AnyAsync(
+                    x => x.ShopId == shopId &&
+                         x.InvoiceNumber.ToLower() == normalizedInvoiceNumber.ToLower(),
+                    cancellationToken);
+            if (exists)
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.InvalidAdminRequest,
+                    "invoice_number already exists for this shop.",
+                    StatusCodes.Status409Conflict);
+            }
+
+            return normalizedInvoiceNumber;
+        }
+
+        while (true)
+        {
+            var suffix = Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
+            var generated = $"LIC-{shopCode.ToUpperInvariant()}-{now:yyyyMMddHHmmss}-{suffix}";
+            var exists = await dbContext.ManualBillingInvoices
+                .AnyAsync(
+                    x => x.ShopId == shopId &&
+                         x.InvoiceNumber.ToLower() == generated.ToLower(),
+                    cancellationToken);
+            if (!exists)
+            {
+                return generated;
+            }
+        }
+    }
+
+    private static ManualBillingPaymentMethod ParseManualBillingPaymentMethod(string? method)
+    {
+        var normalized = NormalizeOptionalValue(method)?.ToLowerInvariant();
+        return normalized switch
+        {
+            "cash" => ManualBillingPaymentMethod.Cash,
+            "bank_deposit" or "bankdeposit" => ManualBillingPaymentMethod.BankDeposit,
+            "bank_transfer" or "banktransfer" => ManualBillingPaymentMethod.BankTransfer,
+            _ => throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "method must be one of: cash, bank_deposit, bank_transfer.",
+                StatusCodes.Status400BadRequest)
+        };
+    }
+
+    private static ManualBillingInvoiceStatus? ParseManualBillingInvoiceStatus(string? status)
+    {
+        var normalized = NormalizeOptionalValue(status)?.ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        return normalized switch
+        {
+            "open" => ManualBillingInvoiceStatus.Open,
+            "pending_verification" or "pendingverification" => ManualBillingInvoiceStatus.PendingVerification,
+            "paid" => ManualBillingInvoiceStatus.Paid,
+            "overdue" => ManualBillingInvoiceStatus.Overdue,
+            "canceled" => ManualBillingInvoiceStatus.Canceled,
+            _ => throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Invalid invoice status filter.",
+                StatusCodes.Status400BadRequest)
+        };
+    }
+
+    private static ManualBillingPaymentStatus? ParseManualBillingPaymentStatus(string? status)
+    {
+        var normalized = NormalizeOptionalValue(status)?.ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        return normalized switch
+        {
+            "pending_verification" or "pendingverification" => ManualBillingPaymentStatus.PendingVerification,
+            "verified" => ManualBillingPaymentStatus.Verified,
+            "rejected" => ManualBillingPaymentStatus.Rejected,
+            _ => throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Invalid payment status filter.",
+                StatusCodes.Status400BadRequest)
+        };
+    }
+
+    private ManualOverrideContext ResolveManualOverrideContext(
+        string? actor,
+        string? reasonCode,
+        string? actorNote,
+        string defaultActor,
+        string defaultReasonCode)
+    {
+        var resolvedActor = string.IsNullOrWhiteSpace(actor) ? defaultActor : actor.Trim();
+        var resolvedReasonCode = NormalizeReasonCode(reasonCode);
+        if (string.IsNullOrWhiteSpace(resolvedReasonCode))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "reason_code is required for manual override actions.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var resolvedActorNote = NormalizeOptionalValue(actorNote);
+        if (string.IsNullOrWhiteSpace(resolvedActorNote))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "actor_note is required for manual override actions.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var fallbackCode = NormalizeReasonCode(defaultReasonCode) ?? "manual_override";
+        return new ManualOverrideContext(
+            resolvedActor,
+            resolvedReasonCode,
+            resolvedActorNote,
+            string.IsNullOrWhiteSpace(resolvedReasonCode) ? fallbackCode : resolvedReasonCode);
+    }
+
+    private static string? NormalizeReasonCode(string? value)
+    {
+        var normalized = NormalizeOptionalValue(value)?.ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        if (normalized.Length is < 3 or > 64)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "reason_code must be between 3 and 64 characters.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        foreach (var character in normalized)
+        {
+            if (char.IsAsciiLetterOrDigit(character) || character is '_' or '-' or '.')
+            {
+                continue;
+            }
+
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "reason_code contains invalid characters.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        return normalized;
+    }
+
+    private StepUpApprovalContext ResolveStepUpApproval(
+        bool required,
+        string? approvedBy,
+        string? approvalNote,
+        string actionKey)
+    {
+        var normalizedApprovedBy = NormalizeOptionalValue(approvedBy);
+        var normalizedApprovalNote = NormalizeOptionalValue(approvalNote);
+        if (!required)
+        {
+            return string.IsNullOrWhiteSpace(normalizedApprovedBy) || string.IsNullOrWhiteSpace(normalizedApprovalNote)
+                ? new StepUpApprovalContext(string.Empty, string.Empty, false)
+                : new StepUpApprovalContext(normalizedApprovedBy, normalizedApprovalNote, true);
+        }
+
+        if (string.IsNullOrWhiteSpace(normalizedApprovedBy) || string.IsNullOrWhiteSpace(normalizedApprovalNote))
+        {
+            licensingAlertMonitor.RecordSecurityAnomaly($"step_up_approval_required:{actionKey}");
+            throw new LicenseException(
+                LicenseErrorCodes.SecondApprovalRequired,
+                "This high-risk action requires step-up approval.",
+                StatusCodes.Status409Conflict);
+        }
+
+        return new StepUpApprovalContext(normalizedApprovedBy, normalizedApprovalNote, true);
+    }
+
+    private static string NormalizeEmergencyAction(string? action)
+    {
+        var normalized = NormalizeOptionalValue(action)?.ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalized) || !EmergencyActions.Contains(normalized))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "action must be one of: lock_device, revoke_token, force_reauth.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        return normalized;
+    }
+
+    private string SignEmergencyCommandEnvelope(EmergencyCommandEnvelopePayload payload)
+    {
+        var payloadSegment = Base64UrlEncode(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(payload)));
+        var secret = ResolveEmergencyCommandSigningSecret();
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
+        var signature = hmac.ComputeHash(Encoding.UTF8.GetBytes(payloadSegment));
+        var signatureSegment = Base64UrlEncode(signature);
+        return $"{payloadSegment}.{signatureSegment}";
+    }
+
+    private EmergencyCommandEnvelopePayload ParseAndValidateEmergencyCommandEnvelope(string envelopeToken)
+    {
+        var parts = envelopeToken.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length != 2)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "envelope_token format is invalid.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        byte[] signatureBytes;
+        try
+        {
+            signatureBytes = Base64UrlDecode(parts[1]);
+        }
+        catch (FormatException)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "envelope_token signature format is invalid.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var secret = ResolveEmergencyCommandSigningSecret();
+        using (var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret)))
+        {
+            var expectedSignature = hmac.ComputeHash(Encoding.UTF8.GetBytes(parts[0]));
+            if (!CryptographicOperations.FixedTimeEquals(expectedSignature, signatureBytes))
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.InvalidAdminRequest,
+                    "envelope_token signature is invalid.",
+                    StatusCodes.Status403Forbidden);
+            }
+        }
+
+        try
+        {
+            var payloadJson = Encoding.UTF8.GetString(Base64UrlDecode(parts[0]));
+            var payload = JsonSerializer.Deserialize<EmergencyCommandEnvelopePayload>(payloadJson);
+            if (payload is null ||
+                payload.CommandId == Guid.Empty ||
+                string.IsNullOrWhiteSpace(payload.DeviceCode) ||
+                string.IsNullOrWhiteSpace(payload.Nonce))
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.InvalidAdminRequest,
+                    "envelope_token payload is incomplete.",
+                    StatusCodes.Status400BadRequest);
+            }
+
+            payload.Action = NormalizeEmergencyAction(payload.Action);
+            payload.ReasonCode = NormalizeReasonCode(payload.ReasonCode) ?? "emergency_command";
+            payload.ActorNote = NormalizeOptionalValue(payload.ActorNote) ?? "no_note";
+            payload.Actor = NormalizeOptionalValue(payload.Actor) ?? "security-admin";
+            return payload;
+        }
+        catch (JsonException)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "envelope_token payload is invalid JSON.",
+                StatusCodes.Status400BadRequest);
+        }
+        catch (FormatException)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "envelope_token payload encoding is invalid.",
+                StatusCodes.Status400BadRequest);
+        }
+    }
+
+    private async Task<int> RevokeDeviceTokenSessionsAsAdminAsync(
+        string deviceCode,
+        string actor,
+        string reasonCode,
+        string actorNote,
+        string manualOverrideAction,
+        string auditAction,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var normalizedDeviceCode = NormalizeDeviceCode(deviceCode);
+        var provisionedDevice = await dbContext.ProvisionedDevices
+            .FirstOrDefaultAsync(x => x.DeviceCode == normalizedDeviceCode, cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.Unprovisioned,
+                "Device is not provisioned.",
+                StatusCodes.Status404NotFound);
+
+        List<Guid> activeLicenseIds;
+        if (dbContext.Database.IsSqlite())
+        {
+            activeLicenseIds = (await dbContext.Licenses
+                    .Where(x => x.ProvisionedDeviceId == provisionedDevice.Id &&
+                                x.Status == LicenseRecordStatus.Active)
+                    .ToListAsync(cancellationToken))
+                .Where(x => !x.RevokedAtUtc.HasValue || x.RevokedAtUtc > now)
+                .Select(x => x.Id)
+                .Distinct()
+                .ToList();
+        }
+        else
+        {
+            activeLicenseIds = await dbContext.Licenses
+                .Where(x => x.ProvisionedDeviceId == provisionedDevice.Id &&
+                            x.Status == LicenseRecordStatus.Active &&
+                            (!x.RevokedAtUtc.HasValue || x.RevokedAtUtc > now))
+                .Select(x => x.Id)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+        }
+
+        List<LicenseTokenSession> sessions;
+        if (activeLicenseIds.Count == 0)
+        {
+            sessions = [];
+        }
+        else
+        {
+            sessions = (await dbContext.LicenseTokenSessions
+                    .Where(x => activeLicenseIds.Contains(x.LicenseId))
+                    .ToListAsync(cancellationToken))
+                .Where(x => x.RejectAfterUtc > now)
+                .ToList();
+        }
+
+        foreach (var session in sessions)
+        {
+            session.RejectAfterUtc = now;
+            session.RevokedAtUtc = now;
+        }
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = provisionedDevice.ShopId,
+            ProvisionedDeviceId = provisionedDevice.Id,
+            Action = auditAction,
+            Actor = actor,
+            Reason = reasonCode,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                device_code = normalizedDeviceCode,
+                revoked_token_sessions = sessions.Count,
+                reason_code = reasonCode,
+                actor_note = actorNote
+            }),
+            CreatedAtUtc = now
+        });
+
+        await AddManualOverrideAuditLogAsync(
+            provisionedDevice.ShopId,
+            provisionedDevice.Id,
+            manualOverrideAction,
+            actor,
+            reasonCode,
+            new
+            {
+                device_code = normalizedDeviceCode,
+                revoked_token_sessions = sessions.Count,
+                reason_code = reasonCode,
+                actor_note = actorNote
+            },
+            now,
+            cancellationToken);
+
+        return sessions.Count;
+    }
+
+    private static DateOnly ResolveReconciliationDate(string? dateValue)
+    {
+        var normalized = NormalizeOptionalValue(dateValue);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return DateOnly.FromDateTime(DateTime.UtcNow);
+        }
+
+        if (DateOnly.TryParseExact(
+                normalized,
+                "yyyy-MM-dd",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var parsed))
+        {
+            return parsed;
+        }
+
+        throw new LicenseException(
+            LicenseErrorCodes.InvalidAdminRequest,
+            "date must be in YYYY-MM-DD format.",
+            StatusCodes.Status400BadRequest);
+    }
+
+    private string ResolveCurrentAdminActor()
+    {
+        var user = httpContextAccessor.HttpContext?.User;
+        var actor = NormalizeOptionalValue(
+            user?.FindFirstValue("username") ??
+            user?.FindFirstValue(ClaimTypes.Name) ??
+            user?.FindFirstValue(ClaimTypes.NameIdentifier));
+        return string.IsNullOrWhiteSpace(actor) ? "super-admin" : actor;
+    }
+
+    private async Task<int> CountSelfServiceDeactivationsUsedTodayAsync(
+        Guid shopId,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var dayStart = new DateTimeOffset(now.UtcDateTime.Date, TimeSpan.Zero);
+        if (dbContext.Database.IsSqlite())
+        {
+            return (await dbContext.LicenseAuditLogs
+                    .AsNoTracking()
+                    .Where(x =>
+                        x.ShopId == shopId &&
+                        x.Action == "self_service_device_deactivate")
+                    .ToListAsync(cancellationToken))
+                .Count(x => x.CreatedAtUtc >= dayStart);
+        }
+
+        return await dbContext.LicenseAuditLogs
+            .AsNoTracking()
+            .Where(x =>
+                x.ShopId == shopId &&
+                x.Action == "self_service_device_deactivate" &&
+                x.CreatedAtUtc >= dayStart)
+            .CountAsync(cancellationToken);
+    }
+
+    private async Task<ResolvedCurrentShopContext> ResolveCurrentShopContextAsync(
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var httpContext = httpContextAccessor.HttpContext;
+        var currentDeviceCode = httpContext is null ? string.Empty : ResolveDeviceCode(null, httpContext);
+
+        if (!string.IsNullOrWhiteSpace(currentDeviceCode))
+        {
+            var provisionedDevice = await dbContext.ProvisionedDevices
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.DeviceCode == currentDeviceCode, cancellationToken);
+            if (provisionedDevice is not null)
+            {
+                var existingShop = await dbContext.Shops
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.Id == provisionedDevice.ShopId, cancellationToken);
+                if (existingShop is not null)
+                {
+                    return new ResolvedCurrentShopContext(existingShop, currentDeviceCode);
+                }
+            }
+        }
+
+        var shop = await GetOrCreateDefaultShopAsync(now, cancellationToken);
+        if (dbContext.Entry(shop).State == EntityState.Added)
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        return new ResolvedCurrentShopContext(shop, currentDeviceCode);
+    }
+
+    private static string ResolveCurrency(string? currency)
+    {
+        var normalized = NormalizeOptionalValue(currency);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return "LKR";
+        }
+
+        var upper = normalized.ToUpperInvariant();
+        return upper.Length > 8 ? upper[..8] : upper;
+    }
+
+    private static AdminManualBillingInvoiceRow MapManualBillingInvoiceRow(
+        ManualBillingInvoice invoice,
+        string shopCode)
+    {
+        return new AdminManualBillingInvoiceRow
+        {
+            InvoiceId = invoice.Id,
+            ShopId = invoice.ShopId,
+            ShopCode = shopCode,
+            InvoiceNumber = invoice.InvoiceNumber,
+            AmountDue = invoice.AmountDue,
+            AmountPaid = invoice.AmountPaid,
+            Currency = invoice.Currency,
+            Status = MapManualBillingInvoiceStatusValue(invoice.Status),
+            DueAt = invoice.DueAtUtc,
+            Notes = invoice.Notes,
+            CreatedBy = invoice.CreatedBy,
+            CreatedAt = invoice.CreatedAtUtc,
+            UpdatedAt = invoice.UpdatedAtUtc
+        };
+    }
+
+    private static AdminManualBillingPaymentRow MapManualBillingPaymentRow(
+        ManualBillingPayment payment,
+        string shopCode,
+        string invoiceNumber)
+    {
+        return new AdminManualBillingPaymentRow
+        {
+            PaymentId = payment.Id,
+            ShopId = payment.ShopId,
+            ShopCode = shopCode,
+            InvoiceId = payment.InvoiceId,
+            InvoiceNumber = invoiceNumber,
+            Method = MapManualBillingPaymentMethodValue(payment.Method),
+            Amount = payment.Amount,
+            Currency = payment.Currency,
+            Status = MapManualBillingPaymentStatusValue(payment.Status),
+            BankReference = payment.BankReference,
+            DepositSlipUrl = payment.DepositSlipUrl,
+            ReceivedAt = payment.ReceivedAtUtc,
+            Notes = payment.Notes,
+            RecordedBy = payment.RecordedBy,
+            VerifiedBy = payment.VerifiedBy,
+            VerifiedAt = payment.VerifiedAtUtc,
+            RejectedBy = payment.RejectedBy,
+            RejectedAt = payment.RejectedAtUtc,
+            RejectionReason = payment.RejectionReason,
+            CreatedAt = payment.CreatedAtUtc,
+            UpdatedAt = payment.UpdatedAtUtc
+        };
+    }
+
+    private static string MapManualBillingInvoiceStatusValue(ManualBillingInvoiceStatus status)
+    {
+        return status switch
+        {
+            ManualBillingInvoiceStatus.Open => "open",
+            ManualBillingInvoiceStatus.PendingVerification => "pending_verification",
+            ManualBillingInvoiceStatus.Paid => "paid",
+            ManualBillingInvoiceStatus.Overdue => "overdue",
+            ManualBillingInvoiceStatus.Canceled => "canceled",
+            _ => "open"
+        };
+    }
+
+    private static string MapManualBillingPaymentStatusValue(ManualBillingPaymentStatus status)
+    {
+        return status switch
+        {
+            ManualBillingPaymentStatus.PendingVerification => "pending_verification",
+            ManualBillingPaymentStatus.Verified => "verified",
+            ManualBillingPaymentStatus.Rejected => "rejected",
+            _ => "pending_verification"
+        };
+    }
+
+    private static string MapManualBillingPaymentMethodValue(ManualBillingPaymentMethod method)
+    {
+        return method switch
+        {
+            ManualBillingPaymentMethod.Cash => "cash",
+            ManualBillingPaymentMethod.BankDeposit => "bank_deposit",
+            ManualBillingPaymentMethod.BankTransfer => "bank_transfer",
+            _ => "bank_deposit"
+        };
+    }
+
     private LicenseTokenPayload ParseAndValidateToken(string token)
     {
         if (string.IsNullOrWhiteSpace(token))
@@ -2147,6 +5726,62 @@ public sealed class LicenseService(
         return payload;
     }
 
+    private OfflineGrantTokenPayload ParseAndValidateOfflineGrantToken(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.OfflineGrantRequired,
+                "offline_grant_token is empty.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        var parts = token.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length != 2)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidToken,
+                "offline_grant_token format is invalid.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        var payloadSegment = parts[0];
+        var signatureSegment = parts[1];
+        OfflineGrantTokenPayload? payload;
+        byte[] providedSignatureBytes;
+        try
+        {
+            var payloadBytes = Base64UrlDecode(payloadSegment);
+            payload = JsonSerializer.Deserialize<OfflineGrantTokenPayload>(payloadBytes, TokenSerializerOptions);
+            providedSignatureBytes = Base64UrlDecode(signatureSegment);
+        }
+        catch (Exception ex) when (ex is FormatException or JsonException)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidToken,
+                "offline_grant_token payload is invalid.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        if (payload is null)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidToken,
+                "offline_grant_token payload is invalid.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        if (!VerifySignature(payloadSegment, providedSignatureBytes, payload.KeyId))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidToken,
+                "offline_grant_token signature validation failed.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        return payload;
+    }
+
     private string SignToken(LicenseTokenPayload payload, ResolvedSigningKey signingKey)
     {
         var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(payload, TokenSerializerOptions);
@@ -2168,16 +5803,31 @@ public sealed class LicenseService(
 
     private bool VerifySignature(string payloadSegment, byte[] signatureBytes, string? keyId)
     {
-        var verificationKey = ResolveVerificationKeyById(keyId);
+        var payloadBytes = Encoding.UTF8.GetBytes(payloadSegment);
+        var verificationKeys = ResolveVerificationKeysById(keyId);
 
-        using var rsa = RSA.Create();
-        rsa.ImportFromPem(verificationKey.PublicKeyPem.AsSpan());
+        foreach (var verificationKey in verificationKeys)
+        {
+            try
+            {
+                using var rsa = RSA.Create();
+                rsa.ImportFromPem(verificationKey.PublicKeyPem.AsSpan());
+                if (rsa.VerifyData(
+                        payloadBytes,
+                        signatureBytes,
+                        HashAlgorithmName.SHA256,
+                        RSASignaturePadding.Pkcs1))
+                {
+                    return true;
+                }
+            }
+            catch (CryptographicException)
+            {
+                // Try remaining trusted verification keys.
+            }
+        }
 
-        return rsa.VerifyData(
-            Encoding.UTF8.GetBytes(payloadSegment),
-            signatureBytes,
-            HashAlgorithmName.SHA256,
-            RSASignaturePadding.Pkcs1);
+        return false;
     }
 
     private ResolvedSigningKey ResolveActiveSigningKey()
@@ -2229,7 +5879,7 @@ public sealed class LicenseService(
         return new ResolvedSigningKey(fallbackKeyId, fallbackPrivateKeyPem, fallbackPublicKeyPem);
     }
 
-    private ResolvedSigningKey ResolveVerificationKeyById(string? keyId)
+    private IReadOnlyList<ResolvedSigningKey> ResolveVerificationKeysById(string? keyId)
     {
         var keyRing = options.SigningKeys
             .Where(static key => !string.IsNullOrWhiteSpace(key.KeyId))
@@ -2246,13 +5896,27 @@ public sealed class LicenseService(
                     StatusCodes.Status403Forbidden);
             }
 
-            var publicKeyPem = NormalizePem(configuredKey.PublicKeyPem);
-            if (string.IsNullOrWhiteSpace(publicKeyPem))
+            var candidates = new List<ResolvedSigningKey>();
+
+            var configuredPublicKeyPem = NormalizePem(configuredKey.PublicKeyPem);
+            if (!string.IsNullOrWhiteSpace(configuredPublicKeyPem))
+            {
+                candidates.Add(new ResolvedSigningKey(tokenKeyId, string.Empty, configuredPublicKeyPem));
+            }
+
+            var derivedPublicKeyPem = TryDerivePublicKeyPem(configuredKey.PrivateKeyPem);
+            if (!string.IsNullOrWhiteSpace(derivedPublicKeyPem) &&
+                !candidates.Any(x => string.Equals(x.PublicKeyPem, derivedPublicKeyPem, StringComparison.Ordinal)))
+            {
+                candidates.Add(new ResolvedSigningKey(tokenKeyId, string.Empty, derivedPublicKeyPem));
+            }
+
+            if (candidates.Count == 0)
             {
                 throw new InvalidOperationException($"Licensing signing key '{tokenKeyId}' is missing a public key.");
             }
 
-            return new ResolvedSigningKey(tokenKeyId, string.Empty, publicKeyPem);
+            return candidates;
         }
 
         var expectedKeyId = NormalizeOptionalValue(options.SigningKeyId) ?? "smartpos-k1";
@@ -2265,13 +5929,60 @@ public sealed class LicenseService(
                 StatusCodes.Status403Forbidden);
         }
 
-        var publicKeyPemFallback = NormalizePem(options.VerificationPublicKeyPem);
-        if (string.IsNullOrWhiteSpace(publicKeyPemFallback))
+        var fallbackCandidates = new List<ResolvedSigningKey>();
+        var configuredFallbackPublicKeyPem = NormalizePem(options.VerificationPublicKeyPem);
+        if (!string.IsNullOrWhiteSpace(configuredFallbackPublicKeyPem))
+        {
+            fallbackCandidates.Add(new ResolvedSigningKey(expectedKeyId, string.Empty, configuredFallbackPublicKeyPem));
+        }
+
+        var derivedFallbackPublicKeyPem = TryDerivePublicKeyPemForFallbackKey(expectedKeyId);
+        if (!string.IsNullOrWhiteSpace(derivedFallbackPublicKeyPem) &&
+            !fallbackCandidates.Any(x => string.Equals(x.PublicKeyPem, derivedFallbackPublicKeyPem, StringComparison.Ordinal)))
+        {
+            // Prefer derived key first so verification matches whichever private key is actively used to sign.
+            fallbackCandidates.Insert(0, new ResolvedSigningKey(expectedKeyId, string.Empty, derivedFallbackPublicKeyPem));
+        }
+
+        if (fallbackCandidates.Count == 0)
         {
             throw new InvalidOperationException("Licensing public verification key is not configured.");
         }
 
-        return new ResolvedSigningKey(expectedKeyId, string.Empty, publicKeyPemFallback);
+        return fallbackCandidates;
+    }
+
+    private string? TryDerivePublicKeyPemForFallbackKey(string keyId)
+    {
+        try
+        {
+            var signingPrivateKeyPem = ResolveSigningPrivateKeyPem(options.SigningPrivateKeyPem, keyId);
+            return TryDerivePublicKeyPem(signingPrivateKeyPem);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or CryptographicException)
+        {
+            return null;
+        }
+    }
+
+    private static string? TryDerivePublicKeyPem(string? privateKeyPem)
+    {
+        var normalizedPrivateKeyPem = NormalizePem(privateKeyPem);
+        if (string.IsNullOrWhiteSpace(normalizedPrivateKeyPem))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var rsa = RSA.Create();
+            rsa.ImportFromPem(normalizedPrivateKeyPem.AsSpan());
+            return NormalizePem(rsa.ExportSubjectPublicKeyInfoPem());
+        }
+        catch (CryptographicException)
+        {
+            return null;
+        }
     }
 
     private string ResolveSigningPrivateKeyPem(string? inlinePrivateKeyPem, string keyId)
@@ -2371,13 +6082,132 @@ public sealed class LicenseService(
 
     private byte[] ResolveDataEncryptionKey()
     {
-        var material = NormalizeOptionalValue(options.DataEncryptionKey);
+        var material = ResolveDataEncryptionKeyMaterial();
         if (string.IsNullOrWhiteSpace(material))
         {
             throw new InvalidOperationException("Licensing data encryption key is not configured.");
         }
 
         return SHA256.HashData(Encoding.UTF8.GetBytes(material));
+    }
+
+    private string ResolveDataEncryptionKeyMaterial()
+    {
+        var fromConfig = NormalizeOptionalValue(options.DataEncryptionKey);
+        var envVarName = NormalizeOptionalValue(options.DataEncryptionKeyEnvironmentVariable)
+                         ?? "SMARTPOS_LICENSE_DATA_ENCRYPTION_KEY";
+        var fromEnvironment = NormalizeOptionalValue(Environment.GetEnvironmentVariable(envVarName));
+        if (!string.IsNullOrWhiteSpace(fromEnvironment))
+        {
+            return fromEnvironment;
+        }
+
+        return fromConfig ?? string.Empty;
+    }
+
+    private string ResolveWebhookSigningSecret()
+    {
+        var fromConfig = NormalizeOptionalValue(options.WebhookSecurity.SigningSecret);
+        var envVarName = NormalizeOptionalValue(options.WebhookSecurity.SigningSecretEnvironmentVariable)
+                         ?? "SMARTPOS_BILLING_WEBHOOK_SIGNING_SECRET";
+        var fromEnvironment = NormalizeOptionalValue(Environment.GetEnvironmentVariable(envVarName));
+        if (!string.IsNullOrWhiteSpace(fromEnvironment))
+        {
+            return fromEnvironment;
+        }
+
+        if (!string.IsNullOrWhiteSpace(fromConfig))
+        {
+            return fromConfig;
+        }
+
+        throw new InvalidOperationException(
+            $"Licensing webhook signing secret is not configured. Set '{LicenseOptions.SectionName}:WebhookSecurity:SigningSecret' or environment variable '{envVarName}'.");
+    }
+
+    private string ResolveEmergencyCommandSigningSecret()
+    {
+        var fromConfig = NormalizeOptionalValue(options.EmergencyCommandSigningSecret);
+        var envVarName = NormalizeOptionalValue(options.EmergencyCommandSigningSecretEnvironmentVariable)
+                         ?? "SMARTPOS_EMERGENCY_COMMAND_SIGNING_SECRET";
+        var fromEnvironment = NormalizeOptionalValue(Environment.GetEnvironmentVariable(envVarName));
+        if (!string.IsNullOrWhiteSpace(fromEnvironment))
+        {
+            return fromEnvironment;
+        }
+
+        if (!string.IsNullOrWhiteSpace(fromConfig))
+        {
+            return fromConfig;
+        }
+
+        throw new InvalidOperationException(
+            $"Emergency command signing secret is not configured. Set '{LicenseOptions.SectionName}:EmergencyCommandSigningSecret' or environment variable '{envVarName}'.");
+    }
+
+    internal static string BuildActivationChallengePayload(Guid challengeId, string nonce, string deviceCode)
+    {
+        return $"smartpos.provision.activate|{challengeId:N}|{nonce}|{NormalizeDeviceCode(deviceCode)}";
+    }
+
+    private static bool VerifyDeviceKeySignature(byte[] payloadBytes, byte[] signatureBytes, byte[] publicKeySpkiBytes)
+    {
+        try
+        {
+            using var ecdsa = ECDsa.Create();
+            ecdsa.ImportSubjectPublicKeyInfo(publicKeySpkiBytes, out _);
+            return VerifySignatureWithFormat(
+                       ecdsa,
+                       payloadBytes,
+                       signatureBytes,
+                       DSASignatureFormat.Rfc3279DerSequence)
+                   || VerifySignatureWithFormat(
+                       ecdsa,
+                       payloadBytes,
+                       signatureBytes,
+                       DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+        }
+        catch (CryptographicException)
+        {
+            return false;
+        }
+    }
+
+    private static bool VerifySignatureWithFormat(
+        ECDsa ecdsa,
+        byte[] payloadBytes,
+        byte[] signatureBytes,
+        DSASignatureFormat signatureFormat)
+    {
+        try
+        {
+            return ecdsa.VerifyData(
+                payloadBytes,
+                signatureBytes,
+                HashAlgorithmName.SHA256,
+                signatureFormat);
+        }
+        catch (CryptographicException)
+        {
+            return false;
+        }
+    }
+
+    private static string ComputeDeviceKeyFingerprint(byte[] publicKeySpkiBytes)
+    {
+        var digest = SHA256.HashData(publicKeySpkiBytes);
+        return Convert.ToHexString(digest).ToLowerInvariant();
+    }
+
+    private static string NormalizeKeyFingerprint(string value)
+    {
+        return value.Trim().ToLowerInvariant();
+    }
+
+    private static string ResolveDeviceKeyAlgorithm(string? requestedAlgorithm)
+    {
+        var normalized = NormalizeOptionalValue(requestedAlgorithm);
+        return string.IsNullOrWhiteSpace(normalized) ? DefaultDeviceKeyAlgorithm : normalized.ToUpperInvariant();
     }
 
     private static string Base64UrlEncode(byte[] bytes)
@@ -2416,6 +6246,512 @@ public sealed class LicenseService(
         return string.IsNullOrWhiteSpace(value)
             ? string.Empty
             : value.Trim();
+    }
+
+    private async Task<ResolvedActivationEntitlement?> ResolveActivationEntitlementForActivationAsync(
+        string? activationEntitlementKey,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var normalizedInput = NormalizeOptionalValue(activationEntitlementKey);
+        if (string.IsNullOrWhiteSpace(normalizedInput))
+        {
+            return null;
+        }
+
+        var normalizedKey = NormalizeActivationEntitlementKey(normalizedInput);
+        if (string.IsNullOrWhiteSpace(normalizedKey))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidActivationEntitlement,
+                "activation_entitlement_key format is invalid.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        var keyHash = ComputeActivationEntitlementHash(normalizedKey);
+        var entitlement = await dbContext.CustomerActivationEntitlements
+            .Include(x => x.Shop)
+            .FirstOrDefaultAsync(x => x.EntitlementKeyHash == keyHash, cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.ActivationEntitlementNotFound,
+                "activation_entitlement_key was not found.",
+                StatusCodes.Status403Forbidden);
+
+        var storedKey = NormalizeActivationEntitlementKey(UnprotectSensitiveValue(entitlement.EntitlementKey));
+        if (!string.Equals(storedKey, normalizedKey, StringComparison.Ordinal))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidActivationEntitlement,
+                "activation_entitlement_key is invalid.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        if (entitlement.Status == ActivationEntitlementStatus.Revoked)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidActivationEntitlement,
+                "activation_entitlement_key is revoked.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        if (entitlement.Status == ActivationEntitlementStatus.Expired || entitlement.ExpiresAtUtc <= now)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.ActivationEntitlementExpired,
+                "activation_entitlement_key has expired.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        var maxActivations = Math.Max(1, entitlement.MaxActivations);
+        if (entitlement.ActivationsUsed >= maxActivations)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidActivationEntitlement,
+                "activation_entitlement_key has no remaining activations.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        return new ResolvedActivationEntitlement(entitlement, entitlement.Shop);
+    }
+
+    private async Task<ResolvedActivationEntitlementLookup> ResolveActivationEntitlementByPresentedKeyAsync(
+        string activationEntitlementKey,
+        CancellationToken cancellationToken)
+    {
+        var normalizedKey = NormalizeActivationEntitlementKey(activationEntitlementKey);
+        if (string.IsNullOrWhiteSpace(normalizedKey))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidActivationEntitlement,
+                "activation_entitlement_key format is invalid.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var keyHash = ComputeActivationEntitlementHash(normalizedKey);
+        var entitlement = await dbContext.CustomerActivationEntitlements
+            .Include(x => x.Shop)
+            .FirstOrDefaultAsync(x => x.EntitlementKeyHash == keyHash, cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.ActivationEntitlementNotFound,
+                "activation_entitlement_key was not found.",
+                StatusCodes.Status404NotFound);
+
+        var storedKey = NormalizeActivationEntitlementKey(UnprotectSensitiveValue(entitlement.EntitlementKey));
+        if (!string.Equals(storedKey, normalizedKey, StringComparison.Ordinal))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidActivationEntitlement,
+                "activation_entitlement_key is invalid.",
+                StatusCodes.Status404NotFound);
+        }
+
+        return new ResolvedActivationEntitlementLookup(entitlement, entitlement.Shop, normalizedKey);
+    }
+
+    private static string DetermineEntitlementState(CustomerActivationEntitlement entitlement, DateTimeOffset now)
+    {
+        if (entitlement.ExpiresAtUtc <= now || entitlement.Status == ActivationEntitlementStatus.Expired)
+        {
+            return "expired";
+        }
+
+        var maxActivations = Math.Max(1, entitlement.MaxActivations);
+        if (entitlement.ActivationsUsed >= maxActivations)
+        {
+            return "consumed";
+        }
+
+        if (entitlement.Status == ActivationEntitlementStatus.Revoked)
+        {
+            return "revoked";
+        }
+
+        return "active";
+    }
+
+    private async Task<LicenseAccessDeliveryResponse?> DeliverAccessDetailsAsync(
+        Shop shop,
+        CustomerActivationEntitlementResponse? activationEntitlement,
+        string? requestedRecipientEmail,
+        string source,
+        string? sourceReference,
+        string actor,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        if (activationEntitlement is null)
+        {
+            return null;
+        }
+
+        var successPageUrl = BuildAccessSuccessPageUrl(activationEntitlement.ActivationEntitlementKey);
+        var emailDelivery = await TrySendAccessDeliveryEmailAsync(
+            shop,
+            activationEntitlement,
+            requestedRecipientEmail,
+            successPageUrl,
+            now,
+            cancellationToken);
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = shop.Id,
+            Action = "customer_access_delivery_dispatched",
+            Actor = NormalizeOptionalValue(actor) ?? "system",
+            Reason = NormalizeOptionalValue(source) ?? "payment_success",
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                source = NormalizeOptionalValue(source) ?? "payment_success",
+                source_reference = NormalizeOptionalValue(sourceReference),
+                success_page_url = successPageUrl,
+                activation_entitlement_id = activationEntitlement.EntitlementId,
+                email_recipient = emailDelivery.RecipientEmail,
+                email_status = emailDelivery.Status,
+                email_reason = emailDelivery.Reason
+            }),
+            CreatedAtUtc = now
+        });
+
+        return new LicenseAccessDeliveryResponse
+        {
+            ShopId = shop.Id,
+            ShopCode = shop.Code,
+            SuccessPageUrl = successPageUrl,
+            EmailDelivery = emailDelivery,
+            ProcessedAt = now
+        };
+    }
+
+    private async Task<LicenseAccessEmailDeliveryResult> TrySendAccessDeliveryEmailAsync(
+        Shop shop,
+        CustomerActivationEntitlementResponse entitlement,
+        string? requestedRecipientEmail,
+        string successPageUrl,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var recipientEmail = await ResolveAccessDeliveryRecipientEmailAsync(requestedRecipientEmail, cancellationToken);
+        if (string.IsNullOrWhiteSpace(recipientEmail))
+        {
+            return new LicenseAccessEmailDeliveryResult
+            {
+                RecipientEmail = null,
+                Status = "skipped",
+                Reason = "no_recipient_email",
+                ProcessedAt = now
+            };
+        }
+
+        if (!options.AccessDeliveryEmailEnabled)
+        {
+            return new LicenseAccessEmailDeliveryResult
+            {
+                RecipientEmail = recipientEmail,
+                Status = "skipped",
+                Reason = "email_delivery_disabled",
+                ProcessedAt = now
+            };
+        }
+
+        var smtpHost = NormalizeOptionalValue(options.AccessDeliverySmtpHost);
+        if (string.IsNullOrWhiteSpace(smtpHost))
+        {
+            return new LicenseAccessEmailDeliveryResult
+            {
+                RecipientEmail = recipientEmail,
+                Status = "skipped",
+                Reason = "smtp_not_configured",
+                ProcessedAt = now
+            };
+        }
+
+        var senderEmail = NormalizeOptionalValue(options.AccessDeliveryFromEmail);
+        if (string.IsNullOrWhiteSpace(senderEmail))
+        {
+            return new LicenseAccessEmailDeliveryResult
+            {
+                RecipientEmail = recipientEmail,
+                Status = "skipped",
+                Reason = "sender_email_missing",
+                ProcessedAt = now
+            };
+        }
+
+        try
+        {
+            using var message = new MailMessage
+            {
+                From = new MailAddress(
+                    senderEmail,
+                    NormalizeOptionalValue(options.AccessDeliveryFromName) ?? "SmartPOS Licensing"),
+                Subject = $"SmartPOS access details for {shop.Name}",
+                Body = BuildAccessDeliveryEmailBody(shop, entitlement, successPageUrl),
+                IsBodyHtml = false
+            };
+            message.To.Add(new MailAddress(recipientEmail));
+
+            using var smtpClient = new SmtpClient(smtpHost, options.AccessDeliverySmtpPort <= 0 ? 587 : options.AccessDeliverySmtpPort)
+            {
+                EnableSsl = options.AccessDeliverySmtpEnableSsl,
+                DeliveryMethod = SmtpDeliveryMethod.Network
+            };
+
+            var smtpUsername = NormalizeOptionalValue(options.AccessDeliverySmtpUsername);
+            if (!string.IsNullOrWhiteSpace(smtpUsername))
+            {
+                smtpClient.Credentials = new NetworkCredential(smtpUsername, ResolveAccessDeliverySmtpPassword() ?? string.Empty);
+            }
+
+            await smtpClient.SendMailAsync(message, cancellationToken);
+            return new LicenseAccessEmailDeliveryResult
+            {
+                RecipientEmail = recipientEmail,
+                Status = "sent",
+                Reason = "ok",
+                ProcessedAt = now
+            };
+        }
+        catch (Exception ex)
+        {
+            licensingAlertMonitor.RecordSecurityAnomaly("license_access_email_delivery_failed");
+            return new LicenseAccessEmailDeliveryResult
+            {
+                RecipientEmail = recipientEmail,
+                Status = "failed",
+                Reason = TruncateAccessDeliveryReason(ex.Message),
+                ProcessedAt = now
+            };
+        }
+    }
+
+    private async Task<string?> ResolveAccessDeliveryRecipientEmailAsync(
+        string? requestedRecipientEmail,
+        CancellationToken cancellationToken)
+    {
+        var direct = NormalizeOptionalValue(requestedRecipientEmail);
+        if (!string.IsNullOrWhiteSpace(direct))
+        {
+            return direct;
+        }
+
+        return await ResolveLatestShopProfileEmailAsync(cancellationToken);
+    }
+
+    private async Task<string?> ResolveLatestShopProfileEmailAsync(CancellationToken cancellationToken)
+    {
+        var profiles = await dbContext.ShopProfiles
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        return profiles
+            .OrderByDescending(profile => profile.UpdatedAtUtc ?? profile.CreatedAtUtc)
+            .Select(profile => NormalizeOptionalValue(profile.Email))
+            .FirstOrDefault(email => !string.IsNullOrWhiteSpace(email));
+    }
+
+    private string BuildAccessSuccessPageUrl(string activationEntitlementKey)
+    {
+        var baseUrl = NormalizeOptionalValue(options.AccessSuccessPageBaseUrl);
+        if (string.IsNullOrWhiteSpace(baseUrl))
+        {
+            var httpContext = httpContextAccessor.HttpContext;
+            if (httpContext is not null)
+            {
+                baseUrl = $"{httpContext.Request.Scheme}://{httpContext.Request.Host}/license/success";
+            }
+            else
+            {
+                baseUrl = "/license/success";
+            }
+        }
+
+        var separator = baseUrl.Contains('?') ? "&" : "?";
+        return $"{baseUrl}{separator}activation_entitlement_key={Uri.EscapeDataString(activationEntitlementKey)}";
+    }
+
+    private string? ResolveAccessDeliverySmtpPassword()
+    {
+        var configuredPassword = NormalizeOptionalValue(options.AccessDeliverySmtpPassword);
+        if (!string.IsNullOrWhiteSpace(configuredPassword))
+        {
+            return configuredPassword;
+        }
+
+        var envVar = NormalizeOptionalValue(options.AccessDeliverySmtpPasswordEnvironmentVariable);
+        if (string.IsNullOrWhiteSpace(envVar))
+        {
+            return null;
+        }
+
+        return NormalizeOptionalValue(Environment.GetEnvironmentVariable(envVar));
+    }
+
+    private static string BuildAccessDeliveryEmailBody(
+        Shop shop,
+        CustomerActivationEntitlementResponse entitlement,
+        string successPageUrl)
+    {
+        return $"""
+                Hello,
+
+                Your SmartPOS payment is verified and your access is ready.
+
+                Shop: {shop.Name} ({shop.Code})
+                Activation key: {entitlement.ActivationEntitlementKey}
+                Key expires at (UTC): {entitlement.ExpiresAt:O}
+                Success page: {successPageUrl}
+
+                To activate:
+                1. Open your SmartPOS app.
+                2. Enter the activation key on the activation screen.
+                3. Click Activate.
+
+                If you need help, contact SmartPOS support.
+                """;
+    }
+
+    private static string TruncateAccessDeliveryReason(string? value)
+    {
+        var normalized = NormalizeOptionalValue(value);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return "delivery_failed";
+        }
+
+        return normalized.Length > 120 ? normalized[..120] : normalized;
+    }
+
+    private async Task<CustomerActivationEntitlementResponse?> IssueActivationEntitlementAsync(
+        Shop shop,
+        int maxActivations,
+        string source,
+        string? sourceReference,
+        string actor,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var normalizedSource = NormalizeOptionalValue(source) ?? "payment_success";
+        var normalizedActor = NormalizeOptionalValue(actor) ?? "system";
+        var normalizedSourceReference = NormalizeOptionalValue(sourceReference);
+        var normalizedMaxActivations = Math.Clamp(maxActivations <= 0 ? 1 : maxActivations, 1, 250);
+        var configuredTtlDays = options.ActivationEntitlementTtlDays <= 0 ? 90 : options.ActivationEntitlementTtlDays;
+        var ttlDays = Math.Clamp(configuredTtlDays, 1, 3650);
+        var keyPrefix = NormalizeOptionalValue(options.ActivationEntitlementKeyPrefix)?.ToUpperInvariant() ?? "SPK";
+
+        for (var attempt = 0; attempt < 8; attempt++)
+        {
+            var key = GenerateActivationEntitlementKey(keyPrefix);
+            var keyHash = ComputeActivationEntitlementHash(key);
+            var exists = await dbContext.CustomerActivationEntitlements
+                .AsNoTracking()
+                .AnyAsync(x => x.EntitlementKeyHash == keyHash, cancellationToken);
+            if (exists)
+            {
+                continue;
+            }
+
+            var entitlement = new CustomerActivationEntitlement
+            {
+                ShopId = shop.Id,
+                Shop = shop,
+                EntitlementKeyHash = keyHash,
+                EntitlementKey = ProtectSensitiveValue(key),
+                Source = normalizedSource,
+                SourceReference = normalizedSourceReference,
+                Status = ActivationEntitlementStatus.Active,
+                MaxActivations = normalizedMaxActivations,
+                ActivationsUsed = 0,
+                IssuedBy = normalizedActor,
+                IssuedAtUtc = now,
+                ExpiresAtUtc = now.AddDays(ttlDays),
+                LastUsedAtUtc = null,
+                RevokedAtUtc = null
+            };
+
+            dbContext.CustomerActivationEntitlements.Add(entitlement);
+            return MapActivationEntitlementResponse(entitlement, shop.Code, key);
+        }
+
+        throw new LicenseException(
+            LicenseErrorCodes.InvalidAdminRequest,
+            "Unable to issue activation entitlement key at this time.",
+            StatusCodes.Status503ServiceUnavailable);
+    }
+
+    private CustomerActivationEntitlementResponse MapActivationEntitlementResponse(
+        CustomerActivationEntitlement entitlement,
+        string shopCode,
+        string? plainKeyOverride = null)
+    {
+        return new CustomerActivationEntitlementResponse
+        {
+            EntitlementId = entitlement.Id,
+            ShopId = entitlement.ShopId,
+            ShopCode = shopCode,
+            ActivationEntitlementKey = string.IsNullOrWhiteSpace(plainKeyOverride)
+                ? UnprotectSensitiveValue(entitlement.EntitlementKey)
+                : plainKeyOverride,
+            Source = entitlement.Source,
+            SourceReference = entitlement.SourceReference,
+            Status = entitlement.Status.ToString().ToLowerInvariant(),
+            MaxActivations = Math.Max(1, entitlement.MaxActivations),
+            ActivationsUsed = Math.Max(0, entitlement.ActivationsUsed),
+            IssuedBy = entitlement.IssuedBy,
+            IssuedAt = entitlement.IssuedAtUtc,
+            ExpiresAt = entitlement.ExpiresAtUtc,
+            LastUsedAt = entitlement.LastUsedAtUtc,
+            RevokedAt = entitlement.RevokedAtUtc
+        };
+    }
+
+    private static void ConsumeActivationEntitlement(CustomerActivationEntitlement entitlement, DateTimeOffset now)
+    {
+        var maxActivations = Math.Max(1, entitlement.MaxActivations);
+        entitlement.ActivationsUsed = Math.Min(maxActivations, Math.Max(0, entitlement.ActivationsUsed) + 1);
+        entitlement.LastUsedAtUtc = now;
+        if (entitlement.ActivationsUsed >= maxActivations)
+        {
+            entitlement.Status = ActivationEntitlementStatus.Revoked;
+            entitlement.RevokedAtUtc ??= now;
+        }
+    }
+
+    private static string GenerateActivationEntitlementKey(string prefix)
+    {
+        var normalizedPrefix = new string((prefix ?? "SPK")
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToUpperInvariant)
+            .ToArray());
+        if (string.IsNullOrWhiteSpace(normalizedPrefix))
+        {
+            normalizedPrefix = "SPK";
+        }
+
+        var raw = Convert.ToHexString(RandomNumberGenerator.GetBytes(12));
+        var segments = Enumerable.Range(0, raw.Length / 4)
+            .Select(index => raw.Substring(index * 4, 4))
+            .ToArray();
+        return $"{normalizedPrefix}-{string.Join("-", segments)}";
+    }
+
+    private static string NormalizeActivationEntitlementKey(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return new string(value
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToUpperInvariant)
+            .ToArray());
+    }
+
+    private static string ComputeActivationEntitlementHash(string entitlementKey)
+    {
+        var normalized = NormalizeActivationEntitlementKey(entitlementKey);
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
+        return Convert.ToHexString(digest).ToLowerInvariant();
     }
 
     private async Task<Subscription?> ResolveSubscriptionForWebhookAsync(
@@ -2524,6 +6860,30 @@ public sealed class LicenseService(
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 
+    private static string EscapeCsv(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var normalized = value.Replace("\"", "\"\"", StringComparison.Ordinal);
+        if (normalized.Contains(',') ||
+            normalized.Contains('"') ||
+            normalized.Contains('\n') ||
+            normalized.Contains('\r'))
+        {
+            return $"\"{normalized}\"";
+        }
+
+        return normalized;
+    }
+
+    private RequestSourceContext ResolveRequestSourceContext()
+    {
+        return RequestSourceContext.FromHttpContext(httpContextAccessor.HttpContext);
+    }
+
     private static string ResolveDeviceName(string? requestName, string? fallbackName = null)
     {
         if (!string.IsNullOrWhiteSpace(requestName))
@@ -2539,9 +6899,9 @@ public sealed class LicenseService(
         return "POS Device";
     }
 
-    private static LicenseStatusResponse ToResponse(LicenseStatusSnapshot snapshot)
+    private LicenseStatusResponse CreateResponse(LicenseStatusSnapshot snapshot)
     {
-        return new LicenseStatusResponse
+        var response = new LicenseStatusResponse
         {
             State = snapshot.State.ToString().ToLowerInvariant(),
             ShopId = snapshot.ShopId,
@@ -2553,9 +6913,64 @@ public sealed class LicenseService(
             ValidUntil = snapshot.ValidUntil,
             GraceUntil = snapshot.GraceUntil,
             LicenseToken = snapshot.LicenseToken,
+            DeviceKeyFingerprint = snapshot.DeviceKeyFingerprint,
             BlockedActions = snapshot.BlockedActions,
             ServerTime = snapshot.ServerTime
         };
+
+        var offlineGrant = CreateOfflineGrant(response, snapshot.ServerTime);
+        if (offlineGrant is not null)
+        {
+            response.OfflineGrantToken = offlineGrant.Token;
+            response.OfflineGrantExpiresAt = offlineGrant.ExpiresAt;
+            response.OfflineMaxCheckoutOperations = offlineGrant.MaxCheckoutOperations;
+            response.OfflineMaxRefundOperations = offlineGrant.MaxRefundOperations;
+        }
+
+        return response;
+    }
+
+    private OfflineGrantResult? CreateOfflineGrant(LicenseStatusResponse response, DateTimeOffset now)
+    {
+        if (response.State is not "active" and not "grace")
+        {
+            return null;
+        }
+
+        if (!response.ShopId.HasValue || string.IsNullOrWhiteSpace(response.DeviceCode))
+        {
+            return null;
+        }
+
+        var configuredMaxHours = options.OfflineGrantMaxHours <= 0 ? 72 : options.OfflineGrantMaxHours;
+        var maxHours = Math.Clamp(configuredMaxHours, 24, 72);
+        var configuredTtlHours = options.OfflineGrantTtlHours <= 0 ? maxHours : options.OfflineGrantTtlHours;
+        var ttlHours = Math.Clamp(configuredTtlHours, 24, maxHours);
+        var expiresAt = now.AddHours(ttlHours);
+        var key = ResolveActiveSigningKey();
+        var payload = new OfflineGrantTokenPayload
+        {
+            Type = "offline_grant",
+            GrantId = Guid.NewGuid(),
+            ShopId = response.ShopId.Value,
+            DeviceCode = response.DeviceCode,
+            DeviceKeyFingerprint = response.DeviceKeyFingerprint,
+            IssuedAt = now,
+            ExpiresAt = expiresAt,
+            KeyId = key.KeyId,
+            MaxCheckoutOperations = Math.Max(0, options.OfflineMaxCheckoutOperations),
+            MaxRefundOperations = Math.Max(0, options.OfflineMaxRefundOperations)
+        };
+
+        return new OfflineGrantResult(SignOfflineGrantToken(payload, key), expiresAt, payload.MaxCheckoutOperations, payload.MaxRefundOperations);
+    }
+
+    private string SignOfflineGrantToken(OfflineGrantTokenPayload payload, ResolvedSigningKey signingKey)
+    {
+        var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(payload, TokenSerializerOptions);
+        var payloadSegment = Base64UrlEncode(payloadBytes);
+        var signatureSegment = Base64UrlEncode(SignPayload(payloadSegment, signingKey.PrivateKeyPem));
+        return $"{payloadSegment}.{signatureSegment}";
     }
 
     private sealed class LicenseTokenPayload
@@ -2569,8 +6984,64 @@ public sealed class LicenseService(
         public string SubscriptionStatus { get; set; } = string.Empty;
         public string Plan { get; set; } = string.Empty;
         public int SeatLimit { get; set; }
+        public string? DeviceKeyFingerprint { get; set; }
+        public string? Jti { get; set; }
     }
 
+    private sealed class OfflineGrantTokenPayload
+    {
+        public string Type { get; set; } = "offline_grant";
+        public Guid GrantId { get; set; }
+        public Guid ShopId { get; set; }
+        public string DeviceCode { get; set; } = string.Empty;
+        public string? DeviceKeyFingerprint { get; set; }
+        public DateTimeOffset IssuedAt { get; set; }
+        public DateTimeOffset ExpiresAt { get; set; }
+        public string KeyId { get; set; } = string.Empty;
+        public int MaxCheckoutOperations { get; set; }
+        public int MaxRefundOperations { get; set; }
+    }
+
+    private sealed class EmergencyCommandEnvelopePayload
+    {
+        public Guid CommandId { get; set; }
+        public string DeviceCode { get; set; } = string.Empty;
+        public string Action { get; set; } = string.Empty;
+        public string Nonce { get; set; } = string.Empty;
+        public string Actor { get; set; } = string.Empty;
+        public string ReasonCode { get; set; } = string.Empty;
+        public string ActorNote { get; set; } = string.Empty;
+        public long IssuedAtUnix { get; set; }
+        public long ExpiresAtUnix { get; set; }
+    }
+
+    private sealed record DeviceKeyBindingProof(
+        string Fingerprint,
+        string PublicKeySpki,
+        string KeyAlgorithm,
+        Guid ChallengeId);
+    private sealed record OfflineGrantResult(
+        string Token,
+        DateTimeOffset ExpiresAt,
+        int MaxCheckoutOperations,
+        int MaxRefundOperations);
+    private sealed record ResolvedCurrentShopContext(
+        Shop Shop,
+        string CurrentDeviceCode);
+    private sealed record ResolvedActivationEntitlement(
+        CustomerActivationEntitlement Entitlement,
+        Shop Shop);
+    private sealed record ResolvedActivationEntitlementLookup(
+        CustomerActivationEntitlement Entitlement,
+        Shop Shop,
+        string NormalizedKeyForDisplay);
+    private sealed record BillingReconciliationDriftCandidate(
+        Guid ShopId,
+        string? BillingSubscriptionId,
+        string? BillingCustomerId,
+        DateTimeOffset PeriodEndUtc,
+        SubscriptionStatus Status,
+        DateTimeOffset CreatedAtUtc);
     private sealed record IssuedLicenseResult(LicenseRecord Record, string PlainToken);
     private sealed record LicenseReissueOutcome(int ReissuedCount, int RevokedCount, int ActiveDeviceCount);
     private sealed record ResolvedSigningKey(string KeyId, string PrivateKeyPem, string PublicKeyPem);
@@ -2602,6 +7073,7 @@ internal sealed record LicenseStatusSnapshot
     public DateTimeOffset? ValidUntil { get; init; }
     public DateTimeOffset? GraceUntil { get; init; }
     public string? LicenseToken { get; init; }
+    public string? DeviceKeyFingerprint { get; init; }
     public List<string> BlockedActions { get; init; } = [];
     public DateTimeOffset ServerTime { get; init; }
 
@@ -2613,3 +7085,15 @@ internal sealed record LicenseStatusSnapshot
             ServerTime = now
         };
 }
+
+public sealed record OfflineGrantValidationSnapshot(
+    Guid GrantId,
+    Guid ShopId,
+    string DeviceCode,
+    string? DeviceKeyFingerprint,
+    DateTimeOffset IssuedAt,
+    DateTimeOffset ExpiresAt,
+    int MaxCheckoutOperations,
+    int MaxRefundOperations,
+    int UsedCheckoutOperations,
+    int UsedRefundOperations);

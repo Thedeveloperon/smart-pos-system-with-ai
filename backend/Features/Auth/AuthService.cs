@@ -1,10 +1,12 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using SmartPos.Backend.Domain;
+using SmartPos.Backend.Features.Licensing;
 using SmartPos.Backend.Infrastructure;
 using SmartPos.Backend.Security;
 
@@ -13,7 +15,9 @@ namespace SmartPos.Backend.Features.Auth;
 public sealed class AuthService(
     SmartPosDbContext dbContext,
     JwtCookieOptions jwtOptions,
-    IOptions<AuthSecurityOptions> authSecurityOptionsAccessor)
+    IOptions<AuthSecurityOptions> authSecurityOptionsAccessor,
+    IHttpContextAccessor httpContextAccessor,
+    ILicensingAlertMonitor licensingAlertMonitor)
 {
     private readonly AuthSecurityOptions authSecurityOptions = authSecurityOptionsAccessor.Value;
 
@@ -79,6 +83,50 @@ public sealed class AuthService(
                 : request.DeviceName.Trim();
             device.IsTrusted = true;
             device.LastSeenAtUtc = now;
+        }
+
+        var source = RequestSourceContext.FromHttpContext(httpContextAccessor.HttpContext);
+        var anomalies = await DetectAuthAnomaliesAsync(
+            user.Id,
+            device.Id,
+            source,
+            now,
+            cancellationToken);
+
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            UserId = user.Id,
+            DeviceId = device.Id,
+            Action = "auth_login",
+            EntityName = "auth_session",
+            EntityId = device.Id.ToString(),
+            AfterJson = JsonSerializer.Serialize(new
+            {
+                username = user.Username,
+                role,
+                mfa_verified = mfaVerified,
+                source_ip = source.SourceIp,
+                source_ip_prefix = source.SourceIpPrefix,
+                source_forwarded_for = source.ForwardedFor,
+                source_user_agent = source.UserAgent,
+                source_user_agent_family = source.UserAgentFamily,
+                source_fingerprint = source.SourceFingerprint
+            }),
+            CreatedAtUtc = now
+        });
+        foreach (var anomaly in anomalies)
+        {
+            dbContext.AuditLogs.Add(new AuditLog
+            {
+                UserId = user.Id,
+                DeviceId = device.Id,
+                Action = anomaly.Action,
+                EntityName = "auth_security",
+                EntityId = user.Id.ToString(),
+                AfterJson = anomaly.MetadataJson,
+                CreatedAtUtc = now
+            });
+            licensingAlertMonitor.RecordSecurityAnomaly(anomaly.AlertReason);
         }
 
         user.LastLoginAtUtc = now;
@@ -272,8 +320,180 @@ public sealed class AuthService(
         return true;
     }
 
+    private async Task<List<AuthAnomalySignal>> DetectAuthAnomaliesAsync(
+        Guid userId,
+        Guid currentDeviceId,
+        RequestSourceContext source,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var maxLookbackMinutes = Math.Max(
+            Math.Clamp(authSecurityOptions.ImpossibleTravelLookbackMinutes, 5, 1440),
+            Math.Clamp(authSecurityOptions.ConcurrentDeviceWindowMinutes, 5, 1440));
+        var windowStart = now.AddMinutes(-maxLookbackMinutes);
+
+        List<AuditLog> recentLogRows;
+        if (dbContext.Database.IsSqlite())
+        {
+            recentLogRows = (await dbContext.AuditLogs
+                    .AsNoTracking()
+                    .Where(x => x.UserId == userId &&
+                                x.Action == "auth_login")
+                    .ToListAsync(cancellationToken))
+                .Where(x => x.CreatedAtUtc >= windowStart)
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Take(100)
+                .ToList();
+        }
+        else
+        {
+            recentLogRows = await dbContext.AuditLogs
+                .AsNoTracking()
+                .Where(x => x.UserId == userId &&
+                            x.Action == "auth_login" &&
+                            x.CreatedAtUtc >= windowStart)
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Take(100)
+                .ToListAsync(cancellationToken);
+        }
+
+        var recentLogSnapshots = recentLogRows
+            .Select(row => new AuthLoginAuditSnapshot
+            {
+                CreatedAtUtc = row.CreatedAtUtc,
+                DeviceId = row.DeviceId,
+                SourceIpPrefix = ExtractAuditMetadataString(row.AfterJson, "source_ip_prefix"),
+                SourceFingerprint = ExtractAuditMetadataString(row.AfterJson, "source_fingerprint")
+            })
+            .ToList();
+
+        var signals = new List<AuthAnomalySignal>();
+
+        var impossibleTravelWindowStart = now.AddMinutes(-Math.Clamp(authSecurityOptions.ImpossibleTravelLookbackMinutes, 5, 1440));
+        var currentPrefix = NormalizeOptionalValue(source.SourceIpPrefix);
+        var currentFingerprint = NormalizeOptionalValue(source.SourceFingerprint);
+
+        if (!string.IsNullOrWhiteSpace(currentPrefix))
+        {
+            var sourceShiftEvidence = recentLogSnapshots
+                .Where(x => x.CreatedAtUtc >= impossibleTravelWindowStart)
+                .Where(x => !string.IsNullOrWhiteSpace(x.SourceIpPrefix))
+                .Where(x =>
+                    !string.Equals(x.SourceIpPrefix, currentPrefix, StringComparison.OrdinalIgnoreCase) &&
+                    (!string.IsNullOrWhiteSpace(currentFingerprint)
+                        ? !string.Equals(x.SourceFingerprint, currentFingerprint, StringComparison.OrdinalIgnoreCase)
+                        : true))
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .FirstOrDefault();
+
+            if (sourceShiftEvidence is not null)
+            {
+                signals.Add(new AuthAnomalySignal(
+                    Action: "auth_anomaly_impossible_travel",
+                    AlertReason: "auth_source_shift",
+                    MetadataJson: JsonSerializer.Serialize(new
+                    {
+                        user_id = userId,
+                        current_device_id = currentDeviceId,
+                        current_source_ip_prefix = currentPrefix,
+                        current_source_fingerprint = currentFingerprint,
+                        previous_source_ip_prefix = sourceShiftEvidence.SourceIpPrefix,
+                        previous_source_fingerprint = sourceShiftEvidence.SourceFingerprint,
+                        previous_seen_at = sourceShiftEvidence.CreatedAtUtc
+                    })));
+            }
+        }
+
+        var concurrentWindowStart = now.AddMinutes(-Math.Clamp(authSecurityOptions.ConcurrentDeviceWindowMinutes, 5, 1440));
+        var concurrentSnapshots = recentLogSnapshots
+            .Where(x => x.CreatedAtUtc >= concurrentWindowStart)
+            .ToList();
+        concurrentSnapshots.Add(new AuthLoginAuditSnapshot
+        {
+            CreatedAtUtc = now,
+            DeviceId = currentDeviceId,
+            SourceIpPrefix = currentPrefix,
+            SourceFingerprint = currentFingerprint
+        });
+
+        var deviceThreshold = Math.Max(2, authSecurityOptions.ConcurrentDeviceThreshold);
+        var sourceThreshold = Math.Max(2, authSecurityOptions.ConcurrentSourceThreshold);
+
+        var distinctDeviceCount = concurrentSnapshots
+            .Where(x => x.DeviceId.HasValue)
+            .Select(x => x.DeviceId!.Value)
+            .Distinct()
+            .Count();
+        var distinctSourceCount = concurrentSnapshots
+            .Where(x => !string.IsNullOrWhiteSpace(x.SourceFingerprint))
+            .Select(x => x.SourceFingerprint!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
+
+        if (distinctDeviceCount >= deviceThreshold && distinctSourceCount >= sourceThreshold)
+        {
+            signals.Add(new AuthAnomalySignal(
+                Action: "auth_anomaly_concurrent_devices",
+                AlertReason: "auth_concurrent_devices",
+                MetadataJson: JsonSerializer.Serialize(new
+                {
+                    user_id = userId,
+                    current_device_id = currentDeviceId,
+                    concurrent_window_minutes = Math.Clamp(authSecurityOptions.ConcurrentDeviceWindowMinutes, 5, 1440),
+                    distinct_device_count = distinctDeviceCount,
+                    distinct_source_count = distinctSourceCount,
+                    device_threshold = deviceThreshold,
+                    source_threshold = sourceThreshold
+                })));
+        }
+
+        return signals;
+    }
+
+    private static string? ExtractAuditMetadataString(string? metadataJson, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(metadataJson) || string.IsNullOrWhiteSpace(propertyName))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(metadataJson);
+            if (!document.RootElement.TryGetProperty(propertyName, out var propertyValue))
+            {
+                return null;
+            }
+
+            var value = propertyValue.GetString();
+            return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? NormalizeOptionalValue(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
     private static Guid? ParseGuid(string? value)
     {
         return Guid.TryParse(value, out var parsed) ? parsed : null;
     }
+
+    private sealed class AuthLoginAuditSnapshot
+    {
+        public DateTimeOffset CreatedAtUtc { get; set; }
+        public Guid? DeviceId { get; set; }
+        public string? SourceIpPrefix { get; set; }
+        public string? SourceFingerprint { get; set; }
+    }
+
+    private sealed record AuthAnomalySignal(
+        string Action,
+        string AlertReason,
+        string MetadataJson);
 }

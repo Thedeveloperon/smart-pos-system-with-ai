@@ -1,19 +1,50 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
+using SmartPos.Backend.Features.Licensing;
 using SmartPos.Backend.Infrastructure;
 
 namespace SmartPos.Backend.Features.Sync;
 
-public sealed class SyncEventsProcessor(SmartPosDbContext dbContext, ILogger<SyncEventsProcessor> logger)
+public sealed class SyncEventsProcessor(
+    SmartPosDbContext dbContext,
+    LicenseService licenseService,
+    ILogger<SyncEventsProcessor> logger)
 {
-    public async Task<SyncEventsResponse> ProcessAsync(SyncEventsRequest request, CancellationToken cancellationToken)
+    public async Task<SyncEventsResponse> ProcessAsync(
+        SyncEventsRequest request,
+        string requestDeviceCode,
+        CancellationToken cancellationToken)
     {
         var response = new SyncEventsResponse();
+        var normalizedDeviceCode = requestDeviceCode?.Trim() ?? string.Empty;
+        OfflineGrantWindowState? grantWindow = null;
+        string? offlineGrantRejectionMessage = null;
+
+        if (request.Events.Any(item => RequiresOfflineGrant(item.Type)))
+        {
+            try
+            {
+                var snapshot = await licenseService.ValidateOfflineGrantForSyncAsync(
+                    request.OfflineGrantToken,
+                    normalizedDeviceCode,
+                    cancellationToken);
+                grantWindow = new OfflineGrantWindowState(snapshot);
+            }
+            catch (LicenseException ex)
+            {
+                offlineGrantRejectionMessage = MapOfflineGrantErrorCodeToMessage(ex.Code);
+            }
+        }
 
         foreach (var item in request.Events)
         {
-            var result = await ProcessSingleEventAsync(request.DeviceId, item, cancellationToken);
+            var result = await ProcessSingleEventAsync(
+                request.DeviceId,
+                item,
+                grantWindow,
+                offlineGrantRejectionMessage,
+                cancellationToken);
             response.Results.Add(result);
         }
 
@@ -23,6 +54,8 @@ public sealed class SyncEventsProcessor(SmartPosDbContext dbContext, ILogger<Syn
     private async Task<SyncEventResult> ProcessSingleEventAsync(
         Guid? requestDeviceId,
         SyncEventRequestItem item,
+        OfflineGrantWindowState? grantWindow,
+        string? offlineGrantRejectionMessage,
         CancellationToken cancellationToken)
     {
         if (item.EventId == Guid.Empty)
@@ -93,9 +126,40 @@ public sealed class SyncEventsProcessor(SmartPosDbContext dbContext, ILogger<Syn
             record.RejectionReason = outcome.Message;
             processMessage = outcome.Message ?? "processed";
         }
+        else if (eventType is OfflineEventType.Sale or OfflineEventType.Refund)
+        {
+            if (!string.IsNullOrWhiteSpace(offlineGrantRejectionMessage))
+            {
+                record.Status = OfflineEventStatus.Rejected;
+                record.RejectionReason = offlineGrantRejectionMessage;
+            }
+            else if (grantWindow is null)
+            {
+                record.Status = OfflineEventStatus.Rejected;
+                record.RejectionReason = "offline_grant_required";
+            }
+            else if (!grantWindow.TryReserve(eventType, out var limitExceededMessage))
+            {
+                record.Status = OfflineEventStatus.Rejected;
+                record.RejectionReason = limitExceededMessage;
+            }
+            else
+            {
+                record.OfflineGrantId = grantWindow.GrantId;
+                record.OfflineGrantIssuedAtUtc = grantWindow.IssuedAt;
+                record.OfflineGrantExpiresAtUtc = grantWindow.ExpiresAt;
+                record.Status = OfflineEventStatus.Synced;
+                processMessage = "offline_event_synced";
+            }
+        }
         else
         {
             record.Status = OfflineEventStatus.Synced;
+        }
+
+        if (record.Status == OfflineEventStatus.Rejected)
+        {
+            processMessage = record.RejectionReason ?? "event_rejected";
         }
 
         dbContext.OfflineEvents.Add(record);
@@ -172,6 +236,26 @@ public sealed class SyncEventsProcessor(SmartPosDbContext dbContext, ILogger<Syn
         }
     }
 
+    private static bool RequiresOfflineGrant(string? rawType)
+    {
+        return string.Equals(rawType?.Trim(), "sale", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(rawType?.Trim(), "refund", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string MapOfflineGrantErrorCodeToMessage(string code)
+    {
+        return code switch
+        {
+            LicenseErrorCodes.OfflineGrantRequired => "offline_grant_required",
+            LicenseErrorCodes.OfflineGrantExpired => "offline_grant_expired",
+            LicenseErrorCodes.OfflineGrantLimitExceeded => "offline_grant_limit_exceeded",
+            LicenseErrorCodes.DeviceMismatch => "offline_grant_device_mismatch",
+            LicenseErrorCodes.DeviceKeyMismatch => "offline_grant_device_key_mismatch",
+            LicenseErrorCodes.InvalidToken => "offline_grant_invalid",
+            _ => "offline_grant_invalid"
+        };
+    }
+
     private static string ToPayloadJson(JsonElement payload)
     {
         return payload.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null
@@ -237,5 +321,59 @@ public sealed class SyncEventsProcessor(SmartPosDbContext dbContext, ILogger<Syn
     private static Guid ParseEventIdOrDefault(string eventId)
     {
         return Guid.TryParse(eventId, out var parsedEventId) ? parsedEventId : Guid.Empty;
+    }
+
+    private sealed class OfflineGrantWindowState
+    {
+        public OfflineGrantWindowState(OfflineGrantValidationSnapshot snapshot)
+        {
+            GrantId = snapshot.GrantId;
+            IssuedAt = snapshot.IssuedAt;
+            ExpiresAt = snapshot.ExpiresAt;
+            maxCheckoutOperations = Math.Max(0, snapshot.MaxCheckoutOperations);
+            maxRefundOperations = Math.Max(0, snapshot.MaxRefundOperations);
+            usedCheckoutOperations = Math.Max(0, snapshot.UsedCheckoutOperations);
+            usedRefundOperations = Math.Max(0, snapshot.UsedRefundOperations);
+        }
+
+        public Guid GrantId { get; }
+        public DateTimeOffset IssuedAt { get; }
+        public DateTimeOffset ExpiresAt { get; }
+
+        private int usedCheckoutOperations;
+        private int usedRefundOperations;
+        private readonly int maxCheckoutOperations;
+        private readonly int maxRefundOperations;
+
+        public bool TryReserve(OfflineEventType eventType, out string rejectionMessage)
+        {
+            rejectionMessage = string.Empty;
+            if (eventType == OfflineEventType.Sale)
+            {
+                if (usedCheckoutOperations >= maxCheckoutOperations)
+                {
+                    rejectionMessage = "offline_grant_checkout_limit_exceeded";
+                    return false;
+                }
+
+                usedCheckoutOperations += 1;
+                return true;
+            }
+
+            if (eventType == OfflineEventType.Refund)
+            {
+                if (usedRefundOperations >= maxRefundOperations)
+                {
+                    rejectionMessage = "offline_grant_refund_limit_exceeded";
+                    return false;
+                }
+
+                usedRefundOperations += 1;
+                return true;
+            }
+
+            rejectionMessage = "offline_grant_not_required";
+            return true;
+        }
     }
 }

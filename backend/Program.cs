@@ -23,6 +23,20 @@ var jwtOptions = builder.Configuration
                      .GetSection(JwtCookieOptions.SectionName)
                      .Get<JwtCookieOptions>()
                  ?? new JwtCookieOptions();
+var jwtSecretEnvironmentVariable = string.IsNullOrWhiteSpace(jwtOptions.SecretKeyEnvironmentVariable)
+    ? "SMARTPOS_JWT_SECRET"
+    : jwtOptions.SecretKeyEnvironmentVariable.Trim();
+var jwtSecretFromEnvironment = Environment.GetEnvironmentVariable(jwtSecretEnvironmentVariable);
+if (!string.IsNullOrWhiteSpace(jwtSecretFromEnvironment))
+{
+    jwtOptions.SecretKey = jwtSecretFromEnvironment.Trim();
+}
+
+if (string.IsNullOrWhiteSpace(jwtOptions.SecretKey))
+{
+    throw new InvalidOperationException(
+        $"JWT secret key is not configured. Set '{JwtCookieOptions.SectionName}:SecretKey' or environment variable '{jwtSecretEnvironmentVariable}'.");
+}
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -41,6 +55,8 @@ builder.Services.AddSingleton<ILicensingAlertMonitor>(
     serviceProvider => serviceProvider.GetRequiredService<LicensingAlertMonitor>());
 builder.Services.AddHostedService(
     serviceProvider => serviceProvider.GetRequiredService<LicensingAlertMonitor>());
+builder.Services.AddHostedService<LicenseTokenSessionCleanupService>();
+builder.Services.AddHostedService<BillingStateReconciliationService>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddCors(options =>
 {
@@ -95,17 +111,44 @@ builder.Services.AddAuthorization(options =>
             SmartPosRoles.BillingAdmin,
             SmartPosRoles.SecurityAdmin));
     options.AddPolicy(SmartPosPolicies.SuperAdmin, policy =>
-        policy.RequireRole(SmartPosRoles.SuperAdminRoles)
+        policy.RequireRole(SmartPosRoles.SuperAdmin)
             .RequireClaim("mfa_verified", "true"));
     options.AddPolicy(SmartPosPolicies.SupportOrSecurity, policy =>
-        policy.RequireRole(SmartPosRoles.SuperAdmin, SmartPosRoles.Support, SmartPosRoles.SecurityAdmin)
-            .RequireClaim("mfa_verified", "true"));
+    {
+        policy.RequireRole(SmartPosRoles.SuperAdmin)
+            .RequireClaim("mfa_verified", "true")
+            .RequireAssertion(context =>
+            {
+                var scope = context.User.FindFirst("super_admin_scope")?.Value?.Trim().ToLowerInvariant();
+                return scope == SmartPosRoles.SuperAdmin ||
+                       scope == SmartPosRoles.Support ||
+                       scope == SmartPosRoles.SecurityAdmin;
+            });
+    });
     options.AddPolicy(SmartPosPolicies.SupportOrBilling, policy =>
-        policy.RequireRole(SmartPosRoles.SuperAdmin, SmartPosRoles.Support, SmartPosRoles.BillingAdmin)
-            .RequireClaim("mfa_verified", "true"));
+    {
+        policy.RequireRole(SmartPosRoles.SuperAdmin)
+            .RequireClaim("mfa_verified", "true")
+            .RequireAssertion(context =>
+            {
+                var scope = context.User.FindFirst("super_admin_scope")?.Value?.Trim().ToLowerInvariant();
+                return scope == SmartPosRoles.SuperAdmin ||
+                       scope == SmartPosRoles.Support ||
+                       scope == SmartPosRoles.BillingAdmin;
+            });
+    });
     options.AddPolicy(SmartPosPolicies.BillingOrSecurity, policy =>
-        policy.RequireRole(SmartPosRoles.SuperAdmin, SmartPosRoles.BillingAdmin, SmartPosRoles.SecurityAdmin)
-            .RequireClaim("mfa_verified", "true"));
+    {
+        policy.RequireRole(SmartPosRoles.SuperAdmin)
+            .RequireClaim("mfa_verified", "true")
+            .RequireAssertion(context =>
+            {
+                var scope = context.User.FindFirst("super_admin_scope")?.Value?.Trim().ToLowerInvariant();
+                return scope == SmartPosRoles.SuperAdmin ||
+                       scope == SmartPosRoles.BillingAdmin ||
+                       scope == SmartPosRoles.SecurityAdmin;
+            });
+    });
 });
 builder.Services.AddScoped<CheckoutService>();
 builder.Services.AddScoped<CashSessionService>();
@@ -119,6 +162,7 @@ builder.Services.AddScoped<SyncEventsProcessor>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<AuditLogService>();
 builder.Services.AddScoped<LicenseService>();
+builder.Services.AddScoped<DeviceActionProofService>();
 builder.Services.AddHttpClient<AiSuggestionService>();
 builder.Services.AddSingleton<BasicTextOcrProvider>();
 builder.Services.AddSingleton<TesseractOcrProvider>();
@@ -204,6 +248,7 @@ app.UseCors("frontend-dev");
 app.UseMiddleware<ProvisioningRateLimitMiddleware>();
 app.UseAuthentication();
 app.UseMiddleware<LicenseEnforcementMiddleware>();
+app.UseMiddleware<DeviceActionProofMiddleware>();
 app.UseAuthorization();
 
 app.MapGet("/health", () =>
@@ -220,6 +265,7 @@ app.MapGet("/health", () =>
 
 app.MapAuthEndpoints();
 app.MapLicensingEndpoints();
+app.MapDeviceActionProofEndpoints();
 app.MapAiSuggestionEndpoints();
 app.MapCashSessionEndpoints();
 app.MapSyncEndpoints();

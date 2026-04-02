@@ -34,8 +34,9 @@ public sealed class LicensingTokenIssuanceTests(CustomWebApplicationFactory fact
         Assert.Equal("trialing", payload.SubscriptionStatus);
         Assert.Equal("trial", payload.Plan);
         Assert.Equal(3, payload.SeatLimit);
+        Assert.False(string.IsNullOrWhiteSpace(payload.Jti));
         Assert.True(payload.ValidUntil > payload.IssuedAt);
-        Assert.True(payload.ValidUntil <= payload.IssuedAt.AddHours(24).AddMinutes(1));
+        Assert.True(payload.ValidUntil <= payload.IssuedAt.AddMinutes(16));
 
         var licenseRecord = await dbContext.Licenses
             .AsNoTracking()
@@ -89,6 +90,7 @@ public sealed class LicensingTokenIssuanceTests(CustomWebApplicationFactory fact
         Assert.Equal("active", payload.SubscriptionStatus);
         Assert.Equal("growth", payload.Plan);
         Assert.Equal(5, payload.SeatLimit);
+        Assert.False(string.IsNullOrWhiteSpace(payload.Jti));
         Assert.True(payload.ValidUntil <= reconciledPeriodEnd.AddMinutes(1));
         Assert.True(payload.ValidUntil > payload.IssuedAt);
     }
@@ -111,7 +113,8 @@ public sealed class LicensingTokenIssuanceTests(CustomWebApplicationFactory fact
             ValidUntil = root.GetProperty("validUntil").GetDateTimeOffset(),
             SubscriptionStatus = root.GetProperty("subscriptionStatus").GetString() ?? string.Empty,
             Plan = root.GetProperty("plan").GetString() ?? string.Empty,
-            SeatLimit = root.GetProperty("seatLimit").GetInt32()
+            SeatLimit = root.GetProperty("seatLimit").GetInt32(),
+            Jti = root.GetProperty("jti").GetString() ?? string.Empty
         };
     }
 
@@ -134,5 +137,6 @@ public sealed class LicensingTokenIssuanceTests(CustomWebApplicationFactory fact
         public string SubscriptionStatus { get; set; } = string.Empty;
         public string Plan { get; set; } = string.Empty;
         public int SeatLimit { get; set; }
+        public string Jti { get; set; } = string.Empty;
     }
 }
