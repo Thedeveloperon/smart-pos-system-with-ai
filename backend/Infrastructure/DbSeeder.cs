@@ -10,40 +10,97 @@ public static class DbSeeder
     {
         if (!dbContext.Products.Any())
         {
-            var groceries = new Category
+            var categories = new Dictionary<string, Category>(StringComparer.OrdinalIgnoreCase)
             {
-                Name = "Groceries",
-                Description = "Daily essentials",
+                ["geometry-drawing-items"] = new Category
+                {
+                    Name = "Geometry & Drawing Items",
+                    Description = "Geometry sets, erasers, and art supplies",
+                },
+                ["paper-products"] = new Category
+                {
+                    Name = "Paper Products",
+                    Description = "Books, pages, and stationery paper items",
+                },
+                ["school-supplies"] = new Category
+                {
+                    Name = "School Supplies",
+                    Description = "Back-to-school essentials",
+                },
+                ["tools-accessories"] = new Category
+                {
+                    Name = "Tools & Accessories",
+                    Description = "Desk tools and stationery accessories",
+                },
+                ["writing-instruments"] = new Category
+                {
+                    Name = "Writing Instruments",
+                    Description = "Pens, pencils, markers, and highlighters",
+                },
             };
 
-            var personalCare = new Category
+            var products = new (string Name, string Sku, string ImagePath, decimal UnitPrice, decimal CostPrice, string CategoryKey)[]
             {
-                Name = "Personal Care",
-                Description = "Hygiene and beauty",
+                ("Correction Pens", "GD-001", "geometry-drawing-items/correction-pens.webp", 180m, 115m, "geometry-drawing-items"),
+                ("Erasers", "GD-002", "geometry-drawing-items/erasers.jpeg", 45m, 28m, "geometry-drawing-items"),
+                ("Geometry Boxes", "GD-003", "geometry-drawing-items/geometry-boxes.jpg", 850m, 560m, "geometry-drawing-items"),
+                ("Rulers", "GD-004", "geometry-drawing-items/rulers.jpg", 95m, 60m, "geometry-drawing-items"),
+                ("Watercolors", "GD-005", "geometry-drawing-items/watercolors.jpeg", 420m, 270m, "geometry-drawing-items"),
+
+                ("Drawing Books", "PP-001", "paper-products/drawing-books.jpg", 160m, 100m, "paper-products"),
+                ("Exercise Books 40 Page", "PP-002", "paper-products/exercise-books-40-page.webp", 85m, 52m, "paper-products"),
+                ("Exercise Books 160 Page", "PP-003", "paper-products/exercise-books-160-page.jpeg", 220m, 140m, "paper-products"),
+                ("Exercise Books 160 Page Premium", "PP-004", "paper-products/exercise-books-160-page.jpg", 245m, 155m, "paper-products"),
+                ("Exercise Books 400 Page", "PP-005", "paper-products/exercise-books-400-page.jpg", 480m, 305m, "paper-products"),
+                ("Exercise Books 80 Pages", "PP-006", "paper-products/exercise-books-80-pages.jpg", 145m, 90m, "paper-products"),
+                ("Graph Papers", "PP-007", "paper-products/graph-papers.jpeg", 95m, 60m, "paper-products"),
+                ("Paper Sample Pack", "PP-008", "paper-products/images.jpeg", 140m, 88m, "paper-products"),
+                ("Notebooks", "PP-009", "paper-products/notebooks.jpg", 260m, 168m, "paper-products"),
+                ("Plain Papers", "PP-010", "paper-products/plain-papers.jpg", 120m, 76m, "paper-products"),
+                ("Ruled Papers", "PP-011", "paper-products/ruled-papers.jpeg", 110m, 70m, "paper-products"),
+                ("Sticky Notes", "PP-012", "paper-products/sticky-notes.jpg", 135m, 82m, "paper-products"),
+
+                ("Labels & Stickers", "SS-001", "school-supplies/labels-stickers.jpg", 150m, 95m, "school-supplies"),
+                ("Lunch Boxes", "SS-002", "school-supplies/lunch-boxes.jpg", 950m, 640m, "school-supplies"),
+                ("Pencil Cases", "SS-003", "school-supplies/pencil-cases.webp", 280m, 180m, "school-supplies"),
+                ("School Bags", "SS-004", "school-supplies/school-bags.jpeg", 2600m, 1800m, "school-supplies"),
+                ("Water Bottles", "SS-005", "school-supplies/water-bottles.jpg", 650m, 420m, "school-supplies"),
+
+                ("Liquid Glue", "TA-001", "tools-accessories/liquid-glue.jpg", 120m, 75m, "tools-accessories"),
+                ("Paper Cutters", "TA-002", "tools-accessories/paper-cutters.jpg", 390m, 250m, "tools-accessories"),
+                ("Punch Machines", "TA-003", "tools-accessories/punch-machines.jpeg", 520m, 330m, "tools-accessories"),
+                ("Rubber Bands", "TA-004", "tools-accessories/rubber-bands.jpeg", 60m, 36m, "tools-accessories"),
+                ("Scissors", "TA-005", "tools-accessories/scissors.png", 220m, 140m, "tools-accessories"),
+                ("Staple Pins", "TA-006", "tools-accessories/staple-pins.jpeg", 95m, 58m, "tools-accessories"),
+                ("Staplers", "TA-007", "tools-accessories/staplers.jpeg", 430m, 275m, "tools-accessories"),
+                ("Tape Dispensers", "TA-008", "tools-accessories/tape-dispensers.jpg", 170m, 105m, "tools-accessories"),
+
+                ("Ballpoint Pen", "WI-001", "writing-instruments/ballpoint-pen.jpg", 60m, 36m, "writing-instruments"),
+                ("Chalk", "WI-002", "writing-instruments/chalk.jpg", 40m, 24m, "writing-instruments"),
+                ("Color Pencils", "WI-003", "writing-instruments/color-pencils.jpg", 280m, 180m, "writing-instruments"),
+                ("Colored Pens", "WI-004", "writing-instruments/colored-pens.jpg", 320m, 205m, "writing-instruments"),
+                ("Gel Pen", "WI-005", "writing-instruments/gel-pen.jpg", 95m, 58m, "writing-instruments"),
+                ("Highlighters", "WI-006", "writing-instruments/highlighters.jpg", 180m, 110m, "writing-instruments"),
+                ("Highlighters Pack", "WI-007", "writing-instruments/highlighters.png", 240m, 150m, "writing-instruments"),
+                ("Notebook Set", "WI-008", "writing-instruments/notebooks.jpg", 300m, 195m, "writing-instruments"),
+                ("Pencil", "WI-009", "writing-instruments/pencil.jpg", 50m, 30m, "writing-instruments"),
+                ("Permanent Markers", "WI-010", "writing-instruments/permanent-markers.jpg", 170m, 108m, "writing-instruments"),
+                ("Whiteboard Markers", "WI-011", "writing-instruments/whiteboard-markers.jpg", 160m, 102m, "writing-instruments"),
             };
 
-            var books = new Category
+            foreach (var (name, sku, imagePath, unitPrice, costPrice, categoryKey) in products)
             {
-                Name = "Books",
-                Description = "Stationery and books",
-            };
+                var category = categories[categoryKey];
+                var product = new Product
+                {
+                    Name = name,
+                    Sku = sku,
+                    ImageUrl = $"/stationery/{imagePath}",
+                    UnitPrice = unitPrice,
+                    CostPrice = costPrice,
+                    Category = category,
+                };
 
-            var products = new List<Product>
-            {
-                new() { Name = "Ceylon Tea 100g", Barcode = "4790001000010", Sku = "TEA-100", ImageUrl = "https://images.unsplash.com/photo-1544787219-7f47ccb76574?w=600&h=600&fit=crop", UnitPrice = 850m, CostPrice = 640m, Category = groceries },
-                new() { Name = "Sugar 1kg", Barcode = "4790001000027", Sku = "SGR-1KG", ImageUrl = "https://images.unsplash.com/photo-1582657625660-d2c6b8a2fd7d?w=600&h=600&fit=crop", UnitPrice = 310m, CostPrice = 260m, Category = groceries },
-                new() { Name = "Milk Powder 400g", Barcode = "4790001000034", Sku = "MLK-400", ImageUrl = "https://images.unsplash.com/photo-1563636619-e9143da7973b?w=600&h=600&fit=crop", UnitPrice = 1490m, CostPrice = 1290m, Category = groceries },
-                new() { Name = "Rice 5kg", Barcode = "4790001000041", Sku = "RCE-5KG", ImageUrl = "https://images.unsplash.com/photo-1586201375761-83865001e31c?w=600&h=600&fit=crop", UnitPrice = 1280m, CostPrice = 1090m, Category = groceries },
-                new() { Name = "Bath Soap", Barcode = "4790001000058", Sku = "SOAP-01", ImageUrl = "https://images.unsplash.com/photo-1607006344380-b6775a0824a7?w=600&h=600&fit=crop", UnitPrice = 220m, CostPrice = 170m, Category = personalCare },
-                new() { Name = "Shampoo 180ml", Barcode = "4790001000065", Sku = "SHMP-180", ImageUrl = "https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?w=600&h=600&fit=crop", UnitPrice = 690m, CostPrice = 520m, Category = personalCare },
-                new() { Name = "Toothpaste 120g", Barcode = "4790001000072", Sku = "TP-120", ImageUrl = "https://images.unsplash.com/photo-1556228578-8c89e6adf883?w=600&h=600&fit=crop", UnitPrice = 480m, CostPrice = 360m, Category = personalCare },
-                new() { Name = "Notebook A5", Barcode = "4790001000089", Sku = "NB-A5", ImageUrl = "https://images.unsplash.com/photo-1516979187457-637abb4f9353?w=600&h=600&fit=crop", UnitPrice = 240m, CostPrice = 140m, Category = books },
-                new() { Name = "Ball Pen Blue", Barcode = "4790001000096", Sku = "PEN-BLU", ImageUrl = "https://images.unsplash.com/photo-1583485088034-697b5bc54ccd?w=600&h=600&fit=crop", UnitPrice = 90m, CostPrice = 45m, Category = books },
-                new() { Name = "Story Book Grade 5", Barcode = "4790001000102", Sku = "BK-G5", ImageUrl = "https://images.unsplash.com/photo-1512820790803-83ca734da794?w=600&h=600&fit=crop", UnitPrice = 1250m, CostPrice = 980m, Category = books },
-            };
-
-            foreach (var product in products)
-            {
                 dbContext.Products.Add(product);
                 dbContext.Inventory.Add(new InventoryRecord
                 {
