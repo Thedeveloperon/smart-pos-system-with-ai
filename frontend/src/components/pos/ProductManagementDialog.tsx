@@ -17,6 +17,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogClose,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -205,186 +206,199 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved }: ProductEd
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92vh] max-w-4xl overflow-y-auto border-border/70 bg-background p-0 shadow-2xl">
+      <DialogContent hideClose className="h-[92vh] max-h-[92vh] max-w-4xl overflow-hidden border-border/70 bg-background p-0 shadow-2xl">
         <div className="border-b border-border/70 bg-pos-header px-6 py-5 text-pos-header-foreground">
-          <DialogHeader className="space-y-2 text-left">
-            <DialogTitle className="flex items-center gap-2 text-xl font-semibold">
-              <PencilLine className="h-5 w-5 text-primary" />
-              Manage Product
-            </DialogTitle>
-            <DialogDescription className="text-pos-header-foreground/70">
-              Edit price, stock settings, and active status. Deleting a product will deactivate it.
-            </DialogDescription>
-          </DialogHeader>
+          <div className="relative pr-28">
+            <DialogHeader className="space-y-2 text-left">
+              <DialogTitle className="flex items-center gap-2 text-xl font-semibold">
+                <PencilLine className="h-5 w-5 text-primary" />
+                Manage Product
+              </DialogTitle>
+              <DialogDescription className="text-pos-header-foreground/70">
+                Edit price, stock settings, and active status. Deleting a product will deactivate it.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogClose asChild>
+              <Button
+                type="button"
+                variant="outline"
+                className="absolute right-0 top-0 z-10 border-pos-header-foreground/30 bg-transparent text-pos-header-foreground hover:bg-pos-header-foreground/10 hover:text-pos-header-foreground"
+              >
+                Cancel
+              </Button>
+            </DialogClose>
+          </div>
         </div>
 
-        <div className="grid gap-6 px-6 py-6 lg:grid-cols-[1.2fr_0.8fr]">
-          <div className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="manage-name">Product name</Label>
-                <Input
-                  id="manage-name"
-                  value={form.name}
-                  onChange={(event) => updateField("name", event.target.value)}
-                />
-              </div>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="grid gap-6 px-6 py-6 lg:grid-cols-[1.2fr_0.8fr]">
+            <div className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="manage-name">Product name</Label>
+                  <Input
+                    id="manage-name"
+                    value={form.name}
+                    onChange={(event) => updateField("name", event.target.value)}
+                  />
+                </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="manage-sku">SKU</Label>
-                <Input
-                  id="manage-sku"
-                  value={form.sku}
-                  onChange={(event) => updateField("sku", event.target.value)}
-                />
-              </div>
+                <div className="space-y-2">
+                  <Label htmlFor="manage-sku">SKU</Label>
+                  <Input
+                    id="manage-sku"
+                    value={form.sku}
+                    onChange={(event) => updateField("sku", event.target.value)}
+                  />
+                </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="manage-barcode">Barcode</Label>
-                <Input
-                  id="manage-barcode"
-                  value={form.barcode}
-                  onChange={(event) => updateField("barcode", event.target.value)}
-                />
-              </div>
+                <div className="space-y-2">
+                  <Label htmlFor="manage-barcode">Barcode</Label>
+                  <Input
+                    id="manage-barcode"
+                    value={form.barcode}
+                    onChange={(event) => updateField("barcode", event.target.value)}
+                  />
+                </div>
 
-              <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="manage-image">Image URL</Label>
-                <Input
-                  id="manage-image"
-                  value={form.imageUrl}
-                  onChange={(event) => updateField("imageUrl", event.target.value)}
-                  placeholder="https://..."
-                />
-              </div>
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="manage-image">Image URL</Label>
+                  <Input
+                    id="manage-image"
+                    value={form.imageUrl}
+                    onChange={(event) => updateField("imageUrl", event.target.value)}
+                    placeholder="https://..."
+                  />
+                </div>
 
-              <div className="space-y-2 md:col-span-2">
-                <Label>Category</Label>
-                <Select
-                  value={form.categoryId || "__none__"}
-                  onValueChange={(value) => updateField("categoryId", value === "__none__" ? "" : value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder={loadingCategories ? "Loading categories..." : "Select category"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">No category</SelectItem>
-                    {categories.map((category) => (
-                      <SelectItem key={category.category_id} value={category.category_id}>
-                        {category.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                <div className="space-y-2 md:col-span-2">
+                  <Label>Category</Label>
+                  <Select
+                    value={form.categoryId || "__none__"}
+                    onValueChange={(value) => updateField("categoryId", value === "__none__" ? "" : value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={loadingCategories ? "Loading categories..." : "Select category"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">No category</SelectItem>
+                      {categories.map((category) => (
+                        <SelectItem key={category.category_id} value={category.category_id}>
+                          {category.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="manage-unit-price">Unit price</Label>
-                <Input
-                  id="manage-unit-price"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={form.unitPrice}
-                  onChange={(event) => updateField("unitPrice", event.target.value)}
-                />
-              </div>
+                <div className="space-y-2">
+                  <Label htmlFor="manage-unit-price">Unit price</Label>
+                  <Input
+                    id="manage-unit-price"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.unitPrice}
+                    onChange={(event) => updateField("unitPrice", event.target.value)}
+                  />
+                </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="manage-cost-price">Cost price</Label>
-                <Input
-                  id="manage-cost-price"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={form.costPrice}
-                  onChange={(event) => updateField("costPrice", event.target.value)}
-                />
-              </div>
+                <div className="space-y-2">
+                  <Label htmlFor="manage-cost-price">Cost price</Label>
+                  <Input
+                    id="manage-cost-price"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.costPrice}
+                    onChange={(event) => updateField("costPrice", event.target.value)}
+                  />
+                </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="manage-reorder">Reorder level</Label>
-                <Input
-                  id="manage-reorder"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={form.reorderLevel}
-                  onChange={(event) => updateField("reorderLevel", event.target.value)}
-                />
+                <div className="space-y-2">
+                  <Label htmlFor="manage-reorder">Reorder level</Label>
+                  <Input
+                    id="manage-reorder"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.reorderLevel}
+                    onChange={(event) => updateField("reorderLevel", event.target.value)}
+                  />
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="space-y-4">
-            <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
-              <div className="border-b border-border bg-muted/40 px-4 py-3">
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                  Current State
-                </p>
+            <div className="space-y-4">
+              <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+                <div className="border-b border-border bg-muted/40 px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                    Current State
+                  </p>
+                </div>
+                <div className="space-y-3 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <p className="text-base font-semibold">{product?.name}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {product?.sku || "No SKU"} {product?.barcode ? `| ${product.barcode}` : ""}
+                      </p>
+                    </div>
+                    <Badge variant={product?.isActive ? "default" : "secondary"}>
+                      {product?.isActive ? "Active" : "Inactive"}
+                    </Badge>
+                  </div>
+
+                  <div className="grid gap-2 rounded-xl border border-border bg-background p-3 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Unit price</span>
+                      <span className="font-medium">Rs. {Number(form.unitPrice || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Cost price</span>
+                      <span className="font-medium">Rs. {Number(form.costPrice || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Stock</span>
+                      <span className="font-medium">{product?.stockQuantity.toLocaleString()}</span>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 rounded-2xl border border-border bg-muted/20 p-4">
+                    <label className="flex items-center justify-between gap-4 rounded-xl border border-border bg-background px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium">Allow negative stock</p>
+                        <p className="text-xs text-muted-foreground">Lets sales continue below zero stock.</p>
+                      </div>
+                      <Switch
+                        checked={form.allowNegativeStock}
+                        onCheckedChange={(checked) => updateField("allowNegativeStock", checked)}
+                      />
+                    </label>
+
+                    <label className="flex items-center justify-between gap-4 rounded-xl border border-border bg-background px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium">Active product</p>
+                        <p className="text-xs text-muted-foreground">Inactive products are hidden from sales.</p>
+                      </div>
+                      <Switch
+                        checked={form.isActive}
+                        onCheckedChange={(checked) => updateField("isActive", checked)}
+                      />
+                    </label>
+                  </div>
+                </div>
               </div>
-              <div className="space-y-3 p-4">
-                <div className="flex items-start justify-between gap-3">
+
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-950">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
                   <div className="space-y-1">
-                    <p className="text-base font-semibold">{product?.name}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {product?.sku || "No SKU"} {product?.barcode ? `| ${product.barcode}` : ""}
+                    <p className="text-sm font-semibold">Delete safety</p>
+                    <p className="text-sm text-amber-900/80">
+                      Deleting a product only deactivates it so sales history stays intact.
                     </p>
                   </div>
-                  <Badge variant={product?.isActive ? "default" : "secondary"}>
-                    {product?.isActive ? "Active" : "Inactive"}
-                  </Badge>
-                </div>
-
-                <div className="grid gap-2 rounded-xl border border-border bg-background p-3 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Unit price</span>
-                    <span className="font-medium">Rs. {Number(form.unitPrice || 0).toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Cost price</span>
-                    <span className="font-medium">Rs. {Number(form.costPrice || 0).toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Stock</span>
-                    <span className="font-medium">{product?.stockQuantity.toLocaleString()}</span>
-                  </div>
-                </div>
-
-                <div className="grid gap-4 rounded-2xl border border-border bg-muted/20 p-4">
-                  <label className="flex items-center justify-between gap-4 rounded-xl border border-border bg-background px-4 py-3">
-                    <div>
-                      <p className="text-sm font-medium">Allow negative stock</p>
-                      <p className="text-xs text-muted-foreground">Lets sales continue below zero stock.</p>
-                    </div>
-                    <Switch
-                      checked={form.allowNegativeStock}
-                      onCheckedChange={(checked) => updateField("allowNegativeStock", checked)}
-                    />
-                  </label>
-
-                  <label className="flex items-center justify-between gap-4 rounded-xl border border-border bg-background px-4 py-3">
-                    <div>
-                      <p className="text-sm font-medium">Active product</p>
-                      <p className="text-xs text-muted-foreground">Inactive products are hidden from sales.</p>
-                    </div>
-                    <Switch
-                      checked={form.isActive}
-                      onCheckedChange={(checked) => updateField("isActive", checked)}
-                    />
-                  </label>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-950">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
-                <div className="space-y-1">
-                  <p className="text-sm font-semibold">Delete safety</p>
-                  <p className="text-sm text-amber-900/80">
-                    Deleting a product only deactivates it so sales history stays intact.
-                  </p>
                 </div>
               </div>
             </div>
@@ -493,88 +507,102 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-h-[92vh] max-w-6xl overflow-hidden border-border/70 bg-background p-0 shadow-2xl">
+        <DialogContent hideClose className="h-[92vh] max-h-[92vh] max-w-6xl overflow-hidden border-border/70 bg-background p-0 shadow-2xl">
           <div className="border-b border-border/70 bg-pos-header px-6 py-5 text-pos-header-foreground">
-            <DialogHeader className="space-y-2 text-left">
-              <DialogTitle className="text-xl font-semibold">Product Management</DialogTitle>
-              <DialogDescription className="text-pos-header-foreground/70">
-                Edit prices, deactivate products, and keep the catalog aligned with the POS.
-              </DialogDescription>
-            </DialogHeader>
+            <div className="flex items-start justify-between gap-4">
+              <DialogHeader className="space-y-2 text-left">
+                <DialogTitle className="text-xl font-semibold">Product Management</DialogTitle>
+                <DialogDescription className="text-pos-header-foreground/70">
+                  Edit prices, deactivate products, and keep the catalog aligned with the POS.
+                </DialogDescription>
+              </DialogHeader>
+
+              <DialogClose asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="shrink-0 border-pos-header-foreground/30 bg-transparent text-pos-header-foreground hover:bg-pos-header-foreground/10 hover:text-pos-header-foreground"
+                >
+                  Cancel
+                </Button>
+              </DialogClose>
+            </div>
           </div>
 
-          <div className="space-y-4 px-6 py-5">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div className="relative w-full md:max-w-md">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Search by name, SKU, barcode, or category"
-                  className="pl-9"
-                />
+          <div className="scrollbar-thin min-h-0 flex-1 overflow-y-scroll px-6 py-5">
+            <div className="space-y-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="relative w-full md:max-w-md">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Search by name, SKU, barcode, or category"
+                    className="pl-9"
+                  />
+                </div>
+                <Badge variant="secondary" className="w-fit">
+                  {filtered.length} products
+                </Badge>
               </div>
-              <Badge variant="secondary" className="w-fit">
-                {filtered.length} products
-              </Badge>
-            </div>
 
-            <div className="overflow-hidden rounded-2xl border border-border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Product</TableHead>
-                    <TableHead className="hidden md:table-cell">Category</TableHead>
-                    <TableHead className="text-right">Unit Price</TableHead>
-                    <TableHead className="text-right">Stock</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {loading ? (
+              <div className="overflow-hidden rounded-2xl border border-border">
+                <Table>
+                  <TableHeader>
                     <TableRow>
-                      <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
-                        Loading products...
-                      </TableCell>
+                      <TableHead>Product</TableHead>
+                      <TableHead className="hidden md:table-cell">Category</TableHead>
+                      <TableHead className="text-right">Unit Price</TableHead>
+                      <TableHead className="text-right">Stock</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
-                  ) : filtered.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
-                        No products found.
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filtered.map((product) => (
-                      <TableRow key={product.id}>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <div className="font-medium">{product.name}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {product.sku}
-                              {product.barcode ? ` | ${product.barcode}` : ""}
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell className="hidden md:table-cell">{product.categoryName || "No category"}</TableCell>
-                        <TableCell className="text-right">Rs. {product.unitPrice.toLocaleString()}</TableCell>
-                        <TableCell className="text-right">{product.stockQuantity.toLocaleString()}</TableCell>
-                        <TableCell>
-                          <Badge variant={product.isActive ? "default" : "secondary"}>
-                            {product.isActive ? "Active" : "Inactive"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button variant="ghost" size="sm" onClick={() => handleEdit(product)}>
-                            <PencilLine className="h-4 w-4" />
-                            Edit
-                          </Button>
+                  </TableHeader>
+                  <TableBody>
+                    {loading ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                          Loading products...
                         </TableCell>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
+                    ) : filtered.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                          No products found.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filtered.map((product) => (
+                        <TableRow key={product.id}>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <div className="font-medium">{product.name}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {product.sku}
+                                {product.barcode ? ` | ${product.barcode}` : ""}
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell">{product.categoryName || "No category"}</TableCell>
+                          <TableCell className="text-right">Rs. {product.unitPrice.toLocaleString()}</TableCell>
+                          <TableCell className="text-right">{product.stockQuantity.toLocaleString()}</TableCell>
+                          <TableCell>
+                            <Badge variant={product.isActive ? "default" : "secondary"}>
+                              {product.isActive ? "Active" : "Inactive"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button variant="ghost" size="sm" onClick={() => handleEdit(product)}>
+                              <PencilLine className="h-4 w-4" />
+                              Edit
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
           </div>
         </DialogContent>
