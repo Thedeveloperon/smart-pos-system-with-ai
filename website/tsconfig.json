@@ -35,8 +35,6 @@
     ".next/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules",
-    "playwright.config.ts",
-    "playwright-fixture.ts"
+    "node_modules"
   ]
 }

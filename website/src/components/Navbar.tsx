@@ -2,28 +2,53 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Menu, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import Image from "next/image";
+import Link from "next/link";
+import { locales } from "@/i18n/config";
+import { useI18n } from "@/i18n/I18nProvider";
 
 const Navbar = () => {
   const [open, setOpen] = useState(false);
+  const { locale, t } = useI18n();
+
+  const navLinks = [
+    { href: "#features", label: t("nav.links.features") },
+    { href: "#how-it-works", label: t("nav.links.howItWorks") },
+    { href: "#pricing", label: t("nav.links.pricing") },
+  ];
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-xl border-b border-border">
       <div className="container mx-auto flex items-center justify-between h-16 px-4">
-        <a href="#" className="text-foreground font-heading text-xl font-bold tracking-tight">
-          Smart<span className="text-primary">POS</span>
-        </a>
+        <Link href={`/${locale}`} className="inline-flex items-center">
+          <Image src="/logo.png" alt={t("meta.logoAlt")} width={180} height={43} priority />
+        </Link>
 
-        <div className="hidden md:flex items-center gap-8">
-          {["Features", "How It Works", "Pricing"].map((item) => (
-            <a
-              key={item}
-              href={`#${item.toLowerCase().replace(/\s+/g, "-")}`}
+        <div className="hidden md:flex items-center gap-6">
+          {navLinks.map((item) => (
+            <Link
+              key={item.href}
+              href={`/${locale}${item.href}`}
               className="text-muted-foreground hover:text-foreground text-sm transition-colors"
             >
-              {item}
-            </a>
+              {item.label}
+            </Link>
           ))}
-          <Button variant="hero" size="sm">Get Started Free</Button>
+          <div className="flex items-center rounded-full border border-border p-1">
+            {locales.map((code) => (
+              <Link
+                key={code}
+                href={`/${code}`}
+                aria-label={`${t("nav.languageLabel")}: ${t(`nav.languages.${code}`)}`}
+                className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                  locale === code ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {t(`nav.languages.${code}`)}
+              </Link>
+            ))}
+          </div>
+          <Button variant="hero" size="sm">{t("nav.cta")}</Button>
         </div>
 
         <button className="md:hidden text-foreground" onClick={() => setOpen(!open)}>
@@ -40,17 +65,31 @@ const Navbar = () => {
             className="md:hidden bg-background border-b border-border overflow-hidden"
           >
             <div className="flex flex-col gap-4 p-4">
-              {["Features", "How It Works", "Pricing"].map((item) => (
-                <a
-                  key={item}
-                  href={`#${item.toLowerCase().replace(/\s+/g, "-")}`}
+              {navLinks.map((item) => (
+                <Link
+                  key={item.href}
+                  href={`/${locale}${item.href}`}
                   className="text-muted-foreground hover:text-foreground text-sm"
                   onClick={() => setOpen(false)}
                 >
-                  {item}
-                </a>
+                  {item.label}
+                </Link>
               ))}
-              <Button variant="hero" size="sm">Get Started Free</Button>
+              <div className="flex items-center gap-2">
+                {locales.map((code) => (
+                  <Link
+                    key={code}
+                    href={`/${code}`}
+                    onClick={() => setOpen(false)}
+                    className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                      locale === code ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {t(`nav.languages.${code}`)}
+                  </Link>
+                ))}
+              </div>
+              <Button variant="hero" size="sm">{t("nav.cta")}</Button>
             </div>
           </motion.div>
         )}

@@ -12,6 +12,7 @@ dist
 dist-ssr
 .next
 out
+tmp
 *.local
 
 # Editor directories and files
