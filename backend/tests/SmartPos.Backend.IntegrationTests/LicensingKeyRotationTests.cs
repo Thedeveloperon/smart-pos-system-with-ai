@@ -45,6 +45,7 @@ public sealed class LicensingKeyRotationTests(CustomWebApplicationFactory factor
         var now = DateTimeOffset.UtcNow;
         var validUntil = now.AddHours(1);
         var legacyLicenseId = Guid.NewGuid();
+        var legacyJti = $"legacy-jti-{Guid.NewGuid():N}";
         var legacyPayload = JsonSerializer.SerializeToUtf8Bytes(new
         {
             licenseId = legacyLicenseId,
@@ -55,7 +56,8 @@ public sealed class LicensingKeyRotationTests(CustomWebApplicationFactory factor
             keyId = "it-k1",
             subscriptionStatus = subscription.Status.ToString().ToLowerInvariant(),
             plan = subscription.Plan,
-            seatLimit = subscription.SeatLimit
+            seatLimit = subscription.SeatLimit,
+            jti = legacyJti
         });
 
         var payloadSegment = Base64UrlEncode(legacyPayload);
@@ -78,6 +80,16 @@ public sealed class LicensingKeyRotationTests(CustomWebApplicationFactory factor
             IssuedAtUtc = now,
             Shop = provisionedDevice.Shop,
             ProvisionedDevice = provisionedDevice
+        });
+        dbContext.LicenseTokenSessions.Add(new LicenseTokenSession
+        {
+            ShopId = provisionedDevice.ShopId,
+            ProvisionedDeviceId = provisionedDevice.Id,
+            LicenseId = legacyLicenseId,
+            Jti = legacyJti,
+            IssuedAtUtc = now,
+            ExpiresAtUtc = validUntil,
+            RejectAfterUtc = validUntil
         });
 
         await dbContext.SaveChangesAsync();

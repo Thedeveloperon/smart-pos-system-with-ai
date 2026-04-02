@@ -17,6 +17,10 @@ function buildStatus(overrides: Partial<LicenseStatus> = {}): LicenseStatus {
     validUntil: new Date(now.getTime() + 60 * 60 * 1000),
     graceUntil: new Date(now.getTime() + 2 * 60 * 60 * 1000),
     licenseToken: "cache-test-token",
+    offlineGrantToken: "cache-offline-grant-token",
+    offlineGrantExpiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+    offlineMaxCheckoutOperations: 200,
+    offlineMaxRefundOperations: 40,
     blockedActions: [],
     serverTime: now,
     ...overrides,
@@ -79,6 +83,40 @@ describe("licenseCache", () => {
     expect(cached?.status.blockedActions).toEqual(["checkout", "refund"]);
   });
 
+  it("forces online validation when offline grant is missing", async () => {
+    const now = new Date();
+    await saveCachedLicenseStatus(
+      buildStatus({
+        state: "active",
+        serverTime: now,
+        offlineGrantToken: null,
+        offlineGrantExpiresAt: null,
+      })
+    );
+    rewriteCachedValidationTimes({ serverMsAgo: 5 * 60 * 1000, clientMsAgo: 5 * 60 * 1000 });
+
+    const cached = await loadCachedLicenseStatus("cache-test-device");
+    expect(cached).not.toBeNull();
+    expect(cached?.status.state).toBe("suspended");
+    expect(cached?.warning).toMatch(/offline grant is missing/i);
+  });
+
+  it("forces online validation when offline grant has expired", async () => {
+    const now = new Date();
+    await saveCachedLicenseStatus(
+      buildStatus({
+        state: "active",
+        serverTime: now,
+        offlineGrantExpiresAt: new Date(now.getTime() - 60 * 1000),
+      })
+    );
+
+    const cached = await loadCachedLicenseStatus("cache-test-device");
+    expect(cached).not.toBeNull();
+    expect(cached?.status.state).toBe("suspended");
+    expect(cached?.warning).toMatch(/offline grant expired/i);
+  });
+
   it("blocks cached usage when system clock rollback is detected", async () => {
     await saveCachedLicenseStatus(buildStatus());
 
@@ -92,6 +130,22 @@ describe("licenseCache", () => {
     expect(cached).not.toBeNull();
     expect(cached?.status.state).toBe("suspended");
     expect(cached?.warning).toMatch(/clock moved backwards/i);
+    expect(window.localStorage.getItem(CACHE_KEY)).toBeNull();
+  });
+
+  it("blocks cached usage when server-time drift metadata is tampered", async () => {
+    await saveCachedLicenseStatus(buildStatus());
+
+    const raw = window.localStorage.getItem(CACHE_KEY);
+    expect(raw).not.toBeNull();
+    const envelope = JSON.parse(raw || "{}") as { validated_server_time?: string };
+    envelope.validated_server_time = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    window.localStorage.setItem(CACHE_KEY, JSON.stringify(envelope));
+
+    const cached = await loadCachedLicenseStatus("cache-test-device");
+    expect(cached).not.toBeNull();
+    expect(cached?.status.state).toBe("suspended");
+    expect(cached?.warning).toMatch(/clock drift exceeded/i);
     expect(window.localStorage.getItem(CACHE_KEY)).toBeNull();
   });
 });

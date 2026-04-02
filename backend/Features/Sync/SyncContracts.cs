@@ -8,6 +8,9 @@ public sealed class SyncEventsRequest
     [JsonPropertyName("device_id")]
     public Guid? DeviceId { get; set; }
 
+    [JsonPropertyName("offline_grant_token")]
+    public string? OfflineGrantToken { get; set; }
+
     [JsonPropertyName("events")]
     public List<SyncEventRequestItem> Events { get; set; } = [];
 }

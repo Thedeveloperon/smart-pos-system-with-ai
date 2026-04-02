@@ -337,6 +337,9 @@ public sealed class OfflineEvent
     public required string EventId { get; set; }
     public Guid? StoreId { get; set; }
     public Guid? DeviceId { get; set; }
+    public Guid? OfflineGrantId { get; set; }
+    public DateTimeOffset? OfflineGrantIssuedAtUtc { get; set; }
+    public DateTimeOffset? OfflineGrantExpiresAtUtc { get; set; }
     public DateTimeOffset DeviceTimestampUtc { get; set; }
     public DateTimeOffset? ServerTimestampUtc { get; set; }
     public OfflineEventType Type { get; set; }
@@ -360,6 +363,9 @@ public sealed class Shop
     public ICollection<ProvisionedDevice> ProvisionedDevices { get; set; } = [];
     public ICollection<LicenseRecord> Licenses { get; set; } = [];
     public ICollection<LicenseAuditLog> LicenseAuditLogs { get; set; } = [];
+    public ICollection<ManualBillingInvoice> ManualBillingInvoices { get; set; } = [];
+    public ICollection<ManualBillingPayment> ManualBillingPayments { get; set; } = [];
+    public ICollection<CustomerActivationEntitlement> CustomerActivationEntitlements { get; set; } = [];
 }
 
 public sealed class Subscription
@@ -392,10 +398,34 @@ public sealed class ProvisionedDevice
     public DateTimeOffset AssignedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? RevokedAtUtc { get; set; }
     public DateTimeOffset? LastHeartbeatAtUtc { get; set; }
+    public string? DeviceKeyFingerprint { get; set; }
+    public string? DevicePublicKeySpki { get; set; }
+    public string? DeviceKeyAlgorithm { get; set; }
+    public DateTimeOffset? DeviceKeyRegisteredAtUtc { get; set; }
 
     public required Shop Shop { get; set; }
     public ICollection<LicenseRecord> Licenses { get; set; } = [];
     public ICollection<LicenseAuditLog> AuditLogs { get; set; } = [];
+}
+
+public sealed class DeviceKeyChallenge
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public required string DeviceCode { get; set; }
+    public required string Nonce { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset ExpiresAtUtc { get; set; } = DateTimeOffset.UtcNow.AddMinutes(5);
+    public DateTimeOffset? ConsumedAtUtc { get; set; }
+}
+
+public sealed class DeviceActionChallenge
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public required string DeviceCode { get; set; }
+    public required string Nonce { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset ExpiresAtUtc { get; set; } = DateTimeOffset.UtcNow.AddMinutes(2);
+    public DateTimeOffset? ConsumedAtUtc { get; set; }
 }
 
 public sealed class LicenseRecord
@@ -416,6 +446,21 @@ public sealed class LicenseRecord
 
     public required Shop Shop { get; set; }
     public required ProvisionedDevice ProvisionedDevice { get; set; }
+}
+
+public sealed class LicenseTokenSession
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ShopId { get; set; }
+    public Guid ProvisionedDeviceId { get; set; }
+    public Guid LicenseId { get; set; }
+    public required string Jti { get; set; }
+    public DateTimeOffset IssuedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset ExpiresAtUtc { get; set; } = DateTimeOffset.UtcNow.AddMinutes(15);
+    public DateTimeOffset RejectAfterUtc { get; set; } = DateTimeOffset.UtcNow.AddMinutes(15);
+    public DateTimeOffset? RevokedAtUtc { get; set; }
+    public string? ReplacedByJti { get; set; }
+    public DateTimeOffset? LastValidatedAtUtc { get; set; }
 }
 
 public sealed class LicenseAuditLog
@@ -448,6 +493,71 @@ public sealed class BillingWebhookEvent
     public DateTimeOffset ReceivedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? ProcessedAtUtc { get; set; }
     public DateTimeOffset? UpdatedAtUtc { get; set; }
+}
+
+public sealed class ManualBillingInvoice
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ShopId { get; set; }
+    public required string InvoiceNumber { get; set; }
+    public decimal AmountDue { get; set; }
+    public decimal AmountPaid { get; set; }
+    public string Currency { get; set; } = "LKR";
+    public ManualBillingInvoiceStatus Status { get; set; } = ManualBillingInvoiceStatus.Open;
+    public DateTimeOffset DueAtUtc { get; set; } = DateTimeOffset.UtcNow.AddDays(7);
+    public string? Notes { get; set; }
+    public string? CreatedBy { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public required Shop Shop { get; set; }
+    public ICollection<ManualBillingPayment> Payments { get; set; } = [];
+}
+
+public sealed class ManualBillingPayment
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ShopId { get; set; }
+    public Guid InvoiceId { get; set; }
+    public ManualBillingPaymentMethod Method { get; set; } = ManualBillingPaymentMethod.BankDeposit;
+    public decimal Amount { get; set; }
+    public string Currency { get; set; } = "LKR";
+    public ManualBillingPaymentStatus Status { get; set; } = ManualBillingPaymentStatus.PendingVerification;
+    public string? BankReference { get; set; }
+    public string? DepositSlipUrl { get; set; }
+    public DateTimeOffset ReceivedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public string? Notes { get; set; }
+    public string? RecordedBy { get; set; }
+    public string? VerifiedBy { get; set; }
+    public DateTimeOffset? VerifiedAtUtc { get; set; }
+    public string? RejectedBy { get; set; }
+    public DateTimeOffset? RejectedAtUtc { get; set; }
+    public string? RejectionReason { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public required Shop Shop { get; set; }
+    public required ManualBillingInvoice Invoice { get; set; }
+}
+
+public sealed class CustomerActivationEntitlement
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ShopId { get; set; }
+    public required string EntitlementKeyHash { get; set; }
+    public required string EntitlementKey { get; set; }
+    public string Source { get; set; } = "payment_success";
+    public string? SourceReference { get; set; }
+    public ActivationEntitlementStatus Status { get; set; } = ActivationEntitlementStatus.Active;
+    public int MaxActivations { get; set; } = 1;
+    public int ActivationsUsed { get; set; }
+    public string? IssuedBy { get; set; }
+    public DateTimeOffset IssuedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset ExpiresAtUtc { get; set; } = DateTimeOffset.UtcNow.AddDays(30);
+    public DateTimeOffset? LastUsedAtUtc { get; set; }
+    public DateTimeOffset? RevokedAtUtc { get; set; }
+
+    public required Shop Shop { get; set; }
 }
 
 public enum SaleStatus
@@ -525,4 +635,34 @@ public enum LicenseRecordStatus
 {
     Active = 1,
     Revoked = 2
+}
+
+public enum ManualBillingInvoiceStatus
+{
+    Open = 1,
+    PendingVerification = 2,
+    Paid = 3,
+    Overdue = 4,
+    Canceled = 5
+}
+
+public enum ManualBillingPaymentMethod
+{
+    Cash = 1,
+    BankDeposit = 2,
+    BankTransfer = 3
+}
+
+public enum ManualBillingPaymentStatus
+{
+    PendingVerification = 1,
+    Verified = 2,
+    Rejected = 3
+}
+
+public enum ActivationEntitlementStatus
+{
+    Active = 1,
+    Revoked = 2,
+    Expired = 3
 }

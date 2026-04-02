@@ -1,3 +1,5 @@
+using SmartPos.Backend.Features.Licensing;
+
 namespace SmartPos.Backend.Features.Sync;
 
 public static class SyncEndpoints
@@ -10,6 +12,8 @@ public static class SyncEndpoints
 
         group.MapPost("/events", async (
             SyncEventsRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
             SyncEventsProcessor processor,
             CancellationToken cancellationToken) =>
         {
@@ -18,7 +22,8 @@ public static class SyncEndpoints
                 return Results.BadRequest(new { message = "events list cannot be empty" });
             }
 
-            var response = await processor.ProcessAsync(request, cancellationToken);
+            var requestDeviceCode = licenseService.ResolveDeviceCode(null, httpContext);
+            var response = await processor.ProcessAsync(request, requestDeviceCode, cancellationToken);
             return Results.Ok(response);
         })
         .WithName("SyncOfflineEvents")

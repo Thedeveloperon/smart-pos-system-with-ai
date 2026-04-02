@@ -13,6 +13,7 @@ import { getDeviceCode } from "@/lib/api";
 import { isSuperAdminBackendRole } from "@/lib/auth";
 import AdminConsole from "./pages/AdminConsole.tsx";
 import Index from "./pages/Index.tsx";
+import LicenseAccessSuccess from "./pages/LicenseAccessSuccess.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
 const SPLASH_MIN_DURATION_MS = 1000;
@@ -177,12 +178,19 @@ const AdminAuthGate = () => {
 const LicenseGate = () => {
   const { status, isLoading, isRefreshing, error, isLicensed, isBlocked, refresh, activate } = useLicensing();
   const [isActivating, setIsActivating] = useState(false);
+  const [activationEntitlementKey, setActivationEntitlementKey] = useState("");
   const showSplash = useMinimumVisible(isLoading);
 
-  const handleActivate = async () => {
+  const handleActivate = async (rawActivationEntitlementKey?: string) => {
     setIsActivating(true);
     try {
-      await activate();
+      const resolvedKey = (rawActivationEntitlementKey ?? activationEntitlementKey).trim();
+      const activationError = await activate({
+        activationEntitlementKey: resolvedKey || undefined,
+      });
+      if (!activationError) {
+        setActivationEntitlementKey("");
+      }
     } finally {
       setIsActivating(false);
     }
@@ -194,18 +202,20 @@ const LicenseGate = () => {
 
   if (!status || status.state === "unprovisioned") {
     return (
-      <LicenseActivationScreen
-        deviceCode={status?.deviceCode || getDeviceCode()}
-        error={error}
-        isBusy={isActivating || isRefreshing}
-        onActivate={() => {
-          void handleActivate();
-        }}
-        onRefresh={() => {
-          void refresh();
-        }}
-      />
-    );
+        <LicenseActivationScreen
+          deviceCode={status?.deviceCode || getDeviceCode()}
+          error={error}
+          isBusy={isActivating || isRefreshing}
+          activationEntitlementKey={activationEntitlementKey}
+          onActivationEntitlementKeyChange={setActivationEntitlementKey}
+          onActivate={(key) => {
+            void handleActivate(key);
+          }}
+          onRefresh={() => {
+            void refresh();
+          }}
+        />
+      );
   }
 
   if (isBlocked || status.state === "suspended" || status.state === "revoked") {
@@ -218,7 +228,7 @@ const LicenseGate = () => {
           void refresh();
         }}
         onActivate={() => {
-          void handleActivate();
+          void handleActivate(activationEntitlementKey);
         }}
       />
     );
@@ -239,7 +249,9 @@ const App = () => (
   <TooltipProvider>
     <Toaster />
     <Sonner />
-    {(typeof window !== "undefined" && window.location.pathname.startsWith("/admin")) ? (
+    {(typeof window !== "undefined" && window.location.pathname.startsWith("/license/success")) ? (
+      <LicenseAccessSuccess />
+    ) : (typeof window !== "undefined" && window.location.pathname.startsWith("/admin")) ? (
       <AuthProvider>
         <AdminAuthGate />
       </AuthProvider>

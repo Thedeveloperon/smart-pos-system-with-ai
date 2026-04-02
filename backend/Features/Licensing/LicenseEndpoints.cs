@@ -12,6 +12,31 @@ public static class LicenseEndpoints
         var provision = app.MapGroup("/api/provision")
             .WithTags("Provisioning");
 
+        provision.MapPost("/challenge", async (
+            ProvisionChallengeRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            request.DeviceCode = string.IsNullOrWhiteSpace(request.DeviceCode)
+                ? licenseService.ResolveDeviceCode(null, httpContext)
+                : request.DeviceCode;
+
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.CreateActivationChallengeAsync(request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .AllowAnonymous()
+        .WithName("CreateProvisionChallenge")
+        .WithOpenApi();
+
         provision.MapPost("/activate", async (
             ProvisionActivateRequest request,
             HttpContext httpContext,
@@ -26,10 +51,16 @@ public static class LicenseEndpoints
             {
                 ValidateIdempotencyKey(httpContext);
                 var response = await licenseService.ActivateAsync(request, cancellationToken);
+                SyncLicenseTokenCookie(httpContext, licenseService, response);
                 return Results.Ok(response);
             }
             catch (LicenseException ex)
             {
+                if (ex.Code is LicenseErrorCodes.InvalidToken or LicenseErrorCodes.DeviceMismatch or LicenseErrorCodes.DeviceKeyMismatch)
+                {
+                    licenseService.WriteLicenseTokenCookie(httpContext, null);
+                }
+
                 return ToErrorResult(ex);
             }
         })
@@ -51,6 +82,7 @@ public static class LicenseEndpoints
             {
                 ValidateIdempotencyKey(httpContext);
                 var response = await licenseService.DeactivateAsync(request, cancellationToken);
+                SyncLicenseTokenCookie(httpContext, licenseService, response);
                 return Results.Ok(response);
             }
             catch (LicenseException ex)
@@ -74,13 +106,21 @@ public static class LicenseEndpoints
             try
             {
                 var deviceCode = licenseService.ResolveDeviceCode(device_code, httpContext);
-                var token = licenseService.ResolveLicenseToken(httpContext);
+                var token = string.IsNullOrWhiteSpace(device_code)
+                    ? licenseService.ResolveLicenseToken(httpContext)
+                    : licenseService.ResolveLicenseToken(httpContext, includeCookie: false);
                 var response = await licenseService.GetStatusAsync(deviceCode, token, cancellationToken);
+                SyncLicenseTokenCookie(httpContext, licenseService, response);
                 return Results.Ok(response);
             }
             catch (LicenseException ex)
             {
                 alertMonitor.RecordLicenseValidationFailure(ex.Code);
+                if (ex.Code is LicenseErrorCodes.InvalidToken or LicenseErrorCodes.DeviceMismatch or LicenseErrorCodes.DeviceKeyMismatch or LicenseErrorCodes.TokenReplayDetected)
+                {
+                    licenseService.WriteLicenseTokenCookie(httpContext, null);
+                }
+
                 return ToErrorResult(ex);
             }
         })
@@ -109,17 +149,100 @@ public static class LicenseEndpoints
             {
                 ValidateIdempotencyKey(httpContext);
                 var response = await licenseService.HeartbeatAsync(request, cancellationToken);
+                SyncLicenseTokenCookie(httpContext, licenseService, response);
                 return Results.Ok(response);
             }
             catch (LicenseException ex)
             {
                 licensingMetrics.RecordHeartbeatFailure(ex.Code);
                 alertMonitor.RecordLicenseValidationFailure(ex.Code);
+                if (ex.Code is LicenseErrorCodes.InvalidToken or LicenseErrorCodes.DeviceMismatch or LicenseErrorCodes.DeviceKeyMismatch or LicenseErrorCodes.TokenReplayDetected)
+                {
+                    licenseService.WriteLicenseTokenCookie(httpContext, null);
+                }
+
                 return ToErrorResult(ex);
             }
         })
         .AllowAnonymous()
         .WithName("LicenseHeartbeat")
+        .WithOpenApi();
+
+        license.MapGet("/activation-entitlement", [Authorize(Roles = $"{SmartPosRoles.Owner},{SmartPosRoles.Manager}")] async (
+            string? shop_code,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var response = await licenseService.GetLatestActivationEntitlementAsync(shop_code, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .WithName("GetLatestActivationEntitlement")
+        .WithOpenApi();
+
+        license.MapGet("/access/success", async (
+            string activation_entitlement_key,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var response = await licenseService.GetLicenseAccessSuccessAsync(
+                    activation_entitlement_key,
+                    cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .AllowAnonymous()
+        .WithName("GetLicenseAccessSuccess")
+        .WithOpenApi();
+
+        license.MapGet("/account/licenses", [Authorize(Policy = SmartPosPolicies.ManagerOrOwner)] async (
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var response = await licenseService.GetCustomerLicensePortalAsync(cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .WithName("GetCustomerLicensePortal")
+        .WithOpenApi();
+
+        license.MapPost("/account/licenses/devices/{device_code}/deactivate", [Authorize(Policy = SmartPosPolicies.ManagerOrOwner)] async (
+            string device_code,
+            CustomerSelfServiceDeviceDeactivationRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.DeactivateDeviceViaSelfServiceAsync(device_code, request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .WithName("DeactivateCustomerLicenseDevice")
         .WithOpenApi();
 
         license.MapPut("/subscription/billing-provider", [Authorize(Roles = $"{SmartPosRoles.Owner},{SmartPosRoles.Manager}")] async (
@@ -254,6 +377,241 @@ public static class LicenseEndpoints
         .WithName("AdminSearchLicenseAuditLogs")
         .WithOpenApi();
 
+        admin.MapGet("/audit-logs/export", async (
+            string? search,
+            string? action,
+            string? actor,
+            string? format,
+            int? take,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            var normalizedFormat = string.IsNullOrWhiteSpace(format)
+                ? "csv"
+                : format.Trim().ToLowerInvariant();
+            if (normalizedFormat is not ("csv" or "json"))
+            {
+                return ToErrorResult(new LicenseException(
+                    LicenseErrorCodes.InvalidAdminRequest,
+                    "format must be either 'csv' or 'json'.",
+                    StatusCodes.Status400BadRequest));
+            }
+
+            var normalizedTake = Math.Clamp(take ?? 200, 1, 500);
+            if (normalizedFormat == "json")
+            {
+                var json = await licenseService.ExportAdminAuditLogsJsonAsync(
+                    search,
+                    action,
+                    actor,
+                    normalizedTake,
+                    cancellationToken);
+                return Results.File(
+                    Encoding.UTF8.GetBytes(json),
+                    "application/json; charset=utf-8",
+                    $"license-audit-logs-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}.json");
+            }
+
+            var csv = await licenseService.ExportAdminAuditLogsCsvAsync(
+                search,
+                action,
+                actor,
+                normalizedTake,
+                cancellationToken);
+            return Results.File(
+                Encoding.UTF8.GetBytes(csv),
+                "text/csv; charset=utf-8",
+                $"license-audit-logs-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}.csv");
+        })
+        .WithName("AdminExportLicenseAuditLogs")
+        .WithOpenApi();
+
+        admin.MapGet("/billing/invoices", [Authorize(Policy = SmartPosPolicies.SupportOrBilling)] async (
+            string? search,
+            string? status,
+            int? take,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var response = await licenseService.GetAdminManualInvoicesAsync(
+                    search,
+                    status,
+                    take ?? 50,
+                    cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.SupportOrBilling)
+        .WithName("AdminGetManualBillingInvoices")
+        .WithOpenApi();
+
+        admin.MapPost("/billing/invoices", [Authorize(Policy = SmartPosPolicies.SupportOrBilling)] async (
+            AdminManualBillingInvoiceCreateRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.CreateManualInvoiceAsAdminAsync(request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.SupportOrBilling)
+        .WithName("AdminCreateManualBillingInvoice")
+        .WithOpenApi();
+
+        admin.MapGet("/billing/payments", [Authorize(Policy = SmartPosPolicies.SupportOrBilling)] async (
+            string? search,
+            string? status,
+            int? take,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var response = await licenseService.GetAdminManualPaymentsAsync(
+                    search,
+                    status,
+                    take ?? 50,
+                    cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.SupportOrBilling)
+        .WithName("AdminGetManualBillingPayments")
+        .WithOpenApi();
+
+        admin.MapPost("/billing/payments/record", [Authorize(Policy = SmartPosPolicies.SupportOrBilling)] async (
+            AdminManualBillingPaymentRecordRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.RecordManualPaymentAsAdminAsync(request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.SupportOrBilling)
+        .WithName("AdminRecordManualBillingPayment")
+        .WithOpenApi();
+
+        admin.MapPost("/billing/payments/{payment_id:guid}/verify", [Authorize(Policy = SmartPosPolicies.BillingOrSecurity)] async (
+            Guid payment_id,
+            AdminManualBillingPaymentVerifyRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.VerifyManualPaymentAsAdminAsync(payment_id, request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.BillingOrSecurity)
+        .WithName("AdminVerifyManualBillingPayment")
+        .WithOpenApi();
+
+        admin.MapPost("/billing/payments/{payment_id:guid}/reject", [Authorize(Policy = SmartPosPolicies.BillingOrSecurity)] async (
+            Guid payment_id,
+            AdminManualBillingPaymentRejectRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.RejectManualPaymentAsAdminAsync(payment_id, request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.BillingOrSecurity)
+        .WithName("AdminRejectManualBillingPayment")
+        .WithOpenApi();
+
+        admin.MapGet("/billing/reconciliation/daily", [Authorize(Policy = SmartPosPolicies.SupportOrBilling)] async (
+            string? date,
+            string? currency,
+            decimal? expected_total,
+            int? take,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var response = await licenseService.GetDailyManualBankReconciliationAsync(
+                    date,
+                    currency,
+                    expected_total,
+                    take ?? 50,
+                    cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.SupportOrBilling)
+        .WithName("AdminGetDailyManualBillingReconciliation")
+        .WithOpenApi();
+
+        admin.MapPost("/billing/reconciliation/run", [Authorize(Policy = SmartPosPolicies.SupportOrBilling)] async (
+            AdminBillingStateReconciliationRunRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.RunBillingStateReconciliationAsAdminAsync(
+                    request,
+                    cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.SupportOrBilling)
+        .WithName("AdminRunBillingStateReconciliation")
+        .WithOpenApi();
+
         admin.MapPost("/devices/{device_code}/revoke", [Authorize(Policy = SmartPosPolicies.SuperAdmin)] async (
             string device_code,
             AdminDeviceActionRequest request,
@@ -275,6 +633,27 @@ public static class LicenseEndpoints
         .WithName("AdminRevokeDevice")
         .WithOpenApi();
 
+        admin.MapPost("/devices/{device_code}/deactivate", [Authorize(Policy = SmartPosPolicies.SuperAdmin)] async (
+            string device_code,
+            AdminDeviceActionRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.DeactivateDeviceAsAdminAsync(device_code, request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .WithName("AdminDeactivateDevice")
+        .WithOpenApi();
+
         admin.MapPost("/devices/{device_code}/reactivate", [Authorize(Policy = SmartPosPolicies.SuperAdmin)] async (
             string device_code,
             AdminDeviceActionRequest request,
@@ -294,6 +673,116 @@ public static class LicenseEndpoints
             }
         })
         .WithName("AdminReactivateDevice")
+        .WithOpenApi();
+
+        admin.MapPost("/devices/{device_code}/activate", [Authorize(Policy = SmartPosPolicies.SuperAdmin)] async (
+            string device_code,
+            AdminDeviceActionRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.ActivateDeviceAsAdminAsync(device_code, request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .WithName("AdminActivateDevice")
+        .WithOpenApi();
+
+        admin.MapPost("/devices/{device_code}/transfer-seat", [Authorize(Policy = SmartPosPolicies.SuperAdmin)] async (
+            string device_code,
+            AdminDeviceSeatTransferRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.TransferDeviceSeatAsAdminAsync(device_code, request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .WithName("AdminTransferDeviceSeat")
+        .WithOpenApi();
+
+        admin.MapPost("/devices/mass-revoke", [Authorize(Policy = SmartPosPolicies.SuperAdmin)] async (
+            AdminMassDeviceRevokeRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.MassRevokeDevicesAsAdminAsync(request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .WithName("AdminMassRevokeDevices")
+        .WithOpenApi();
+
+        admin.MapPost("/devices/{device_code}/emergency/envelope", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+            string device_code,
+            AdminEmergencyCommandEnvelopeRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.CreateEmergencyCommandEnvelopeAsAdminAsync(
+                    device_code,
+                    request,
+                    cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .WithName("AdminCreateEmergencyCommandEnvelope")
+        .WithOpenApi();
+
+        admin.MapPost("/devices/{device_code}/emergency/execute", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+            string device_code,
+            AdminEmergencyCommandExecuteRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.ExecuteEmergencyCommandAsAdminAsync(
+                    device_code,
+                    request,
+                    cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .WithName("AdminExecuteEmergencyCommand")
         .WithOpenApi();
 
         admin.MapPost("/devices/{device_code}/extend-grace", [Authorize(Policy = SmartPosPolicies.SuperAdmin)] async (
@@ -350,6 +839,14 @@ public static class LicenseEndpoints
                 Message = exception.Message
             }
         }, statusCode: exception.StatusCode);
+    }
+
+    private static void SyncLicenseTokenCookie(
+        HttpContext httpContext,
+        LicenseService licenseService,
+        LicenseStatusResponse response)
+    {
+        licenseService.WriteLicenseTokenCookie(httpContext, response.LicenseToken, response.ValidUntil);
     }
 
     private static void ValidateIdempotencyKey(HttpContext httpContext)

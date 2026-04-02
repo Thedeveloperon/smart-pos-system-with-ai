@@ -92,7 +92,8 @@ public sealed class LicensingMetrics : IDisposable
 
             var activeLicenses = dbContext.Licenses
                 .AsNoTracking()
-                .Where(x => x.Status == LicenseRecordStatus.Active)
+                .Where(x => x.Status == LicenseRecordStatus.Active &&
+                            (!x.RevokedAtUtc.HasValue || x.RevokedAtUtc > now))
                 .Select(x => new
                 {
                     x.ShopId,

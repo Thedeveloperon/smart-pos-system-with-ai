@@ -6,6 +6,7 @@ public interface ILicensingAlertMonitor
 {
     void RecordLicenseValidationFailure(string? code);
     void RecordWebhookFailure(string? eventType, string? reason = null);
+    void RecordSecurityAnomaly(string? reason);
     LicensingAlertSnapshot GetSnapshot(int windowMinutes);
 }
 
@@ -14,10 +15,13 @@ public sealed class LicensingAlertSnapshot
     public int WindowMinutes { get; set; }
     public int ValidationFailureCount { get; set; }
     public int WebhookFailureCount { get; set; }
+    public int SecurityAnomalyCount { get; set; }
     public List<LicensingAlertBreakdownItem> TopValidationFailures { get; set; } = [];
     public List<LicensingAlertBreakdownItem> TopWebhookFailures { get; set; } = [];
+    public List<LicensingAlertBreakdownItem> TopSecurityAnomalies { get; set; } = [];
     public DateTimeOffset? LastValidationAlertAtUtc { get; set; }
     public DateTimeOffset? LastWebhookAlertAtUtc { get; set; }
+    public DateTimeOffset? LastSecurityAlertAtUtc { get; set; }
 }
 
 public sealed class LicensingAlertBreakdownItem
@@ -34,6 +38,7 @@ public sealed class LicensingAlertMonitor(
     private static readonly HashSet<string> TrackedValidationCodes =
     [
         LicenseErrorCodes.InvalidToken,
+        LicenseErrorCodes.TokenReplayDetected,
         LicenseErrorCodes.DeviceMismatch,
         LicenseErrorCodes.LicenseExpired,
         LicenseErrorCodes.Revoked,
@@ -43,11 +48,13 @@ public sealed class LicensingAlertMonitor(
     private readonly object gate = new();
     private readonly List<AlertEvent> validationFailures = [];
     private readonly List<AlertEvent> webhookFailures = [];
+    private readonly List<AlertEvent> securityAnomalies = [];
     private readonly LicenseAlertOptions alertOptions = optionsAccessor.Value.Alerts;
     private readonly TimeSpan maxRetention = TimeSpan.FromHours(3);
 
     private DateTimeOffset lastValidationAlertAtUtc = DateTimeOffset.MinValue;
     private DateTimeOffset lastWebhookAlertAtUtc = DateTimeOffset.MinValue;
+    private DateTimeOffset lastSecurityAlertAtUtc = DateTimeOffset.MinValue;
 
     public void RecordLicenseValidationFailure(string? code)
     {
@@ -73,6 +80,19 @@ public sealed class LicensingAlertMonitor(
         {
             PruneExpiredEvents(DateTimeOffset.UtcNow);
             webhookFailures.Add(new AlertEvent(DateTimeOffset.UtcNow, $"{normalizedType}:{normalizedReason}"));
+        }
+    }
+
+    public void RecordSecurityAnomaly(string? reason)
+    {
+        var normalizedReason = string.IsNullOrWhiteSpace(reason)
+            ? "unknown_security_anomaly"
+            : reason.Trim().ToLowerInvariant();
+
+        lock (gate)
+        {
+            PruneExpiredEvents(DateTimeOffset.UtcNow);
+            securityAnomalies.Add(new AlertEvent(DateTimeOffset.UtcNow, normalizedReason));
         }
     }
 
@@ -131,6 +151,7 @@ public sealed class LicensingAlertMonitor(
         LicensingAlertSnapshot snapshot;
         bool shouldAlertValidation;
         bool shouldAlertWebhook;
+        bool shouldAlertSecurity;
 
         lock (gate)
         {
@@ -143,6 +164,9 @@ public sealed class LicensingAlertMonitor(
             shouldAlertWebhook = snapshot.WebhookFailureCount >= Math.Max(1, alertOptions.WebhookFailureThreshold)
                 && now - lastWebhookAlertAtUtc >= cooldown;
 
+            shouldAlertSecurity = snapshot.SecurityAnomalyCount >= Math.Max(1, alertOptions.SecurityAnomalyThreshold)
+                && now - lastSecurityAlertAtUtc >= cooldown;
+
             if (shouldAlertValidation)
             {
                 lastValidationAlertAtUtc = now;
@@ -151,6 +175,11 @@ public sealed class LicensingAlertMonitor(
             if (shouldAlertWebhook)
             {
                 lastWebhookAlertAtUtc = now;
+            }
+
+            if (shouldAlertSecurity)
+            {
+                lastSecurityAlertAtUtc = now;
             }
         }
 
@@ -171,6 +200,15 @@ public sealed class LicensingAlertMonitor(
                 alertOptions.WindowMinutes,
                 FormatTopEntries(snapshot.TopWebhookFailures));
         }
+
+        if (shouldAlertSecurity)
+        {
+            logger.LogWarning(
+                "Security anomaly spike detected: {FailureCount} events in last {WindowMinutes} minutes. Top reasons: {TopReasons}",
+                snapshot.SecurityAnomalyCount,
+                alertOptions.WindowMinutes,
+                FormatTopEntries(snapshot.TopSecurityAnomalies));
+        }
     }
 
     private void PruneExpiredEvents(DateTimeOffset now)
@@ -178,6 +216,7 @@ public sealed class LicensingAlertMonitor(
         var oldestAllowed = now - maxRetention;
         validationFailures.RemoveAll(x => x.TimestampUtc < oldestAllowed);
         webhookFailures.RemoveAll(x => x.TimestampUtc < oldestAllowed);
+        securityAnomalies.RemoveAll(x => x.TimestampUtc < oldestAllowed);
     }
 
     private LicensingAlertSnapshot BuildSnapshotUnsafe(DateTimeOffset now, TimeSpan window)
@@ -189,16 +228,22 @@ public sealed class LicensingAlertMonitor(
         var webhookInWindow = webhookFailures
             .Where(x => x.TimestampUtc >= windowStart)
             .ToList();
+        var securityInWindow = securityAnomalies
+            .Where(x => x.TimestampUtc >= windowStart)
+            .ToList();
 
         return new LicensingAlertSnapshot
         {
             WindowMinutes = (int)Math.Round(window.TotalMinutes),
             ValidationFailureCount = validationInWindow.Count,
             WebhookFailureCount = webhookInWindow.Count,
+            SecurityAnomalyCount = securityInWindow.Count,
             TopValidationFailures = BuildTopBreakdown(validationInWindow),
             TopWebhookFailures = BuildTopBreakdown(webhookInWindow),
+            TopSecurityAnomalies = BuildTopBreakdown(securityInWindow),
             LastValidationAlertAtUtc = lastValidationAlertAtUtc == DateTimeOffset.MinValue ? null : lastValidationAlertAtUtc,
-            LastWebhookAlertAtUtc = lastWebhookAlertAtUtc == DateTimeOffset.MinValue ? null : lastWebhookAlertAtUtc
+            LastWebhookAlertAtUtc = lastWebhookAlertAtUtc == DateTimeOffset.MinValue ? null : lastWebhookAlertAtUtc,
+            LastSecurityAlertAtUtc = lastSecurityAlertAtUtc == DateTimeOffset.MinValue ? null : lastSecurityAlertAtUtc
         };
     }
 

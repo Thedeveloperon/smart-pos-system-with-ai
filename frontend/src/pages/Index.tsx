@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useAuth } from "@/components/auth/AuthContext";
 import { useLicensing } from "@/components/licensing/LicensingContext";
 import { LicenseGraceBanner } from "@/components/licensing/LicenseScreens";
 import HeaderBar from "@/components/pos/HeaderBar";
+import LicenseAccountDialog from "@/components/pos/LicenseAccountDialog";
 import NewItemDialog from "@/components/pos/NewItemDialog";
 import ImportSupplierBillDialog from "@/components/pos/ImportSupplierBillDialog";
 import ProductManagementDialog from "@/components/pos/ProductManagementDialog";
@@ -35,6 +36,7 @@ import {
   voidSale,
 } from "@/lib/api";
 import { isSuperAdminBackendRole } from "@/lib/auth";
+import { flushOfflineSyncQueue, getOfflineSyncQueueSummary } from "@/lib/offlineSyncQueue";
 import { playCartAddSound } from "@/lib/sound";
 
 const IndexInner = () => {
@@ -64,9 +66,13 @@ const IndexInner = () => {
   const [showAuditLog, setShowAuditLog] = useState(false);
   const [showImportSupplierBill, setShowImportSupplierBill] = useState(false);
   const [showShopSettings, setShowShopSettings] = useState(false);
+  const [showLicenseAccount, setShowLicenseAccount] = useState(false);
   const [refundSaleId, setRefundSaleId] = useState<string | null>(null);
   const [salesRefreshToken, setSalesRefreshToken] = useState(0);
   const [mobileTab, setMobileTab] = useState<"products" | "cart" | "checkout">("products");
+  const [offlinePendingCount, setOfflinePendingCount] = useState(0);
+  const [isOfflineSyncing, setIsOfflineSyncing] = useState(false);
+  const isOfflineFlushInProgressRef = useRef(false);
 
   const {
     session,
@@ -105,6 +111,84 @@ const IndexInner = () => {
   useEffect(() => {
     void Promise.all([loadProducts(), loadHeldBills()]);
   }, [loadHeldBills, loadProducts]);
+
+  const refreshOfflineQueueSummary = useCallback(async () => {
+    try {
+      const summary = await getOfflineSyncQueueSummary();
+      setOfflinePendingCount(summary.pending);
+    } catch (error) {
+      console.error(error);
+    }
+  }, []);
+
+  const flushOfflineQueue = useCallback(async (source: "startup" | "online" | "interval" | "manual") => {
+    if (isOfflineFlushInProgressRef.current) {
+      return;
+    }
+
+    isOfflineFlushInProgressRef.current = true;
+    setIsOfflineSyncing(true);
+
+    try {
+      const result = await flushOfflineSyncQueue({ batchSize: 50 });
+      setOfflinePendingCount(result.pending);
+
+      if (result.attempted === 0) {
+        return;
+      }
+
+      const shouldNotify = source !== "interval";
+      if (shouldNotify && result.synced > 0) {
+        toast.success(`Synced ${result.synced} offline event${result.synced === 1 ? "" : "s"}.`);
+      }
+
+      if (shouldNotify && result.conflicts > 0) {
+        toast.info(`${result.conflicts} offline event${result.conflicts === 1 ? "" : "s"} had conflicts.`);
+      }
+
+      if (shouldNotify && result.rejected > 0) {
+        const reason = result.rejectionMessages[0];
+        const base = `${result.rejected} offline event${result.rejected === 1 ? "" : "s"} rejected.`;
+        toast.error(reason ? `${base} ${reason}` : base);
+      }
+
+      if (result.failureMessage && (source === "manual" || source === "online")) {
+        toast.error(result.failureMessage);
+      }
+    } catch (error) {
+      console.error(error);
+      if (source === "manual" || source === "online") {
+        toast.error("Failed to flush offline sync queue.");
+      }
+    } finally {
+      isOfflineFlushInProgressRef.current = false;
+      setIsOfflineSyncing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshOfflineQueueSummary();
+    void flushOfflineQueue("startup");
+
+    const handleOnline = () => {
+      void flushOfflineQueue("online");
+    };
+
+    const intervalId = window.setInterval(() => {
+      if (!navigator.onLine) {
+        return;
+      }
+
+      void flushOfflineQueue("interval");
+    }, 90 * 1000);
+
+    window.addEventListener("online", handleOnline);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("online", handleOnline);
+    };
+  }, [flushOfflineQueue, refreshOfflineQueueSummary]);
 
   const cartCount = cartItems.reduce((a, i) => a + i.quantity, 0);
   const needsOpening = !session || session.status === "closed";
@@ -289,6 +373,12 @@ const IndexInner = () => {
         onReports={() => setShowReports(true)}
         onImportSupplierBill={() => setShowImportSupplierBill(true)}
         onShopSettings={() => setShowShopSettings(true)}
+        onMyAccountLicenses={() => setShowLicenseAccount(true)}
+        onSyncOffline={isAdmin ? () => {
+          void flushOfflineQueue("manual");
+        } : undefined}
+        offlinePendingCount={offlinePendingCount}
+        isOfflineSyncing={isOfflineSyncing}
         onSignOut={() => {
           void logout();
         }}
@@ -443,6 +533,14 @@ const IndexInner = () => {
       <ShopProfileDialog
         open={showShopSettings}
         onOpenChange={setShowShopSettings}
+      />
+
+      <LicenseAccountDialog
+        open={showLicenseAccount}
+        onOpenChange={setShowLicenseAccount}
+        onChanged={() => {
+          void refreshLicenseStatus();
+        }}
       />
 
       <RefundSaleDialog

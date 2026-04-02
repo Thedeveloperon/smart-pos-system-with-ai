@@ -12,6 +12,9 @@ import {
   Upload,
   Settings2,
   PencilLine,
+  CloudUpload,
+  Loader2,
+  KeyRound,
 } from "lucide-react";
 
 interface HeaderBarProps {
@@ -24,6 +27,10 @@ interface HeaderBarProps {
   onReports?: () => void;
   onImportSupplierBill: () => void;
   onShopSettings?: () => void;
+  onMyAccountLicenses?: () => void;
+  onSyncOffline?: () => void;
+  offlinePendingCount?: number;
+  isOfflineSyncing?: boolean;
   onSignOut: () => void;
   onAuditLog?: () => void;
   onEndShift?: () => void;
@@ -41,6 +48,10 @@ const HeaderBar = ({
   onReports,
   onImportSupplierBill,
   onShopSettings,
+  onMyAccountLicenses,
+  onSyncOffline,
+  offlinePendingCount = 0,
+  isOfflineSyncing = false,
   onSignOut,
   onAuditLog,
   onEndShift,
@@ -162,6 +173,36 @@ const HeaderBar = ({
           >
             <Settings2 className="h-4 w-4" />
             <span className="hidden md:inline ml-1">Shop</span>
+          </Button>
+        )}
+
+        {isAdmin && onMyAccountLicenses && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onMyAccountLicenses}
+            className="text-pos-header-foreground hover:bg-pos-header-foreground/10"
+          >
+            <KeyRound className="h-4 w-4" />
+            <span className="hidden md:inline ml-1">My Licenses</span>
+          </Button>
+        )}
+
+        {onSyncOffline && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onSyncOffline}
+            disabled={isOfflineSyncing}
+            className="text-pos-header-foreground hover:bg-pos-header-foreground/10 relative"
+          >
+            {isOfflineSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudUpload className="h-4 w-4" />}
+            <span className="hidden md:inline ml-1">Sync</span>
+            {offlinePendingCount > 0 && (
+              <Badge className="absolute -top-1 -right-1 h-5 min-w-5 px-1.5 flex items-center justify-center text-[10px] bg-warning text-warning-foreground">
+                {offlinePendingCount > 99 ? "99+" : offlinePendingCount}
+              </Badge>
+            )}
           </Button>
         )}
 

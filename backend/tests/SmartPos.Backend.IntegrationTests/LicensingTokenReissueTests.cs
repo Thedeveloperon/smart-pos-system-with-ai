@@ -1,3 +1,6 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SmartPos.Backend.Domain;
@@ -10,6 +13,7 @@ public sealed class LicensingTokenReissueTests(CustomWebApplicationFactory facto
     : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly CustomWebApplicationFactory appFactory = factory;
+    private readonly HttpClient client = factory.CreateClient();
 
     [Fact]
     public async Task ReconcileSubscriptionStateAsync_ShouldForceReissueAndRevokePreviousToken()
@@ -40,8 +44,7 @@ public sealed class LicensingTokenReissueTests(CustomWebApplicationFactory facto
             Reason = "force reissue on subscription change"
         }, CancellationToken.None);
 
-        var statusWithOriginalToken = await licenseService.GetStatusAsync(deviceCode, originalToken, CancellationToken.None);
-        Assert.Equal("revoked", statusWithOriginalToken.State);
+        await AssertStatusWithOldTokenRejectedAsync(deviceCode, originalToken);
 
         var provisionedDevice = await dbContext.ProvisionedDevices
             .AsNoTracking()
@@ -83,8 +86,7 @@ public sealed class LicensingTokenReissueTests(CustomWebApplicationFactory facto
             Actor = "integration-tests"
         }, CancellationToken.None);
 
-        var firstDeviceStatusWithOldToken = await licenseService.GetStatusAsync(firstDeviceCode, firstToken, CancellationToken.None);
-        Assert.Equal("revoked", firstDeviceStatusWithOldToken.State);
+        await AssertStatusWithOldTokenRejectedAsync(firstDeviceCode, firstToken);
 
         var firstProvisionedDevice = await dbContext.ProvisionedDevices
             .AsNoTracking()
@@ -98,5 +100,21 @@ public sealed class LicensingTokenReissueTests(CustomWebApplicationFactory facto
 
         Assert.Single(replacementToken);
         Assert.NotEqual(firstToken, replacementToken[0]);
+    }
+
+    private async Task AssertStatusWithOldTokenRejectedAsync(string deviceCode, string token)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"/api/license/status?device_code={Uri.EscapeDataString(deviceCode)}");
+        request.Headers.Add("X-License-Token", token);
+
+        var response = await client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+
+        var payload = await response.Content.ReadFromJsonAsync<JsonObject>();
+        Assert.Equal(
+            "TOKEN_REPLAY_DETECTED",
+            payload?["error"]?["code"]?.GetValue<string>());
     }
 }

@@ -393,6 +393,26 @@ public sealed class ReportService(
         var allAuditLogs = await dbContext.LicenseAuditLogs
             .AsNoTracking()
             .ToListAsync(cancellationToken);
+        List<AuditLog> authSecurityLogsInWindow;
+        if (dbContext.Database.IsSqlite())
+        {
+            authSecurityLogsInWindow = (await dbContext.AuditLogs
+                    .AsNoTracking()
+                    .Where(x => x.Action == "auth_anomaly_impossible_travel" ||
+                                x.Action == "auth_anomaly_concurrent_devices")
+                    .ToListAsync(cancellationToken))
+                .Where(x => x.CreatedAtUtc >= windowStart)
+                .ToList();
+        }
+        else
+        {
+            authSecurityLogsInWindow = await dbContext.AuditLogs
+                .AsNoTracking()
+                .Where(x => x.CreatedAtUtc >= windowStart &&
+                            (x.Action == "auth_anomaly_impossible_travel" ||
+                             x.Action == "auth_anomaly_concurrent_devices"))
+                .ToListAsync(cancellationToken);
+        }
 
         var activityLogs = allAuditLogs
             .Where(x => x.CreatedAtUtc >= windowStart)
@@ -404,6 +424,10 @@ public sealed class ReportService(
             DeactivationsInWindow = activityLogs.Count(x => x.Action == "provision_deactivate"),
             HeartbeatsInWindow = activityLogs.Count(x => x.Action == "license_heartbeat")
         };
+        var sensitiveActionProofFailureLogs = activityLogs
+            .Where(x => x.Action == "sensitive_action_proof_failed")
+            .ToList();
+        var devicesWithUnusualSourceChanges = CountDevicesWithUnusualSourceChanges(activityLogs);
 
         var recentAuditLogs = allAuditLogs
             .OrderByDescending(x => x.CreatedAtUtc)
@@ -411,6 +435,10 @@ public sealed class ReportService(
             .ToList();
 
         var alertSnapshot = alertMonitor.GetSnapshot(normalizedWindowMinutes);
+        var authImpossibleTravelSignals = authSecurityLogsInWindow
+            .Count(x => x.Action == "auth_anomaly_impossible_travel");
+        var authConcurrentDeviceSignals = authSecurityLogsInWindow
+            .Count(x => x.Action == "auth_anomaly_concurrent_devices");
 
         return new SupportTriageReportResponse
         {
@@ -423,6 +451,11 @@ public sealed class ReportService(
             {
                 ValidationFailuresInWindow = alertSnapshot.ValidationFailureCount,
                 WebhookFailuresInWindow = alertSnapshot.WebhookFailureCount,
+                SecurityAnomaliesInWindow = alertSnapshot.SecurityAnomalyCount,
+                AuthImpossibleTravelSignalsInWindow = authImpossibleTravelSignals,
+                AuthConcurrentDeviceSignalsInWindow = authConcurrentDeviceSignals,
+                SensitiveActionProofFailuresInWindow = sensitiveActionProofFailureLogs.Count,
+                DevicesWithUnusualSourceChangesInWindow = devicesWithUnusualSourceChanges,
                 TopValidationFailures = alertSnapshot.TopValidationFailures
                     .Select(x => new SupportAlertBreakdownRow
                     {
@@ -437,8 +470,17 @@ public sealed class ReportService(
                         Count = x.Count
                     })
                     .ToList(),
+                TopSecurityAnomalies = alertSnapshot.TopSecurityAnomalies
+                    .Select(x => new SupportAlertBreakdownRow
+                    {
+                        Reason = x.Reason,
+                        Count = x.Count
+                    })
+                    .ToList(),
+                TopSensitiveActionFailureSources = BuildTopSensitiveActionFailureSources(sensitiveActionProofFailureLogs),
                 LastValidationAlertAt = alertSnapshot.LastValidationAlertAtUtc,
-                LastWebhookAlertAt = alertSnapshot.LastWebhookAlertAtUtc
+                LastWebhookAlertAt = alertSnapshot.LastWebhookAlertAtUtc,
+                LastSecurityAlertAt = alertSnapshot.LastSecurityAlertAtUtc
             },
             RecentAuditEvents = recentAuditLogs
                 .Select(x => new SupportLicenseAuditEventRow
@@ -447,7 +489,11 @@ public sealed class ReportService(
                     Action = x.Action,
                     Actor = x.Actor,
                     DeviceCode = ExtractDeviceCode(x.MetadataJson),
-                    Reason = x.Reason
+                    Reason = x.Reason,
+                    SourceIp = ExtractMetadataString(x.MetadataJson, "source_ip"),
+                    SourceIpPrefix = ExtractMetadataString(x.MetadataJson, "source_ip_prefix"),
+                    SourceUserAgentFamily = ExtractMetadataString(x.MetadataJson, "source_user_agent_family"),
+                    SourceFingerprint = ExtractMetadataString(x.MetadataJson, "source_fingerprint")
                 })
                 .ToList()
         };
@@ -533,7 +579,8 @@ public sealed class ReportService(
             return SupportLicenseState.MissingLicense;
         }
 
-        if (license.Status == LicenseRecordStatus.Revoked)
+        if (license.Status == LicenseRecordStatus.Revoked ||
+            (license.RevokedAtUtc.HasValue && now >= license.RevokedAtUtc.Value))
         {
             return SupportLicenseState.Revoked;
         }
@@ -590,6 +637,113 @@ public sealed class ReportService(
         }
 
         return null;
+    }
+
+    private static string? ExtractMetadataString(string? metadataJson, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(metadataJson) || string.IsNullOrWhiteSpace(propertyName))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(metadataJson);
+            if (!document.RootElement.TryGetProperty(propertyName, out var value))
+            {
+                return null;
+            }
+
+            var stringValue = value.GetString();
+            return string.IsNullOrWhiteSpace(stringValue) ? null : stringValue;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static int CountDevicesWithUnusualSourceChanges(IEnumerable<LicenseAuditLog> logs)
+    {
+        return logs
+            .Select(log => new
+            {
+                DeviceKey = ResolveDeviceSourceKey(log),
+                SourceKey = ResolveSourceKey(log)
+            })
+            .Where(x => !string.IsNullOrWhiteSpace(x.DeviceKey) && !string.IsNullOrWhiteSpace(x.SourceKey))
+            .GroupBy(x => x.DeviceKey!)
+            .Count(group => group
+                .Select(x => x.SourceKey!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(2)
+                .Count() > 1);
+    }
+
+    private static List<SupportAlertBreakdownRow> BuildTopSensitiveActionFailureSources(
+        IEnumerable<LicenseAuditLog> failureLogs)
+    {
+        return failureLogs
+            .Select(log => ResolveSourceDisplayLabel(log))
+            .GroupBy(label => label, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new SupportAlertBreakdownRow
+            {
+                Reason = group.Key,
+                Count = group.Count()
+            })
+            .OrderByDescending(x => x.Count)
+            .ThenBy(x => x.Reason)
+            .Take(5)
+            .ToList();
+    }
+
+    private static string? ResolveDeviceSourceKey(LicenseAuditLog log)
+    {
+        if (log.ProvisionedDeviceId.HasValue)
+        {
+            return $"id:{log.ProvisionedDeviceId.Value:N}";
+        }
+
+        var metadataDeviceCode = ExtractDeviceCode(log.MetadataJson);
+        return string.IsNullOrWhiteSpace(metadataDeviceCode)
+            ? null
+            : $"code:{metadataDeviceCode.ToLowerInvariant()}";
+    }
+
+    private static string? ResolveSourceKey(LicenseAuditLog log)
+    {
+        var fingerprint = ExtractMetadataString(log.MetadataJson, "source_fingerprint");
+        if (!string.IsNullOrWhiteSpace(fingerprint))
+        {
+            return $"fingerprint:{fingerprint.ToLowerInvariant()}";
+        }
+
+        var ipPrefix = ExtractMetadataString(log.MetadataJson, "source_ip_prefix");
+        var userAgentFamily = ExtractMetadataString(log.MetadataJson, "source_user_agent_family");
+        if (!string.IsNullOrWhiteSpace(ipPrefix) || !string.IsNullOrWhiteSpace(userAgentFamily))
+        {
+            return $"fallback:{(ipPrefix ?? "unknown").ToLowerInvariant()}|{(userAgentFamily ?? "unknown").ToLowerInvariant()}";
+        }
+
+        return null;
+    }
+
+    private static string ResolveSourceDisplayLabel(LicenseAuditLog log)
+    {
+        var sourceFingerprint = ExtractMetadataString(log.MetadataJson, "source_fingerprint");
+        if (!string.IsNullOrWhiteSpace(sourceFingerprint))
+        {
+            return $"fingerprint:{sourceFingerprint}";
+        }
+
+        var ipPrefix = ExtractMetadataString(log.MetadataJson, "source_ip_prefix");
+        var userAgentFamily = ExtractMetadataString(log.MetadataJson, "source_user_agent_family");
+        if (!string.IsNullOrWhiteSpace(ipPrefix) || !string.IsNullOrWhiteSpace(userAgentFamily))
+        {
+            return $"{userAgentFamily ?? "unknown"}@{ipPrefix ?? "unknown"}";
+        }
+
+        return "unknown_source";
     }
 
     private sealed record DateRange(

@@ -1,12 +1,15 @@
 import { AlertCircle, AlertTriangle, ShieldAlert, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import type { LicenseStatus } from "@/lib/api";
 
 type LicenseActivationScreenProps = {
   deviceCode?: string;
   error?: string | null;
   isBusy?: boolean;
-  onActivate: () => void;
+  activationEntitlementKey?: string;
+  onActivationEntitlementKeyChange?: (value: string) => void;
+  onActivate: (activationEntitlementKey?: string) => void;
   onRefresh: () => void;
 };
 
@@ -15,7 +18,7 @@ type LicenseBlockedScreenProps = {
   error?: string | null;
   isBusy?: boolean;
   onRefresh: () => void;
-  onActivate: () => void;
+  onActivate: (activationEntitlementKey?: string) => void;
 };
 
 type LicenseGraceBannerProps = {
@@ -55,6 +58,8 @@ export const LicenseActivationScreen = ({
   deviceCode,
   error,
   isBusy,
+  activationEntitlementKey,
+  onActivationEntitlementKeyChange,
   onActivate,
   onRefresh,
 }: LicenseActivationScreenProps) => {
@@ -79,6 +84,19 @@ export const LicenseActivationScreen = ({
             </div>
           </div>
 
+          <div className="space-y-2">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Activation Key</p>
+            <Input
+              value={activationEntitlementKey || ""}
+              onChange={(event) => onActivationEntitlementKeyChange?.(event.target.value)}
+              placeholder="SPK-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
+              disabled={isBusy}
+            />
+            <p className="text-xs text-muted-foreground">
+              Enter the key shared after payment verification (cash or bank deposit).
+            </p>
+          </div>
+
           {error && (
             <div className="rounded-xl bg-destructive/10 text-destructive text-sm px-3 py-2 flex items-start gap-2">
               <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
@@ -90,7 +108,7 @@ export const LicenseActivationScreen = ({
             <Button
               variant="pos-primary"
               className="rounded-xl"
-              onClick={onActivate}
+              onClick={() => onActivate(activationEntitlementKey)}
               disabled={isBusy}
             >
               {isBusy ? "Activating..." : "Activate Device"}
@@ -149,7 +167,9 @@ export const LicenseBlockedScreen = ({
           <div className="space-y-2 text-sm text-muted-foreground">
             <p className="font-medium text-foreground">Recovery steps</p>
             <ol className="list-decimal pl-5 space-y-1">
-              <li>Confirm the shop subscription is active and seat allocation is available.</li>
+              <li>Renew or settle the subscription payment for this shop.</li>
+              <li>Sign in to super admin billing/support and verify the device allocation.</li>
+              <li>Contact support with this device code if lock state remains after payment.</li>
               <li>Re-run activation to request a fresh license token for this device.</li>
               <li>Use Recheck Status after payment or provisioning updates complete.</li>
             </ol>
@@ -168,6 +188,9 @@ export const LicenseBlockedScreen = ({
             </Button>
             <Button variant="pos-primary" className="rounded-xl" onClick={onActivate} disabled={isBusy}>
               Retry Activation
+            </Button>
+            <Button asChild variant="ghost" className="rounded-xl sm:col-span-2">
+              <a href="/admin/login">Open Admin Sign-In</a>
             </Button>
           </div>
         </div>

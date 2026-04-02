@@ -29,9 +29,15 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
     public DbSet<Shop> Shops => Set<Shop>();
     public DbSet<Subscription> Subscriptions => Set<Subscription>();
     public DbSet<ProvisionedDevice> ProvisionedDevices => Set<ProvisionedDevice>();
+    public DbSet<DeviceKeyChallenge> DeviceKeyChallenges => Set<DeviceKeyChallenge>();
+    public DbSet<DeviceActionChallenge> DeviceActionChallenges => Set<DeviceActionChallenge>();
     public DbSet<LicenseRecord> Licenses => Set<LicenseRecord>();
+    public DbSet<LicenseTokenSession> LicenseTokenSessions => Set<LicenseTokenSession>();
     public DbSet<LicenseAuditLog> LicenseAuditLogs => Set<LicenseAuditLog>();
     public DbSet<BillingWebhookEvent> BillingWebhookEvents => Set<BillingWebhookEvent>();
+    public DbSet<ManualBillingInvoice> ManualBillingInvoices => Set<ManualBillingInvoice>();
+    public DbSet<ManualBillingPayment> ManualBillingPayments => Set<ManualBillingPayment>();
+    public DbSet<CustomerActivationEntitlement> CustomerActivationEntitlements => Set<CustomerActivationEntitlement>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -330,6 +336,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.RejectionReason).HasMaxLength(250);
             entity.HasIndex(x => x.EventId).IsUnique();
             entity.HasIndex(x => x.DeviceId);
+            entity.HasIndex(x => x.OfflineGrantId);
         });
 
         modelBuilder.Entity<Shop>(entity =>
@@ -364,14 +371,38 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.DeviceCode).HasMaxLength(64);
             entity.Property(x => x.Name).HasMaxLength(120);
             entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.DeviceKeyFingerprint).HasMaxLength(128);
+            entity.Property(x => x.DeviceKeyAlgorithm).HasMaxLength(64);
+            entity.Property(x => x.DevicePublicKeySpki).HasColumnType("text");
             entity.HasIndex(x => x.ShopId);
             entity.HasIndex(x => x.DeviceId);
             entity.HasIndex(x => x.Status);
             entity.HasIndex(x => x.DeviceCode).IsUnique();
+            entity.HasIndex(x => x.DeviceKeyFingerprint);
             entity.HasOne(x => x.Shop)
                 .WithMany(x => x.ProvisionedDevices)
                 .HasForeignKey(x => x.ShopId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<DeviceKeyChallenge>(entity =>
+        {
+            entity.ToTable("device_key_challenges");
+            entity.Property(x => x.DeviceCode).HasMaxLength(128);
+            entity.Property(x => x.Nonce).HasMaxLength(256);
+            entity.HasIndex(x => x.DeviceCode);
+            entity.HasIndex(x => x.ExpiresAtUtc);
+            entity.HasIndex(x => x.ConsumedAtUtc);
+        });
+
+        modelBuilder.Entity<DeviceActionChallenge>(entity =>
+        {
+            entity.ToTable("device_action_challenges");
+            entity.Property(x => x.DeviceCode).HasMaxLength(128);
+            entity.Property(x => x.Nonce).HasMaxLength(256);
+            entity.HasIndex(x => x.DeviceCode);
+            entity.HasIndex(x => x.ExpiresAtUtc);
+            entity.HasIndex(x => x.ConsumedAtUtc);
         });
 
         modelBuilder.Entity<LicenseRecord>(entity =>
@@ -393,6 +424,31 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.HasOne(x => x.ProvisionedDevice)
                 .WithMany(x => x.Licenses)
                 .HasForeignKey(x => x.ProvisionedDeviceId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<LicenseTokenSession>(entity =>
+        {
+            entity.ToTable("license_token_sessions");
+            entity.Property(x => x.Jti).HasMaxLength(120);
+            entity.Property(x => x.ReplacedByJti).HasMaxLength(120);
+            entity.HasIndex(x => x.ShopId);
+            entity.HasIndex(x => x.ProvisionedDeviceId);
+            entity.HasIndex(x => x.LicenseId);
+            entity.HasIndex(x => x.Jti).IsUnique();
+            entity.HasIndex(x => x.RejectAfterUtc);
+            entity.HasIndex(x => x.RevokedAtUtc);
+            entity.HasOne<Shop>()
+                .WithMany()
+                .HasForeignKey(x => x.ShopId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<ProvisionedDevice>()
+                .WithMany()
+                .HasForeignKey(x => x.ProvisionedDeviceId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<LicenseRecord>()
+                .WithMany()
+                .HasForeignKey(x => x.LicenseId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -433,6 +489,73 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
                 .WithMany()
                 .HasForeignKey(x => x.ShopId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<ManualBillingInvoice>(entity =>
+        {
+            entity.ToTable("manual_billing_invoices");
+            entity.Property(x => x.InvoiceNumber).HasMaxLength(80);
+            entity.Property(x => x.AmountDue).HasPrecision(18, 2);
+            entity.Property(x => x.AmountPaid).HasPrecision(18, 2);
+            entity.Property(x => x.Currency).HasMaxLength(8);
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.Notes).HasMaxLength(500);
+            entity.Property(x => x.CreatedBy).HasMaxLength(120);
+            entity.HasIndex(x => x.ShopId);
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => x.DueAtUtc);
+            entity.HasIndex(x => new { x.ShopId, x.InvoiceNumber }).IsUnique();
+            entity.HasOne(x => x.Shop)
+                .WithMany(x => x.ManualBillingInvoices)
+                .HasForeignKey(x => x.ShopId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ManualBillingPayment>(entity =>
+        {
+            entity.ToTable("manual_billing_payments");
+            entity.Property(x => x.Method).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.Amount).HasPrecision(18, 2);
+            entity.Property(x => x.Currency).HasMaxLength(8);
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.BankReference).HasMaxLength(160);
+            entity.Property(x => x.DepositSlipUrl).HasMaxLength(500);
+            entity.Property(x => x.Notes).HasMaxLength(500);
+            entity.Property(x => x.RecordedBy).HasMaxLength(120);
+            entity.Property(x => x.VerifiedBy).HasMaxLength(120);
+            entity.Property(x => x.RejectedBy).HasMaxLength(120);
+            entity.Property(x => x.RejectionReason).HasMaxLength(500);
+            entity.HasIndex(x => x.ShopId);
+            entity.HasIndex(x => x.InvoiceId);
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => x.ReceivedAtUtc);
+            entity.HasOne(x => x.Shop)
+                .WithMany(x => x.ManualBillingPayments)
+                .HasForeignKey(x => x.ShopId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Invoice)
+                .WithMany(x => x.Payments)
+                .HasForeignKey(x => x.InvoiceId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<CustomerActivationEntitlement>(entity =>
+        {
+            entity.ToTable("customer_activation_entitlements");
+            entity.Property(x => x.EntitlementKeyHash).HasMaxLength(128);
+            entity.Property(x => x.EntitlementKey).HasColumnType("text");
+            entity.Property(x => x.Source).HasMaxLength(80);
+            entity.Property(x => x.SourceReference).HasMaxLength(160);
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(24);
+            entity.Property(x => x.IssuedBy).HasMaxLength(120);
+            entity.HasIndex(x => x.ShopId);
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => x.ExpiresAtUtc);
+            entity.HasIndex(x => x.EntitlementKeyHash).IsUnique();
+            entity.HasOne(x => x.Shop)
+                .WithMany(x => x.CustomerActivationEntitlements)
+                .HasForeignKey(x => x.ShopId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

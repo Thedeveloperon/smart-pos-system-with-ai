@@ -44,6 +44,8 @@ public sealed class LicensingWebhookEventHandlingTests(CustomWebApplicationFacto
         Assert.True(paidResult.Handled);
         Assert.Equal("active", paidResult.SubscriptionStatus);
         Assert.Equal(billingSync.ShopId, paidResult.ShopId);
+        Assert.NotNull(paidResult.ActivationEntitlement);
+        Assert.False(string.IsNullOrWhiteSpace(paidResult.ActivationEntitlement?.ActivationEntitlementKey));
 
         var paymentFailedResult = await licenseService.HandleBillingWebhookAsync(new BillingWebhookEventRequest
         {
@@ -93,6 +95,14 @@ public sealed class LicensingWebhookEventHandlingTests(CustomWebApplicationFacto
         Assert.Equal("starter", subscription.Plan);
         Assert.Equal(2, subscription.SeatLimit);
         Assert.Equal("price_growth_001", subscription.BillingPriceId);
+
+        var entitlements = (await dbContext.CustomerActivationEntitlements
+                .Where(x => x.ShopId == billingSync.ShopId)
+                .ToListAsync())
+            .OrderByDescending(x => x.IssuedAtUtc)
+            .ToList();
+        Assert.NotEmpty(entitlements);
+        Assert.Equal("billing_webhook_invoice_paid", entitlements[0].Source);
 
         var featureFlags = DeserializeFeatureFlags(subscription.FeatureFlagsJson);
         Assert.Contains("reports-basic", featureFlags);

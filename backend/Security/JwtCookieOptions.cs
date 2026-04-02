@@ -6,6 +6,7 @@ public sealed class JwtCookieOptions
 
     public string Issuer { get; set; } = "smartpos-api";
     public string Audience { get; set; } = "smartpos-pwa";
+    public string SecretKeyEnvironmentVariable { get; set; } = "SMARTPOS_JWT_SECRET";
     public string SecretKey { get; set; } =
         "smartpos-dev-secret-key-change-before-production-2026";
     public int ExpiryMinutes { get; set; } = 480;
