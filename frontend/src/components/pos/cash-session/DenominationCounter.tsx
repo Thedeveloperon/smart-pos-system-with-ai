@@ -1,4 +1,4 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Banknote, Coins, Minus, Plus } from "lucide-react";
 import { SRI_LANKAN_DENOMINATIONS, type DenominationCount } from "./types";
@@ -35,53 +35,47 @@ const DenominationCounter = ({ onChange, initialCounts }: DenominationCounterPro
   const notes = SRI_LANKAN_DENOMINATIONS.filter((d) => !isCoin(d.value));
   const coins = SRI_LANKAN_DENOMINATIONS.filter((d) => isCoin(d.value));
 
-  const cardClass = (qty: number) =>
-    `flex min-h-[4rem] flex-col justify-center rounded-2xl border px-2 py-0 shadow-sm transition-all duration-150 ${
-      qty > 0
-        ? "border-primary/25 bg-primary/5 shadow-[0_6px_18px_rgba(16,185,129,0.08)]"
-        : "border-border/70 bg-card hover:border-border hover:bg-muted/20"
-    }`;
+  const notesTotal = notes.reduce(
+    (sum, denomination) => sum + denomination.value * (quantities[denomination.value] || 0),
+    0,
+  );
+  const coinsTotal = coins.reduce(
+    (sum, denomination) => sum + denomination.value * (quantities[denomination.value] || 0),
+    0,
+  );
 
   const renderItem = (d: (typeof SRI_LANKAN_DENOMINATIONS)[number], icon: "note" | "coin") => {
     const qty = quantities[d.value] || 0;
 
     return (
-      <div key={d.value} className={cardClass(qty)}>
-        <div className="grid grid-cols-[2.25rem_auto_2.25rem] items-center gap-1.5">
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            onClick={() => handleChange(d.value, qty - 1)}
-            disabled={qty <= 0}
-            className="h-10 w-10 shrink-0 rounded-xl border-2 border-rose-200 bg-rose-50 text-rose-600 shadow-sm transition-all hover:border-rose-300 hover:bg-rose-100 hover:text-rose-700 focus-visible:ring-rose-300 disabled:border-border disabled:bg-muted disabled:text-muted-foreground"
-            aria-label={`Decrease ${d.label}`}
-          >
-            <Minus className="h-4.5 w-4.5" />
-          </Button>
-
-          <div className="flex min-w-0 items-center justify-center gap-1.5 justify-self-center">
-            <div className="flex min-w-0 items-center gap-1">
-              <span
-                className={`flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-md ${
-                  icon === "note" ? "text-sky-600" : "text-amber-600"
-                }`}
-                aria-hidden="true"
-              >
-                {icon === "note" ? <Banknote className="h-3 w-3" /> : <Coins className="h-3 w-3" />}
-              </span>
-              <span className="text-[1.2rem] font-semibold tracking-tight text-slate-600">Rs.{d.label}</span>
-            </div>
-
-            <div
-              className={`inline-flex min-w-10 items-center justify-center rounded-full px-3 py-1 text-sm font-black tabular-nums text-white shadow-sm ${
-                qty <= 5 ? "bg-rose-500" : qty <= 10 ? "bg-amber-500" : "bg-emerald-500"
+      <div key={d.value} className="grid grid-cols-[minmax(0,1fr),auto] items-center gap-2 rounded-xl px-0.5 py-1">
+        <div className="flex min-w-0 items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <span
+              className={`flex h-4 w-4 shrink-0 items-center justify-center ${
+                icon === "note" ? "text-slate-500" : "text-slate-500"
               }`}
-              aria-live="polite"
-              aria-atomic="true"
+              aria-hidden="true"
             >
-              {qty}
-            </div>
+              {icon === "note" ? <Banknote className="h-3 w-3" /> : <Coins className="h-3 w-3" />}
+            </span>
+            <span className="truncate text-[1rem] font-semibold leading-none tracking-tight text-slate-700">
+              Rs.{d.label}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={() => handleChange(d.value, qty - 1)}
+              disabled={qty <= 0}
+              className="h-9 w-9 rounded-lg border border-slate-300 bg-slate-50 text-slate-500 shadow-none hover:bg-slate-100 hover:text-slate-700 disabled:opacity-60"
+              aria-label={`Decrease ${d.label}`}
+            >
+              <Minus className="h-4 w-4" />
+            </Button>
 
             <input
               type="number"
@@ -90,64 +84,72 @@ const DenominationCounter = ({ onChange, initialCounts }: DenominationCounterPro
               inputMode="numeric"
               value={qty}
               onChange={(event) => handleChange(d.value, Number(event.target.value))}
-              className="h-10 w-16 rounded-xl border-[3px] border-[#f39a6b] bg-background text-center text-sm font-semibold tabular-nums text-slate-700 shadow-sm outline-none transition-colors focus:border-[#f39a6b] focus:ring-2 focus:ring-[#f39a6b]/20"
+              className="h-9 w-[3.5rem] rounded-md border border-slate-300 bg-white px-2 text-center text-sm font-medium tabular-nums text-slate-700 outline-none transition-colors focus:border-primary/60 focus:ring-2 focus:ring-primary/20"
               aria-label={`${d.label} quantity`}
             />
-          </div>
 
-          <Button
-            type="button"
-            variant="pos-primary"
-            size="icon"
-            onClick={() => handleChange(d.value, qty + 1)}
-            className="h-10 w-10 shrink-0 rounded-xl border-2 border-primary bg-primary text-primary-foreground shadow-md transition-all hover:bg-primary/90 focus-visible:ring-primary/40"
-            aria-label={`Increase ${d.label}`}
-          >
-            <Plus className="h-4.5 w-4.5" />
-          </Button>
+            <Button
+              type="button"
+              variant="pos-primary"
+              size="icon"
+              onClick={() => handleChange(d.value, qty + 1)}
+              className="h-9 w-9 rounded-lg border border-primary bg-primary text-primary-foreground shadow-none hover:bg-primary/90"
+              aria-label={`Increase ${d.label}`}
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+
+            <span
+              className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold tabular-nums text-white"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              {qty}
+            </span>
+          </div>
         </div>
       </div>
     );
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2.5 overflow-hidden">
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 md:grid-cols-2 md:items-stretch">
-        <section className="flex min-h-0 h-full flex-col self-stretch rounded-3xl border border-border/70 bg-background/70 p-2 shadow-sm">
-          <div className="mb-2 flex items-center justify-between gap-3">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-300 bg-[#f7f8fa]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 divide-y divide-slate-300 md:grid-cols-2 md:divide-x md:divide-y-0">
+        <section className="flex min-h-0 h-full flex-col p-3">
+          <div className="mb-2.5 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Banknote className="h-4 w-4 text-sky-600" />
-              <h3 className="text-sm font-medium uppercase tracking-[0.22em] text-slate-600">Notes</h3>
+              <Banknote className="h-4 w-4 text-slate-500" />
+              <h3 className="text-xs font-medium uppercase tracking-[0.18em] text-slate-600">Notes</h3>
             </div>
-            <span className="rounded-full border border-border/70 bg-background px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500">
-              {notes.length} items
+            <span className="text-xs font-medium text-slate-500">
+              {notes.length} items - Rs.{notesTotal.toLocaleString()}
             </span>
           </div>
 
-          <div className="grid flex-1 min-h-0 auto-rows-min content-start grid-cols-1 gap-1 overflow-hidden pr-[2px] sm:pr-0">
+          <div className="grid flex-1 min-h-0 auto-rows-min content-start grid-cols-1 gap-0.5 overflow-y-auto pr-1">
             {notes.map((d) => renderItem(d, "note"))}
           </div>
         </section>
 
-        <section className="flex min-h-0 h-full flex-col self-stretch rounded-3xl border border-border/70 bg-background/70 p-2 shadow-sm">
-          <div className="mb-2 flex items-center justify-between gap-3">
+        <section className="flex min-h-0 h-full flex-col p-3">
+          <div className="mb-2.5 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Coins className="h-4 w-4 text-amber-600" />
-              <h3 className="text-sm font-medium uppercase tracking-[0.22em] text-slate-600">Coins</h3>
+              <Coins className="h-4 w-4 text-slate-500" />
+              <h3 className="text-xs font-medium uppercase tracking-[0.18em] text-slate-600">Coins</h3>
             </div>
-            <span className="rounded-full border border-border/70 bg-background px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500">
-              {coins.length} items
+            <span className="text-xs font-medium text-slate-500">
+              {coins.length} items - Rs.{coinsTotal.toLocaleString()}
             </span>
           </div>
 
-          <div className="grid flex-1 min-h-0 auto-rows-min content-start grid-cols-1 gap-1 overflow-hidden pr-[2px] sm:pr-0">
+          <div className="grid flex-1 min-h-0 auto-rows-min content-start grid-cols-1 gap-0.5 overflow-y-auto pr-1">
             {coins.map((d) => renderItem(d, "coin"))}
           </div>
         </section>
       </div>
-
     </div>
   );
 };
 
 export default DenominationCounter;
+

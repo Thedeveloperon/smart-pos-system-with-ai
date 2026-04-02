@@ -82,8 +82,8 @@ const ClosingCashDialog = ({
   if (step === "reason") {
     return (
       <Dialog open={open} onOpenChange={() => handleCancel()}>
-        <DialogContent className="w-[min(96vw,34rem)] sm:max-w-2xl">
-          <DialogHeader>
+        <DialogContent className="w-[min(96vw,34rem)] rounded-2xl border border-slate-300 bg-[#f7f8fa] p-0 shadow-xl sm:max-w-2xl">
+          <DialogHeader className="border-b border-slate-300 px-6 py-5 pr-14">
             <DialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-destructive" />
               Cash Difference Detected
@@ -93,7 +93,7 @@ const ClosingCashDialog = ({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 px-6 py-5">
             <div
               className={`rounded-xl p-4 text-center ${
                 isShortage ? "bg-destructive/10" : "bg-warning/10"
@@ -127,7 +127,7 @@ const ClosingCashDialog = ({
             </div>
           </div>
 
-          <DialogFooter className="gap-2">
+          <DialogFooter className="gap-2 border-t border-slate-300 bg-slate-100 px-6 py-3">
             <Button variant="outline" onClick={() => setStep("count")} className="rounded-xl">
               Go Back
             </Button>
@@ -148,8 +148,8 @@ const ClosingCashDialog = ({
   if (step === "review") {
     return (
       <Dialog open={open} onOpenChange={() => handleCancel()}>
-        <DialogContent className="w-[min(96vw,34rem)] sm:max-w-2xl">
-          <DialogHeader>
+        <DialogContent className="w-[min(96vw,34rem)] rounded-2xl border border-slate-300 bg-[#f7f8fa] p-0 shadow-xl sm:max-w-2xl">
+          <DialogHeader className="border-b border-slate-300 px-6 py-5 pr-14">
             <DialogTitle className="flex items-center gap-2">
               <Lock className="h-5 w-5 text-primary" />
               Confirm Closing Cash
@@ -159,7 +159,7 @@ const ClosingCashDialog = ({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 overflow-y-auto px-6 py-5">
             <div className="space-y-2 rounded-xl bg-muted p-4">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Opening Cash</span>
@@ -238,10 +238,10 @@ const ClosingCashDialog = ({
             </div>
           </div>
 
-        <DialogFooter className="w-full gap-2 px-6">
-          <Button variant="outline" onClick={() => setStep(hasMismatch ? "reason" : "count")} className="rounded-xl">
-            Go Back
-          </Button>
+          <DialogFooter className="w-full gap-2 border-t border-slate-300 bg-slate-100 px-6 py-3">
+            <Button variant="outline" onClick={() => setStep(hasMismatch ? "reason" : "count")} className="rounded-xl">
+              Go Back
+            </Button>
             <Button variant="pos-primary" onClick={handleConfirm} className="rounded-xl">
               <Lock className="h-4 w-4" />
               Confirm & Lock Session
@@ -254,23 +254,26 @@ const ClosingCashDialog = ({
 
   return (
     <Dialog open={open} onOpenChange={() => handleCancel()}>
-      <DialogContent className="w-[min(96vw,56rem)] max-h-[92vh] overflow-hidden flex flex-col sm:max-w-4xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 font-medium text-slate-600">
-            <Shield className="h-5 w-5 text-primary" />
-            Closing Cash Count
-          </DialogTitle>
-          <DialogDescription className="text-slate-500">
-            Count all cash in the register to close your shift.
-          </DialogDescription>
+      <DialogContent className="w-[min(96vw,56rem)] max-h-[92vh] overflow-hidden flex flex-col rounded-2xl border border-slate-300 bg-[#f7f8fa] p-0 shadow-xl sm:max-w-4xl">
+        <DialogHeader className="border-b border-slate-300 px-6 py-4 pr-14">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <DialogTitle className="flex items-center gap-2 text-[1.9rem] font-semibold tracking-tight text-slate-800">
+              <Shield className="h-5 w-5 text-primary shrink-0" />
+              Closing Cash Count
+            </DialogTitle>
+
+            <div className="w-[15.5rem] self-start rounded-xl bg-white px-4 py-2 text-right shadow-sm ring-1 ring-slate-200 md:self-auto">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                Expected Cash
+              </p>
+              <p className="mt-1 text-[1.45rem] font-bold leading-none tabular-nums text-primary">
+                Rs. {expectedCash.toLocaleString()}
+              </p>
+            </div>
+          </div>
         </DialogHeader>
 
-        <div className="rounded-xl bg-muted p-3 flex items-center justify-between">
-          <span className="text-sm font-medium text-slate-500">Expected Cash</span>
-          <span className="text-lg font-semibold tabular-nums text-slate-600">Rs. {expectedCash.toLocaleString()}</span>
-        </div>
-
-        <div className="flex-1 overflow-y-auto py-2 -mx-6 px-6">
+        <div className="flex-1 overflow-y-auto px-6 py-4">
           <DenominationCounter onChange={handleCountChange} />
         </div>
 
@@ -303,14 +306,13 @@ const ClosingCashDialog = ({
           </div>
         )}
 
-        <DialogFooter className="border-t border-border gap-2 pt-2">
-          <Button variant="outline" onClick={handleCancel} className="rounded-xl">
+        <DialogFooter className="flex-row justify-start items-center border-t border-slate-300 bg-slate-100 gap-2 px-6 py-3 sm:justify-start sm:space-x-0">
+          <Button variant="outline" onClick={handleCancel} className="h-10 rounded-xl px-5">
             Cancel
           </Button>
           <Button
             variant="pos-primary"
-            size="lg"
-            className="flex-1 rounded-xl"
+            className="h-10 rounded-xl px-5"
             onClick={handleProceed}
           >
             <CheckCircle2 className="h-5 w-5" />

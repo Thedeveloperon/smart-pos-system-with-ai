@@ -41,10 +41,10 @@ const OpeningCashDialog = ({ open, cashierName, onConfirm }: OpeningCashDialogPr
     return (
       <Dialog open={open}>
         <DialogContent
-          className="w-[min(96vw,42rem)] max-h-[90vh] overflow-hidden flex flex-col sm:max-w-3xl"
+          className="w-[min(96vw,42rem)] max-h-[90vh] overflow-hidden flex flex-col rounded-2xl border border-slate-300 bg-[#f7f8fa] p-0 shadow-xl sm:max-w-3xl"
           onInteractOutside={(e) => e.preventDefault()}
         >
-          <DialogHeader>
+          <DialogHeader className="border-b border-slate-300 px-6 py-5 pr-14">
             <DialogTitle className="flex items-center gap-2">
               <CheckCircle2 className="h-5 w-5 text-success" />
               Confirm Opening Cash
@@ -54,7 +54,7 @@ const OpeningCashDialog = ({ open, cashierName, onConfirm }: OpeningCashDialogPr
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 overflow-y-auto px-6 py-5">
             <div className="rounded-xl bg-accent p-4 text-center">
               <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Opening Cash Amount
@@ -87,7 +87,7 @@ const OpeningCashDialog = ({ open, cashierName, onConfirm }: OpeningCashDialogPr
             </div>
           </div>
 
-          <DialogFooter className="gap-2">
+          <DialogFooter className="gap-2 border-t border-slate-300 bg-slate-100 px-6 py-3">
             <Button variant="outline" onClick={() => setShowConfirm(false)} className="rounded-xl">
               Go Back
             </Button>
@@ -104,28 +104,32 @@ const OpeningCashDialog = ({ open, cashierName, onConfirm }: OpeningCashDialogPr
   return (
     <Dialog open={open}>
       <DialogContent
-        className="w-[min(96vw,56rem)] max-h-[92vh] overflow-hidden flex flex-col sm:max-w-4xl"
+        className="w-[min(96vw,56rem)] max-h-[92vh] overflow-hidden flex flex-col rounded-2xl border border-slate-300 bg-[#f7f8fa] p-0 shadow-xl sm:max-w-4xl"
         onInteractOutside={(e) => e.preventDefault()}
       >
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Shield className="h-5 w-5 text-primary" />
-            Opening Cash Count
-          </DialogTitle>
-          <DialogDescription>
-            Count all cash in the register before starting your shift. This is required to begin selling.
-          </DialogDescription>
+        <DialogHeader className="border-b border-slate-300 px-6 py-5 pr-14">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <DialogTitle className="flex items-center gap-2 text-[1.9rem] font-semibold tracking-tight text-slate-800">
+                <Shield className="h-5 w-5 text-primary" />
+                Opening Cash Count
+              </DialogTitle>
+            </div>
+            <p className="text-[2rem] font-bold leading-none tabular-nums text-primary">
+              Rs. {total.toLocaleString()}
+            </p>
+          </div>
         </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto py-2 -mx-6 px-6">
+        <div className="flex-1 overflow-y-auto px-6 py-4">
           <DenominationCounter onChange={handleCountChange} />
         </div>
 
-        <DialogFooter className="border-t border-border pt-4">
+        <DialogFooter className="justify-start border-t border-slate-300 bg-slate-100 px-6 py-3 sm:justify-start sm:space-x-0">
           <Button
             variant="pos-primary"
             size="lg"
-            className="w-full rounded-xl"
+            className="w-full rounded-xl sm:w-[17rem]"
             onClick={handleProceed}
           >
             <CheckCircle2 className="h-5 w-5" />
