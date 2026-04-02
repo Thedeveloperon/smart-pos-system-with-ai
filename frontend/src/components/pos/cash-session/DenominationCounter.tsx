@@ -126,7 +126,7 @@ const DenominationCounter = ({ onChange, initialCounts }: DenominationCounterPro
             </span>
           </div>
 
-          <div className="grid flex-1 min-h-0 auto-rows-min content-start grid-cols-1 gap-0.5 overflow-y-auto pr-1">
+          <div className="scrollbar-thin grid max-h-[18rem] flex-1 min-h-0 auto-rows-min content-start grid-cols-1 gap-0.5 overflow-y-scroll pr-2 md:max-h-[22rem]">
             {notes.map((d) => renderItem(d, "note"))}
           </div>
         </section>
@@ -142,7 +142,7 @@ const DenominationCounter = ({ onChange, initialCounts }: DenominationCounterPro
             </span>
           </div>
 
-          <div className="grid flex-1 min-h-0 auto-rows-min content-start grid-cols-1 gap-0.5 overflow-y-auto pr-1">
+          <div className="scrollbar-thin grid max-h-[18rem] flex-1 min-h-0 auto-rows-min content-start grid-cols-1 gap-0.5 overflow-y-scroll pr-2 md:max-h-[22rem]">
             {coins.map((d) => renderItem(d, "coin"))}
           </div>
         </section>

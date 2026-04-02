@@ -71,7 +71,7 @@ const ManageDrawerDialog = ({ open, session, onClose, onSave }: ManageDrawerDial
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-6 py-4">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-4 pr-4 scrollbar-thin">
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-2xl border border-slate-300 bg-white px-4 py-3">
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
@@ -119,7 +119,7 @@ const ManageDrawerDialog = ({ open, session, onClose, onSave }: ManageDrawerDial
             </p>
           </div>
 
-          <div className="flex-1 min-h-0 overflow-hidden rounded-2xl border border-slate-300 bg-white p-3">
+          <div className="rounded-2xl border border-slate-300 bg-white p-3">
             <DenominationCounter
               key={resetKey}
               initialCounts={counts.length > 0 ? counts : openingCounts}
