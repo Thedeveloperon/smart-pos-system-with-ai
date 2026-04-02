@@ -44,6 +44,9 @@ public sealed class CashSessionService(
             OpeningSubmittedAtUtc = now,
             OpeningApprovedBy = actor.CashierName,
             OpeningApprovedAtUtc = now,
+            DrawerCountsJson = JsonSerializer.Serialize(request.Counts),
+            DrawerTotal = request.Total,
+            DrawerUpdatedAtUtc = now,
             CashSalesTotal = 0m,
             OpenedAtUtc = now,
             UpdatedAtUtc = now
@@ -59,6 +62,43 @@ public sealed class CashSessionService(
                 details = $"Opening cash: Rs. {request.Total:N0}",
                 amount = request.Total,
                 opening_total = request.Total,
+                cashier_name = actor.CashierName
+            });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return await BuildResponseAsync(session, cancellationToken);
+    }
+
+    public async Task<CashSessionResponse> UpdateDrawerAsync(
+        UpdateCashDrawerRequest request,
+        CancellationToken cancellationToken)
+    {
+        var actor = RequireActor();
+        ValidateCounts(request.Counts, request.Total);
+
+        var session = await GetLatestActiveSessionAsync(cancellationToken)
+            ?? throw new InvalidOperationException("No active cash session found.");
+
+        if (session.DeviceId.HasValue && actor.DeviceId.HasValue && session.DeviceId != actor.DeviceId)
+        {
+            throw new InvalidOperationException("This cash session belongs to a different device.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        session.DrawerCountsJson = JsonSerializer.Serialize(request.Counts);
+        session.DrawerTotal = request.Total;
+        session.DrawerUpdatedAtUtc = now;
+        session.UpdatedAtUtc = now;
+
+        auditLogService.Queue(
+            action: "cash_drawer_updated",
+            entityName: "cash_session",
+            entityId: session.Id.ToString(),
+            after: new
+            {
+                details = $"Drawer updated: Rs. {request.Total:N0}",
+                amount = request.Total,
+                drawer_total = request.Total,
                 cashier_name = actor.CashierName
             });
 
@@ -166,6 +206,61 @@ public sealed class CashSessionService(
                 sale_id = saleId,
                 sale_number = saleNumber,
                 cash_sales_total = session.CashSalesTotal
+            });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task RecordCashSaleAsync(
+        decimal amount,
+        IReadOnlyCollection<CashCountItem> receivedCounts,
+        IReadOnlyCollection<CashCountItem> changeCounts,
+        Guid saleId,
+        string saleNumber,
+        CancellationToken cancellationToken)
+    {
+        if (amount <= 0m)
+        {
+            return;
+        }
+
+        var session = await GetLatestActiveSessionAsync(cancellationToken);
+        if (session is null)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        session.CashSalesTotal = RoundMoney(session.CashSalesTotal + amount);
+        session.UpdatedAtUtc = now;
+
+        var currentCounts = DeserializeCounts(session.DrawerCountsJson);
+        if (currentCounts.Count == 0)
+        {
+            currentCounts = DeserializeCounts(session.OpeningCountsJson);
+        }
+
+        var updatedCounts = ApplyDrawerCounts(
+            ApplyDrawerCounts(currentCounts, receivedCounts, multiplier: 1m),
+            changeCounts,
+            multiplier: -1m);
+
+        session.DrawerCountsJson = JsonSerializer.Serialize(updatedCounts);
+        session.DrawerTotal = CalculateTotal(updatedCounts);
+        session.DrawerUpdatedAtUtc = now;
+
+        auditLogService.Queue(
+            action: "cash_session_sale_recorded",
+            entityName: "cash_session",
+            entityId: session.Id.ToString(),
+            after: new
+            {
+                details = $"Sale Rs. {amount:N0} via cash",
+                amount,
+                sale_id = saleId,
+                sale_number = saleNumber,
+                cash_sales_total = session.CashSalesTotal,
+                drawer_total = session.DrawerTotal
             });
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -283,6 +378,14 @@ public sealed class CashSessionService(
                 ApprovedBy = session.OpeningApprovedBy,
                 ApprovedAt = session.OpeningApprovedAtUtc
             },
+            Drawer = new CashDrawerResponse
+            {
+                Counts = DeserializeCounts(session.DrawerCountsJson) is { Count: > 0 } drawerCounts
+                    ? drawerCounts
+                    : DeserializeCounts(session.OpeningCountsJson),
+                Total = session.DrawerTotal ?? session.OpeningTotal,
+                UpdatedAt = session.DrawerUpdatedAtUtc ?? session.OpeningApprovedAtUtc ?? session.OpenedAtUtc
+            },
             Closing = session.ClosingCountsJson is null
                 ? null
                 : new CashSessionEntryResponse
@@ -334,7 +437,7 @@ public sealed class CashSessionService(
         };
     }
 
-    private static List<CashCountItem> DeserializeCounts(string json)
+    private static List<CashCountItem> DeserializeCounts(string? json)
     {
         if (string.IsNullOrWhiteSpace(json))
         {
@@ -349,6 +452,46 @@ public sealed class CashSessionService(
         {
             return [];
         }
+    }
+
+    private static List<CashCountItem> ApplyDrawerCounts(
+        IReadOnlyCollection<CashCountItem> baseCounts,
+        IReadOnlyCollection<CashCountItem> deltaCounts,
+        decimal multiplier)
+    {
+        var countsByDenomination = baseCounts
+            .GroupBy(x => x.Denomination)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Sum(x => x.Quantity));
+
+        foreach (var delta in deltaCounts)
+        {
+            var updatedQuantity = (countsByDenomination.TryGetValue(delta.Denomination, out var existing)
+                ? existing
+                : 0m) + (delta.Quantity * multiplier);
+
+            if (updatedQuantity < 0m)
+            {
+                throw new InvalidOperationException("Cash drawer does not have enough denominations for this transaction.");
+            }
+
+            countsByDenomination[delta.Denomination] = updatedQuantity;
+        }
+
+        return countsByDenomination
+            .OrderByDescending(x => x.Key)
+            .Select(x => new CashCountItem
+            {
+                Denomination = x.Key,
+                Quantity = x.Value
+            })
+            .ToList();
+    }
+
+    private static decimal CalculateTotal(IReadOnlyCollection<CashCountItem> counts)
+    {
+        return RoundMoney(counts.Sum(x => x.Denomination * x.Quantity));
     }
 
     private ActorContext RequireActor()

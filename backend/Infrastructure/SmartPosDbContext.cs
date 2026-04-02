@@ -303,6 +303,8 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.OpeningCountsJson).HasColumnType("text");
             entity.Property(x => x.OpeningTotal).HasPrecision(18, 2);
             entity.Property(x => x.OpeningApprovedBy).HasMaxLength(120);
+            entity.Property(x => x.DrawerCountsJson).HasColumnType("text");
+            entity.Property(x => x.DrawerTotal).HasPrecision(18, 2);
             entity.Property(x => x.ClosingCountsJson).HasColumnType("text");
             entity.Property(x => x.ClosingTotal).HasPrecision(18, 2);
             entity.Property(x => x.ClosingApprovedBy).HasMaxLength(120);

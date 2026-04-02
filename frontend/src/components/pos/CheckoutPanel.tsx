@@ -11,16 +11,22 @@ import {
   Phone,
 } from "lucide-react";
 import CashReceivedDialog from "./cash-session/CashReceivedDialog";
+import CashChangeDialog from "./cash-session/CashChangeDialog";
+import { isQuickSaleEnabled } from "@/lib/posPreferences";
 import { playSaleCompleteSound, primeConfirmationSound } from "@/lib/sound";
 import type { CartItem, PaymentMethod } from "./types";
+import type { CashDrawerState, DenominationCount } from "./cash-session/types";
 import { POS_SHORTCUT_INLINE_HINT, POS_SHORTCUT_LABELS } from "./shortcuts";
 
 interface CheckoutPanelProps {
   items: CartItem[];
+  cashDrawer?: CashDrawerState | null;
   onCompleteSale: (
     paymentMethod: PaymentMethod,
     cashReceived: number,
-    customerMobile: string
+    customerMobile: string,
+    cashReceivedCounts?: DenominationCount[],
+    cashChangeCounts?: DenominationCount[]
   ) => void;
   onHoldBill: () => void;
   onCancelSale: () => void;
@@ -40,6 +46,7 @@ export interface CheckoutPanelHandle {
 const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
   ({
     items,
+    cashDrawer,
     onCompleteSale,
     onHoldBill,
     onCancelSale,
@@ -48,7 +55,10 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
     const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
     const [cashReceived, setCashReceived] = useState("");
     const [customerMobile, setCustomerMobile] = useState("");
+    const [cashReceivedCounts, setCashReceivedCounts] = useState<DenominationCount[]>([]);
+    const [cashChangeCounts, setCashChangeCounts] = useState<DenominationCount[]>([]);
     const [showCashCountDialog, setShowCashCountDialog] = useState(false);
+    const [showCashChangeDialog, setShowCashChangeDialog] = useState(false);
     const cashReceivedInputRef = useRef<HTMLInputElement>(null);
 
     const subtotal = items.reduce(
@@ -60,6 +70,9 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
     const cashNum = parseFloat(cashReceived) || 0;
     const change = cashNum - grandTotal;
     const due = grandTotal - cashNum;
+    const availableChangeCounts = cashDrawer
+      ? combineDenominationCounts(cashDrawer.counts, cashReceivedCounts)
+      : cashReceivedCounts;
     const completeBlockReason =
       items.length === 0
         ? "add items to the cart"
@@ -68,14 +81,25 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
           : null;
     const canComplete = completeBlockReason === null;
 
-    const handleComplete = useCallback(() => {
-      onCompleteSale(paymentMethod, cashNum, customerMobile);
+    const handleComplete = useCallback((nextCashChangeCounts = cashChangeCounts) => {
+      onCompleteSale(
+        paymentMethod,
+        cashNum,
+        customerMobile,
+        cashReceivedCounts,
+        nextCashChangeCounts
+      );
       setCashReceived("");
       setCustomerMobile("");
-    }, [cashNum, customerMobile, onCompleteSale, paymentMethod]);
+      setCashReceivedCounts([]);
+      setCashChangeCounts([]);
+    }, [cashChangeCounts, cashNum, cashReceivedCounts, customerMobile, onCompleteSale, paymentMethod]);
 
     const openCashWorkflow = useCallback(() => {
       setPaymentMethod("cash");
+      setCashReceived("");
+      setCashReceivedCounts([]);
+      setCashChangeCounts([]);
       setShowCashCountDialog(true);
       window.setTimeout(() => {
         cashReceivedInputRef.current?.focus();
@@ -83,24 +107,33 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
       }, 0);
     }, []);
 
-    const runCompleteSale = useCallback(() => {
+    const runCompleteSale = useCallback((nextCashChangeCounts?: DenominationCount[]) => {
       void playSaleCompleteSound();
-      handleComplete();
+      handleComplete(nextCashChangeCounts);
     }, [handleComplete]);
+
+    const requestCompleteSale = useCallback(() => {
+      if (completeBlockReason) {
+        return { ok: false, reason: completeBlockReason } as const;
+      }
+
+      if (paymentMethod === "cash" && !isQuickSaleEnabled()) {
+        setShowCashChangeDialog(true);
+        return { ok: true } as const;
+      }
+
+      runCompleteSale();
+      return { ok: true } as const;
+    }, [completeBlockReason, paymentMethod, runCompleteSale]);
 
     useImperativeHandle(ref, () => ({
       openCashWorkflow: () => {
         openCashWorkflow();
       },
       tryCompleteSale: () => {
-        if (completeBlockReason) {
-          return { ok: false, reason: completeBlockReason };
-        }
-
-        runCompleteSale();
-        return { ok: true };
+        return requestCompleteSale();
       },
-    }), [completeBlockReason, openCashWorkflow, runCompleteSale]);
+    }), [openCashWorkflow, requestCompleteSale]);
 
     return (
       <div className="flex h-full min-h-0 flex-col bg-card">
@@ -143,7 +176,23 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
                 className={`h-11 flex-row gap-1.5 rounded-xl px-2 text-[11px] font-semibold sm:text-xs ${
                   paymentMethod === key ? "" : ""
                 }`}
-                onClick={() => (key === "cash" ? openCashWorkflow() : setPaymentMethod(key))}
+                onClick={() => {
+                  if (key !== "cash") {
+                    setPaymentMethod(key);
+                    return;
+                  }
+
+                  if (isQuickSaleEnabled()) {
+                    setPaymentMethod("cash");
+                    setCashReceived(String(grandTotal));
+                    setCashReceivedCounts([]);
+                    setCashChangeCounts([]);
+                    setShowCashCountDialog(false);
+                    return;
+                  }
+
+                  openCashWorkflow();
+                }}
               >
                 <Icon className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
                 <span className="truncate whitespace-nowrap">{label}</span>
@@ -204,7 +253,7 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
               void primeConfirmationSound();
             }}
             onClick={() => {
-              runCompleteSale();
+              requestCompleteSale();
             }}
           >
             <CheckCircle2 className="h-4 w-4" />
@@ -238,9 +287,22 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
           expectedCash={grandTotal}
           onClose={() => setShowCashCountDialog(false)}
           onTotalChange={(total) => setCashReceived(String(total))}
-          onConfirm={(_, total) => {
+          onConfirm={(counts, total) => {
+            setCashReceivedCounts(counts);
             setCashReceived(String(total));
             setShowCashCountDialog(false);
+          }}
+        />
+
+        <CashChangeDialog
+          open={showCashChangeDialog}
+          changeAmount={change}
+          availableCounts={availableChangeCounts}
+          onClose={() => setShowCashChangeDialog(false)}
+          onConfirm={(counts) => {
+            setCashChangeCounts(counts);
+            setShowCashChangeDialog(false);
+            runCompleteSale(counts);
           }}
         />
       </div>
@@ -251,3 +313,18 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
 CheckoutPanel.displayName = "CheckoutPanel";
 
 export default CheckoutPanel;
+
+function combineDenominationCounts(
+  left: DenominationCount[],
+  right: DenominationCount[],
+): DenominationCount[] {
+  const totals = new Map<number, number>();
+
+  for (const item of [...left, ...right]) {
+    totals.set(item.denomination, (totals.get(item.denomination) ?? 0) + item.quantity);
+  }
+
+  return [...totals.entries()]
+    .map(([denomination, quantity]) => ({ denomination, quantity }))
+    .sort((first, second) => second.denomination - first.denomination);
+}

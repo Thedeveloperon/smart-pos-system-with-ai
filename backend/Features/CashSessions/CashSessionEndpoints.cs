@@ -38,6 +38,24 @@ public static class CashSessionEndpoints
         .WithName("OpenCashSession")
         .WithOpenApi();
 
+        group.MapPut("/current/drawer", async (
+            UpdateCashDrawerRequest request,
+            CashSessionService cashSessionService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var session = await cashSessionService.UpdateDrawerAsync(request, cancellationToken);
+                return Results.Ok(session);
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .WithName("UpdateCashDrawer")
+        .WithOpenApi();
+
         group.MapPost("/{sessionId:guid}/close", async (
             Guid sessionId,
             CloseCashSessionRequest request,

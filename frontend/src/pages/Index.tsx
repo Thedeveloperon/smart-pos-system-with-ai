@@ -22,6 +22,7 @@ import OpeningCashDialog from "@/components/pos/cash-session/OpeningCashDialog";
 import ClosingCashDialog from "@/components/pos/cash-session/ClosingCashDialog";
 import CashSessionBanner from "@/components/pos/cash-session/CashSessionBanner";
 import SessionClosedSummary from "@/components/pos/cash-session/SessionClosedSummary";
+import ManageDrawerDialog from "@/components/pos/cash-session/ManageDrawerDialog";
 import AuditLogPanel from "@/components/pos/cash-session/AuditLogPanel";
 import type { CartItem, HeldBill, PaymentMethod, Product } from "@/components/pos/types";
 import type { DenominationCount } from "@/components/pos/cash-session/types";
@@ -32,6 +33,7 @@ import {
   fetchProducts,
   holdSale,
   fetchReceiptHtmlUrl,
+  updateCurrentCashDrawer,
   type PurchaseImportConfirmResponse,
   voidSale,
 } from "@/lib/api";
@@ -77,6 +79,7 @@ const IndexInner = () => {
   const [showReports, setShowReports] = useState(false);
   const [showTodaySales, setShowTodaySales] = useState(false);
   const [showClosing, setShowClosing] = useState(false);
+  const [showManageDrawer, setShowManageDrawer] = useState(false);
   const [showAuditLog, setShowAuditLog] = useState(false);
   const [showImportSupplierBill, setShowImportSupplierBill] = useState(false);
   const [showShopSettings, setShowShopSettings] = useState(false);
@@ -305,7 +308,13 @@ const IndexInner = () => {
   );
 
   const handleCompleteSale = useCallback(
-    async (paymentMethod: PaymentMethod, cashReceived: number, customerMobile: string) => {
+    async (
+      paymentMethod: PaymentMethod,
+      cashReceived: number,
+      customerMobile: string,
+      cashReceivedCounts?: DenominationCount[],
+      cashChangeCounts?: DenominationCount[]
+    ) => {
       const total = cartItems.reduce((a, i) => a + i.product.price * i.quantity, 0);
       const paidAmount = paymentMethod === "cash" ? cashReceived || total : total;
       const referenceNumber = customerMobile.trim() || undefined;
@@ -318,7 +327,9 @@ const IndexInner = () => {
           paymentMethod,
           paidAmount,
           activeHeldSaleId || undefined,
-          referenceNumber
+          referenceNumber,
+          cashReceivedCounts,
+          cashChangeCounts
         );
 
         setCartItems([]);
@@ -351,6 +362,10 @@ const IndexInner = () => {
     initiateClosing();
     setShowClosing(true);
   };
+
+  const handleManageDrawer = useCallback(() => {
+    setShowManageDrawer(true);
+  }, []);
 
   const handleCloseSession = async (counts: DenominationCount[], total: number, reason?: string) => {
     const didClose = await completeClosing(counts, total, reason);
@@ -504,6 +519,12 @@ const IndexInner = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (!canSell) {
+      setShowManageDrawer(false);
+    }
+  }, [canSell]);
+
   return (
     <div className="h-screen flex flex-col overflow-hidden">
       <HeaderBar
@@ -552,7 +573,7 @@ const IndexInner = () => {
         />
       )}
 
-      {canSell && <CashSessionBanner onEndShift={handleEndShift} />}
+      {canSell && <CashSessionBanner onEndShift={handleEndShift} onManageDrawer={handleManageDrawer} />}
 
       {isPosShortcutsFeatureEnabled && canSell && !isClosed && showShortcutOnboarding && (
         <div className="mx-3 mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
@@ -619,6 +640,7 @@ const IndexInner = () => {
                   <CheckoutPanel
                     ref={desktopCheckoutRef}
                     items={cartItems}
+                    cashDrawer={session?.drawer}
                     onCompleteSale={handleCompleteSale}
                     onHoldBill={() => void handleHoldBill()}
                     onCancelSale={handleCancelSale}
@@ -648,6 +670,7 @@ const IndexInner = () => {
                 <CheckoutPanel
                   ref={mobileCheckoutRef}
                   items={cartItems}
+                  cashDrawer={session?.drawer}
                   onCompleteSale={handleCompleteSale}
                   onHoldBill={() => void handleHoldBill()}
                   onCancelSale={handleCancelSale}
@@ -671,6 +694,7 @@ const IndexInner = () => {
         expectedCash={getExpectedCash()}
         openingCash={session?.opening.total || 0}
         cashSalesTotal={cashSalesTotal}
+        initialCounts={session?.drawer.counts ?? session?.opening.counts ?? []}
         onConfirm={handleCloseSession}
       />
 
@@ -678,6 +702,17 @@ const IndexInner = () => {
         open={showAuditLog}
         onClose={() => setShowAuditLog(false)}
         entries={auditLog}
+      />
+
+      <ManageDrawerDialog
+        open={showManageDrawer}
+        session={session}
+        onClose={() => setShowManageDrawer(false)}
+        onSave={async (counts, total) => {
+          await updateCurrentCashDrawer(counts, total);
+          await refreshSession();
+          setShowManageDrawer(false);
+        }}
       />
 
       <TodaySalesDrawer

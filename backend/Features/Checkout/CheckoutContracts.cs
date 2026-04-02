@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using SmartPos.Backend.Features.CashSessions;
 
 namespace SmartPos.Backend.Features.Checkout;
 
@@ -51,6 +52,12 @@ public sealed class CompleteSaleRequest
 
     [JsonPropertyName("payments")]
     public List<PaymentRequest> Payments { get; set; } = [];
+
+    [JsonPropertyName("cash_received_counts")]
+    public List<CashCountItem> CashReceivedCounts { get; set; } = [];
+
+    [JsonPropertyName("cash_change_counts")]
+    public List<CashCountItem> CashChangeCounts { get; set; } = [];
 }
 
 public sealed class HeldSaleListItem

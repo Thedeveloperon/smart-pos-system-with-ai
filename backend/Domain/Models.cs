@@ -303,6 +303,9 @@ public sealed class CashSession
     public DateTimeOffset OpeningSubmittedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public string? OpeningApprovedBy { get; set; }
     public DateTimeOffset? OpeningApprovedAtUtc { get; set; }
+    public string? DrawerCountsJson { get; set; }
+    public decimal? DrawerTotal { get; set; }
+    public DateTimeOffset? DrawerUpdatedAtUtc { get; set; }
     public string? ClosingCountsJson { get; set; }
     public decimal? ClosingTotal { get; set; }
     public DateTimeOffset? ClosingSubmittedAtUtc { get; set; }

@@ -32,6 +32,15 @@ public sealed class CloseCashSessionRequest
     public string? Reason { get; set; }
 }
 
+public sealed class UpdateCashDrawerRequest
+{
+    [JsonPropertyName("counts")]
+    public List<CashCountItem> Counts { get; set; } = [];
+
+    [JsonPropertyName("total")]
+    public decimal Total { get; set; }
+}
+
 public sealed class CashSessionAuditEntryResponse
 {
     [JsonPropertyName("id")]
@@ -74,6 +83,18 @@ public sealed class CashSessionEntryResponse
     public DateTimeOffset? ApprovedAt { get; set; }
 }
 
+public sealed class CashDrawerResponse
+{
+    [JsonPropertyName("counts")]
+    public List<CashCountItem> Counts { get; set; } = [];
+
+    [JsonPropertyName("total")]
+    public decimal Total { get; set; }
+
+    [JsonPropertyName("updated_at")]
+    public DateTimeOffset? UpdatedAt { get; set; }
+}
+
 public sealed class CashSessionResponse
 {
     [JsonPropertyName("cash_session_id")]
@@ -99,6 +120,9 @@ public sealed class CashSessionResponse
 
     [JsonPropertyName("opening")]
     public CashSessionEntryResponse Opening { get; set; } = new();
+
+    [JsonPropertyName("drawer")]
+    public CashDrawerResponse Drawer { get; set; } = new();
 
     [JsonPropertyName("closing")]
     public CashSessionEntryResponse? Closing { get; set; }

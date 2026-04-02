@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { fetchShopProfile, updateShopProfile, type ShopProfile } from "@/lib/api";
+import { isQuickSaleEnabled, setQuickSaleEnabled } from "@/lib/posPreferences";
 import { isConfirmationSoundEnabled, setConfirmationSoundEnabled } from "@/lib/sound";
 
 interface ShopProfileDialogProps {
@@ -32,6 +33,7 @@ const emptyProfile = (): ShopProfile => ({
 const ShopProfileDialog = ({ open, onOpenChange, onSaved }: ShopProfileDialogProps) => {
   const [profile, setProfile] = useState<ShopProfile>(emptyProfile);
   const [confirmationSoundEnabled, setConfirmationSoundEnabledState] = useState(true);
+  const [quickSaleEnabled, setQuickSaleEnabledState] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -43,6 +45,7 @@ const ShopProfileDialog = ({ open, onOpenChange, onSaved }: ShopProfileDialogPro
     let alive = true;
     setIsLoading(true);
     setConfirmationSoundEnabledState(isConfirmationSoundEnabled());
+    setQuickSaleEnabledState(isQuickSaleEnabled());
 
     void fetchShopProfile()
       .then((data) => {
@@ -106,6 +109,11 @@ const ShopProfileDialog = ({ open, onOpenChange, onSaved }: ShopProfileDialogPro
   const handleSoundToggle = (enabled: boolean) => {
     setConfirmationSoundEnabledState(enabled);
     setConfirmationSoundEnabled(enabled);
+  };
+
+  const handleQuickSaleToggle = (enabled: boolean) => {
+    setQuickSaleEnabledState(enabled);
+    setQuickSaleEnabled(enabled);
   };
 
   return (
@@ -220,6 +228,18 @@ const ShopProfileDialog = ({ open, onOpenChange, onSaved }: ShopProfileDialogPro
                   </p>
                 </div>
                 <Switch checked={confirmationSoundEnabled} onCheckedChange={handleSoundToggle} />
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-border bg-muted/20 p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">Quick sale</p>
+                  <p className="text-xs text-muted-foreground">
+                    Skips the cash count dialog and fills the exact total for faster cash checkouts.
+                  </p>
+                </div>
+                <Switch checked={quickSaleEnabled} onCheckedChange={handleQuickSaleToggle} />
               </div>
             </div>
           </div>

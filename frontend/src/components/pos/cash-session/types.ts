@@ -31,6 +31,12 @@ export interface CashSessionEntry {
   approvedAt?: Date;
 }
 
+export interface CashDrawerState {
+  counts: DenominationCount[];
+  total: number;
+  updatedAt?: Date;
+}
+
 export interface CashSession {
   id: string;
   cashierName: string;
@@ -44,6 +50,7 @@ export interface CashSession {
   status: "active" | "closing" | "closed" | "locked";
   auditLog: AuditLogEntry[];
   cashSalesTotal: number;
+  drawer: CashDrawerState;
 }
 
 export interface AuditLogEntry {

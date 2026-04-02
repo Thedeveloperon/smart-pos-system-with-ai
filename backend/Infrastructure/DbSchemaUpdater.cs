@@ -125,6 +125,9 @@ public static class DbSchemaUpdater
                   "OpeningSubmittedAtUtc" TEXT NOT NULL,
                   "OpeningApprovedBy" TEXT NULL,
                   "OpeningApprovedAtUtc" TEXT NULL,
+                  "DrawerCountsJson" TEXT NULL,
+                  "DrawerTotal" TEXT NULL,
+                  "DrawerUpdatedAtUtc" TEXT NULL,
                   "ClosingCountsJson" TEXT NULL,
                   "ClosingTotal" TEXT NULL,
                   "ClosingSubmittedAtUtc" TEXT NULL,
@@ -146,6 +149,28 @@ public static class DbSchemaUpdater
                 """;
 
             await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+
+            if (!await ColumnExistsAsync(dbContext, "cash_sessions", "DrawerCountsJson", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "cash_sessions" ADD COLUMN "DrawerCountsJson" TEXT NULL;""",
+                    cancellationToken);
+            }
+
+            if (!await ColumnExistsAsync(dbContext, "cash_sessions", "DrawerTotal", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "cash_sessions" ADD COLUMN "DrawerTotal" TEXT NULL;""",
+                    cancellationToken);
+            }
+
+            if (!await ColumnExistsAsync(dbContext, "cash_sessions", "DrawerUpdatedAtUtc", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "cash_sessions" ADD COLUMN "DrawerUpdatedAtUtc" TEXT NULL;""",
+                    cancellationToken);
+            }
+
             return;
         }
 
@@ -164,6 +189,9 @@ public static class DbSchemaUpdater
                   "OpeningSubmittedAtUtc" timestamptz NOT NULL,
                   "OpeningApprovedBy" varchar(120) NULL,
                   "OpeningApprovedAtUtc" timestamptz NULL,
+                  "DrawerCountsJson" text NULL,
+                  "DrawerTotal" numeric(18,2) NULL,
+                  "DrawerUpdatedAtUtc" timestamptz NULL,
                   "ClosingCountsJson" text NULL,
                   "ClosingTotal" numeric(18,2) NULL,
                   "ClosingSubmittedAtUtc" timestamptz NULL,
@@ -185,6 +213,16 @@ public static class DbSchemaUpdater
                 """;
 
             await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE cash_sessions ADD COLUMN IF NOT EXISTS "DrawerCountsJson" text NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE cash_sessions ADD COLUMN IF NOT EXISTS "DrawerTotal" numeric(18,2) NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE cash_sessions ADD COLUMN IF NOT EXISTS "DrawerUpdatedAtUtc" timestamptz NULL;""",
+                cancellationToken);
         }
     }
 

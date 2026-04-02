@@ -34,6 +34,7 @@ const CashReceivedDialog = ({
     if (open) {
       setCounts([]);
       setTotal(0);
+      onTotalChange?.(0);
       setResetKey((value) => value + 1);
     }
   }, [open]);
@@ -77,7 +78,10 @@ const CashReceivedDialog = ({
 
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-6 py-4">
             <div className="min-h-0 flex-1 overflow-hidden">
-              <DenominationCounter key={resetKey} onChange={handleCountChange} />
+              <DenominationCounter
+                key={resetKey}
+                onChange={handleCountChange}
+              />
             </div>
 
           </div>
