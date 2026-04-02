@@ -209,73 +209,73 @@ const HeaderBar = ({
               <Menu className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuItem onSelect={() => onHeldBills()}>
-              <PauseCircle className="mr-2 h-4 w-4" />
+          <DropdownMenuContent align="end" className="w-72 p-2">
+            <DropdownMenuItem onSelect={() => onHeldBills()} className="min-h-11 px-3 py-2 text-base">
+              <PauseCircle className="mr-3 h-5 w-5" />
               Held
               {heldBillsCount > 0 && <Badge className="ml-auto h-5 min-w-5 px-1 text-[10px]">{heldBillsCount}</Badge>}
             </DropdownMenuItem>
 
             {isAdmin && (
-              <DropdownMenuItem onSelect={() => onNewItem()}>
-                <PlusCircle className="mr-2 h-4 w-4" />
+              <DropdownMenuItem onSelect={() => onNewItem()} className="min-h-11 px-3 py-2 text-base">
+                <PlusCircle className="mr-3 h-5 w-5" />
                 New Item
               </DropdownMenuItem>
             )}
 
             {isAdmin && onManageProducts && (
-              <DropdownMenuItem onSelect={() => onManageProducts()}>
-                <PencilLine className="mr-2 h-4 w-4" />
+              <DropdownMenuItem onSelect={() => onManageProducts()} className="min-h-11 px-3 py-2 text-base">
+                <PencilLine className="mr-3 h-5 w-5" />
                 Manage
               </DropdownMenuItem>
             )}
 
             {isAdmin && onReports && (
-              <DropdownMenuItem onSelect={() => onReports()}>
-                <BarChart3 className="mr-2 h-4 w-4" />
+              <DropdownMenuItem onSelect={() => onReports()} className="min-h-11 px-3 py-2 text-base">
+                <BarChart3 className="mr-3 h-5 w-5" />
                 Reports
               </DropdownMenuItem>
             )}
 
             {isAdmin && (
-              <DropdownMenuItem onSelect={() => onTodaySales()}>
-                <Clock className="mr-2 h-4 w-4" />
+              <DropdownMenuItem onSelect={() => onTodaySales()} className="min-h-11 px-3 py-2 text-base">
+                <Clock className="mr-3 h-5 w-5" />
                 Today
               </DropdownMenuItem>
             )}
 
             {onAuditLog && (
-              <DropdownMenuItem onSelect={() => onAuditLog()}>
-                <FileText className="mr-2 h-4 w-4" />
+              <DropdownMenuItem onSelect={() => onAuditLog()} className="min-h-11 px-3 py-2 text-base">
+                <FileText className="mr-3 h-5 w-5" />
                 Audit
               </DropdownMenuItem>
             )}
 
             {hasActiveSession && onEndShift && (
-              <DropdownMenuItem onSelect={() => onEndShift()}>
-                <Lock className="mr-2 h-4 w-4" />
+              <DropdownMenuItem onSelect={() => onEndShift()} className="min-h-11 px-3 py-2 text-base">
+                <Lock className="mr-3 h-5 w-5" />
                 End Shift
               </DropdownMenuItem>
             )}
 
             {isAdmin && (
-              <DropdownMenuItem onSelect={() => onImportSupplierBill()}>
-                <Upload className="mr-2 h-4 w-4" />
+              <DropdownMenuItem onSelect={() => onImportSupplierBill()} className="min-h-11 px-3 py-2 text-base">
+                <Upload className="mr-3 h-5 w-5" />
                 Import Bill
               </DropdownMenuItem>
             )}
 
             {isAdmin && onShopSettings && (
-              <DropdownMenuItem onSelect={() => onShopSettings()}>
-                <Settings2 className="mr-2 h-4 w-4" />
+              <DropdownMenuItem onSelect={() => onShopSettings()} className="min-h-11 px-3 py-2 text-base">
+                <Settings2 className="mr-3 h-5 w-5" />
                 Shop
               </DropdownMenuItem>
             )}
 
             <DropdownMenuSeparator />
 
-            <DropdownMenuItem onSelect={() => onSignOut()}>
-              <LogOut className="mr-2 h-4 w-4" />
+            <DropdownMenuItem onSelect={() => onSignOut()} className="min-h-11 px-3 py-2 text-base">
+              <LogOut className="mr-3 h-5 w-5" />
               Sign Out
             </DropdownMenuItem>
           </DropdownMenuContent>
