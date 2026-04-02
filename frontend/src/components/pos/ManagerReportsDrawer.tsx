@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import {
@@ -11,7 +11,9 @@ import {
   Package,
   RefreshCw,
   RotateCcw,
+  ShieldAlert,
   ShieldCheck,
+  ShieldX,
   ShoppingCart,
   FileDown,
   FileText,
@@ -19,22 +21,55 @@ import {
   Wallet,
 } from "lucide-react";
 import {
+  adminActivateDevice,
+  adminDeactivateDevice,
   adminExtendDeviceGrace,
   adminForceLicenseResync,
+  adminMassRevokeDevices,
   adminReactivateDevice,
   adminRevokeDevice,
+  adminTransferDeviceSeat,
+  exportAdminLicenseAuditLogs,
+  createAdminManualBillingInvoice,
+  runAdminEmergencyAction,
+  fetchAdminManualBillingDailyReconciliation,
+  fetchAdminManualBillingInvoices,
   fetchAdminLicenseAuditLogs,
   fetchAdminLicensingShops,
+  fetchAdminManualBillingPayments,
+  runAdminBillingStateReconciliation,
   fetchDailySalesReport,
   fetchLowStockReport,
   fetchPaymentBreakdownReport,
   fetchSupportTriageReport,
   fetchTopItemsReport,
   fetchTransactionsReport,
+  recordAdminManualBillingPayment,
+  rejectAdminManualBillingPayment,
+  verifyAdminManualBillingPayment,
 } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -55,6 +90,10 @@ type LowStockItem = Awaited<ReturnType<typeof fetchLowStockReport>>["items"][num
 type SupportTriageData = Awaited<ReturnType<typeof fetchSupportTriageReport>>;
 type AdminLicensingShopData = Awaited<ReturnType<typeof fetchAdminLicensingShops>>;
 type AdminLicensingAuditData = Awaited<ReturnType<typeof fetchAdminLicenseAuditLogs>>;
+type AdminManualBillingInvoicesData = Awaited<ReturnType<typeof fetchAdminManualBillingInvoices>>;
+type AdminManualBillingPaymentsData = Awaited<ReturnType<typeof fetchAdminManualBillingPayments>>;
+type AdminManualBillingReconciliationData = Awaited<ReturnType<typeof fetchAdminManualBillingDailyReconciliation>>;
+type AdminBillingStateReconciliationData = Awaited<ReturnType<typeof runAdminBillingStateReconciliation>>;
 
 type ReportData = {
   summary: Awaited<ReturnType<typeof fetchDailySalesReport>> | null;
@@ -65,6 +104,43 @@ type ReportData = {
   support: SupportTriageData | null;
   adminShops: AdminLicensingShopData | null;
   adminAudit: AdminLicensingAuditData | null;
+  manualInvoices: AdminManualBillingInvoicesData | null;
+  manualPayments: AdminManualBillingPaymentsData | null;
+  manualReconciliation: AdminManualBillingReconciliationData | null;
+  billingStateReconciliation: AdminBillingStateReconciliationData | null;
+};
+
+type PromptDialogConfig = {
+  title: string;
+  description?: string;
+  label?: string;
+  placeholder?: string;
+  defaultValue?: string;
+  required?: boolean;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  validate?: (value: string) => string | null;
+};
+
+type PromptDialogState = PromptDialogConfig & {
+  value: string;
+  error: string | null;
+};
+
+type ConfirmDialogConfig = {
+  title: string;
+  description?: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+};
+
+type ConfirmDialogState = ConfirmDialogConfig;
+
+type ShareDialogState = {
+  title: string;
+  description?: string;
+  activationKey?: string;
+  successUrl?: string;
 };
 
 const money = (value: number) => `Rs. ${value.toLocaleString()}`;
@@ -109,6 +185,18 @@ const escapeHtml = (value: string | number | null | undefined) =>
 const downloadCsvFile = (filename: string, rows: string[][]) => {
   const blob = new Blob([rows.map((row) => row.map(escapeCsvValue).join(",")).join("\r\n")], {
     type: "text/csv;charset=utf-8;",
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+};
+
+const downloadTextFile = (filename: string, content: string, mimeType: string) => {
+  const blob = new Blob([content], {
+    type: mimeType || "text/plain;charset=utf-8;",
   });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
@@ -206,7 +294,101 @@ const ManagerReportsDrawer = ({
     support: null,
     adminShops: null,
     adminAudit: null,
+    manualInvoices: null,
+    manualPayments: null,
+    manualReconciliation: null,
+    billingStateReconciliation: null,
   });
+  const [promptState, setPromptState] = useState<PromptDialogState | null>(null);
+  const [confirmState, setConfirmState] = useState<ConfirmDialogState | null>(null);
+  const [shareState, setShareState] = useState<ShareDialogState | null>(null);
+  const promptResolveRef = useRef<((value: string | null) => void) | null>(null);
+  const confirmResolveRef = useRef<((value: boolean) => void) | null>(null);
+
+  const openPromptDialog = useCallback((config: PromptDialogConfig) => {
+    return new Promise<string | null>((resolve) => {
+      promptResolveRef.current = resolve;
+      setPromptState({
+        ...config,
+        value: config.defaultValue ?? "",
+        error: null,
+      });
+    });
+  }, []);
+
+  const cancelPromptDialog = useCallback(() => {
+    promptResolveRef.current?.(null);
+    promptResolveRef.current = null;
+    setPromptState(null);
+  }, []);
+
+  const submitPromptDialog = useCallback(() => {
+    if (!promptState) {
+      return;
+    }
+
+    const value = promptState.value.trim();
+    if (promptState.required !== false && !value) {
+      setPromptState((current) => (current ? { ...current, error: "This field is required." } : current));
+      return;
+    }
+
+    const validationError = promptState.validate?.(value) || null;
+    if (validationError) {
+      setPromptState((current) => (current ? { ...current, error: validationError } : current));
+      return;
+    }
+
+    promptResolveRef.current?.(value);
+    promptResolveRef.current = null;
+    setPromptState(null);
+  }, [promptState]);
+
+  const openConfirmDialog = useCallback((config: ConfirmDialogConfig) => {
+    return new Promise<boolean>((resolve) => {
+      confirmResolveRef.current = resolve;
+      setConfirmState(config);
+    });
+  }, []);
+
+  const cancelConfirmDialog = useCallback(() => {
+    confirmResolveRef.current?.(false);
+    confirmResolveRef.current = null;
+    setConfirmState(null);
+  }, []);
+
+  const acceptConfirmDialog = useCallback(() => {
+    confirmResolveRef.current?.(true);
+    confirmResolveRef.current = null;
+    setConfirmState(null);
+  }, []);
+
+  const copyTextToClipboard = useCallback(async (value: string, successMessage: string) => {
+    if (!value) {
+      return;
+    }
+
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(value);
+        toast.success(successMessage);
+        return;
+      } catch {
+        // fallback below
+      }
+    }
+
+    toast.info("Clipboard not available. Copy manually from the dialog.");
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      promptResolveRef.current?.(null);
+      confirmResolveRef.current?.(false);
+      promptResolveRef.current = null;
+      confirmResolveRef.current = null;
+    };
+  }, []);
 
   const loadReports = useCallback(async () => {
     setLoading(true);
@@ -222,16 +404,22 @@ const ManagerReportsDrawer = ({
       let support: SupportTriageData | null = null;
       let adminShops: AdminLicensingShopData | null = null;
       let adminAudit: AdminLicensingAuditData | null = null;
+      let manualInvoices: AdminManualBillingInvoicesData | null = null;
+      let manualPayments: AdminManualBillingPaymentsData | null = null;
+      let manualReconciliation: AdminManualBillingReconciliationData | null = null;
 
       if (isSuperAdmin) {
-        [support, adminShops, adminAudit] = await Promise.all([
+        [support, adminShops, adminAudit, manualInvoices, manualPayments, manualReconciliation] = await Promise.all([
           fetchSupportTriageReport(30),
           fetchAdminLicensingShops(),
           fetchAdminLicenseAuditLogs({ take: 50 }),
+          fetchAdminManualBillingInvoices({ take: 30 }),
+          fetchAdminManualBillingPayments({ take: 30 }),
+          fetchAdminManualBillingDailyReconciliation({ date: toDate, currency: "LKR", take: 30 }),
         ]);
       }
 
-      setReport({
+      setReport((current) => ({
         summary,
         transactions: transactions.items,
         payments: payments.items,
@@ -240,7 +428,11 @@ const ManagerReportsDrawer = ({
         support,
         adminShops,
         adminAudit,
-      });
+        manualInvoices,
+        manualPayments,
+        manualReconciliation,
+        billingStateReconciliation: current.billingStateReconciliation,
+      }));
     } catch (error) {
       console.error(error);
       toast.error(error instanceof Error ? error.message : "Failed to load reports.");
@@ -268,13 +460,19 @@ const ManagerReportsDrawer = ({
 
   const handleRevokeDevice = useCallback(
     async (deviceCode: string) => {
-      const reason = window.prompt("Reason for revoking this device?");
-      if (!reason?.trim()) {
+      const reason = await openPromptDialog({
+        title: "Revoke Device",
+        description: `Provide a reason for revoking ${deviceCode}.`,
+        label: "Reason",
+        placeholder: "policy_violation",
+        confirmLabel: "Revoke",
+      });
+      if (!reason) {
         return;
       }
 
       try {
-        await adminRevokeDevice(deviceCode, reason.trim());
+        await adminRevokeDevice(deviceCode, reason);
         toast.success(`Revoked ${deviceCode}`);
         await loadReports();
       } catch (error) {
@@ -282,18 +480,24 @@ const ManagerReportsDrawer = ({
         toast.error(error instanceof Error ? error.message : "Failed to revoke device.");
       }
     },
-    [loadReports]
+    [loadReports, openPromptDialog]
   );
 
   const handleReactivateDevice = useCallback(
     async (deviceCode: string) => {
-      const reason = window.prompt("Reason for reactivating this device?");
-      if (!reason?.trim()) {
+      const reason = await openPromptDialog({
+        title: "Reactivate Device",
+        description: `Provide a reason for reactivating ${deviceCode}.`,
+        label: "Reason",
+        placeholder: "device_restored",
+        confirmLabel: "Reactivate",
+      });
+      if (!reason) {
         return;
       }
 
       try {
-        await adminReactivateDevice(deviceCode, reason.trim());
+        await adminReactivateDevice(deviceCode, reason);
         toast.success(`Reactivated ${deviceCode}`);
         await loadReports();
       } catch (error) {
@@ -301,29 +505,201 @@ const ManagerReportsDrawer = ({
         toast.error(error instanceof Error ? error.message : "Failed to reactivate device.");
       }
     },
-    [loadReports]
+    [loadReports, openPromptDialog]
   );
 
-  const handleExtendGrace = useCallback(
+  const handleDeactivateDevice = useCallback(
     async (deviceCode: string) => {
-      const reason = window.prompt("Reason for extending grace?");
-      if (!reason?.trim()) {
-        return;
-      }
-
-      const daysInput = window.prompt("Extend by how many days? (1-30)", "3");
-      if (!daysInput?.trim()) {
-        return;
-      }
-
-      const days = Number(daysInput);
-      if (!Number.isFinite(days) || days < 1 || days > 30) {
-        toast.error("Grace extension days must be between 1 and 30.");
+      const reason = await openPromptDialog({
+        title: "Deactivate Device",
+        description: `Provide a reason for deactivating ${deviceCode}.`,
+        label: "Reason",
+        placeholder: "seat_recovery",
+        confirmLabel: "Deactivate",
+      });
+      if (!reason) {
         return;
       }
 
       try {
-        await adminExtendDeviceGrace(deviceCode, days, reason.trim());
+        await adminDeactivateDevice(deviceCode, reason);
+        toast.success(`Deactivated ${deviceCode}`);
+        await loadReports();
+      } catch (error) {
+        console.error(error);
+        toast.error(error instanceof Error ? error.message : "Failed to deactivate device.");
+      }
+    },
+    [loadReports, openPromptDialog]
+  );
+
+  const handleActivateDevice = useCallback(
+    async (deviceCode: string) => {
+      const reason = await openPromptDialog({
+        title: "Activate Device",
+        description: `Provide a reason for activating ${deviceCode}.`,
+        label: "Reason",
+        placeholder: "manual_reactivation",
+        confirmLabel: "Activate",
+      });
+      if (!reason) {
+        return;
+      }
+
+      try {
+        await adminActivateDevice(deviceCode, reason);
+        toast.success(`Activated ${deviceCode}`);
+        await loadReports();
+      } catch (error) {
+        console.error(error);
+        toast.error(error instanceof Error ? error.message : "Failed to activate device.");
+      }
+    },
+    [loadReports, openPromptDialog]
+  );
+
+  const handleTransferSeat = useCallback(
+    async (deviceCode: string, currentShopCode: string) => {
+      const fallbackTargetShopCode =
+        report.adminShops?.items.find((shop) => shop.shop_code !== currentShopCode)?.shop_code || "default";
+      const targetShopCode = await openPromptDialog({
+        title: "Transfer Seat",
+        description: `Enter target shop code for device ${deviceCode}.`,
+        label: "Target shop code",
+        defaultValue: fallbackTargetShopCode,
+        confirmLabel: "Continue",
+        validate: (value) => {
+          if (value === currentShopCode) {
+            return "Target shop must be different from current shop.";
+          }
+
+          return null;
+        },
+      });
+      if (!targetShopCode) {
+        return;
+      }
+
+      const reason = await openPromptDialog({
+        title: "Transfer Seat",
+        description: `Provide a reason for moving ${deviceCode} to ${targetShopCode}.`,
+        label: "Reason",
+        placeholder: "branch_reassignment",
+        confirmLabel: "Transfer",
+      });
+      if (!reason) {
+        return;
+      }
+
+      try {
+        await adminTransferDeviceSeat(deviceCode, targetShopCode, reason, "support-ui");
+        toast.success(`Transferred ${deviceCode} to ${targetShopCode}.`);
+        await loadReports();
+      } catch (error) {
+        console.error(error);
+        toast.error(error instanceof Error ? error.message : "Failed to transfer seat.");
+      }
+    },
+    [loadReports, openPromptDialog, report.adminShops?.items]
+  );
+
+  const handleEmergencyAction = useCallback(
+    async (
+      deviceCode: string,
+      action: "lock_device" | "revoke_token" | "force_reauth",
+      label: string
+    ) => {
+      const actorNote = await openPromptDialog({
+        title: label,
+        description: `Provide a reason for ${label.toLowerCase()} on ${deviceCode}.`,
+        label: "Reason",
+        placeholder: "security_response",
+        confirmLabel: label,
+      });
+      if (!actorNote) {
+        return;
+      }
+
+      try {
+        await runAdminEmergencyAction(deviceCode, action, actorNote, "security-ui");
+        toast.success(`${label} executed for ${deviceCode}.`);
+        await loadReports();
+      } catch (error) {
+        console.error(error);
+        toast.error(error instanceof Error ? error.message : `Failed to run ${label.toLowerCase()}.`);
+      }
+    },
+    [loadReports, openPromptDialog]
+  );
+
+  const handleExtendGrace = useCallback(
+    async (deviceCode: string) => {
+      const reason = await openPromptDialog({
+        title: "Extend Grace",
+        description: `Provide a reason for extending grace on ${deviceCode}.`,
+        label: "Reason",
+        placeholder: "billing_delay",
+        confirmLabel: "Continue",
+      });
+      if (!reason) {
+        return;
+      }
+
+      const daysInput = await openPromptDialog({
+        title: "Extend Grace",
+        description: "Enter grace extension days (1-30).",
+        label: "Days",
+        defaultValue: "3",
+        confirmLabel: "Continue",
+        validate: (value) => {
+          const parsed = Number(value);
+          if (!Number.isFinite(parsed) || parsed < 1 || parsed > 30) {
+            return "Grace extension days must be between 1 and 30.";
+          }
+
+          return null;
+        },
+      });
+      if (!daysInput) {
+        return;
+      }
+
+      const days = Number(daysInput);
+      let stepUpApprovedBy: string | undefined;
+      let stepUpApprovalNote: string | undefined;
+      if (days >= 7) {
+        stepUpApprovedBy = (await openPromptDialog({
+          title: "Step-Up Approval Required",
+          description: "Enter the approver username for this high-risk extension.",
+          label: "Approver username",
+          confirmLabel: "Continue",
+        })) || undefined;
+        if (!stepUpApprovedBy) {
+          return;
+        }
+
+        stepUpApprovalNote = (await openPromptDialog({
+          title: "Step-Up Approval Required",
+          description: "Enter approval note from the step-up approver.",
+          label: "Approval note",
+          placeholder: "approved for billing exception",
+          confirmLabel: "Submit",
+        })) || undefined;
+        if (!stepUpApprovalNote) {
+          return;
+        }
+      }
+
+      try {
+        await adminExtendDeviceGrace(
+          deviceCode,
+          days,
+          reason,
+          "support-ui",
+          "manual_extend_grace",
+          stepUpApprovedBy,
+          stepUpApprovalNote
+        );
         toast.success(`Extended grace for ${deviceCode}`);
         await loadReports();
       } catch (error) {
@@ -331,18 +707,101 @@ const ManagerReportsDrawer = ({
         toast.error(error instanceof Error ? error.message : "Failed to extend grace.");
       }
     },
-    [loadReports]
+    [loadReports, openPromptDialog]
   );
+
+  const handleMassRevoke = useCallback(async () => {
+    const prefill = (report.adminShops?.items ?? [])
+      .flatMap((shop) => shop.devices.filter((device) => device.device_status.toLowerCase() === "active"))
+      .slice(0, 3)
+      .map((device) => device.device_code)
+      .join(",");
+    const rawCodes = await openPromptDialog({
+      title: "Mass Revoke Devices",
+      description: "Enter one or more device codes separated by commas.",
+      label: "Device codes",
+      defaultValue: prefill,
+      confirmLabel: "Continue",
+      validate: (value) => {
+        const codes = value
+          .split(",")
+          .map((item) => item.trim())
+          .filter((item) => item.length > 0);
+        return codes.length === 0 ? "At least one device code is required." : null;
+      },
+    });
+    if (!rawCodes) {
+      return;
+    }
+
+    const deviceCodes = rawCodes
+      .split(",")
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+
+    const actorNote = await openPromptDialog({
+      title: "Mass Revoke Devices",
+      description: "Provide a reason for this bulk revoke operation.",
+      label: "Reason",
+      placeholder: "suspected_multi_device_compromise",
+      confirmLabel: "Continue",
+    });
+    if (!actorNote) {
+      return;
+    }
+
+    const stepUpApprovedBy = await openPromptDialog({
+      title: "Step-Up Approval Required",
+      description: "Enter approver username.",
+      label: "Approver username",
+      confirmLabel: "Continue",
+    });
+    if (!stepUpApprovedBy) {
+      return;
+    }
+
+    const stepUpApprovalNote = await openPromptDialog({
+      title: "Step-Up Approval Required",
+      description: "Enter approval note.",
+      label: "Approval note",
+      confirmLabel: "Mass Revoke",
+    });
+    if (!stepUpApprovalNote) {
+      return;
+    }
+
+    try {
+      const result = await adminMassRevokeDevices(
+        deviceCodes,
+        actorNote,
+        "security-ui",
+        "manual_mass_revoke",
+        stepUpApprovedBy,
+        stepUpApprovalNote
+      );
+      toast.success(`Mass revoke completed: ${result.revoked_count} revoked, ${result.already_revoked_count} already revoked.`);
+      await loadReports();
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Failed to run mass revoke.");
+    }
+  }, [loadReports, openPromptDialog, report.adminShops?.items]);
 
   const handleResyncShop = useCallback(
     async (shopCode: string) => {
-      const reason = window.prompt(`Reason for forcing license resync on ${shopCode}?`);
-      if (!reason?.trim()) {
+      const actorNote = await openPromptDialog({
+        title: "Force License Resync",
+        description: `Provide a reason for forcing resync on shop ${shopCode}.`,
+        label: "Reason",
+        placeholder: "manual_sync_after_billing_update",
+        confirmLabel: "Resync",
+      });
+      if (!actorNote) {
         return;
       }
 
       try {
-        await adminForceLicenseResync(shopCode, reason.trim());
+        await adminForceLicenseResync(shopCode, actorNote);
         toast.success(`Forced resync for ${shopCode}`);
         await loadReports();
       } catch (error) {
@@ -350,8 +809,467 @@ const ManagerReportsDrawer = ({
         toast.error(error instanceof Error ? error.message : "Failed to force license resync.");
       }
     },
-    [loadReports]
+    [loadReports, openPromptDialog]
   );
+
+  const handleExportAuditLogs = useCallback(async (format: "csv" | "json") => {
+    try {
+      const result = await exportAdminLicenseAuditLogs({
+        search: auditSearch,
+        take: 500,
+        format,
+      });
+      downloadTextFile(result.filename, result.content, result.mimeType);
+      toast.success(`Exported audit logs (${format.toUpperCase()}).`);
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Failed to export audit logs.");
+    }
+  }, [auditSearch]);
+
+  const handleCreateManualInvoice = useCallback(async () => {
+    const suggestedShopCode = report.adminShops?.items[0]?.shop_code || "default";
+    const shopCodeInput = await openPromptDialog({
+      title: "Create Invoice",
+      description: "Enter shop code for this invoice.",
+      label: "Shop code",
+      defaultValue: suggestedShopCode,
+      confirmLabel: "Continue",
+    });
+    if (!shopCodeInput) {
+      return;
+    }
+
+    const amountInput = await openPromptDialog({
+      title: "Create Invoice",
+      description: "Enter invoice amount due (LKR).",
+      label: "Amount due",
+      defaultValue: "5000",
+      confirmLabel: "Continue",
+      validate: (value) => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+          return "Invoice amount must be greater than zero.";
+        }
+
+        return null;
+      },
+    });
+    if (!amountInput) {
+      return;
+    }
+    const amountDue = Number(amountInput);
+
+    const dueDateInput = await openPromptDialog({
+      title: "Create Invoice",
+      description: "Enter due date in YYYY-MM-DD format.",
+      label: "Due date",
+      defaultValue: formatDateInput(new Date()),
+      confirmLabel: "Continue",
+      validate: (value) => /^\d{4}-\d{2}-\d{2}$/.test(value) ? null : "Due date must be in YYYY-MM-DD format.",
+    });
+    if (!dueDateInput) {
+      return;
+    }
+
+    const notes = await openPromptDialog({
+      title: "Create Invoice",
+      description: "Optional notes for this invoice.",
+      label: "Notes (optional)",
+      required: false,
+      confirmLabel: "Continue",
+    });
+    if (notes === null) {
+      return;
+    }
+
+    const actorNote = await openPromptDialog({
+      title: "Create Invoice",
+      description: "Actor note is required for audit.",
+      label: "Actor note",
+      confirmLabel: "Create Invoice",
+    });
+    if (!actorNote) {
+      return;
+    }
+
+    try {
+      await createAdminManualBillingInvoice({
+        shop_code: shopCodeInput,
+        amount_due: amountDue,
+        currency: "LKR",
+        due_at: `${dueDateInput}T00:00:00Z`,
+        notes: notes || undefined,
+        actor: "support-ui",
+        reason_code: "manual_billing_invoice_created",
+        actor_note: actorNote,
+      });
+      toast.success("Manual billing invoice created.");
+      await loadReports();
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Failed to create invoice.");
+    }
+  }, [loadReports, openPromptDialog, report.adminShops]);
+
+  const handleRecordManualPayment = useCallback(async (prefillInvoiceNumber?: string) => {
+    const invoiceNumber = prefillInvoiceNumber?.trim() || await openPromptDialog({
+      title: "Record Payment",
+      description: "Enter invoice number (for example LIC-DEFAULT-...).",
+      label: "Invoice number",
+      confirmLabel: "Continue",
+    });
+    if (!invoiceNumber) {
+      return;
+    }
+
+    const methodInput = await openPromptDialog({
+      title: "Record Payment",
+      description: "Payment method must be cash, bank_deposit, or bank_transfer.",
+      label: "Payment method",
+      defaultValue: "bank_deposit",
+      confirmLabel: "Continue",
+      validate: (value) => {
+        const normalized = value.toLowerCase();
+        return normalized === "cash" || normalized === "bank_deposit" || normalized === "bank_transfer"
+          ? null
+          : "Method must be cash, bank_deposit, or bank_transfer.";
+      },
+    });
+    if (!methodInput) {
+      return;
+    }
+
+    const method = methodInput.toLowerCase() as "cash" | "bank_deposit" | "bank_transfer";
+
+    const amountInput = await openPromptDialog({
+      title: "Record Payment",
+      description: "Enter received amount (LKR).",
+      label: "Amount",
+      defaultValue: "5000",
+      confirmLabel: "Continue",
+      validate: (value) => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+          return "Payment amount must be greater than zero.";
+        }
+
+        return null;
+      },
+    });
+    if (!amountInput) {
+      return;
+    }
+
+    const amount = Number(amountInput);
+
+    const bankReference = await openPromptDialog({
+      title: "Record Payment",
+      description: "Optional bank reference or deposit slip number.",
+      label: "Bank reference (optional)",
+      required: false,
+      confirmLabel: "Continue",
+    });
+    if (bankReference === null) {
+      return;
+    }
+
+    const notes = await openPromptDialog({
+      title: "Record Payment",
+      description: "Optional notes for this payment.",
+      label: "Notes (optional)",
+      required: false,
+      confirmLabel: "Continue",
+    });
+    if (notes === null) {
+      return;
+    }
+
+    const actorNote = await openPromptDialog({
+      title: "Record Payment",
+      description: "Actor note is required for audit.",
+      label: "Actor note",
+      confirmLabel: "Record Payment",
+    });
+    if (!actorNote) {
+      return;
+    }
+
+    try {
+      await recordAdminManualBillingPayment({
+        invoice_number: invoiceNumber,
+        method,
+        amount,
+        currency: "LKR",
+        bank_reference: bankReference || undefined,
+        notes: notes || undefined,
+        actor: "support-ui",
+        reason_code: "manual_payment_pending_verification",
+        actor_note: actorNote,
+      });
+      toast.success("Payment recorded and pending verification.");
+      await loadReports();
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Failed to record payment.");
+    }
+  }, [loadReports, openPromptDialog]);
+
+  const handleVerifyManualPayment = useCallback(async (prefillPaymentId?: string) => {
+    const paymentId = prefillPaymentId?.trim() || await openPromptDialog({
+      title: "Verify Payment",
+      description: "Enter payment ID to verify.",
+      label: "Payment ID",
+      confirmLabel: "Continue",
+    });
+    if (!paymentId) {
+      return;
+    }
+
+    const actorNote = await openPromptDialog({
+      title: "Verify Payment",
+      description: "Actor note is required for verification.",
+      label: "Actor note",
+      confirmLabel: "Continue",
+    });
+    if (!actorNote) {
+      return;
+    }
+
+    const extendDaysInput = await openPromptDialog({
+      title: "Verify Payment",
+      description: "Extend subscription by days (1-365).",
+      label: "Extension days",
+      defaultValue: "30",
+      confirmLabel: "Continue",
+      validate: (value) => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed) || parsed < 1 || parsed > 365) {
+          return "Extension days must be between 1 and 365.";
+        }
+
+        return null;
+      },
+    });
+    if (!extendDaysInput) {
+      return;
+    }
+
+    const customerEmail = await openPromptDialog({
+      title: "Verify Payment",
+      description: "Optional customer email for access delivery.",
+      label: "Customer email (optional)",
+      required: false,
+      confirmLabel: "Verify Payment",
+    });
+    if (customerEmail === null) {
+      return;
+    }
+
+    const extendDays = Number(extendDaysInput);
+
+    try {
+      const verification = await verifyAdminManualBillingPayment(paymentId, {
+        reason_code: "manual_payment_verified",
+        actor_note: actorNote,
+        reason: actorNote,
+        extend_days: Math.round(extendDays),
+        customer_email: customerEmail || undefined,
+        actor: "billing-ui",
+      });
+      const issuedActivationKey = verification.activation_entitlement?.activation_entitlement_key?.trim() || "";
+      const accessSuccessUrl = verification.access_delivery?.success_page_url?.trim() || "";
+      const accessEmail = verification.access_delivery?.email_delivery;
+
+      if (issuedActivationKey) {
+        await copyTextToClipboard(issuedActivationKey, "Activation key copied.");
+        toast.success("Payment verified. New activation key issued.");
+      } else {
+        toast.success("Payment verified and subscription updated.");
+      }
+
+      if (issuedActivationKey || accessSuccessUrl) {
+        setShareState({
+          title: "Customer Access Details",
+          description: "Share these details with the customer for device activation.",
+          activationKey: issuedActivationKey || undefined,
+          successUrl: accessSuccessUrl || undefined,
+        });
+      }
+
+      if (accessEmail?.status === "sent") {
+        toast.success(
+          accessEmail.recipient_email
+            ? `Access email sent to ${accessEmail.recipient_email}.`
+            : "Access email sent."
+        );
+      } else if (accessEmail?.status === "failed") {
+        toast.warning(
+          accessEmail.reason
+            ? `Access email delivery failed: ${accessEmail.reason}`
+            : "Access email delivery failed."
+        );
+      } else if (accessEmail?.status === "skipped" && accessEmail.reason === "no_recipient_email") {
+        toast.info("Access email skipped: no recipient email configured.");
+      }
+
+      await loadReports();
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Failed to verify payment.");
+    }
+  }, [copyTextToClipboard, loadReports, openPromptDialog]);
+
+  const handleRejectManualPayment = useCallback(async (prefillPaymentId?: string) => {
+    const paymentId = prefillPaymentId?.trim() || await openPromptDialog({
+      title: "Reject Payment",
+      description: "Enter payment ID to reject.",
+      label: "Payment ID",
+      confirmLabel: "Continue",
+    });
+    if (!paymentId) {
+      return;
+    }
+
+    const actorNote = await openPromptDialog({
+      title: "Reject Payment",
+      description: "Actor note is required for rejection.",
+      label: "Actor note",
+      confirmLabel: "Reject Payment",
+    });
+    if (!actorNote) {
+      return;
+    }
+
+    try {
+      await rejectAdminManualBillingPayment(paymentId, {
+        reason_code: "manual_payment_rejected",
+        actor_note: actorNote,
+        reason: actorNote,
+        actor: "billing-ui",
+      });
+      toast.success("Payment rejected.");
+      await loadReports();
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Failed to reject payment.");
+    }
+  }, [loadReports, openPromptDialog]);
+
+  const handleRunManualBillingReconciliation = useCallback(async () => {
+    const reconciliationDate = await openPromptDialog({
+      title: "Run Reconciliation",
+      description: "Enter reconciliation date in YYYY-MM-DD format.",
+      label: "Date",
+      defaultValue: toDate,
+      confirmLabel: "Continue",
+      validate: (value) => /^\d{4}-\d{2}-\d{2}$/.test(value) ? null : "Date must be in YYYY-MM-DD format.",
+    });
+    if (!reconciliationDate) {
+      return;
+    }
+
+    const expectedInput = await openPromptDialog({
+      title: "Run Reconciliation",
+      description: "Optional expected verified bank total (LKR).",
+      label: "Expected total (optional)",
+      required: false,
+      defaultValue: "",
+      confirmLabel: "Run",
+      validate: (value) => {
+        if (!value) {
+          return null;
+        }
+
+        const parsed = Number(value);
+        return Number.isFinite(parsed) && parsed >= 0
+          ? null
+          : "Expected total must be a positive number.";
+      },
+    });
+    if (expectedInput === null) {
+      return;
+    }
+
+    let expectedTotal: number | undefined;
+    if (expectedInput) {
+      expectedTotal = Number(expectedInput);
+    }
+
+    try {
+      const manualReconciliation = await fetchAdminManualBillingDailyReconciliation({
+        date: reconciliationDate,
+        currency: "LKR",
+        expectedTotal,
+        take: 30,
+      });
+      setReport((current) => ({
+        ...current,
+        manualReconciliation,
+      }));
+
+      if (manualReconciliation.has_mismatch) {
+        toast.warning("Reconciliation completed with mismatches. Review alert causes.");
+      } else {
+        toast.success("Reconciliation completed with no mismatch.");
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Failed to run reconciliation.");
+    }
+  }, [openPromptDialog, toDate]);
+
+  const handleRunBillingStateReconciliation = useCallback(async () => {
+    const applyUpdates = await openConfirmDialog({
+      title: "Billing Drift Reconciliation",
+      description: "Apply reconciliation updates now? Choose cancel for preview-only dry run.",
+      confirmLabel: "Apply Updates",
+      cancelLabel: "Preview Only",
+    });
+    const dryRun = !applyUpdates;
+
+    const reason = await openPromptDialog({
+      title: "Billing Drift Reconciliation",
+      description: "Reason is required for audit.",
+      label: "Reason",
+      defaultValue: dryRun ? "preview webhook-miss drift" : "reconcile webhook-miss drift",
+      confirmLabel: dryRun ? "Run Preview" : "Run Apply",
+    });
+    if (!reason) {
+      return;
+    }
+
+    try {
+      const result = await runAdminBillingStateReconciliation({
+        dry_run: dryRun,
+        reason,
+        reason_code: "manual_admin_billing_reconciliation",
+        actor_note: reason,
+        actor: "billing-ui",
+      });
+      setReport((current) => ({
+        ...current,
+        billingStateReconciliation: result,
+      }));
+
+      if (dryRun) {
+        toast.info(
+          `Preview found ${result.drift_candidates} drift candidate(s) and ${result.webhook_failures_detected} failed webhook event(s).`
+        );
+      } else if (result.subscriptions_reconciled > 0) {
+        toast.success(
+          `Reconciled ${result.subscriptions_reconciled} subscription(s); ${result.webhook_failures_detected} webhook failure(s) detected.`
+        );
+      } else {
+        toast.success("Billing drift reconciliation completed. No subscription updates were needed.");
+      }
+
+      await loadReports();
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Failed to run billing drift reconciliation.");
+    }
+  }, [loadReports, openConfirmDialog, openPromptDialog]);
 
   useEffect(() => {
     if (!open) {
@@ -608,6 +1526,7 @@ const ManagerReportsDrawer = ({
   };
 
   return (
+    <>
     <Sheet open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
       <SheetContent
         side="right"
@@ -985,7 +1904,7 @@ const ManagerReportsDrawer = ({
 
               {isSuperAdmin && (
                 <TabsContent value="support" className="space-y-4">
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
                   <StatCard
                     icon={<LifeBuoy className="h-5 w-5" />}
                     label="Active Devices"
@@ -1009,6 +1928,18 @@ const ManagerReportsDrawer = ({
                     label="Validation Failures"
                     value={String(report.support?.alerts.validation_failures_in_window ?? 0)}
                     hint={`Last ${report.support?.window_minutes ?? 30} minutes`}
+                  />
+                  <StatCard
+                    icon={<ShieldAlert className="h-5 w-5" />}
+                    label="Security Anomalies"
+                    value={String(report.support?.alerts.security_anomalies_in_window ?? 0)}
+                    hint="Cross-signal anomaly events"
+                  />
+                  <StatCard
+                    icon={<ShieldX className="h-5 w-5" />}
+                    label="Proof Failures"
+                    value={String(report.support?.alerts.sensitive_action_proof_failures_in_window ?? 0)}
+                    hint="Invalid device signatures"
                   />
                 </div>
 
@@ -1034,6 +1965,14 @@ const ManagerReportsDrawer = ({
                         <span>Webhook failures</span>
                         <span className="font-semibold">{report.support?.alerts.webhook_failures_in_window ?? 0}</span>
                       </div>
+                      <div className="flex items-center justify-between rounded-xl bg-muted/40 px-4 py-3">
+                        <span>Impossible-travel signals</span>
+                        <span className="font-semibold">{report.support?.alerts.auth_impossible_travel_signals_in_window ?? 0}</span>
+                      </div>
+                      <div className="flex items-center justify-between rounded-xl bg-muted/40 px-4 py-3">
+                        <span>Concurrent-device signals</span>
+                        <span className="font-semibold">{report.support?.alerts.auth_concurrent_device_signals_in_window ?? 0}</span>
+                      </div>
                     </div>
                   </div>
 
@@ -1043,7 +1982,9 @@ const ManagerReportsDrawer = ({
                     </div>
                     <div className="space-y-3 p-4">
                       {(report.support?.alerts.top_validation_failures.length || 0) === 0 &&
-                      (report.support?.alerts.top_webhook_failures.length || 0) === 0 ? (
+                      (report.support?.alerts.top_webhook_failures.length || 0) === 0 &&
+                      (report.support?.alerts.top_security_anomalies.length || 0) === 0 &&
+                      (report.support?.alerts.top_sensitive_action_failure_sources.length || 0) === 0 ? (
                         <p className="text-sm text-muted-foreground">No alert spikes in the current window.</p>
                       ) : (
                         <>
@@ -1060,6 +2001,26 @@ const ManagerReportsDrawer = ({
                           {(report.support?.alerts.top_webhook_failures ?? []).map((item) => (
                             <div key={`webhook-${item.reason}`} className="rounded-xl border border-border bg-background px-4 py-3">
                               <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Webhook</p>
+                              <div className="mt-1 flex items-center justify-between gap-3">
+                                <p className="truncate text-sm font-medium">{item.reason}</p>
+                                <Badge variant="secondary">{item.count}</Badge>
+                              </div>
+                            </div>
+                          ))}
+
+                          {(report.support?.alerts.top_security_anomalies ?? []).map((item) => (
+                            <div key={`security-${item.reason}`} className="rounded-xl border border-border bg-background px-4 py-3">
+                              <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Security</p>
+                              <div className="mt-1 flex items-center justify-between gap-3">
+                                <p className="truncate text-sm font-medium">{item.reason}</p>
+                                <Badge variant="secondary">{item.count}</Badge>
+                              </div>
+                            </div>
+                          ))}
+
+                          {(report.support?.alerts.top_sensitive_action_failure_sources ?? []).map((item) => (
+                            <div key={`proof-source-${item.reason}`} className="rounded-xl border border-border bg-background px-4 py-3">
+                              <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Proof Source</p>
                               <div className="mt-1 flex items-center justify-between gap-3">
                                 <p className="truncate text-sm font-medium">{item.reason}</p>
                                 <Badge variant="secondary">{item.count}</Badge>
@@ -1083,13 +2044,14 @@ const ManagerReportsDrawer = ({
                         <TableHead>Action</TableHead>
                         <TableHead>Actor</TableHead>
                         <TableHead>Device</TableHead>
+                        <TableHead>Source</TableHead>
                         <TableHead>Reason</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {(report.support?.recent_audit_events.length ?? 0) === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
+                          <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
                             No recent audit events.
                           </TableCell>
                         </TableRow>
@@ -1102,6 +2064,9 @@ const ManagerReportsDrawer = ({
                             <TableCell className="font-medium">{event.action}</TableCell>
                             <TableCell>{event.actor}</TableCell>
                             <TableCell>{event.device_code || "-"}</TableCell>
+                            <TableCell className="text-muted-foreground">
+                              {event.source_user_agent_family || "unknown"} | {event.source_ip_prefix || event.source_ip || "-"}
+                            </TableCell>
                             <TableCell className="text-muted-foreground">{event.reason || "-"}</TableCell>
                           </TableRow>
                         ))
@@ -1114,6 +2079,15 @@ const ManagerReportsDrawer = ({
                   <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
                     <p className="text-sm font-semibold">Super Admin Device Controls</p>
                     <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          void handleMassRevoke();
+                        }}
+                      >
+                        Mass Revoke
+                      </Button>
                       {(report.adminShops?.items ?? []).slice(0, 4).map((shop) => (
                         <Button
                           key={shop.shop_id}
@@ -1172,33 +2146,94 @@ const ManagerReportsDrawer = ({
                               <TableCell className="capitalize">{row.device.license_state}</TableCell>
                               <TableCell className="text-right">
                                 <div className="flex justify-end gap-2">
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => {
-                                      void handleRevokeDevice(row.device.device_code);
-                                    }}
-                                  >
-                                    Revoke
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => {
-                                      void handleReactivateDevice(row.device.device_code);
-                                    }}
-                                  >
-                                    Reactivate
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => {
-                                      void handleExtendGrace(row.device.device_code);
-                                    }}
-                                  >
-                                    Extend Grace
-                                  </Button>
+                                  {row.device.device_status.toLowerCase() === "active" ? (
+                                    <>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                          void handleDeactivateDevice(row.device.device_code);
+                                        }}
+                                      >
+                                        Deactivate
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                          void handleRevokeDevice(row.device.device_code);
+                                        }}
+                                      >
+                                        Revoke
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                          void handleTransferSeat(row.device.device_code, row.shopCode);
+                                        }}
+                                      >
+                                        Transfer Seat
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                          void handleExtendGrace(row.device.device_code);
+                                        }}
+                                      >
+                                        Extend Grace
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                          void handleEmergencyAction(row.device.device_code, "lock_device", "Lock Device");
+                                        }}
+                                      >
+                                        Lock
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                          void handleEmergencyAction(row.device.device_code, "revoke_token", "Revoke Token");
+                                        }}
+                                      >
+                                        Revoke Token
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                          void handleEmergencyAction(row.device.device_code, "force_reauth", "Force Re-Auth");
+                                        }}
+                                      >
+                                        Force Re-Auth
+                                      </Button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                          void handleActivateDevice(row.device.device_code);
+                                        }}
+                                      >
+                                        Activate
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                          void handleReactivateDevice(row.device.device_code);
+                                        }}
+                                      >
+                                        Reactivate
+                                      </Button>
+                                    </>
+                                  )}
                                 </div>
                               </TableCell>
                             </TableRow>
@@ -1206,6 +2241,427 @@ const ManagerReportsDrawer = ({
                       )}
                     </TableBody>
                   </Table>
+                </div>
+
+                <div className="rounded-2xl border border-border bg-card shadow-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+                    <p className="text-sm font-semibold">Manual Billing (Cash / Bank Deposit)</p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          void handleCreateManualInvoice();
+                        }}
+                      >
+                        Create Invoice
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          void handleRecordManualPayment();
+                        }}
+                      >
+                        Record Payment
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          void loadReports();
+                        }}
+                      >
+                        Refresh Billing
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          void handleRunManualBillingReconciliation();
+                        }}
+                      >
+                        Run Reconciliation
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          void handleRunBillingStateReconciliation();
+                        }}
+                      >
+                        Run Drift Check
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 p-4 xl:grid-cols-2">
+                    <div className="rounded-xl border border-border bg-background">
+                      <div className="flex items-center justify-between border-b border-border px-3 py-2">
+                        <p className="text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+                          Recent Invoices
+                        </p>
+                        <Badge variant="secondary">{report.manualInvoices?.count ?? 0}</Badge>
+                      </div>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Invoice</TableHead>
+                            <TableHead>Shop</TableHead>
+                            <TableHead className="text-right">Due</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead className="text-right">Action</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {(report.manualInvoices?.items.length ?? 0) === 0 ? (
+                            <TableRow>
+                              <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                                No manual billing invoices yet.
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            (report.manualInvoices?.items ?? []).slice(0, 12).map((invoice) => (
+                              <TableRow key={invoice.invoice_id}>
+                                <TableCell>
+                                  <div className="space-y-1">
+                                    <p className="font-medium">{invoice.invoice_number}</p>
+                                    <p className="text-xs text-muted-foreground">
+                                      Due {new Date(invoice.due_at).toLocaleDateString()}
+                                    </p>
+                                  </div>
+                                </TableCell>
+                                <TableCell>{invoice.shop_code}</TableCell>
+                                <TableCell className="text-right font-semibold">
+                                  {money(invoice.amount_due)}
+                                </TableCell>
+                                <TableCell className="capitalize">{invoice.status.replaceAll("_", " ")}</TableCell>
+                                <TableCell className="text-right">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      void handleRecordManualPayment(invoice.invoice_number);
+                                    }}
+                                  >
+                                    Record
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-background">
+                      <div className="flex items-center justify-between border-b border-border px-3 py-2">
+                        <p className="text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+                          Recent Payments
+                        </p>
+                        <Badge variant="secondary">{report.manualPayments?.count ?? 0}</Badge>
+                      </div>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Payment</TableHead>
+                            <TableHead>Invoice</TableHead>
+                            <TableHead className="text-right">Amount</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead className="text-right">Action</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {(report.manualPayments?.items.length ?? 0) === 0 ? (
+                            <TableRow>
+                              <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                                No manual payments recorded.
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            (report.manualPayments?.items ?? []).slice(0, 12).map((payment) => (
+                              <TableRow key={payment.payment_id}>
+                                <TableCell className="font-medium">{payment.payment_id.slice(0, 8)}</TableCell>
+                                <TableCell>
+                                  <div className="space-y-1">
+                                    <p className="font-medium">{payment.invoice_number}</p>
+                                    <p className="text-xs text-muted-foreground">{payment.method.replaceAll("_", " ")}</p>
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-right font-semibold">{money(payment.amount)}</TableCell>
+                                <TableCell className="capitalize">{payment.status.replaceAll("_", " ")}</TableCell>
+                                <TableCell className="text-right">
+                                  {payment.status === "pending_verification" ? (
+                                    <div className="flex justify-end gap-2">
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                          void handleVerifyManualPayment(payment.payment_id);
+                                        }}
+                                      >
+                                        Verify
+                                      </Button>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                          void handleRejectManualPayment(payment.payment_id);
+                                        }}
+                                      >
+                                        Reject
+                                      </Button>
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground">Processed</span>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-border p-4">
+                    <div className="rounded-xl border border-border bg-background">
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-3 py-2">
+                        <p className="text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+                          Daily Bank Reconciliation
+                        </p>
+                        {report.manualReconciliation ? (
+                          <Badge variant={report.manualReconciliation.has_mismatch ? "destructive" : "secondary"}>
+                            {report.manualReconciliation.has_mismatch ? "Mismatch Detected" : "Balanced"}
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline">Not Run</Badge>
+                        )}
+                      </div>
+
+                      {report.manualReconciliation ? (
+                        <div className="space-y-4 p-3">
+                          <div className="grid gap-3 md:grid-cols-4">
+                            <div className="rounded-lg border border-border p-3">
+                              <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Verified Total</p>
+                              <p className="text-base font-semibold">{money(report.manualReconciliation.verified_bank_total)}</p>
+                            </div>
+                            <div className="rounded-lg border border-border p-3">
+                              <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Pending Total</p>
+                              <p className="text-base font-semibold">{money(report.manualReconciliation.pending_bank_total)}</p>
+                            </div>
+                            <div className="rounded-lg border border-border p-3">
+                              <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Expected Total</p>
+                              <p className="text-base font-semibold">
+                                {typeof report.manualReconciliation.expected_bank_total === "number"
+                                  ? money(report.manualReconciliation.expected_bank_total)
+                                  : "Not provided"}
+                              </p>
+                            </div>
+                            <div className="rounded-lg border border-border p-3">
+                              <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Mismatch Amount</p>
+                              <p className="text-base font-semibold">
+                                {typeof report.manualReconciliation.mismatch_amount === "number"
+                                  ? money(report.manualReconciliation.mismatch_amount)
+                                  : "-"}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="grid gap-3 xl:grid-cols-2">
+                            <div className="rounded-lg border border-border">
+                              <div className="border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                Alert Causes ({report.manualReconciliation.alert_count})
+                              </div>
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead>Code</TableHead>
+                                    <TableHead>Severity</TableHead>
+                                    <TableHead className="text-right">Count</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {report.manualReconciliation.alerts.length === 0 ? (
+                                    <TableRow>
+                                      <TableCell colSpan={3} className="py-6 text-center text-muted-foreground">
+                                        No reconciliation alerts.
+                                      </TableCell>
+                                    </TableRow>
+                                  ) : (
+                                    report.manualReconciliation.alerts.map((alert) => (
+                                      <TableRow key={`${alert.code}-${alert.severity}`}>
+                                        <TableCell className="font-medium">{alert.code}</TableCell>
+                                        <TableCell className="capitalize">{alert.severity}</TableCell>
+                                        <TableCell className="text-right">{alert.count}</TableCell>
+                                      </TableRow>
+                                    ))
+                                  )}
+                                </TableBody>
+                              </Table>
+                            </div>
+
+                            <div className="rounded-lg border border-border">
+                              <div className="border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                Latest Bank Entries
+                              </div>
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead>Invoice</TableHead>
+                                    <TableHead>Method</TableHead>
+                                    <TableHead className="text-right">Amount</TableHead>
+                                    <TableHead>Status</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {report.manualReconciliation.items.length === 0 ? (
+                                    <TableRow>
+                                      <TableCell colSpan={4} className="py-6 text-center text-muted-foreground">
+                                        No bank entries for this date.
+                                      </TableCell>
+                                    </TableRow>
+                                  ) : (
+                                    report.manualReconciliation.items.slice(0, 8).map((item) => (
+                                      <TableRow key={item.payment_id}>
+                                        <TableCell className="font-medium">{item.invoice_number}</TableCell>
+                                        <TableCell className="capitalize">{item.method.replaceAll("_", " ")}</TableCell>
+                                        <TableCell className="text-right">{money(item.amount)}</TableCell>
+                                        <TableCell className="capitalize">{item.status.replaceAll("_", " ")}</TableCell>
+                                      </TableRow>
+                                    ))
+                                  )}
+                                </TableBody>
+                              </Table>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="px-3 py-6 text-sm text-muted-foreground">
+                          Run daily reconciliation to compare bank totals and detect duplicate/missing references.
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="mt-4 rounded-xl border border-border bg-background">
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-3 py-2">
+                        <p className="text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+                          Webhook Drift Reconciliation
+                        </p>
+                        {report.billingStateReconciliation ? (
+                          <Badge
+                            variant={
+                              report.billingStateReconciliation.drift_candidates > 0 ||
+                              report.billingStateReconciliation.webhook_failures_detected > 0
+                                ? "destructive"
+                                : "secondary"
+                            }
+                          >
+                            {report.billingStateReconciliation.dry_run ? "Preview" : "Applied"}
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline">Not Run</Badge>
+                        )}
+                      </div>
+
+                      {report.billingStateReconciliation ? (
+                        <div className="space-y-4 p-3">
+                          <div className="grid gap-3 md:grid-cols-4">
+                            <div className="rounded-lg border border-border p-3">
+                              <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Subscriptions Scanned</p>
+                              <p className="text-base font-semibold">{report.billingStateReconciliation.billing_subscriptions_scanned}</p>
+                            </div>
+                            <div className="rounded-lg border border-border p-3">
+                              <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Drift Candidates</p>
+                              <p className="text-base font-semibold">{report.billingStateReconciliation.drift_candidates}</p>
+                            </div>
+                            <div className="rounded-lg border border-border p-3">
+                              <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Reconciled</p>
+                              <p className="text-base font-semibold">{report.billingStateReconciliation.subscriptions_reconciled}</p>
+                            </div>
+                            <div className="rounded-lg border border-border p-3">
+                              <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Webhook Failures</p>
+                              <p className="text-base font-semibold">{report.billingStateReconciliation.webhook_failures_detected}</p>
+                            </div>
+                          </div>
+
+                          <div className="grid gap-3 xl:grid-cols-2">
+                            <div className="rounded-lg border border-border">
+                              <div className="border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                Subscription Updates
+                              </div>
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead>Shop</TableHead>
+                                    <TableHead>Previous</TableHead>
+                                    <TableHead>Current</TableHead>
+                                    <TableHead>Applied</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {report.billingStateReconciliation.subscription_updates.length === 0 ? (
+                                    <TableRow>
+                                      <TableCell colSpan={4} className="py-6 text-center text-muted-foreground">
+                                        No drift candidates.
+                                      </TableCell>
+                                    </TableRow>
+                                  ) : (
+                                    report.billingStateReconciliation.subscription_updates.slice(0, 8).map((item) => (
+                                      <TableRow key={`${item.shop_id}-${item.subscription_id || item.customer_id || item.period_end}`}>
+                                        <TableCell className="font-medium">{item.shop_code}</TableCell>
+                                        <TableCell className="capitalize">{item.previous_status.replaceAll("_", " ")}</TableCell>
+                                        <TableCell className="capitalize">{item.reconciled_status.replaceAll("_", " ")}</TableCell>
+                                        <TableCell>{item.applied ? "Yes" : "No"}</TableCell>
+                                      </TableRow>
+                                    ))
+                                  )}
+                                </TableBody>
+                              </Table>
+                            </div>
+
+                            <div className="rounded-lg border border-border">
+                              <div className="border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                Failed Webhook Events
+                              </div>
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead>Event</TableHead>
+                                    <TableHead>Type</TableHead>
+                                    <TableHead>Shop</TableHead>
+                                    <TableHead>Error</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {report.billingStateReconciliation.failed_webhook_events.length === 0 ? (
+                                    <TableRow>
+                                      <TableCell colSpan={4} className="py-6 text-center text-muted-foreground">
+                                        No failed webhook events in lookback window.
+                                      </TableCell>
+                                    </TableRow>
+                                  ) : (
+                                    report.billingStateReconciliation.failed_webhook_events.slice(0, 8).map((item) => (
+                                      <TableRow key={item.event_id}>
+                                        <TableCell className="font-medium">{item.event_id.slice(0, 12)}</TableCell>
+                                        <TableCell>{item.event_type}</TableCell>
+                                        <TableCell>{item.shop_code || "-"}</TableCell>
+                                        <TableCell className="text-muted-foreground">{item.last_error_code || "-"}</TableCell>
+                                      </TableRow>
+                                    ))
+                                  )}
+                                </TableBody>
+                              </Table>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="px-3 py-6 text-sm text-muted-foreground">
+                          Run drift check to reconcile expired billing periods when webhook events are missed.
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
                 <div className="rounded-2xl border border-border bg-card shadow-sm">
@@ -1218,6 +2674,24 @@ const ManagerReportsDrawer = ({
                         placeholder="Search action, actor, reason, metadata"
                         className="md:w-80"
                       />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          void handleExportAuditLogs("csv");
+                        }}
+                      >
+                        Export CSV
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          void handleExportAuditLogs("json");
+                        }}
+                      >
+                        Export JSON
+                      </Button>
                       <Button
                         variant="outline"
                         size="sm"
@@ -1269,6 +2743,150 @@ const ManagerReportsDrawer = ({
         </ScrollArea>
       </SheetContent>
     </Sheet>
+
+    <Dialog
+      open={Boolean(promptState)}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          cancelPromptDialog();
+        }
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{promptState?.title || "Input Required"}</DialogTitle>
+          {promptState?.description && (
+            <DialogDescription>{promptState.description}</DialogDescription>
+          )}
+        </DialogHeader>
+
+        <div className="space-y-2">
+          <Label htmlFor="manager-report-prompt-input">{promptState?.label || "Value"}</Label>
+          <Input
+            id="manager-report-prompt-input"
+            value={promptState?.value || ""}
+            placeholder={promptState?.placeholder}
+            autoFocus
+            onChange={(event) => {
+              setPromptState((current) => (
+                current
+                  ? {
+                      ...current,
+                      value: event.target.value,
+                      error: null,
+                    }
+                  : current
+              ));
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                submitPromptDialog();
+              }
+            }}
+          />
+          {promptState?.error && (
+            <p className="text-sm text-destructive">{promptState.error}</p>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={cancelPromptDialog}>
+            {promptState?.cancelLabel || "Cancel"}
+          </Button>
+          <Button onClick={submitPromptDialog}>
+            {promptState?.confirmLabel || "Submit"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <AlertDialog
+      open={Boolean(confirmState)}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          cancelConfirmDialog();
+        }
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{confirmState?.title || "Confirm Action"}</AlertDialogTitle>
+          {confirmState?.description && (
+            <AlertDialogDescription>{confirmState.description}</AlertDialogDescription>
+          )}
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={cancelConfirmDialog}>
+            {confirmState?.cancelLabel || "Cancel"}
+          </AlertDialogCancel>
+          <AlertDialogAction onClick={acceptConfirmDialog}>
+            {confirmState?.confirmLabel || "Confirm"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <Dialog
+      open={Boolean(shareState)}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          setShareState(null);
+        }
+      }}
+    >
+      <DialogContent className="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>{shareState?.title || "Share Access Details"}</DialogTitle>
+          {shareState?.description && (
+            <DialogDescription>{shareState.description}</DialogDescription>
+          )}
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {shareState?.activationKey && (
+            <div className="space-y-2">
+              <Label htmlFor="share-activation-key">Activation key</Label>
+              <div className="flex gap-2">
+                <Input id="share-activation-key" value={shareState.activationKey} readOnly className="font-mono text-xs" />
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    void copyTextToClipboard(shareState.activationKey || "", "Activation key copied.");
+                  }}
+                >
+                  Copy
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {shareState?.successUrl && (
+            <div className="space-y-2">
+              <Label htmlFor="share-success-url">Success page URL</Label>
+              <div className="flex gap-2">
+                <Input id="share-success-url" value={shareState.successUrl} readOnly className="font-mono text-xs" />
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    void copyTextToClipboard(shareState.successUrl || "", "Success URL copied.");
+                  }}
+                >
+                  Copy
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setShareState(null)}>
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 };
 
