@@ -2127,6 +2127,7 @@ const ManagerReportsDrawer = ({
                         <TableHead>Device</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>License</TableHead>
+                        <TableHead>Activation Key</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -2134,11 +2135,12 @@ const ManagerReportsDrawer = ({
                       {(report.adminShops?.items ?? []).flatMap((shop) =>
                         shop.devices.map((device) => ({
                           shopCode: shop.shop_code,
+                          latestActivationEntitlement: shop.latest_activation_entitlement,
                           device,
                         }))
                       ).length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
+                          <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
                             No admin device seats found.
                           </TableCell>
                         </TableRow>
@@ -2147,6 +2149,7 @@ const ManagerReportsDrawer = ({
                           .flatMap((shop) =>
                             shop.devices.map((device) => ({
                               shopCode: shop.shop_code,
+                              latestActivationEntitlement: shop.latest_activation_entitlement,
                               device,
                             }))
                           )
@@ -2162,6 +2165,34 @@ const ManagerReportsDrawer = ({
                               </TableCell>
                               <TableCell className="capitalize">{row.device.device_status}</TableCell>
                               <TableCell className="capitalize">{row.device.license_state}</TableCell>
+                              <TableCell>
+                                {row.latestActivationEntitlement?.activation_entitlement_key ? (
+                                  <div className="space-y-1">
+                                    <p className="max-w-[20rem] break-all font-mono text-[11px]">
+                                      {row.latestActivationEntitlement.activation_entitlement_key}
+                                    </p>
+                                    <div className="flex items-center gap-2">
+                                      <Badge variant="outline" className="capitalize text-[10px]">
+                                        {row.latestActivationEntitlement.status}
+                                      </Badge>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                          void copyTextToClipboard(
+                                            row.latestActivationEntitlement?.activation_entitlement_key || "",
+                                            "Activation key copied."
+                                          );
+                                        }}
+                                      >
+                                        Copy
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">Not issued</span>
+                                )}
+                              </TableCell>
                               <TableCell className="text-right">
                                 <div className="flex justify-end gap-2">
                                   {row.device.device_status.toLowerCase() === "active" ? (

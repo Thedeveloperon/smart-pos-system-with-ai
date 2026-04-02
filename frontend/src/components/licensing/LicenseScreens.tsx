@@ -1,4 +1,5 @@
 import { AlertCircle, AlertTriangle, ShieldAlert, ShieldCheck } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { LicenseStatus } from "@/lib/api";
@@ -23,6 +24,13 @@ type LicenseBlockedScreenProps = {
 
 type LicenseGraceBannerProps = {
   status: LicenseStatus;
+  isRefreshing?: boolean;
+  onRefresh: () => void;
+};
+
+type LicenseOfflineBannerProps = {
+  status: LicenseStatus;
+  pendingSyncCount?: number;
   isRefreshing?: boolean;
   onRefresh: () => void;
 };
@@ -54,6 +62,59 @@ const formatGraceRemaining = (status: LicenseStatus) => {
   return `${totalDays} day${totalDays === 1 ? "" : "s"} remaining`;
 };
 
+const formatOfflineGrantRemaining = (status: LicenseStatus) => {
+  if (!status.offlineGrantExpiresAt) {
+    return "Offline grant expiry unavailable";
+  }
+
+  const remainingMs = status.offlineGrantExpiresAt.getTime() - status.serverTime.getTime();
+  if (remainingMs <= 0) {
+    return "Offline grant expires now";
+  }
+
+  const totalMinutes = Math.ceil(remainingMs / (60 * 1000));
+  if (totalMinutes < 60) {
+    return `${totalMinutes} minute${totalMinutes === 1 ? "" : "s"} remaining`;
+  }
+
+  const totalHours = Math.ceil(totalMinutes / 60);
+  if (totalHours < 24) {
+    return `${totalHours} hour${totalHours === 1 ? "" : "s"} remaining`;
+  }
+
+  const totalDays = Math.ceil(totalHours / 24);
+  return `${totalDays} day${totalDays === 1 ? "" : "s"} remaining`;
+};
+
+const copyText = async (value: string, successMessage: string) => {
+  if (!value.trim()) {
+    toast.info("Nothing to copy.");
+    return;
+  }
+
+  try {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      toast.success(successMessage);
+      return;
+    }
+
+    const textArea = document.createElement("textarea");
+    textArea.value = value;
+    textArea.style.position = "fixed";
+    textArea.style.opacity = "0";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    document.execCommand("copy");
+    document.body.removeChild(textArea);
+    toast.success(successMessage);
+  } catch (error) {
+    console.error(error);
+    toast.error("Failed to copy.");
+  }
+};
+
 export const LicenseActivationScreen = ({
   deviceCode,
   error,
@@ -78,7 +139,20 @@ export const LicenseActivationScreen = ({
 
         <div className="rounded-2xl border border-border bg-card p-6 space-y-4 shadow-sm">
           <div className="space-y-2">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Device Code</p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Device Code</p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => {
+                  void copyText(deviceCode || "", "Device code copied.");
+                }}
+                disabled={isBusy || !deviceCode}
+              >
+                Copy
+              </Button>
+            </div>
             <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 font-mono text-xs break-all">
               {deviceCode || "Unavailable"}
             </div>
@@ -217,6 +291,47 @@ export const LicenseGraceBanner = ({ status, isRefreshing, onRefresh }: LicenseG
           variant="outline"
           size="sm"
           className="h-8 border-amber-700/40 bg-transparent text-amber-900 hover:bg-amber-500/20 dark:text-amber-100"
+          onClick={onRefresh}
+          disabled={isRefreshing}
+        >
+          {isRefreshing ? "Refreshing..." : "Refresh"}
+        </Button>
+      </div>
+    </div>
+  );
+};
+
+export const LicenseOfflineBanner = ({
+  status,
+  pendingSyncCount = 0,
+  isRefreshing,
+  onRefresh,
+}: LicenseOfflineBannerProps) => {
+  if (!status.offlineGrantToken) {
+    return null;
+  }
+
+  return (
+    <div className="mx-3 mt-2 rounded-xl border border-sky-500/45 bg-sky-500/10 px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="text-sm">
+          <p className="font-semibold text-sky-900 dark:text-sky-100">Offline fallback ready</p>
+          <p className="text-sky-800 dark:text-sky-200">
+            {formatOfflineGrantRemaining(status)}. Checkout cap{" "}
+            <span className="font-medium">{status.offlineMaxCheckoutOperations ?? "n/a"}</span>, refund cap{" "}
+            <span className="font-medium">{status.offlineMaxRefundOperations ?? "n/a"}</span>.
+          </p>
+          {pendingSyncCount > 0 && (
+            <p className="text-sky-800 dark:text-sky-200">
+              {pendingSyncCount} offline event{pendingSyncCount === 1 ? "" : "s"} pending sync.
+            </p>
+          )}
+        </div>
+
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 border-sky-700/40 bg-transparent text-sky-900 hover:bg-sky-500/20 dark:text-sky-100"
           onClick={onRefresh}
           disabled={isRefreshing}
         >

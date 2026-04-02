@@ -700,6 +700,7 @@ export type AdminShopsLicensingSnapshotResponse = {
     seat_limit: number;
     active_seats: number;
     total_devices: number;
+    latest_activation_entitlement?: ActivationEntitlement | null;
     devices: {
       provisioned_device_id: string;
       device_code: string;
@@ -1260,6 +1261,18 @@ function normalizeOptionalString(value?: string | null) {
   return trimmed ? trimmed : null;
 }
 
+const LICENSE_TOKEN_RECOVERY_ERROR_CODES = new Set([
+  "INVALID_LICENSE_TOKEN",
+  "INVALID_TOKEN",
+  "DEVICE_MISMATCH",
+  "DEVICE_KEY_MISMATCH",
+  "TOKEN_REPLAY_DETECTED",
+]);
+
+function isLicenseTokenRecoveryErrorCode(code?: string) {
+  return !!code && LICENSE_TOKEN_RECOVERY_ERROR_CODES.has(code.trim().toUpperCase());
+}
+
 function requiresOfflineGrant(events: SyncEventRequestItem[]) {
   return events.some((item) => item.type === "sale" || item.type === "refund");
 }
@@ -1407,6 +1420,7 @@ async function computeBodyHash(body: BodyInit | null | undefined): Promise<strin
 type RequestExecutionOptions = {
   skipDeviceProof?: boolean;
   deviceProofRecoveryAttempted?: boolean;
+  licenseTokenRecoveryAttempted?: boolean;
 };
 
 async function request<T>(path: string, init: RequestInit = {}, options: RequestExecutionOptions = {}) {
@@ -1474,6 +1488,42 @@ async function request<T>(path: string, init: RequestInit = {}, options: Request
 
     return await parseResponse<T>(response);
   } catch (error) {
+    if (
+      error instanceof ApiError &&
+      isLicenseTokenRecoveryErrorCode(error.code) &&
+      !options.licenseTokenRecoveryAttempted &&
+      !path.startsWith("/api/license/status") &&
+      !path.startsWith("/api/license/heartbeat") &&
+      !path.startsWith("/api/provision/activate")
+    ) {
+      const retryHeaders = {
+        ...Object.fromEntries(new Headers(init.headers || {}).entries()),
+        ...(existingHeaders.get("Idempotency-Key")
+          ? { "Idempotency-Key": existingHeaders.get("Idempotency-Key") as string }
+          : {}),
+      };
+
+      // Stale X-License-Token headers can override a valid HttpOnly cookie and trigger replay errors.
+      setStoredLicenseToken(null);
+      try {
+        await fetchLicenseStatus();
+      } catch {
+        // Retry once anyway so cookie-only validation can proceed when available.
+      }
+
+      return request<T>(
+        path,
+        {
+          ...init,
+          headers: retryHeaders,
+        },
+        {
+          ...options,
+          licenseTokenRecoveryAttempted: true,
+        }
+      );
+    }
+
     if (
       error instanceof ApiError &&
       error.code === "DEVICE_KEY_MISMATCH" &&
@@ -1802,12 +1852,7 @@ export async function fetchLicenseStatus() {
     setStoredLicenseToken(status.licenseToken);
     return status;
   } catch (error) {
-    if (
-      error instanceof ApiError &&
-      (error.code === "INVALID_LICENSE_TOKEN" ||
-        error.code === "DEVICE_MISMATCH" ||
-        error.code === "DEVICE_KEY_MISMATCH")
-    ) {
+    if (error instanceof ApiError && isLicenseTokenRecoveryErrorCode(error.code)) {
       setStoredLicenseToken(null);
 
       const retryResponse = await request<BackendLicenseStatus>("/api/license/status");
