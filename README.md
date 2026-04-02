@@ -19,6 +19,28 @@ export Licensing__VerificationPublicKeyPem="$(cat ~/.smartpos/license-public.pem
 dotnet run --project backend/backend.csproj --urls "http://127.0.0.1:5080"
 ```
 
+Optional (enable automatic access email delivery after payment verification):
+
+```bash
+export Licensing__AccessDeliveryEmailEnabled=true
+export Licensing__AccessDeliverySmtpHost="smtp.your-provider.com"
+export Licensing__AccessDeliverySmtpPort=587
+export Licensing__AccessDeliverySmtpEnableSsl=true
+export Licensing__AccessDeliveryFromEmail="noreply@your-domain.com"
+export Licensing__AccessDeliverySmtpUsername="smtp-user"
+export SMARTPOS_ACCESS_DELIVERY_SMTP_PASSWORD="smtp-password"
+```
+
+Optional (protected installer download links from backend):
+
+```bash
+export Licensing__InstallerDownloadBaseUrl="https://downloads.your-domain.com/SmartPOS-Setup.exe"
+export Licensing__InstallerDownloadProtectedEnabled=true
+export Licensing__InstallerDownloadTokenTtlMinutes=30
+export SMARTPOS_INSTALLER_DOWNLOAD_SIGNING_SECRET="replace-with-strong-secret"
+export Licensing__InstallerChecksumSha256="paste-installer-sha256"
+```
+
 ## 3. Run frontend
 
 ```bash
@@ -87,4 +109,3 @@ for (const [user, secret] of Object.entries(users)){
 }
 NODE
 ```
-

@@ -188,6 +188,7 @@
     "mostPopular": "වඩාත් ජනප්‍රිය",
     "plans": [
       {
+        "code": "starter",
         "name": "Starter",
         "price": "Free",
         "period": "",
@@ -197,6 +198,7 @@
         "highlighted": false
       },
       {
+        "code": "pro",
         "name": "Pro",
         "price": "$19",
         "period": "/මාසය",
@@ -206,6 +208,7 @@
         "highlighted": true
       },
       {
+        "code": "business",
         "name": "Business",
         "price": "$49",
         "period": "/මාසය",

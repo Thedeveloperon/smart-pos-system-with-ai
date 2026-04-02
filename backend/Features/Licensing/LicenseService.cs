@@ -5,9 +5,11 @@ using System.Net.Mail;
 using System.Text;
 using System.Text.Json;
 using System.Globalization;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SmartPos.Backend.Domain;
+using SmartPos.Backend.Features.Purchases;
 using SmartPos.Backend.Infrastructure;
 using SmartPos.Backend.Security;
 
@@ -18,7 +20,9 @@ public sealed class LicenseService(
     IOptions<LicenseOptions> optionsAccessor,
     LicensingMetrics metrics,
     IHttpContextAccessor httpContextAccessor,
-    ILicensingAlertMonitor licensingAlertMonitor)
+    ILicensingAlertMonitor licensingAlertMonitor,
+    IBillMalwareScanner billMalwareScanner,
+    IWebHostEnvironment webHostEnvironment)
 {
     private static readonly HashSet<string> SupportedBillingWebhookEvents = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -40,11 +44,28 @@ public sealed class LicenseService(
     private const string EmergencyActionLockDevice = "lock_device";
     private const string EmergencyActionRevokeToken = "revoke_token";
     private const string EmergencyActionForceReauth = "force_reauth";
+    private const string MarketingInvoiceMetadataPrefix = "MARKETING_REQUEST:";
+    private const string MarketingPaymentSubmissionMetadataPrefix = "MARKETING_PAYMENT_SUBMISSION:";
+    private const int MarketingBankReferenceMaxLength = 128;
     private static readonly HashSet<string> EmergencyActions = new(StringComparer.OrdinalIgnoreCase)
     {
         EmergencyActionLockDevice,
         EmergencyActionRevokeToken,
         EmergencyActionForceReauth
+    };
+    private static readonly HashSet<string> AllowedDepositSlipFileExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".pdf"
+    };
+    private static readonly Dictionary<string, MarketingPlanQuote> MarketingPlanCatalog = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["starter"] = new MarketingPlanQuote("starter", "trial", 0m, "USD", false),
+        ["pro"] = new MarketingPlanQuote("pro", "growth", 19m, "USD", true),
+        ["business"] = new MarketingPlanQuote("business", "pro", 49m, "USD", true)
     };
 
     private enum TokenRotationMode
@@ -59,6 +80,15 @@ public sealed class LicenseService(
         Heartbeat = 2
     }
 
+    private enum MarketingProofFileKind
+    {
+        Unknown = 0,
+        Pdf = 1,
+        Png = 2,
+        Jpeg = 3,
+        Webp = 4
+    }
+
     private readonly record struct ManualOverrideContext(
         string Actor,
         string ReasonCode,
@@ -69,6 +99,17 @@ public sealed class LicenseService(
         string ApprovedBy,
         string ApprovalNote,
         bool Applied);
+
+    private readonly record struct MarketingPlanQuote(
+        string MarketingPlanCode,
+        string InternalPlanCode,
+        decimal AmountDue,
+        string Currency,
+        bool RequiresPayment);
+    private readonly record struct InstallerDownloadAccess(
+        string? DownloadUrl,
+        DateTimeOffset? ExpiresAt,
+        bool IsProtected);
 
     private static readonly JsonSerializerOptions TokenSerializerOptions = new()
     {
@@ -1040,6 +1081,7 @@ public sealed class LicenseService(
         var activationEntitlement = MapActivationEntitlementResponse(
             resolved.Entitlement,
             resolved.Shop.Code);
+        var installerDownloadAccess = BuildInstallerDownloadAccessForSuccess(resolved, now);
 
         return new LicenseAccessSuccessResponse
         {
@@ -1052,6 +1094,10 @@ public sealed class LicenseService(
             SeatLimit = seatLimit,
             EntitlementState = entitlementState,
             CanActivate = string.Equals(entitlementState, "active", StringComparison.Ordinal),
+            InstallerDownloadUrl = installerDownloadAccess.DownloadUrl,
+            InstallerDownloadExpiresAt = installerDownloadAccess.ExpiresAt,
+            InstallerDownloadProtected = installerDownloadAccess.IsProtected,
+            InstallerChecksumSha256 = NormalizeOptionalValue(options.InstallerChecksumSha256),
             ActivationEntitlement = activationEntitlement
         };
     }
@@ -2464,6 +2510,459 @@ public sealed class LicenseService(
         };
     }
 
+    public async Task<MarketingPaymentRequestCreateResponse> CreateMarketingPaymentRequestAsync(
+        MarketingPaymentRequestCreateRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var now = DateTimeOffset.UtcNow;
+        var shopName = NormalizeOptionalValue(request.ShopName);
+        if (string.IsNullOrWhiteSpace(shopName))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "shop_name is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var contactName = NormalizeOptionalValue(request.ContactName);
+        if (string.IsNullOrWhiteSpace(contactName))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "contact_name is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var contactEmail = NormalizeOptionalValue(request.ContactEmail);
+        var contactPhone = NormalizeOptionalValue(request.ContactPhone);
+        if (string.IsNullOrWhiteSpace(contactEmail) && string.IsNullOrWhiteSpace(contactPhone))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Either contact_email or contact_phone is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var quote = ResolveMarketingPlanQuote(request.PlanCode);
+        var paymentMethod = ResolveMarketingPaymentMethod(request.PaymentMethod);
+        var normalizedCurrency = ResolveCurrency(request.Currency ?? quote.Currency);
+        var normalizedSource = NormalizeOptionalValue(request.Source) ?? "marketing_website";
+        var normalizedCampaign = NormalizeOptionalValue(request.Campaign);
+        var normalizedLocale = NormalizeOptionalValue(request.Locale);
+        var customerNotes = NormalizeOptionalValue(request.Notes);
+
+        if (!quote.RequiresPayment || quote.AmountDue <= 0m)
+        {
+            return new MarketingPaymentRequestCreateResponse
+            {
+                GeneratedAt = now,
+                ShopCode = ResolveMarketingShopCodeCandidate(shopName),
+                ShopName = shopName,
+                ContactName = contactName,
+                ContactEmail = contactEmail,
+                ContactPhone = contactPhone,
+                MarketingPlanCode = quote.MarketingPlanCode,
+                InternalPlanCode = quote.InternalPlanCode,
+                RequiresPayment = false,
+                AmountDue = 0m,
+                Currency = normalizedCurrency,
+                NextStep = "open_pos_and_activate_trial",
+                Instructions = new MarketingPaymentInstructionsResponse
+                {
+                    PaymentMethod = paymentMethod,
+                    Message = "This plan does not require payment. Install SmartPOS and continue with trial activation.",
+                    ReferenceHint = "No payment reference required for free trial."
+                }
+            };
+        }
+
+        var shopCode = string.IsNullOrWhiteSpace(request.ShopCode)
+            ? await GenerateUniqueMarketingShopCodeAsync(shopName, cancellationToken)
+            : NormalizeMarketingShopCode(request.ShopCode);
+
+        var invoiceNotes = BuildMarketingInvoiceNotes(
+            quote,
+            paymentMethod,
+            contactName,
+            contactEmail,
+            contactPhone,
+            normalizedSource,
+            normalizedCampaign,
+            normalizedLocale,
+            customerNotes);
+        var actorNote = $"plan={quote.InternalPlanCode}; method={paymentMethod}; source={normalizedSource}";
+
+        var invoiceRow = await CreateManualInvoiceAsAdminAsync(
+            new AdminManualBillingInvoiceCreateRequest
+            {
+                ShopCode = shopCode,
+                AmountDue = decimal.Round(quote.AmountDue, 2),
+                Currency = normalizedCurrency,
+                DueAt = now.AddDays(7),
+                Notes = invoiceNotes,
+                Actor = "marketing-website",
+                ReasonCode = "marketing_payment_request_created",
+                ActorNote = actorNote
+            },
+            cancellationToken);
+
+        var shop = await dbContext.Shops
+            .FirstOrDefaultAsync(x => x.Id == invoiceRow.ShopId, cancellationToken);
+        if (shop is not null &&
+            (shop.Name.StartsWith("Shop ", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(shop.Name, options.DefaultShopName, StringComparison.OrdinalIgnoreCase)) &&
+            !string.Equals(shop.Name, shopName, StringComparison.Ordinal))
+        {
+            shop.Name = shopName;
+            shop.UpdatedAtUtc = now;
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        var resolvedShopCode = shop?.Code ?? invoiceRow.ShopCode;
+        var resolvedShopName = shop?.Name ?? shopName;
+
+        return new MarketingPaymentRequestCreateResponse
+        {
+            GeneratedAt = now,
+            ShopCode = resolvedShopCode,
+            ShopName = resolvedShopName,
+            ContactName = contactName,
+            ContactEmail = contactEmail,
+            ContactPhone = contactPhone,
+            MarketingPlanCode = quote.MarketingPlanCode,
+            InternalPlanCode = quote.InternalPlanCode,
+            RequiresPayment = true,
+            AmountDue = invoiceRow.AmountDue,
+            Currency = invoiceRow.Currency,
+            NextStep = "await_customer_payment",
+            Invoice = new MarketingPaymentInvoiceResponse
+            {
+                InvoiceId = invoiceRow.InvoiceId,
+                InvoiceNumber = invoiceRow.InvoiceNumber,
+                Status = invoiceRow.Status,
+                DueAt = invoiceRow.DueAt
+            },
+            Instructions = BuildMarketingPaymentInstructions(paymentMethod)
+        };
+    }
+
+    public async Task<MarketingPaymentSubmissionResponse> SubmitMarketingPaymentAsync(
+        MarketingPaymentSubmissionRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.Amount <= 0m)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "amount must be greater than zero.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var paymentMethod = ResolveMarketingPaymentMethod(request.PaymentMethod);
+        var contactName = NormalizeOptionalValue(request.ContactName);
+        var contactEmail = NormalizeOptionalValue(request.ContactEmail);
+        var contactPhone = NormalizeOptionalValue(request.ContactPhone);
+        var normalizedNotes = NormalizeOptionalValue(request.Notes);
+        var normalizedBankReference = NormalizeMarketingBankReference(request.BankReference);
+        var normalizedDepositSlipUrl = ValidateDepositSlipUrl(request.DepositSlipUrl);
+        var actorNote = "customer submitted payment details via marketing website";
+
+        if (!string.Equals(paymentMethod, "cash", StringComparison.OrdinalIgnoreCase) &&
+            string.IsNullOrWhiteSpace(normalizedBankReference) &&
+            string.IsNullOrWhiteSpace(normalizedDepositSlipUrl))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "bank_reference or deposit_slip_url is required for bank deposits.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var invoice = await ResolveManualBillingInvoiceForPaymentAsync(
+            new AdminManualBillingPaymentRecordRequest
+            {
+                InvoiceId = request.InvoiceId,
+                InvoiceNumber = request.InvoiceNumber
+            },
+            cancellationToken);
+
+        var hasExistingOpenSubmission = await dbContext.ManualBillingPayments
+            .AsNoTracking()
+            .AnyAsync(
+                x => x.InvoiceId == invoice.Id && x.Status != ManualBillingPaymentStatus.Rejected,
+                cancellationToken);
+        if (hasExistingOpenSubmission)
+        {
+            licensingAlertMonitor.RecordSecurityAnomaly("marketing_payment_duplicate_invoice_submission");
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidPaymentStatus,
+                "A payment submission already exists for this invoice.",
+                StatusCodes.Status409Conflict);
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedBankReference))
+        {
+            var reusedAcrossInvoices = await dbContext.ManualBillingPayments
+                .AsNoTracking()
+                .AnyAsync(
+                    x => x.InvoiceId != invoice.Id &&
+                         x.Status != ManualBillingPaymentStatus.Rejected &&
+                         x.BankReference != null &&
+                         x.BankReference.ToLower() == normalizedBankReference.ToLower(),
+                    cancellationToken);
+            if (reusedAcrossInvoices)
+            {
+                licensingAlertMonitor.RecordSecurityAnomaly("marketing_payment_bank_reference_reused");
+            }
+        }
+
+        var paymentNotes = BuildMarketingPaymentSubmissionNotes(
+            contactName,
+            contactEmail,
+            contactPhone,
+            normalizedNotes);
+
+        var paymentRow = await RecordManualPaymentAsAdminAsync(
+            new AdminManualBillingPaymentRecordRequest
+            {
+                InvoiceId = invoice.Id,
+                InvoiceNumber = invoice.InvoiceNumber,
+                Method = paymentMethod,
+                Amount = decimal.Round(request.Amount, 2),
+                Currency = ResolveCurrency(request.Currency),
+                BankReference = normalizedBankReference,
+                DepositSlipUrl = normalizedDepositSlipUrl,
+                ReceivedAt = request.PaidAt ?? now,
+                Notes = paymentNotes,
+                Actor = "marketing-customer",
+                ReasonCode = "marketing_payment_submission_pending",
+                ActorNote = actorNote
+            },
+            cancellationToken);
+
+        var persistedInvoice = await dbContext.ManualBillingInvoices
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == paymentRow.InvoiceId, cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.InvoiceNotFound,
+                "Invoice was not found after payment submission.",
+                StatusCodes.Status404NotFound);
+
+        return new MarketingPaymentSubmissionResponse
+        {
+            ProcessedAt = now,
+            ShopCode = paymentRow.ShopCode,
+            InvoiceId = persistedInvoice.Id,
+            InvoiceNumber = persistedInvoice.InvoiceNumber,
+            InvoiceStatus = MapManualBillingInvoiceStatusValue(persistedInvoice.Status),
+            PaymentId = paymentRow.PaymentId,
+            PaymentStatus = paymentRow.Status,
+            Message = "Payment submitted successfully. Verification is pending with the billing team.",
+            NextStep = "await_admin_verification"
+        };
+    }
+
+    public async Task<MarketingPaymentProofUploadResponse> UploadMarketingPaymentProofAsync(
+        IFormFile? file,
+        CancellationToken cancellationToken)
+    {
+        var validated = await ValidateAndReadMarketingProofFileAsync(file, cancellationToken);
+        var scanResult = await billMalwareScanner.ScanAsync(validated.FileData, cancellationToken);
+        if (!scanResult.IsClean)
+        {
+            licensingAlertMonitor.RecordSecurityAnomaly("marketing_payment_proof_scan_rejected");
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                scanResult.Message ?? "Payment proof file was rejected by malware scan.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var publicRootPath = EnsureMarketingProofStorageRoot();
+        var folderPath = Path.Combine(
+            publicRootPath,
+            now.ToString("yyyy", CultureInfo.InvariantCulture),
+            now.ToString("MM", CultureInfo.InvariantCulture));
+        Directory.CreateDirectory(folderPath);
+
+        var storedFileName = $"{now:yyyyMMddHHmmss}-{Guid.NewGuid():N}{validated.Extension}";
+        var fullPath = Path.Combine(folderPath, storedFileName);
+        await File.WriteAllBytesAsync(fullPath, validated.FileData.Bytes, cancellationToken);
+
+        var relativePath = Path.GetRelativePath(publicRootPath, fullPath)
+            .Replace('\\', '/');
+        var relativeUrl = $"/payment-proofs/{relativePath}";
+        var proofUrl = BuildPublicAssetUrl(relativeUrl);
+        var sha256 = Convert.ToHexString(SHA256.HashData(validated.FileData.Bytes)).ToLowerInvariant();
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = null,
+            Action = "marketing_payment_proof_uploaded",
+            Actor = "marketing-customer",
+            Reason = "proof_uploaded",
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                proof_url = proofUrl,
+                file_name = validated.FileData.FileName,
+                content_type = validated.FileData.ContentType,
+                size_bytes = validated.SizeBytes,
+                sha256,
+                scan_status = scanResult.Status
+            }),
+            CreatedAtUtc = now
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new MarketingPaymentProofUploadResponse
+        {
+            UploadedAt = now,
+            ProofUrl = proofUrl,
+            FileName = validated.FileData.FileName,
+            ContentType = validated.FileData.ContentType,
+            SizeBytes = validated.SizeBytes,
+            Sha256 = sha256,
+            ScanStatus = scanResult.Status,
+            ScanMessage = NormalizeOptionalValue(scanResult.Message)
+        };
+    }
+
+    public async Task<MarketingLicenseDownloadTrackResponse> TrackMarketingLicenseDownloadAsync(
+        MarketingLicenseDownloadTrackRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var normalizedKey = NormalizeOptionalValue(request.ActivationEntitlementKey);
+        if (string.IsNullOrWhiteSpace(normalizedKey))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "activation_entitlement_key is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var normalizedSource = NormalizeOptionalValue(request.Source) ?? "license_access_success";
+        var normalizedChannel = NormalizeOptionalValue(request.Channel) ?? "installer_download";
+        var entitlementLookup = await ResolveActivationEntitlementByPresentedKeyAsync(normalizedKey, cancellationToken);
+        var entitlement = entitlementLookup.Entitlement;
+
+        Guid? paymentId = null;
+        Guid? invoiceId = null;
+        string? invoiceNumber = null;
+        var sourceReference = NormalizeOptionalValue(entitlement.SourceReference);
+        if (Guid.TryParse(sourceReference, out var parsedPaymentId))
+        {
+            var payment = await dbContext.ManualBillingPayments
+                .AsNoTracking()
+                .Include(x => x.Invoice)
+                .FirstOrDefaultAsync(x => x.Id == parsedPaymentId, cancellationToken);
+            if (payment is not null)
+            {
+                paymentId = payment.Id;
+                invoiceId = payment.InvoiceId;
+                invoiceNumber = payment.Invoice.InvoiceNumber;
+            }
+        }
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = entitlement.ShopId,
+            Action = "marketing_installer_download_tracked",
+            Actor = "marketing-customer",
+            Reason = normalizedSource,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                source = normalizedSource,
+                channel = normalizedChannel,
+                activation_entitlement_id = entitlement.Id,
+                activation_entitlement_source = entitlement.Source,
+                activation_entitlement_source_reference = sourceReference,
+                payment_id = paymentId,
+                invoice_id = invoiceId,
+                invoice_number = invoiceNumber
+            }),
+            CreatedAtUtc = now
+        });
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new MarketingLicenseDownloadTrackResponse
+        {
+            TrackedAt = now,
+            ShopCode = entitlementLookup.Shop.Code,
+            ActivationEntitlementKey = entitlementLookup.NormalizedKeyForDisplay,
+            Source = normalizedSource,
+            Channel = normalizedChannel,
+            PaymentId = paymentId,
+            InvoiceId = invoiceId,
+            InvoiceNumber = invoiceNumber
+        };
+    }
+
+    public async Task<string> ResolveProtectedInstallerDownloadRedirectAsync(
+        string token,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var parsedToken = ParseAndValidateInstallerDownloadToken(token);
+        if (parsedToken.ExpiresAt <= now)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidActivationEntitlement,
+                "Installer download link has expired.",
+                StatusCodes.Status410Gone);
+        }
+
+        var entitlement = await dbContext.CustomerActivationEntitlements
+            .Include(x => x.Shop)
+            .FirstOrDefaultAsync(
+                x => x.Id == parsedToken.EntitlementId && x.ShopId == parsedToken.ShopId,
+                cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.InvalidActivationEntitlement,
+                "Installer download link is invalid.",
+                StatusCodes.Status404NotFound);
+
+        if (entitlement.Status == ActivationEntitlementStatus.Revoked || entitlement.ExpiresAtUtc <= now)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidActivationEntitlement,
+                "Installer download link is no longer valid.",
+                StatusCodes.Status410Gone);
+        }
+
+        var downloadBaseUrl = ResolveInstallerDownloadBaseUrl()
+            ?? throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Installer download is not configured.",
+                StatusCodes.Status404NotFound);
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = entitlement.ShopId,
+            Action = "installer_download_redirect_issued",
+            Actor = "license-download",
+            Reason = "protected_link_validated",
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                entitlement_id = entitlement.Id,
+                entitlement_source = entitlement.Source,
+                entitlement_source_reference = entitlement.SourceReference,
+                token_expires_at = parsedToken.ExpiresAt,
+                download_url = downloadBaseUrl
+            }),
+            CreatedAtUtc = now
+        });
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return downloadBaseUrl;
+    }
+
     public async Task<AdminManualBillingInvoicesResponse> GetAdminManualInvoicesAsync(
         string? search,
         string? status,
@@ -2713,6 +3212,8 @@ public sealed class LicenseService(
             defaultActor: "support-admin",
             defaultReasonCode: "manual_payment_pending_verification");
         var actor = overrideContext.Actor;
+        var normalizedBankReference = NormalizeMarketingBankReference(request.BankReference);
+        var normalizedDepositSlipUrl = ValidateDepositSlipUrl(request.DepositSlipUrl);
         var invoice = await ResolveManualBillingInvoiceForPaymentAsync(request, cancellationToken);
         if (invoice.Status is ManualBillingInvoiceStatus.Paid or ManualBillingInvoiceStatus.Canceled)
         {
@@ -2732,8 +3233,8 @@ public sealed class LicenseService(
             Amount = decimal.Round(request.Amount, 2),
             Currency = ResolveCurrency(request.Currency ?? invoice.Currency),
             Status = ManualBillingPaymentStatus.PendingVerification,
-            BankReference = NormalizeOptionalValue(request.BankReference),
-            DepositSlipUrl = NormalizeOptionalValue(request.DepositSlipUrl),
+            BankReference = normalizedBankReference,
+            DepositSlipUrl = normalizedDepositSlipUrl,
             ReceivedAtUtc = request.ReceivedAt ?? now,
             Notes = NormalizeOptionalValue(request.Notes),
             RecordedBy = actor,
@@ -2891,9 +3392,15 @@ public sealed class LicenseService(
         var previousPlan = subscription.Plan;
         var previousPeriodEnd = subscription.PeriodEndUtc;
 
-        if (!string.IsNullOrWhiteSpace(request.Plan))
+        var requestedPlan = NormalizeOptionalValue(request.Plan);
+        if (string.IsNullOrWhiteSpace(requestedPlan))
         {
-            subscription.Plan = ResolvePlanCode(request.Plan);
+            requestedPlan = TryResolveRequestedPlanFromMarketingMetadata(invoice.Notes);
+        }
+
+        if (!string.IsNullOrWhiteSpace(requestedPlan))
+        {
+            subscription.Plan = ResolvePlanCode(requestedPlan);
         }
 
         if (request.SeatLimit.HasValue && request.SeatLimit.Value > 0)
@@ -2925,10 +3432,14 @@ public sealed class LicenseService(
             actor,
             now,
             cancellationToken);
+        var resolvedCustomerEmail = ResolveAccessDeliveryCustomerEmailCandidate(
+            request.CustomerEmail,
+            invoice.Notes,
+            payment.Notes);
         var accessDelivery = await DeliverAccessDetailsAsync(
             invoice.Shop,
             activationEntitlement,
-            request.CustomerEmail,
+            resolvedCustomerEmail,
             "manual_payment_verified",
             payment.Id.ToString("N"),
             actor,
@@ -2966,6 +3477,7 @@ public sealed class LicenseService(
                 current_plan = subscription.Plan,
                 current_period_end = subscription.PeriodEndUtc,
                 activation_entitlement_id = activationEntitlement?.EntitlementId,
+                access_delivery_recipient = resolvedCustomerEmail,
                 access_delivery_email_status = accessDelivery?.EmailDelivery.Status,
                 access_delivery_success_page_url = accessDelivery?.SuccessPageUrl,
                 reissued_devices = reissueOutcome.ReissuedCount,
@@ -2993,6 +3505,7 @@ public sealed class LicenseService(
                 plan = subscription.Plan,
                 period_end = subscription.PeriodEndUtc,
                 activation_entitlement_id = activationEntitlement?.EntitlementId,
+                access_delivery_recipient = resolvedCustomerEmail,
                 access_delivery_email_status = accessDelivery?.EmailDelivery.Status,
                 reason_code = overrideContext.ReasonCode,
                 actor_note = overrideContext.ActorNote
@@ -5154,6 +5667,566 @@ public sealed class LicenseService(
         }
     }
 
+    private static MarketingPlanQuote ResolveMarketingPlanQuote(string? planCode)
+    {
+        var normalizedCode = NormalizeOptionalValue(planCode)?.ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalizedCode) ||
+            !MarketingPlanCatalog.TryGetValue(normalizedCode, out var quote))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "plan_code must be one of: starter, pro, business.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        return quote with
+        {
+            InternalPlanCode = ResolvePlanCode(quote.InternalPlanCode)
+        };
+    }
+
+    private static string ResolveMarketingPaymentMethod(string? paymentMethod)
+    {
+        var normalized = NormalizeOptionalValue(paymentMethod)?.ToLowerInvariant();
+        return normalized switch
+        {
+            null or "" or "bank_deposit" or "bankdeposit" => "bank_deposit",
+            "cash" => "cash",
+            _ => throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "payment_method must be one of: cash, bank_deposit.",
+                StatusCodes.Status400BadRequest)
+        };
+    }
+
+    private static MarketingPaymentInstructionsResponse BuildMarketingPaymentInstructions(string paymentMethod)
+    {
+        if (string.Equals(paymentMethod, "cash", StringComparison.OrdinalIgnoreCase))
+        {
+            return new MarketingPaymentInstructionsResponse
+            {
+                PaymentMethod = "cash",
+                Message = "Pay by cash at the billing desk and quote the invoice number.",
+                ReferenceHint = "Use your invoice number when handing over cash payment details."
+            };
+        }
+
+        return new MarketingPaymentInstructionsResponse
+        {
+            PaymentMethod = "bank_deposit",
+            Message = "Complete a bank deposit and submit payment details with the invoice reference.",
+            ReferenceHint = "Use the invoice number as your bank reference."
+        };
+    }
+
+    private async Task<string> GenerateUniqueMarketingShopCodeAsync(
+        string shopName,
+        CancellationToken cancellationToken)
+    {
+        var normalizedBase = ResolveMarketingShopCodeCandidate(shopName);
+        for (var attempt = 0; attempt < 20; attempt += 1)
+        {
+            var suffix = Guid.NewGuid().ToString("N")[..6];
+            var candidate = $"{normalizedBase}-{suffix}";
+            if (candidate.Length > 64)
+            {
+                candidate = candidate[..64];
+            }
+
+            var exists = await dbContext.Shops
+                .AnyAsync(x => x.Code.ToLower() == candidate.ToLower(), cancellationToken);
+            if (!exists)
+            {
+                return candidate;
+            }
+        }
+
+        throw new LicenseException(
+            LicenseErrorCodes.InvalidAdminRequest,
+            "Unable to generate a unique shop code for this request.",
+            StatusCodes.Status409Conflict);
+    }
+
+    private static string ResolveMarketingShopCodeCandidate(string value)
+    {
+        var normalized = NormalizeMarketingShopCode(value);
+        if (normalized.Length > 48)
+        {
+            normalized = normalized[..48];
+        }
+
+        return $"mkt-{normalized}";
+    }
+
+    private static string NormalizeMarketingShopCode(string? input)
+    {
+        var normalized = NormalizeOptionalValue(input);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "shop_code is invalid.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var builder = new StringBuilder();
+        foreach (var character in normalized.ToLowerInvariant())
+        {
+            if (char.IsAsciiLetterOrDigit(character))
+            {
+                builder.Append(character);
+                continue;
+            }
+
+            if (character is '-' or '_' or ' ')
+            {
+                if (builder.Length == 0 || builder[^1] == '-')
+                {
+                    continue;
+                }
+
+                builder.Append('-');
+            }
+        }
+
+        var result = builder.ToString().Trim('-');
+        if (string.IsNullOrWhiteSpace(result))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "shop_code is invalid.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        return result.Length > 64 ? result[..64] : result;
+    }
+
+    private static string BuildMarketingInvoiceNotes(
+        MarketingPlanQuote quote,
+        string paymentMethod,
+        string? contactName,
+        string? contactEmail,
+        string? contactPhone,
+        string source,
+        string? campaign,
+        string? locale,
+        string? customerNotes)
+    {
+        var metadata = JsonSerializer.Serialize(new
+        {
+            marketing_plan_code = quote.MarketingPlanCode,
+            requested_internal_plan = quote.InternalPlanCode,
+            requested_payment_method = paymentMethod,
+            contact_name = contactName,
+            contact_email = contactEmail,
+            contact_phone = contactPhone,
+            source,
+            campaign,
+            locale
+        });
+
+        var metadataLine = $"{MarketingInvoiceMetadataPrefix}{metadata}";
+        if (string.IsNullOrWhiteSpace(customerNotes))
+        {
+            return metadataLine;
+        }
+
+        return $"{metadataLine}\n{customerNotes}";
+    }
+
+    private static string BuildMarketingPaymentSubmissionNotes(
+        string? contactName,
+        string? contactEmail,
+        string? contactPhone,
+        string? customerNotes)
+    {
+        var metadata = JsonSerializer.Serialize(new
+        {
+            contact_name = contactName,
+            contact_email = contactEmail,
+            contact_phone = contactPhone,
+            submitted_at = DateTimeOffset.UtcNow
+        });
+
+        var metadataLine = $"{MarketingPaymentSubmissionMetadataPrefix}{metadata}";
+        if (string.IsNullOrWhiteSpace(customerNotes))
+        {
+            return metadataLine;
+        }
+
+        return $"{metadataLine}\n{customerNotes}";
+    }
+
+    private static string? ResolveAccessDeliveryCustomerEmailCandidate(
+        string? requestCustomerEmail,
+        string? invoiceNotes,
+        string? paymentNotes)
+    {
+        var direct = NormalizeOptionalValue(requestCustomerEmail);
+        if (!string.IsNullOrWhiteSpace(direct))
+        {
+            return direct;
+        }
+
+        var paymentMetadataEmail = TryResolveContactEmailFromMarketingPaymentMetadata(paymentNotes);
+        if (!string.IsNullOrWhiteSpace(paymentMetadataEmail))
+        {
+            return paymentMetadataEmail;
+        }
+
+        return TryResolveContactEmailFromMarketingMetadata(invoiceNotes);
+    }
+
+    private static string? TryResolveRequestedPlanFromMarketingMetadata(string? invoiceNotes)
+    {
+        var metadataJson = TryExtractMarketingInvoiceMetadataJson(invoiceNotes);
+        if (string.IsNullOrWhiteSpace(metadataJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(metadataJson);
+            if (document.RootElement.TryGetProperty("requested_internal_plan", out var planElement))
+            {
+                return NormalizeOptionalValue(planElement.GetString());
+            }
+        }
+        catch (JsonException)
+        {
+            // Ignore malformed metadata.
+        }
+
+        return null;
+    }
+
+    private static string? TryResolveContactEmailFromMarketingMetadata(string? invoiceNotes)
+    {
+        var metadataJson = TryExtractMarketingInvoiceMetadataJson(invoiceNotes);
+        if (string.IsNullOrWhiteSpace(metadataJson))
+        {
+            return null;
+        }
+
+        return TryResolveJsonStringProperty(metadataJson, "contact_email");
+    }
+
+    private static string? TryExtractMarketingInvoiceMetadataJson(string? invoiceNotes)
+    {
+        return TryExtractMetadataJsonByPrefix(invoiceNotes, MarketingInvoiceMetadataPrefix);
+    }
+
+    private static string? TryResolveContactEmailFromMarketingPaymentMetadata(string? paymentNotes)
+    {
+        var metadataJson = TryExtractMetadataJsonByPrefix(paymentNotes, MarketingPaymentSubmissionMetadataPrefix);
+        if (string.IsNullOrWhiteSpace(metadataJson))
+        {
+            return null;
+        }
+
+        return TryResolveJsonStringProperty(metadataJson, "contact_email");
+    }
+
+    private static string? TryResolveJsonStringProperty(string metadataJson, string propertyName)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(metadataJson);
+            if (document.RootElement.TryGetProperty(propertyName, out var valueElement))
+            {
+                return NormalizeOptionalValue(valueElement.GetString());
+            }
+        }
+        catch (JsonException)
+        {
+            // Ignore malformed metadata.
+        }
+
+        return null;
+    }
+
+    private static string? TryExtractMetadataJsonByPrefix(string? notes, string prefix)
+    {
+        var normalizedNotes = NormalizeOptionalValue(notes);
+        if (string.IsNullOrWhiteSpace(normalizedNotes))
+        {
+            return null;
+        }
+
+        foreach (var line in normalizedNotes.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (line.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                return line[prefix.Length..];
+            }
+        }
+
+        return null;
+    }
+
+    private static string? NormalizeMarketingBankReference(string? bankReference)
+    {
+        var normalized = NormalizeOptionalValue(bankReference);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        if (normalized.Length > MarketingBankReferenceMaxLength)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                $"bank_reference must be {MarketingBankReferenceMaxLength} characters or less.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        return normalized;
+    }
+
+    private static string? ValidateDepositSlipUrl(string? depositSlipUrl)
+    {
+        var normalized = NormalizeOptionalValue(depositSlipUrl);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        if (!Uri.TryCreate(normalized, UriKind.Absolute, out var uri) ||
+            !(uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "deposit_slip_url must be a valid absolute HTTP/HTTPS URL.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var extension = Path.GetExtension(uri.AbsolutePath);
+        if (!string.IsNullOrWhiteSpace(extension) && !AllowedDepositSlipFileExtensions.Contains(extension))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "deposit_slip_url file type must be one of: .jpg, .jpeg, .png, .webp, .pdf.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        return normalized;
+    }
+
+    private async Task<ValidatedMarketingProofFile> ValidateAndReadMarketingProofFileAsync(
+        IFormFile? file,
+        CancellationToken cancellationToken)
+    {
+        if (file is null)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "file is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        if (file.Length <= 0)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Uploaded proof file is empty.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var maxFileBytes = Math.Clamp(options.MarketingPaymentProofMaxFileBytes, 1 * 1024 * 1024, 30 * 1024 * 1024);
+        if (file.Length > maxFileBytes)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                $"Proof file exceeds max allowed size of {maxFileBytes} bytes.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var extension = Path.GetExtension(file.FileName)?.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(extension) || !AllowedDepositSlipFileExtensions.Contains(extension))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Unsupported proof file extension. Use PDF, PNG, JPG, JPEG, or WEBP.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        await using var stream = file.OpenReadStream();
+        using var memory = new MemoryStream();
+        await stream.CopyToAsync(memory, cancellationToken);
+        var bytes = memory.ToArray();
+        if (bytes.Length == 0)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Uploaded proof file is empty.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var detectedKind = DetectMarketingProofFileKind(bytes);
+        if (detectedKind == MarketingProofFileKind.Unknown)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Proof file signature is invalid. Upload a valid PDF/JPG/PNG/WEBP.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        if (!IsMarketingProofExtensionCompatible(extension, detectedKind))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Proof file extension does not match file content.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        if (!IsMarketingProofContentTypeCompatible(file.ContentType, detectedKind))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Proof file content type does not match file content.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var contentType = detectedKind switch
+        {
+            MarketingProofFileKind.Pdf => "application/pdf",
+            MarketingProofFileKind.Png => "image/png",
+            MarketingProofFileKind.Jpeg => "image/jpeg",
+            MarketingProofFileKind.Webp => "image/webp",
+            _ => "application/octet-stream"
+        };
+
+        return new ValidatedMarketingProofFile(
+            new BillFileData(NormalizeMarketingProofFileName(file.FileName), contentType, bytes),
+            extension,
+            bytes.LongLength);
+    }
+
+    private static MarketingProofFileKind DetectMarketingProofFileKind(byte[] bytes)
+    {
+        if (bytes.Length >= 5 &&
+            bytes[0] == 0x25 &&
+            bytes[1] == 0x50 &&
+            bytes[2] == 0x44 &&
+            bytes[3] == 0x46 &&
+            bytes[4] == 0x2D)
+        {
+            return MarketingProofFileKind.Pdf;
+        }
+
+        if (bytes.Length >= 8 &&
+            bytes[0] == 0x89 &&
+            bytes[1] == 0x50 &&
+            bytes[2] == 0x4E &&
+            bytes[3] == 0x47 &&
+            bytes[4] == 0x0D &&
+            bytes[5] == 0x0A &&
+            bytes[6] == 0x1A &&
+            bytes[7] == 0x0A)
+        {
+            return MarketingProofFileKind.Png;
+        }
+
+        if (bytes.Length >= 3 &&
+            bytes[0] == 0xFF &&
+            bytes[1] == 0xD8 &&
+            bytes[2] == 0xFF)
+        {
+            return MarketingProofFileKind.Jpeg;
+        }
+
+        if (bytes.Length >= 12 &&
+            bytes[0] == 0x52 &&
+            bytes[1] == 0x49 &&
+            bytes[2] == 0x46 &&
+            bytes[3] == 0x46 &&
+            bytes[8] == 0x57 &&
+            bytes[9] == 0x45 &&
+            bytes[10] == 0x42 &&
+            bytes[11] == 0x50)
+        {
+            return MarketingProofFileKind.Webp;
+        }
+
+        return MarketingProofFileKind.Unknown;
+    }
+
+    private static bool IsMarketingProofExtensionCompatible(string extension, MarketingProofFileKind kind)
+    {
+        return kind switch
+        {
+            MarketingProofFileKind.Pdf => extension == ".pdf",
+            MarketingProofFileKind.Png => extension == ".png",
+            MarketingProofFileKind.Jpeg => extension is ".jpg" or ".jpeg",
+            MarketingProofFileKind.Webp => extension == ".webp",
+            _ => false
+        };
+    }
+
+    private static bool IsMarketingProofContentTypeCompatible(string? contentType, MarketingProofFileKind kind)
+    {
+        if (string.IsNullOrWhiteSpace(contentType))
+        {
+            return false;
+        }
+
+        var normalized = contentType.Split(';', 2, StringSplitOptions.TrimEntries)[0].ToLowerInvariant();
+        return kind switch
+        {
+            MarketingProofFileKind.Pdf => normalized == "application/pdf",
+            MarketingProofFileKind.Png => normalized == "image/png",
+            MarketingProofFileKind.Jpeg => normalized is "image/jpeg" or "image/jpg",
+            MarketingProofFileKind.Webp => normalized == "image/webp",
+            _ => false
+        };
+    }
+
+    private static string NormalizeMarketingProofFileName(string? value)
+    {
+        var normalized = NormalizeOptionalValue(value) ?? "payment-proof";
+        var builder = new StringBuilder(normalized.Length);
+        foreach (var character in normalized)
+        {
+            if (char.IsLetterOrDigit(character) || character is '.' or '-' or '_')
+            {
+                builder.Append(character);
+            }
+            else
+            {
+                builder.Append('-');
+            }
+        }
+
+        var result = builder.ToString().Trim('-');
+        if (string.IsNullOrWhiteSpace(result))
+        {
+            return "payment-proof";
+        }
+
+        return result.Length > 120 ? result[..120] : result;
+    }
+
+    private string EnsureMarketingProofStorageRoot()
+    {
+        var publicRoot = Path.Combine(webHostEnvironment.ContentRootPath, "wwwroot");
+        var proofRoot = Path.Combine(publicRoot, "payment-proofs");
+        Directory.CreateDirectory(proofRoot);
+        return proofRoot;
+    }
+
+    private string BuildPublicAssetUrl(string relativeUrl)
+    {
+        var normalizedRelative = relativeUrl.StartsWith('/') ? relativeUrl : $"/{relativeUrl}";
+        var httpContext = httpContextAccessor.HttpContext;
+        if (httpContext is null)
+        {
+            return normalizedRelative;
+        }
+
+        return $"{httpContext.Request.Scheme}://{httpContext.Request.Host}{normalizedRelative}";
+    }
+
     private static ManualBillingPaymentMethod ParseManualBillingPaymentMethod(string? method)
     {
         var normalized = NormalizeOptionalValue(method)?.ToLowerInvariant();
@@ -6569,6 +7642,176 @@ public sealed class LicenseService(
         return $"{baseUrl}{separator}activation_entitlement_key={Uri.EscapeDataString(activationEntitlementKey)}";
     }
 
+    private InstallerDownloadAccess BuildInstallerDownloadAccessForSuccess(
+        ResolvedActivationEntitlementLookup resolved,
+        DateTimeOffset now)
+    {
+        var baseUrl = ResolveInstallerDownloadBaseUrl();
+        if (string.IsNullOrWhiteSpace(baseUrl))
+        {
+            return new InstallerDownloadAccess(null, null, false);
+        }
+
+        if (!options.InstallerDownloadProtectedEnabled)
+        {
+            return new InstallerDownloadAccess(baseUrl, null, false);
+        }
+
+        try
+        {
+            var expiresAt = now.AddMinutes(Math.Clamp(options.InstallerDownloadTokenTtlMinutes, 1, 240));
+            var token = CreateInstallerDownloadToken(
+                resolved.Entitlement.Id,
+                resolved.Entitlement.ShopId,
+                expiresAt);
+            var gatewayUrl = BuildProtectedInstallerDownloadGatewayUrl(token);
+            return new InstallerDownloadAccess(gatewayUrl, expiresAt, true);
+        }
+        catch (InvalidOperationException)
+        {
+            licensingAlertMonitor.RecordSecurityAnomaly("installer_download_protected_link_not_configured");
+            return new InstallerDownloadAccess(null, null, false);
+        }
+    }
+
+    private string? ResolveInstallerDownloadBaseUrl()
+    {
+        var configured = NormalizeOptionalValue(options.InstallerDownloadBaseUrl);
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            return null;
+        }
+
+        if (Uri.TryCreate(configured, UriKind.Absolute, out var absoluteUri) &&
+            (absoluteUri.Scheme == Uri.UriSchemeHttp || absoluteUri.Scheme == Uri.UriSchemeHttps))
+        {
+            return absoluteUri.ToString();
+        }
+
+        if (configured.StartsWith('/'))
+        {
+            return configured;
+        }
+
+        throw new InvalidOperationException("InstallerDownloadBaseUrl must be absolute http(s) URL or root-relative path.");
+    }
+
+    private string BuildProtectedInstallerDownloadGatewayUrl(string token)
+    {
+        var encodedToken = Uri.EscapeDataString(token);
+        const string downloadPath = "/api/license/public/installer-download";
+        var httpContext = httpContextAccessor.HttpContext;
+        if (httpContext is not null)
+        {
+            return $"{httpContext.Request.Scheme}://{httpContext.Request.Host}{downloadPath}?token={encodedToken}";
+        }
+
+        return $"{downloadPath}?token={encodedToken}";
+    }
+
+    private string CreateInstallerDownloadToken(
+        Guid entitlementId,
+        Guid shopId,
+        DateTimeOffset expiresAt)
+    {
+        var secret = ResolveInstallerDownloadSigningSecret();
+        var payload = $"{entitlementId:N}.{shopId:N}.{expiresAt.ToUnixTimeSeconds()}";
+        var payloadBytes = Encoding.UTF8.GetBytes(payload);
+
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
+        var signatureBytes = hmac.ComputeHash(payloadBytes);
+        var payloadSegment = Base64UrlEncode(payloadBytes);
+        var signatureSegment = Base64UrlEncode(signatureBytes);
+        return $"{payloadSegment}.{signatureSegment}";
+    }
+
+    private InstallerDownloadTokenPayload ParseAndValidateInstallerDownloadToken(string? token)
+    {
+        var normalizedToken = NormalizeOptionalValue(token);
+        if (string.IsNullOrWhiteSpace(normalizedToken))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidActivationEntitlement,
+                "Installer download token is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var segments = normalizedToken.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (segments.Length != 2)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidActivationEntitlement,
+                "Installer download token is invalid.",
+                StatusCodes.Status404NotFound);
+        }
+
+        byte[] payloadBytes;
+        byte[] providedSignatureBytes;
+        try
+        {
+            payloadBytes = Base64UrlDecode(segments[0]);
+            providedSignatureBytes = Base64UrlDecode(segments[1]);
+        }
+        catch (FormatException)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidActivationEntitlement,
+                "Installer download token is invalid.",
+                StatusCodes.Status404NotFound);
+        }
+
+        var secret = ResolveInstallerDownloadSigningSecret();
+        using (var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret)))
+        {
+            var expectedSignatureBytes = hmac.ComputeHash(payloadBytes);
+            if (!CryptographicOperations.FixedTimeEquals(expectedSignatureBytes, providedSignatureBytes))
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.InvalidActivationEntitlement,
+                    "Installer download token is invalid.",
+                    StatusCodes.Status404NotFound);
+            }
+        }
+
+        var payloadText = Encoding.UTF8.GetString(payloadBytes);
+        var payloadParts = payloadText.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (payloadParts.Length != 3 ||
+            !Guid.TryParse(payloadParts[0], out var entitlementId) ||
+            !Guid.TryParse(payloadParts[1], out var shopId) ||
+            !long.TryParse(payloadParts[2], out var expiresAtUnix))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidActivationEntitlement,
+                "Installer download token is invalid.",
+                StatusCodes.Status404NotFound);
+        }
+
+        return new InstallerDownloadTokenPayload(
+            entitlementId,
+            shopId,
+            DateTimeOffset.FromUnixTimeSeconds(expiresAtUnix));
+    }
+
+    private string ResolveInstallerDownloadSigningSecret()
+    {
+        var fromConfig = NormalizeOptionalValue(options.InstallerDownloadSigningSecret);
+        if (!string.IsNullOrWhiteSpace(fromConfig))
+        {
+            return fromConfig;
+        }
+
+        var envVar = NormalizeOptionalValue(options.InstallerDownloadSigningSecretEnvironmentVariable)
+            ?? "SMARTPOS_INSTALLER_DOWNLOAD_SIGNING_SECRET";
+        var fromEnv = NormalizeOptionalValue(Environment.GetEnvironmentVariable(envVar));
+        if (!string.IsNullOrWhiteSpace(fromEnv))
+        {
+            return fromEnv;
+        }
+
+        throw new InvalidOperationException(
+            $"Installer download signing secret is not configured. Set '{LicenseOptions.SectionName}:InstallerDownloadSigningSecret' or environment variable '{envVar}'.");
+    }
+
     private string? ResolveAccessDeliverySmtpPassword()
     {
         var configuredPassword = NormalizeOptionalValue(options.AccessDeliverySmtpPassword);
@@ -7035,6 +8278,14 @@ public sealed class LicenseService(
         CustomerActivationEntitlement Entitlement,
         Shop Shop,
         string NormalizedKeyForDisplay);
+    private sealed record ValidatedMarketingProofFile(
+        BillFileData FileData,
+        string Extension,
+        long SizeBytes);
+    private sealed record InstallerDownloadTokenPayload(
+        Guid EntitlementId,
+        Guid ShopId,
+        DateTimeOffset ExpiresAt);
     private sealed record BillingReconciliationDriftCandidate(
         Guid ShopId,
         string? BillingSubscriptionId,
