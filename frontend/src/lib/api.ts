@@ -873,6 +873,22 @@ function createProductImage(label: string, accent = "#2F855A") {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
+function resolveImageUrl(imageUrl?: string | null) {
+  if (!imageUrl) {
+    return undefined;
+  }
+
+  if (/^(https?:|data:|blob:)/i.test(imageUrl)) {
+    return imageUrl;
+  }
+
+  if (imageUrl.startsWith("/")) {
+    return `${API_BASE_URL}${imageUrl}`;
+  }
+
+  return imageUrl;
+}
+
 const SAMPLE_PRODUCT_IMAGES: Record<string, string> = {
   "ball pen blue": "https://images.unsplash.com/photo-1583485088034-697b5bc54ccd?w=600&h=600&fit=crop",
   "bath soap": "https://images.unsplash.com/photo-1607006344380-b6775a0824a7?w=600&h=600&fit=crop",
@@ -927,7 +943,7 @@ function mapProduct(item: BackendProductSearchItem): Product {
     price: Number(item.unitPrice),
     category: undefined,
     stock: Number(item.stockQuantity),
-    image: item.image_url || sampleImage || createProductImage(item.name, accent),
+    image: resolveImageUrl(item.image_url) || sampleImage || createProductImage(item.name, accent),
   };
 }
 
@@ -942,7 +958,7 @@ function mapCatalogProduct(item: BackendProductCatalogItem): Product {
     price: Number(item.unit_price),
     category: undefined,
     stock: Number(item.stock_quantity),
-    image: item.image_url || sampleImage || createProductImage(item.name, accent),
+    image: resolveImageUrl(item.image_url) || sampleImage || createProductImage(item.name, accent),
   };
 }
 
