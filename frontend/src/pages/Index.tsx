@@ -9,9 +9,9 @@ import NewItemDialog from "@/components/pos/NewItemDialog";
 import ImportSupplierBillDialog from "@/components/pos/ImportSupplierBillDialog";
 import ProductManagementDialog from "@/components/pos/ProductManagementDialog";
 import ManagerReportsDrawer from "@/components/pos/ManagerReportsDrawer";
-import ProductSearchPanel from "@/components/pos/ProductSearchPanel";
+import ProductSearchPanel, { type ProductSearchPanelHandle } from "@/components/pos/ProductSearchPanel";
 import CartPanel from "@/components/pos/CartPanel";
-import CheckoutPanel from "@/components/pos/CheckoutPanel";
+import CheckoutPanel, { type CheckoutPanelHandle } from "@/components/pos/CheckoutPanel";
 import HeldBillsDrawer from "@/components/pos/HeldBillsDrawer";
 import TodaySalesDrawer from "@/components/pos/TodaySalesDrawer";
 import MobileTabBar from "@/components/pos/MobileTabBar";
@@ -38,6 +38,20 @@ import {
 import { isSuperAdminBackendRole } from "@/lib/auth";
 import { flushOfflineSyncQueue, getOfflineSyncQueueSummary } from "@/lib/offlineSyncQueue";
 import { playCartAddSound } from "@/lib/sound";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { usePosShortcuts } from "@/hooks/usePosShortcuts";
+import { POS_SHORTCUTS } from "@/components/pos/shortcuts";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+
+const SHORTCUTS_ONBOARDING_STORAGE_KEY_PREFIX = "smartpos.shortcuts.onboarding.v1";
+const isPosShortcutsFeatureEnabled = import.meta.env.VITE_POS_SHORTCUTS_ENABLED !== "false";
 
 const IndexInner = () => {
   const { user, logout } = useAuth();
@@ -72,7 +86,22 @@ const IndexInner = () => {
   const [mobileTab, setMobileTab] = useState<"products" | "cart" | "checkout">("products");
   const [offlinePendingCount, setOfflinePendingCount] = useState(0);
   const [isOfflineSyncing, setIsOfflineSyncing] = useState(false);
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
+  const [showShortcutOnboarding, setShowShortcutOnboarding] = useState(false);
   const isOfflineFlushInProgressRef = useRef(false);
+  const desktopSearchRef = useRef<ProductSearchPanelHandle | null>(null);
+  const mobileSearchRef = useRef<ProductSearchPanelHandle | null>(null);
+  const desktopCheckoutRef = useRef<CheckoutPanelHandle | null>(null);
+  const mobileCheckoutRef = useRef<CheckoutPanelHandle | null>(null);
+  const isMobile = useIsMobile();
+
+  const shortcutsOnboardingStorageKey = useMemo(
+    () =>
+      `${SHORTCUTS_ONBOARDING_STORAGE_KEY_PREFIX}:${
+        user?.username?.trim().toLowerCase() || "anonymous"
+      }`,
+    [user?.username],
+  );
 
   const {
     session,
@@ -344,6 +373,120 @@ const IndexInner = () => {
     await Promise.all([loadProducts(), loadHeldBills(), refreshSession()]);
   };
 
+  const runOnTargetTab = useCallback((tab: "products" | "checkout", action: () => void) => {
+    if (isMobile) {
+      setMobileTab(tab);
+      window.setTimeout(action, 0);
+      return;
+    }
+
+    action();
+  }, [isMobile]);
+
+  const handleShortcutFocusSearch = useCallback(() => {
+    runOnTargetTab("products", () => {
+      const searchPanel = isMobile ? mobileSearchRef.current : desktopSearchRef.current;
+      searchPanel?.focusSearch();
+    });
+  }, [isMobile, runOnTargetTab]);
+
+  const handleShortcutHoldBill = useCallback(() => {
+    if (cartItems.length === 0) {
+      toast.info("F4 blocked: add items to the cart first.");
+      return;
+    }
+
+    void handleHoldBill();
+  }, [cartItems.length, handleHoldBill]);
+
+  const handleShortcutOpenCashWorkflow = useCallback(() => {
+    if (cartItems.length === 0) {
+      toast.info("F8 blocked: add items to the cart first.");
+      return;
+    }
+
+    runOnTargetTab("checkout", () => {
+      const checkoutPanel = isMobile ? mobileCheckoutRef.current : desktopCheckoutRef.current;
+      checkoutPanel?.openCashWorkflow();
+    });
+  }, [cartItems.length, isMobile, runOnTargetTab]);
+
+  const handleShortcutCompleteSale = useCallback(() => {
+    runOnTargetTab("checkout", () => {
+      const checkoutPanel = isMobile ? mobileCheckoutRef.current : desktopCheckoutRef.current;
+      const result = checkoutPanel?.tryCompleteSale();
+
+      if (!result?.ok) {
+        toast.info(`F9 blocked: ${result?.reason ?? "sale is not ready to complete"}.`);
+      }
+    });
+  }, [isMobile, runOnTargetTab]);
+
+  const handleShortcutOpenHelp = useCallback(() => {
+    setShowShortcutsHelp(true);
+  }, []);
+
+  const handleShortcutEscape = useCallback(() => {
+    setShowShortcutsHelp(false);
+  }, []);
+
+  const markShortcutOnboardingSeen = useCallback(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem(shortcutsOnboardingStorageKey, "seen");
+  }, [shortcutsOnboardingStorageKey]);
+
+  const dismissShortcutOnboarding = useCallback(() => {
+    setShowShortcutOnboarding(false);
+    markShortcutOnboardingSeen();
+  }, [markShortcutOnboardingSeen]);
+
+  const isShortcutActionBlocked =
+    showHeldBills ||
+    showNewItem ||
+    showProductManagement ||
+    showReports ||
+    showTodaySales ||
+    showClosing ||
+    showAuditLog ||
+    showImportSupplierBill ||
+    showShopSettings ||
+    showLicenseAccount ||
+    refundSaleId !== null ||
+    showShortcutsHelp;
+
+  usePosShortcuts({
+    enabled: isPosShortcutsFeatureEnabled && canSell && !isClosed,
+    actionsEnabled: !isShortcutActionBlocked,
+    onFocusSearch: handleShortcutFocusSearch,
+    onHoldBill: handleShortcutHoldBill,
+    onOpenCashWorkflow: handleShortcutOpenCashWorkflow,
+    onCompleteSale: handleShortcutCompleteSale,
+    onOpenHelp: handleShortcutOpenHelp,
+    onEscape: handleShortcutEscape,
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    if (!isPosShortcutsFeatureEnabled) {
+      setShowShortcutOnboarding(false);
+      return;
+    }
+
+    if (user?.role !== "cashier") {
+      setShowShortcutOnboarding(false);
+      return;
+    }
+
+    const alreadySeen = window.localStorage.getItem(shortcutsOnboardingStorageKey) === "seen";
+    setShowShortcutOnboarding(!alreadySeen);
+  }, [shortcutsOnboardingStorageKey, user?.role]);
+
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       const data = event.data as { type?: string; saleId?: string } | undefined;
@@ -400,6 +543,37 @@ const IndexInner = () => {
 
       {canSell && <CashSessionBanner onEndShift={handleEndShift} />}
 
+      {isPosShortcutsFeatureEnabled && canSell && !isClosed && showShortcutOnboarding && (
+        <div className="mx-3 mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="font-medium">
+              Keyboard shortcuts are enabled: F2 search, F4 hold, F8 cash, F9 complete.
+            </p>
+            <div className="flex items-center gap-1.5">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2 text-amber-900 hover:bg-amber-100"
+                onClick={() => {
+                  setShowShortcutsHelp(true);
+                  dismissShortcutOnboarding();
+                }}
+              >
+                View Help (F1)
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 border-amber-300 bg-white px-2 text-amber-900 hover:bg-amber-100"
+                onClick={dismissShortcutOnboarding}
+              >
+                Got it
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {needsOpening && !isClosed && (
         <OpeningCashDialog
           open={true}
@@ -418,7 +592,12 @@ const IndexInner = () => {
         <>
           <div className="flex-1 hidden md:grid md:grid-cols-[5fr_3fr] overflow-hidden">
             <div className="min-h-0 min-w-0 border-r border-border overflow-hidden">
-              <ProductSearchPanel products={products} onAddToCart={handleAddToCart} />
+              <ProductSearchPanel
+                ref={desktopSearchRef}
+                products={products}
+                onAddToCart={handleAddToCart}
+                showShortcutHints={isPosShortcutsFeatureEnabled}
+              />
             </div>
             <div className="scrollbar-thin min-h-0 overflow-y-auto bg-card">
               <div className="grid h-full min-h-0" style={{ gridTemplateRows: "38% 62%" }}>
@@ -427,10 +606,12 @@ const IndexInner = () => {
                 </div>
                 <div className="min-h-0 overflow-hidden">
                   <CheckoutPanel
+                    ref={desktopCheckoutRef}
                     items={cartItems}
                     onCompleteSale={handleCompleteSale}
                     onHoldBill={() => void handleHoldBill()}
                     onCancelSale={handleCancelSale}
+                    showShortcutHints={isPosShortcutsFeatureEnabled}
                   />
                 </div>
               </div>
@@ -439,7 +620,12 @@ const IndexInner = () => {
 
           <div className="flex-1 md:hidden overflow-hidden pb-14">
             {mobileTab === "products" && (
-              <ProductSearchPanel products={products} onAddToCart={handleAddToCart} />
+              <ProductSearchPanel
+                ref={mobileSearchRef}
+                products={products}
+                onAddToCart={handleAddToCart}
+                showShortcutHints={isPosShortcutsFeatureEnabled}
+              />
             )}
             {mobileTab === "cart" && (
               <div className="h-full overflow-y-auto">
@@ -449,10 +635,12 @@ const IndexInner = () => {
             {mobileTab === "checkout" && (
               <div className="h-full overflow-y-auto">
                 <CheckoutPanel
+                  ref={mobileCheckoutRef}
                   items={cartItems}
                   onCompleteSale={handleCompleteSale}
                   onHoldBill={() => void handleHoldBill()}
                   onCancelSale={handleCancelSale}
+                  showShortcutHints={isPosShortcutsFeatureEnabled}
                 />
               </div>
             )}
@@ -556,6 +744,29 @@ const IndexInner = () => {
           setRefundSaleId(null);
         }}
       />
+
+      {isPosShortcutsFeatureEnabled && (
+        <Dialog open={showShortcutsHelp} onOpenChange={setShowShortcutsHelp}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>POS Keyboard Shortcuts</DialogTitle>
+              <DialogDescription>
+                Use these keys to speed up cashier billing.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              {POS_SHORTCUTS.map((shortcut) => (
+                <div key={shortcut.id} className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+                  <span className="text-sm text-foreground">{shortcut.description}</span>
+                  <kbd className="rounded bg-muted px-2 py-1 text-xs font-semibold text-muted-foreground">
+                    {shortcut.key}
+                  </kbd>
+                </div>
+              ))}
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 };
