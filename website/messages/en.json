@@ -1,0 +1,240 @@
+{
+  "meta": {
+    "siteName": "SmartPOS",
+    "logoAlt": "SmartPOS logo",
+    "title": "SmartPOS - Fast Billing and Shop Management for Small Businesses",
+    "description": "A smart, easy-to-use POS system for small shops built for fast sales, simple stock control, and zero hassle.",
+    "ogTitle": "SmartPOS - Fast Billing and Shop Management for Small Businesses",
+    "ogDescription": "Run sales, track stock, and get instant business insights from one smart POS system.",
+    "twitterTitle": "SmartPOS - Fast Billing and Shop Management for Small Businesses",
+    "twitterDescription": "Run sales, track stock, and get instant business insights from one smart POS system.",
+    "imageAlt": "SmartPOS marketing preview"
+  },
+  "nav": {
+    "links": {
+      "features": "Features",
+      "howItWorks": "How It Works",
+      "pricing": "Pricing"
+    },
+    "cta": "Get Started Free",
+    "languageLabel": "Language",
+    "languages": {
+      "en": "English",
+      "si": "Sinhala"
+    }
+  },
+  "hero": {
+    "badge": "Built for Small Shops",
+    "titlePart1": "The",
+    "titleHighlight": "AI",
+    "titlePart2": "POS Built",
+    "titlePart3": "for Small Shops",
+    "description": "Run sales, track stock, and get instant business insights from one smart POS system built for groceries, bookshops, clothing shops, and more.",
+    "ctaPrimary": "Start Free Trial",
+    "ctaSecondary": "Watch Product Tour",
+    "subtext": "Runs on phone, tablet, or desktop - no bulky setup or extra hardware.",
+    "dashboard": {
+      "brand": "SmartPOS",
+      "todaySalesLabel": "Today's Sales",
+      "salesTotal": "Rs. 28,450",
+      "lowStockLabel": "Low Stock",
+      "lowStockItem": "Milk Powder",
+      "lowStockCount": "2 Left",
+      "aiInsightsLabel": "AI Insights",
+      "aiInsightMessage": "Biscuit sales increased 18% this week. Consider restocking soon.",
+      "askLabel": "Ask SmartPOS"
+    },
+    "floatingLowStock": {
+      "title": "Low Stock",
+      "items": [
+        { "name": "Milk Powder", "status": "Below 10" },
+        { "name": "Pens", "status": "Below 10" },
+        { "name": "Exercise Books", "status": "Below 10" }
+      ]
+    },
+    "floatingBilling": {
+      "title": "AI Insights",
+      "askPrompt": "Ask SmartPOS",
+      "products": [
+        { "name": "Milk Powder", "price": "Rs. 200.00" },
+        { "name": "Biscuits", "price": "Rs. 360.00" },
+        { "name": "Soap", "price": "Rs. 120.00" }
+      ],
+      "paymentMethods": ["Cash", "Card", "Other"],
+      "total": "Rs. 28,450"
+    }
+  },
+  "quickValue": {
+    "items": [
+      "Works on Phone, Tablet, or Desktop",
+      "Setup in Minutes",
+      "Minimal Training",
+      "No Bulky Hardware"
+    ]
+  },
+  "features": {
+    "badge": "Features",
+    "titlePart1": "Everything a Small Shop Needs -",
+    "titleHighlight": "Without the Complexity",
+    "description": "Simple selling, stock control, and AI-powered insights in one modern POS.",
+    "items": [
+      {
+        "title": "One-Screen Checkout",
+        "description": "Tap, sell, and complete payments from one clean screen."
+      },
+      {
+        "title": "AI Stock Alerts",
+        "description": "Know what's running low before it becomes a problem."
+      },
+      {
+        "title": "Smart Sales Insights",
+        "description": "See what sold, what slowed down, and what needs attention."
+      },
+      {
+        "title": "Works on Devices You Already Own",
+        "description": "Use your phone, tablet, or computer - no expensive setup required."
+      },
+      {
+        "title": "Setup in Minutes",
+        "description": "Add products fast and start billing without complicated onboarding."
+      },
+      {
+        "title": "Built for Real Small Shops",
+        "description": "Designed for groceries, bookshops, boutiques, and everyday retail."
+      }
+    ]
+  },
+  "ai": {
+    "badge": "AI Assistant",
+    "titlePart1": "Meet Your",
+    "titleHighlight": "AI",
+    "titlePart2": "Shop Assistant",
+    "description": "SmartPOS helps you understand your business faster with low-stock alerts, sales summaries, smart search, and instant answers.",
+    "bullets": [
+      "Instant low-stock warnings",
+      "Daily sales summaries",
+      "Smart product search",
+      "Natural language questions"
+    ],
+    "panelTitle": "SmartPOS AI",
+    "insights": [
+      { "type": "question", "text": "What sold most today?" },
+      { "type": "alert", "text": "Milk Powder is likely to run out tomorrow." },
+      { "type": "insight", "text": "Card payments increased 14% this week." },
+      { "type": "insight", "text": "Biscuits sold better than last week. Consider restocking soon." }
+    ],
+    "askPlaceholder": "Ask SmartPOS anything..."
+  },
+  "howItWorks": {
+    "badge": "How It Works",
+    "titlePart1": "Start in",
+    "titleHighlight": "Minutes",
+    "description": "A simple setup flow designed for busy shop owners.",
+    "steps": [
+      {
+        "number": "01",
+        "title": "Add Products",
+        "description": "Create your items quickly with price, stock, and barcode."
+      },
+      {
+        "number": "02",
+        "title": "Start Selling",
+        "description": "Use one simple billing screen to process sales fast."
+      },
+      {
+        "number": "03",
+        "title": "Let AI Assist",
+        "description": "Get stock warnings, sales insights, and daily summaries automatically."
+      }
+    ]
+  },
+  "builtForShops": {
+    "badge": "Who It's For",
+    "titlePart1": "Built for the Shops That Need",
+    "titleHighlight": "Simplicity",
+    "titlePart2": "Most",
+    "shops": [
+      "Grocery Shops",
+      "Bookshops",
+      "Clothing Stores",
+      "Gift Shops",
+      "Cosmetic Stores",
+      "Mini Marts"
+    ]
+  },
+  "beforeAfter": {
+    "badge": "Why Switch",
+    "titlePart1": "Why Small Shops Switch to",
+    "titleHighlight": "SmartPOS",
+    "beforeTitle": "Before SmartPOS",
+    "afterTitle": "With SmartPOS",
+    "beforeItems": [
+      "Too many devices",
+      "Confusing billing screens",
+      "Hard staff training",
+      "Poor stock visibility"
+    ],
+    "afterItems": [
+      "Phone or tablet ready",
+      "One-screen billing",
+      "Easy for staff to learn",
+      "Instant stock and sales insights"
+    ]
+  },
+  "pricing": {
+    "badge": "Pricing",
+    "title": "Simple, Transparent Pricing",
+    "description": "Start free. Upgrade when you're ready.",
+    "mostPopular": "Most Popular",
+    "plans": [
+      {
+        "name": "Starter",
+        "price": "Free",
+        "period": "",
+        "description": "Perfect for getting started",
+        "features": ["1 device", "Up to 100 products", "Basic sales reports", "Email support"],
+        "cta": "Start Free",
+        "highlighted": false
+      },
+      {
+        "name": "Pro",
+        "price": "$19",
+        "period": "/month",
+        "description": "For growing shops",
+        "features": ["Unlimited devices", "Unlimited products", "AI insights & alerts", "Inventory management", "Priority support"],
+        "cta": "Start Free Trial",
+        "highlighted": true
+      },
+      {
+        "name": "Business",
+        "price": "$49",
+        "period": "/month",
+        "description": "Multi-location shops",
+        "features": ["Everything in Pro", "Multi-store management", "Advanced analytics", "API access", "Dedicated support"],
+        "cta": "Contact Sales",
+        "highlighted": false
+      }
+    ]
+  },
+  "cta": {
+    "titlePart1": "Start Selling",
+    "titleHighlight": "Smarter",
+    "description": "Try SmartPOS and see how simple modern shop management can be.",
+    "primary": "Start Free Trial",
+    "secondary": "Book a Demo"
+  },
+  "footer": {
+    "description": "A smart, easy-to-use POS system for small shops.",
+    "columns": [
+      { "title": "Product", "links": ["Features", "Pricing", "Integrations"] },
+      { "title": "Company", "links": ["About", "Blog", "Careers"] },
+      { "title": "Support", "links": ["Help Center", "Contact", "Privacy Policy"] }
+    ],
+    "copyright": "© 2026 SmartPOS. All rights reserved."
+  },
+  "notFound": {
+    "title": "404",
+    "message": "Oops! Page not found",
+    "action": "Return to Home"
+  }
+}
