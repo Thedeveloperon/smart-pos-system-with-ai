@@ -39,7 +39,7 @@ services:
     healthCheckPath: /health
     envVars:
       - key: BACKEND_UPSTREAM
-        value: https://smartpos-backend.onrender.com
+        value: https://smartpos-backend-v7yd.onrender.com
 
   - type: web
     name: smartpos-marketing-website
