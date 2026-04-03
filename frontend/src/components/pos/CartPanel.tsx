@@ -6,9 +6,10 @@ interface CartPanelProps {
   items: CartItem[];
   onUpdateQty: (productId: string, qty: number) => void;
   onRemove: (productId: string) => void;
+  expertMode?: boolean;
 }
 
-const CartPanel = ({ items, onUpdateQty, onRemove }: CartPanelProps) => {
+const CartPanel = ({ items, onUpdateQty, onRemove, expertMode = false }: CartPanelProps) => {
   const itemCount = items.reduce((acc, i) => acc + i.quantity, 0);
   const grandTotal = items.reduce((acc, item) => acc + item.product.price * item.quantity, 0);
 
@@ -36,10 +37,18 @@ const CartPanel = ({ items, onUpdateQty, onRemove }: CartPanelProps) => {
 
       <div className="flex-1 overflow-y-auto scrollbar-thin p-3 space-y-2">
         {items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-40 text-muted-foreground gap-2">
-            <ShoppingCart className="h-10 w-10 opacity-30" />
-            <p className="text-sm">Cart is empty</p>
-            <p className="text-xs">Add products to get started</p>
+          <div
+            className={`flex flex-col justify-center rounded-2xl border border-dashed border-border bg-muted/20 px-4 text-center text-muted-foreground ${
+              expertMode ? "min-h-[220px] items-center gap-3" : "h-40 items-center gap-2"
+            }`}
+          >
+            <ShoppingCart className={`${expertMode ? "h-12 w-12" : "h-10 w-10"} opacity-30`} />
+            <p className="text-sm font-medium text-foreground">
+              {expertMode ? "Added items will appear here" : "Cart is empty"}
+            </p>
+            <p className="text-xs">
+              {expertMode ? "Search or scan a product to populate this live list." : "Add products to get started"}
+            </p>
           </div>
         ) : (
           items.map((item) => (
