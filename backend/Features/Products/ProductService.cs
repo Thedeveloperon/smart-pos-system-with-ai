@@ -281,6 +281,49 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task HardDeleteInactiveProductAsync(Guid productId, CancellationToken cancellationToken)
+    {
+        var product = await dbContext.Products
+            .Include(x => x.Inventory)
+            .FirstOrDefaultAsync(x => x.Id == productId, cancellationToken)
+            ?? throw new KeyNotFoundException("Product not found.");
+
+        if (product.IsActive)
+        {
+            throw new InvalidOperationException("Only inactive products can be permanently deleted.");
+        }
+
+        var hasSalesHistory = await dbContext.SaleItems
+            .AsNoTracking()
+            .AnyAsync(x => x.ProductId == productId, cancellationToken);
+        var hasPurchaseHistory = await dbContext.PurchaseBillItems
+            .AsNoTracking()
+            .AnyAsync(x => x.ProductId == productId, cancellationToken);
+
+        if (hasSalesHistory || hasPurchaseHistory)
+        {
+            throw new InvalidOperationException(
+                "This product has transaction history and cannot be permanently deleted.");
+        }
+
+        var before = new
+        {
+            product.Name,
+            product.Sku,
+            product.Barcode,
+            product.IsActive
+        };
+
+        dbContext.Products.Remove(product);
+        auditLogService.Queue(
+            action: "product_hard_deleted",
+            entityName: "product",
+            entityId: productId.ToString(),
+            before: before);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<StockAdjustmentResponse> AdjustStockAsync(
         Guid productId,
         StockAdjustmentRequest request,
