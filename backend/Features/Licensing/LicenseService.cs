@@ -5,6 +5,7 @@ using System.Net.Mail;
 using System.Text;
 using System.Text.Json;
 using System.Globalization;
+using System.Linq;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -273,13 +274,22 @@ public sealed class LicenseService(
             }
         }
 
-        var issuedLicense = await IssueLicenseAsync(
-            shop,
-            existingDevice,
-            subscription,
-            now,
-            TokenRotationMode.Immediate,
-            cancellationToken);
+        IssuedLicenseResult issuedLicense;
+        try
+        {
+            issuedLicense = await IssueLicenseAsync(
+                shop,
+                existingDevice,
+                subscription,
+                now,
+                TokenRotationMode.Immediate,
+                cancellationToken);
+        }
+        catch (Exception ex) when (IsLicensingConfigurationException(ex))
+        {
+            throw CreateLicensingConfigurationException(ex);
+        }
+
         if (requiresSeat)
         {
             await ForceReissueLicensesForShopAsync(
@@ -319,7 +329,16 @@ public sealed class LicenseService(
         await dbContext.SaveChangesAsync(cancellationToken);
         metrics.RecordActivation();
 
-        var status = await ResolveStatusSnapshotAsync(deviceCode, issuedLicense.PlainToken, strictTokenValidation: true, cancellationToken);
+        LicenseStatusSnapshot status;
+        try
+        {
+            status = await ResolveStatusSnapshotAsync(deviceCode, issuedLicense.PlainToken, strictTokenValidation: true, cancellationToken);
+        }
+        catch (Exception ex) when (IsLicensingConfigurationException(ex))
+        {
+            throw CreateLicensingConfigurationException(ex);
+        }
+
         return CreateResponse(status with { LicenseToken = issuedLicense.PlainToken });
     }
 
@@ -434,11 +453,19 @@ public sealed class LicenseService(
             };
         }
 
-        var snapshot = await ResolveStatusSnapshotAsync(
-            normalizedDeviceCode,
-            licenseToken,
-            strictTokenValidation: !string.IsNullOrWhiteSpace(licenseToken),
-            cancellationToken);
+        LicenseStatusSnapshot snapshot;
+        try
+        {
+            snapshot = await ResolveStatusSnapshotAsync(
+                normalizedDeviceCode,
+                licenseToken,
+                strictTokenValidation: !string.IsNullOrWhiteSpace(licenseToken),
+                cancellationToken);
+        }
+        catch (Exception ex) when (IsLicensingConfigurationException(ex))
+        {
+            throw CreateLicensingConfigurationException(ex);
+        }
 
         return CreateResponse(snapshot);
     }
@@ -460,12 +487,20 @@ public sealed class LicenseService(
 
         var now = DateTimeOffset.UtcNow;
         var requestSource = ResolveRequestSourceContext();
-        var currentStatus = await ResolveStatusSnapshotAsync(
-            deviceCode,
-            request.LicenseToken,
-            strictTokenValidation: true,
-            cancellationToken,
-            tokenValidationPurpose: TokenValidationPurpose.Heartbeat);
+        LicenseStatusSnapshot currentStatus;
+        try
+        {
+            currentStatus = await ResolveStatusSnapshotAsync(
+                deviceCode,
+                request.LicenseToken,
+                strictTokenValidation: true,
+                cancellationToken,
+                tokenValidationPurpose: TokenValidationPurpose.Heartbeat);
+        }
+        catch (Exception ex) when (IsLicensingConfigurationException(ex))
+        {
+            throw CreateLicensingConfigurationException(ex);
+        }
 
         if (currentStatus.State == LicenseState.Unprovisioned)
         {
@@ -506,13 +541,21 @@ public sealed class LicenseService(
 
         provisionedDevice.LastHeartbeatAtUtc = now;
 
-        var refreshedLicense = await IssueLicenseAsync(
-            (await dbContext.Shops.FirstAsync(x => x.Id == provisionedDevice.ShopId, cancellationToken)),
-            provisionedDevice,
-            subscription,
-            now,
-            TokenRotationMode.Overlap,
-            cancellationToken);
+        IssuedLicenseResult refreshedLicense;
+        try
+        {
+            refreshedLicense = await IssueLicenseAsync(
+                (await dbContext.Shops.FirstAsync(x => x.Id == provisionedDevice.ShopId, cancellationToken)),
+                provisionedDevice,
+                subscription,
+                now,
+                TokenRotationMode.Overlap,
+                cancellationToken);
+        }
+        catch (Exception ex) when (IsLicensingConfigurationException(ex))
+        {
+            throw CreateLicensingConfigurationException(ex);
+        }
 
         dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
         {
@@ -535,7 +578,16 @@ public sealed class LicenseService(
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        var status = await ResolveStatusSnapshotAsync(deviceCode, refreshedLicense.PlainToken, strictTokenValidation: true, cancellationToken);
+        LicenseStatusSnapshot status;
+        try
+        {
+            status = await ResolveStatusSnapshotAsync(deviceCode, refreshedLicense.PlainToken, strictTokenValidation: true, cancellationToken);
+        }
+        catch (Exception ex) when (IsLicensingConfigurationException(ex))
+        {
+            throw CreateLicensingConfigurationException(ex);
+        }
+
         return CreateResponse(status with { LicenseToken = refreshedLicense.PlainToken });
     }
 
@@ -7055,7 +7107,7 @@ public sealed class LicenseService(
 
     private static string? TryDerivePublicKeyPem(string? privateKeyPem)
     {
-        var normalizedPrivateKeyPem = NormalizePem(privateKeyPem);
+        var normalizedPrivateKeyPem = NormalizePrivateKeyPem(privateKeyPem);
         if (string.IsNullOrWhiteSpace(normalizedPrivateKeyPem))
         {
             return null;
@@ -7075,7 +7127,7 @@ public sealed class LicenseService(
 
     private string ResolveSigningPrivateKeyPem(string? inlinePrivateKeyPem, string keyId)
     {
-        var normalizedInline = NormalizePem(inlinePrivateKeyPem);
+        var normalizedInline = NormalizePrivateKeyPem(inlinePrivateKeyPem);
         var envVarName = NormalizeOptionalValue(options.SigningPrivateKeyEnvironmentVariable)
                          ?? "SMARTPOS_LICENSE_SIGNING_PRIVATE_KEY_PEM";
 
@@ -7084,7 +7136,7 @@ public sealed class LicenseService(
             return normalizedInline;
         }
 
-        var fromEnvironment = NormalizePem(Environment.GetEnvironmentVariable(envVarName));
+        var fromEnvironment = NormalizePrivateKeyPem(ResolvePemFromEnvironmentVariable(envVarName, keyId));
         if (!string.IsNullOrWhiteSpace(fromEnvironment))
         {
             return fromEnvironment;
@@ -7105,11 +7157,155 @@ public sealed class LicenseService(
             $"Licensing private signing key '{keyId}' is not configured. Set environment variable '{envVarName}'.");
     }
 
+    private static string ResolvePemFromEnvironmentVariable(string envVarName, string keyId)
+    {
+        var normalizedValue = NormalizePem(Environment.GetEnvironmentVariable(envVarName));
+        if (string.IsNullOrWhiteSpace(normalizedValue))
+        {
+            return string.Empty;
+        }
+
+        if (!TryResolvePemFilePath(normalizedValue, out var keyFilePath))
+        {
+            return normalizedValue;
+        }
+
+        if (!File.Exists(keyFilePath))
+        {
+            throw new InvalidOperationException(
+                $"Licensing signing key '{keyId}' environment variable '{envVarName}' points to '{keyFilePath}', but the file was not found.");
+        }
+
+        var filePem = NormalizePem(File.ReadAllText(keyFilePath));
+        if (string.IsNullOrWhiteSpace(filePem))
+        {
+            throw new InvalidOperationException(
+                $"Licensing signing key '{keyId}' file '{keyFilePath}' is empty.");
+        }
+
+        return filePem;
+    }
+
+    private static bool TryResolvePemFilePath(string value, out string filePath)
+    {
+        var normalized = value.Trim();
+        filePath = string.Empty;
+
+        if (normalized.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!Uri.TryCreate(normalized, UriKind.Absolute, out var fileUri) || !fileUri.IsFile)
+            {
+                throw new InvalidOperationException($"Invalid PEM file URI '{normalized}'.");
+            }
+
+            filePath = fileUri.LocalPath;
+            return true;
+        }
+
+        if (normalized.StartsWith("~/", StringComparison.Ordinal))
+        {
+            var homeDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (!string.IsNullOrWhiteSpace(homeDirectory))
+            {
+                filePath = Path.Combine(homeDirectory, normalized[2..]);
+                return true;
+            }
+        }
+
+        if (Path.IsPathRooted(normalized)
+            || normalized.StartsWith("./", StringComparison.Ordinal)
+            || normalized.StartsWith("../", StringComparison.Ordinal)
+            || (normalized.IndexOfAny(new[] { '/', '\\' }) >= 0 && !LooksLikeBase64KeyBody(normalized))
+            || normalized.EndsWith(".pem", StringComparison.OrdinalIgnoreCase)
+            || normalized.EndsWith(".key", StringComparison.OrdinalIgnoreCase)
+            || File.Exists(normalized))
+        {
+            filePath = normalized;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string NormalizePrivateKeyPem(string? keyMaterial)
+    {
+        var normalized = NormalizePem(keyMaterial);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return string.Empty;
+        }
+
+        if (normalized.Contains("-----BEGIN", StringComparison.Ordinal)
+            || normalized.Contains("-----END", StringComparison.Ordinal))
+        {
+            return normalized;
+        }
+
+        return LooksLikeBase64KeyBody(normalized)
+            ? WrapAsPem(normalized, "PRIVATE KEY")
+            : normalized;
+    }
+
+    private static bool LooksLikeBase64KeyBody(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var compact = RemoveWhitespace(value);
+        if (compact.Length < 128)
+        {
+            return false;
+        }
+
+        return compact.All(static c => char.IsLetterOrDigit(c) || c is '+' or '/' or '=');
+    }
+
+    private static string WrapAsPem(string base64Body, string label)
+    {
+        var compact = RemoveWhitespace(base64Body);
+        var builder = new StringBuilder(capacity: compact.Length + 128);
+        builder.Append("-----BEGIN ").Append(label).AppendLine("-----");
+
+        const int lineLength = 64;
+        for (var index = 0; index < compact.Length; index += lineLength)
+        {
+            var take = Math.Min(lineLength, compact.Length - index);
+            builder.AppendLine(compact.Substring(index, take));
+        }
+
+        builder.Append("-----END ").Append(label).Append("-----");
+        return builder.ToString();
+    }
+
+    private static string RemoveWhitespace(string value)
+    {
+        return string.Concat(value.Where(static c => !char.IsWhiteSpace(c)));
+    }
+
     private static string NormalizePem(string? keyMaterial)
     {
-        return string.IsNullOrWhiteSpace(keyMaterial)
-            ? string.Empty
-            : keyMaterial.Replace("\\n", "\n").Trim();
+        if (string.IsNullOrWhiteSpace(keyMaterial))
+        {
+            return string.Empty;
+        }
+
+        var normalized = keyMaterial.Trim();
+        if (normalized.Length >= 2 &&
+            ((normalized[0] == '"' && normalized[^1] == '"')
+             || (normalized[0] == '\'' && normalized[^1] == '\'')))
+        {
+            normalized = normalized[1..^1].Trim();
+        }
+
+        if (normalized.Contains("-----BEGIN", StringComparison.Ordinal)
+            || normalized.Contains("-----END", StringComparison.Ordinal))
+        {
+            normalized = normalized.Replace("\\n", "\n");
+        }
+
+        return normalized.Trim();
     }
 
     private string ProtectSensitiveValue(string? value)
@@ -7316,6 +7512,21 @@ public sealed class LicenseService(
         }
 
         return Convert.FromBase64String(normalized);
+    }
+
+    private static bool IsLicensingConfigurationException(Exception exception)
+    {
+        return exception is InvalidOperationException
+            or CryptographicException
+            or ArgumentException;
+    }
+
+    private static LicenseException CreateLicensingConfigurationException(Exception exception)
+    {
+        return new LicenseException(
+            LicenseErrorCodes.LicensingConfigurationError,
+            $"Licensing configuration error: {exception.Message}",
+            StatusCodes.Status500InternalServerError);
     }
 
     private static string GetSignaturePart(string token)

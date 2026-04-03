@@ -10,6 +10,8 @@ type LoginScreenProps = {
   mode?: LoginScreenMode;
 };
 
+const STATIC_SUPER_ADMIN_MFA_CODE = "123456";
+
 const LoginScreen = ({ mode = "pos" }: LoginScreenProps) => {
   const { login } = useAuth();
   const [username, setUsername] = useState("");
@@ -90,7 +92,9 @@ const LoginScreen = ({ mode = "pos" }: LoginScreenProps) => {
 
             {isAdminMode && (
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">MFA Code (Super Admin)</label>
+                <label className="text-sm font-medium text-foreground">
+                  MFA Code (Super Admin): {STATIC_SUPER_ADMIN_MFA_CODE}
+                </label>
                 <Input
                   value={mfaCode}
                   onChange={(e) => setMfaCode(e.target.value)}
@@ -126,6 +130,7 @@ const LoginScreen = ({ mode = "pos" }: LoginScreenProps) => {
             <code className="font-medium"> support_admin / support123</code>,
             <code className="font-medium"> billing_admin / billing123</code>,
             <code className="font-medium"> security_admin / security123</code>.
+            Static MFA code: <code className="font-medium">{STATIC_SUPER_ADMIN_MFA_CODE}</code>.
           </p>
         ) : (
           <p className="text-center text-xs text-muted-foreground">

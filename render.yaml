@@ -1,3 +1,9 @@
+databases:
+  - name: smartpos-postgres
+    plan: free
+    databaseName: smartpos
+    user: smartpos
+
 services:
   - type: web
     name: smartpos-backend
@@ -10,9 +16,11 @@ services:
       - key: ASPNETCORE_ENVIRONMENT
         value: Production
       - key: Database__Provider
-        value: Sqlite
-      - key: ConnectionStrings__Sqlite
-        value: Data Source=smartpos.db
+        value: Postgres
+      - key: ConnectionStrings__Postgres
+        fromDatabase:
+          name: smartpos-postgres
+          property: connectionString
       - key: JwtAuth__SecureCookie
         value: "true"
       - key: Licensing__TokenCookieSecure
@@ -20,6 +28,8 @@ services:
       - key: SMARTPOS_JWT_SECRET
         sync: false
       - key: SMARTPOS_LICENSE_SIGNING_PRIVATE_KEY_PEM
+        sync: false
+      - key: SMARTPOS_LICENSE_DATA_ENCRYPTION_KEY
         sync: false
       - key: Licensing__VerificationPublicKeyPem
         sync: false
@@ -37,4 +47,20 @@ services:
     healthCheckPath: /health
     envVars:
       - key: BACKEND_UPSTREAM
-        value: https://smartpos-backend.onrender.com
+        fromService:
+          type: web
+          name: smartpos-backend
+          envVarKey: RENDER_EXTERNAL_URL
+
+  - type: web
+    name: smartpos-marketing-website
+    runtime: node
+    rootDir: website
+    autoDeployTrigger: commit
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NEXT_PUBLIC_SITE_URL
+        sync: false
+      - key: SMARTPOS_BACKEND_API_URL
+        sync: false

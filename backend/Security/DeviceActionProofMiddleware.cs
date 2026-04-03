@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using SmartPos.Backend.Features.Licensing;
 
@@ -25,6 +26,12 @@ public sealed class DeviceActionProofMiddleware(RequestDelegate next)
 
         var hasAuthorizeMetadata = endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>().Count > 0;
         if (!hasAuthorizeMetadata || !(httpContext.User.Identity?.IsAuthenticated ?? false))
+        {
+            await next(httpContext);
+            return;
+        }
+
+        if (IsSuperAdminPrincipal(httpContext.User))
         {
             await next(httpContext);
             return;
@@ -95,5 +102,13 @@ public sealed class DeviceActionProofMiddleware(RequestDelegate next)
         return path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase)
                || path.StartsWithSegments("/api/auth", StringComparison.OrdinalIgnoreCase)
                || path.StartsWithSegments("/api/security/challenge", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSuperAdminPrincipal(ClaimsPrincipal principal)
+    {
+        return principal.IsInRole(SmartPosRoles.SuperAdmin) ||
+               principal.IsInRole(SmartPosRoles.Support) ||
+               principal.IsInRole(SmartPosRoles.BillingAdmin) ||
+               principal.IsInRole(SmartPosRoles.SecurityAdmin);
     }
 }
