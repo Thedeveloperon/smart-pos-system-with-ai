@@ -21,6 +21,7 @@ import { POS_SHORTCUT_INLINE_HINT, POS_SHORTCUT_LABELS } from "./shortcuts";
 interface CheckoutPanelProps {
   items: CartItem[];
   cashDrawer?: CashDrawerState | null;
+  allowCustomPayout?: boolean;
   onCompleteSale: (
     paymentMethod: PaymentMethod,
     cashReceived: number,
@@ -47,6 +48,7 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
   ({
     items,
     cashDrawer,
+    allowCustomPayout = false,
     onCompleteSale,
     onHoldBill,
     onCancelSale,
@@ -298,6 +300,7 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
           open={showCashChangeDialog}
           changeAmount={change}
           availableCounts={availableChangeCounts}
+          allowCustomPayout={allowCustomPayout}
           onClose={() => setShowCashChangeDialog(false)}
           onConfirm={(counts) => {
             setCashChangeCounts(counts);

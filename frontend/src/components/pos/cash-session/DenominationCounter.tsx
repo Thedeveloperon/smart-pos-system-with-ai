@@ -6,9 +6,10 @@ import { SRI_LANKAN_DENOMINATIONS, type DenominationCount } from "./types";
 interface DenominationCounterProps {
   onChange: (counts: DenominationCount[], total: number) => void;
   initialCounts?: DenominationCount[];
+  compact?: boolean;
 }
 
-const DenominationCounter = ({ onChange, initialCounts }: DenominationCounterProps) => {
+const DenominationCounter = ({ onChange, initialCounts, compact = false }: DenominationCounterProps) => {
   const [quantities, setQuantities] = useState<Record<number, number>>(() => {
     const map: Record<number, number> = {};
     SRI_LANKAN_DENOMINATIONS.forEach((d) => {
@@ -46,35 +47,47 @@ const DenominationCounter = ({ onChange, initialCounts }: DenominationCounterPro
 
   const renderItem = (d: (typeof SRI_LANKAN_DENOMINATIONS)[number], icon: "note" | "coin") => {
     const qty = quantities[d.value] || 0;
+    const controlButtonClass = compact
+      ? "h-8 w-8 rounded-lg border border-slate-300 bg-slate-50 text-slate-500 shadow-none hover:bg-slate-100 hover:text-slate-700 disabled:opacity-60"
+      : "h-9 w-9 rounded-lg border border-slate-300 bg-slate-50 text-slate-500 shadow-none hover:bg-slate-100 hover:text-slate-700 disabled:opacity-60";
+    const incrementButtonClass = compact
+      ? "h-8 w-8 rounded-lg border border-primary bg-primary text-primary-foreground shadow-none hover:bg-primary/90"
+      : "h-9 w-9 rounded-lg border border-primary bg-primary text-primary-foreground shadow-none hover:bg-primary/90";
+    const quantityInputClass = compact
+      ? "h-8 w-[3.25rem] rounded-md border border-slate-300 bg-white px-2 text-center text-[0.9rem] font-medium tabular-nums text-slate-700 outline-none transition-colors focus:border-primary/60 focus:ring-2 focus:ring-primary/20"
+      : "h-9 w-[3.5rem] rounded-md border border-slate-300 bg-white px-2 text-center text-sm font-medium tabular-nums text-slate-700 outline-none transition-colors focus:border-primary/60 focus:ring-2 focus:ring-primary/20";
 
     return (
-      <div key={d.value} className="grid grid-cols-[minmax(0,1fr),auto] items-center gap-2 rounded-xl px-0.5 py-1">
-        <div className="flex min-w-0 items-center justify-between gap-2">
+      <div
+        key={d.value}
+        className={`grid grid-cols-[minmax(0,1fr),auto] items-center ${compact ? "gap-1.5 px-0 py-0.5" : "gap-2 rounded-xl px-0.5 py-1"}`}
+      >
+        <div className={`flex min-w-0 items-center justify-between ${compact ? "gap-1.5" : "gap-2"}`}>
           <div className="flex min-w-0 items-center gap-2">
             <span
-              className={`flex h-4 w-4 shrink-0 items-center justify-center ${
-                icon === "note" ? "text-slate-500" : "text-slate-500"
-              }`}
+              className={`flex shrink-0 items-center justify-center text-slate-500 ${compact ? "h-3.5 w-3.5" : "h-4 w-4"}`}
               aria-hidden="true"
             >
-              {icon === "note" ? <Banknote className="h-3 w-3" /> : <Coins className="h-3 w-3" />}
+              {icon === "note" ? <Banknote className={compact ? "h-2.5 w-2.5" : "h-3 w-3"} /> : <Coins className={compact ? "h-2.5 w-2.5" : "h-3 w-3"} />}
             </span>
-            <span className="truncate text-[1rem] font-semibold leading-none tracking-tight text-slate-700">
+            <span
+              className={`truncate font-semibold leading-none tracking-tight text-slate-700 ${compact ? "text-[0.86rem]" : "text-[1rem]"}`}
+            >
               Rs.{d.label}
             </span>
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className={`flex items-center ${compact ? "gap-1" : "gap-1.5"}`}>
             <Button
               type="button"
               variant="outline"
               size="icon"
               onClick={() => handleChange(d.value, qty - 1)}
               disabled={qty <= 0}
-              className="h-9 w-9 rounded-lg border border-slate-300 bg-slate-50 text-slate-500 shadow-none hover:bg-slate-100 hover:text-slate-700 disabled:opacity-60"
+              className={controlButtonClass}
               aria-label={`Decrease ${d.label}`}
             >
-              <Minus className="h-4 w-4" />
+              <Minus className={compact ? "h-3.5 w-3.5" : "h-4 w-4"} />
             </Button>
 
             <input
@@ -84,7 +97,7 @@ const DenominationCounter = ({ onChange, initialCounts }: DenominationCounterPro
               inputMode="numeric"
               value={qty}
               onChange={(event) => handleChange(d.value, Number(event.target.value))}
-              className="h-9 w-[3.5rem] rounded-md border border-slate-300 bg-white px-2 text-center text-sm font-medium tabular-nums text-slate-700 outline-none transition-colors focus:border-primary/60 focus:ring-2 focus:ring-primary/20"
+              className={quantityInputClass}
               aria-label={`${d.label} quantity`}
             />
 
@@ -93,14 +106,14 @@ const DenominationCounter = ({ onChange, initialCounts }: DenominationCounterPro
               variant="pos-primary"
               size="icon"
               onClick={() => handleChange(d.value, qty + 1)}
-              className="h-9 w-9 rounded-lg border border-primary bg-primary text-primary-foreground shadow-none hover:bg-primary/90"
+              className={incrementButtonClass}
               aria-label={`Increase ${d.label}`}
             >
-              <Plus className="h-4 w-4" />
+              <Plus className={compact ? "h-3.5 w-3.5" : "h-4 w-4"} />
             </Button>
 
             <span
-              className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold tabular-nums text-white"
+              className={`inline-flex items-center justify-center rounded-full bg-red-500 text-[10px] font-bold tabular-nums text-white ${compact ? "h-[18px] min-w-[18px] px-1" : "h-5 min-w-5 px-1"}`}
               aria-live="polite"
               aria-atomic="true"
             >
@@ -115,34 +128,34 @@ const DenominationCounter = ({ onChange, initialCounts }: DenominationCounterPro
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-300 bg-[#f7f8fa]">
       <div className="grid min-h-0 flex-1 grid-cols-1 divide-y divide-slate-300 md:grid-cols-2 md:divide-x md:divide-y-0">
-        <section className="flex min-h-0 h-full flex-col p-3">
-          <div className="mb-2.5 flex items-center justify-between">
+        <section className={`flex min-h-0 h-full flex-col ${compact ? "p-2" : "p-3"}`}>
+          <div className={`flex items-center justify-between ${compact ? "mb-1.5" : "mb-2.5"}`}>
             <div className="flex items-center gap-2">
-              <Banknote className="h-4 w-4 text-slate-500" />
-              <h3 className="text-xs font-medium uppercase tracking-[0.18em] text-slate-600">Notes</h3>
+              <Banknote className={compact ? "h-3.5 w-3.5 text-slate-500" : "h-4 w-4 text-slate-500"} />
+              <h3 className={`font-medium uppercase tracking-[0.18em] text-slate-600 ${compact ? "text-[11px]" : "text-xs"}`}>Notes</h3>
             </div>
-            <span className="text-xs font-medium text-slate-500">
+            <span className={`font-medium text-slate-500 ${compact ? "text-[11px]" : "text-xs"}`}>
               {notes.length} items - Rs.{notesTotal.toLocaleString()}
             </span>
           </div>
 
-          <div className="scrollbar-thin grid max-h-[18rem] flex-1 min-h-0 auto-rows-min content-start grid-cols-1 gap-0.5 overflow-y-scroll pr-2 md:max-h-[22rem]">
+          <div className={`grid flex-1 min-h-0 auto-rows-min content-start grid-cols-1 ${compact ? "gap-0 overflow-hidden pr-0.5" : "gap-0.5 overflow-y-auto pr-1"}`}>
             {notes.map((d) => renderItem(d, "note"))}
           </div>
         </section>
 
-        <section className="flex min-h-0 h-full flex-col p-3">
-          <div className="mb-2.5 flex items-center justify-between">
+        <section className={`flex min-h-0 h-full flex-col ${compact ? "p-2" : "p-3"}`}>
+          <div className={`flex items-center justify-between ${compact ? "mb-1.5" : "mb-2.5"}`}>
             <div className="flex items-center gap-2">
-              <Coins className="h-4 w-4 text-slate-500" />
-              <h3 className="text-xs font-medium uppercase tracking-[0.18em] text-slate-600">Coins</h3>
+              <Coins className={compact ? "h-3.5 w-3.5 text-slate-500" : "h-4 w-4 text-slate-500"} />
+              <h3 className={`font-medium uppercase tracking-[0.18em] text-slate-600 ${compact ? "text-[11px]" : "text-xs"}`}>Coins</h3>
             </div>
-            <span className="text-xs font-medium text-slate-500">
+            <span className={`font-medium text-slate-500 ${compact ? "text-[11px]" : "text-xs"}`}>
               {coins.length} items - Rs.{coinsTotal.toLocaleString()}
             </span>
           </div>
 
-          <div className="scrollbar-thin grid max-h-[18rem] flex-1 min-h-0 auto-rows-min content-start grid-cols-1 gap-0.5 overflow-y-scroll pr-2 md:max-h-[22rem]">
+          <div className={`grid flex-1 min-h-0 auto-rows-min content-start grid-cols-1 ${compact ? "gap-0 overflow-hidden pr-0.5" : "gap-0.5 overflow-y-auto pr-1"}`}>
             {coins.map((d) => renderItem(d, "coin"))}
           </div>
         </section>
