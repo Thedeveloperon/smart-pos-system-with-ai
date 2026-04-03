@@ -369,6 +369,63 @@ export type CreateProductRequest = {
   is_active: boolean;
 };
 
+export type GenerateProductBarcodeRequest = {
+  name?: string | null;
+  sku?: string | null;
+  seed?: string | null;
+};
+
+export type GenerateProductBarcodeResponse = {
+  barcode: string;
+  format: string;
+  generated_at: string;
+};
+
+export type ValidateProductBarcodeRequest = {
+  barcode: string;
+  exclude_product_id?: string | null;
+  check_existing?: boolean;
+};
+
+export type ValidateProductBarcodeResponse = {
+  barcode: string;
+  normalized_barcode: string;
+  is_valid: boolean;
+  format: string;
+  message?: string | null;
+  exists: boolean;
+};
+
+export type GenerateAndAssignProductBarcodeRequest = {
+  force_replace?: boolean;
+  seed?: string | null;
+};
+
+export type BulkGenerateMissingProductBarcodesRequest = {
+  take?: number;
+  include_inactive?: boolean;
+  dry_run?: boolean;
+};
+
+export type BulkGenerateMissingProductBarcodeItem = {
+  product_id: string;
+  name: string;
+  status: string;
+  barcode?: string | null;
+  message?: string | null;
+};
+
+export type BulkGenerateMissingProductBarcodesResponse = {
+  dry_run: boolean;
+  scanned: number;
+  generated: number;
+  would_generate: number;
+  skipped_existing: number;
+  failed: number;
+  processed_at: string;
+  items: BulkGenerateMissingProductBarcodeItem[];
+};
+
 export type CreateCategoryRequest = {
   name: string;
   description?: string | null;
@@ -2084,6 +2141,56 @@ export async function createProduct(requestBody: CreateProductRequest) {
   });
 
   return mapCatalogProduct(response);
+}
+
+export async function generateProductBarcode(requestBody: GenerateProductBarcodeRequest = {}) {
+  return request<GenerateProductBarcodeResponse>("/api/products/barcodes/generate", {
+    method: "POST",
+    body: JSON.stringify({
+      name: normalizeOptionalString(requestBody.name),
+      sku: normalizeOptionalString(requestBody.sku),
+      seed: normalizeOptionalString(requestBody.seed),
+    }),
+  });
+}
+
+export async function validateProductBarcode(requestBody: ValidateProductBarcodeRequest) {
+  return request<ValidateProductBarcodeResponse>("/api/products/barcodes/validate", {
+    method: "POST",
+    body: JSON.stringify({
+      barcode: requestBody.barcode,
+      exclude_product_id: normalizeOptionalString(requestBody.exclude_product_id),
+      check_existing: requestBody.check_existing ?? true,
+    }),
+  });
+}
+
+export async function generateAndAssignProductBarcode(
+  productId: string,
+  requestBody: GenerateAndAssignProductBarcodeRequest = {}
+) {
+  const response = await request<BackendProductCatalogItem>(`/api/products/${productId}/barcode/generate`, {
+    method: "POST",
+    body: JSON.stringify({
+      force_replace: requestBody.force_replace ?? false,
+      seed: normalizeOptionalString(requestBody.seed),
+    }),
+  });
+
+  return mapCatalogProductItem(response);
+}
+
+export async function bulkGenerateMissingProductBarcodes(
+  requestBody: BulkGenerateMissingProductBarcodesRequest = {}
+) {
+  return request<BulkGenerateMissingProductBarcodesResponse>("/api/products/barcodes/bulk-generate-missing", {
+    method: "POST",
+    body: JSON.stringify({
+      take: Math.max(1, Math.min(1000, Math.trunc(requestBody.take ?? 200))),
+      include_inactive: requestBody.include_inactive ?? false,
+      dry_run: requestBody.dry_run ?? false,
+    }),
+  });
 }
 
 export type ProductAiSuggestionTarget = "name" | "sku" | "barcode" | "image_url" | "category";

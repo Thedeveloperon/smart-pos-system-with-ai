@@ -7,8 +7,10 @@ import {
   createProduct,
   fetchCategories,
   fetchProductCatalogItems,
+  generateProductBarcode,
   generateProductFromImageSuggestions,
   generateProductAiSuggestion,
+  validateProductBarcode,
   type ProductAiSuggestionTarget,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -60,6 +62,7 @@ const defaultForm = {
   allowNegativeStock: true,
   isActive: true,
 };
+const isBarcodeFeatureEnabled = import.meta.env.VITE_BARCODE_FEATURE_ENABLED !== "false";
 
 const IMAGE_UPLOAD_LIMIT_BYTES = 5 * 1024 * 1024;
 const CATEGORY_SUGGESTION_LIMIT = 4;
@@ -241,6 +244,10 @@ const NewItemDialog = ({ open, onOpenChange, onCreated }: NewItemDialogProps) =>
   const [loadingCategories, setLoadingCategories] = useState(false);
   const [loadingExistingImages, setLoadingExistingImages] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [generatingBarcode, setGeneratingBarcode] = useState(false);
+  const [validatingBarcode, setValidatingBarcode] = useState(false);
+  const [barcodeValidationMessage, setBarcodeValidationMessage] = useState("");
+  const [barcodeValidationTone, setBarcodeValidationTone] = useState<"neutral" | "success" | "error">("neutral");
   const [aiSuggestingTarget, setAiSuggestingTarget] = useState<ProductAiSuggestionTarget | null>(null);
   const [aiAnalyzingFromImage, setAiAnalyzingFromImage] = useState(false);
   const [imagePickerOpen, setImagePickerOpen] = useState(false);
@@ -551,6 +558,85 @@ const NewItemDialog = ({ open, onOpenChange, onCreated }: NewItemDialogProps) =>
       toast.error(error instanceof Error ? error.message : "Failed to generate AI suggestion.");
     } finally {
       setAiSuggestingTarget(null);
+    }
+  };
+
+  const handleGenerateBarcode = async () => {
+    if (!isBarcodeFeatureEnabled) {
+      toast.info("Barcode feature is disabled for this rollout.");
+      return;
+    }
+
+    if (generatingBarcode) {
+      return;
+    }
+
+    setGeneratingBarcode(true);
+    try {
+      const response = await generateProductBarcode({
+        name: form.name.trim() || null,
+        sku: form.sku.trim() || null,
+      });
+
+      const generated = response.barcode?.trim() || "";
+      if (!generated) {
+        toast.error("Barcode generator did not return a value.");
+        return;
+      }
+
+      setForm((prev) => ({ ...prev, barcode: generated }));
+      setBarcodeValidationMessage("Generated EAN-13 barcode is ready.");
+      setBarcodeValidationTone("success");
+      toast.success("Barcode generated.");
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Failed to generate barcode.");
+    } finally {
+      setGeneratingBarcode(false);
+    }
+  };
+
+  const handleBarcodeBlur = async () => {
+    if (!isBarcodeFeatureEnabled) {
+      setBarcodeValidationMessage("");
+      setBarcodeValidationTone("neutral");
+      return;
+    }
+
+    const barcode = form.barcode.trim();
+    if (!barcode) {
+      setBarcodeValidationMessage("");
+      setBarcodeValidationTone("neutral");
+      return;
+    }
+
+    setValidatingBarcode(true);
+    try {
+      const response = await validateProductBarcode({
+        barcode,
+        check_existing: true,
+      });
+
+      if (!response.is_valid) {
+        setBarcodeValidationMessage(response.message || "Barcode format is invalid.");
+        setBarcodeValidationTone("error");
+        return;
+      }
+
+      if (response.exists) {
+        setBarcodeValidationMessage("Barcode already exists in another product.");
+        setBarcodeValidationTone("error");
+        return;
+      }
+
+      setBarcodeValidationMessage(`Barcode is valid (${response.format}).`);
+      setBarcodeValidationTone("success");
+    } catch (error) {
+      console.error(error);
+      setBarcodeValidationMessage(error instanceof Error ? error.message : "Failed to validate barcode.");
+      setBarcodeValidationTone("error");
+    } finally {
+      setValidatingBarcode(false);
     }
   };
 
@@ -987,22 +1073,52 @@ const NewItemDialog = ({ open, onOpenChange, onCreated }: NewItemDialogProps) =>
                     <Input
                       id="barcode"
                       value={form.barcode}
-                      onChange={(event) => setForm((prev) => ({ ...prev, barcode: event.target.value }))}
+                      onChange={(event) => {
+                        setForm((prev) => ({ ...prev, barcode: event.target.value }));
+                        setBarcodeValidationMessage("");
+                        setBarcodeValidationTone("neutral");
+                      }}
+                      onBlur={() => void handleBarcodeBlur()}
                       placeholder="Optional barcode"
                       className="h-10 rounded-xl border-slate-300 bg-white"
                     />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      className="h-10 w-10 rounded-xl border-slate-300 bg-white"
-                      onClick={() => void handleAiSuggestion("barcode")}
-                      title="AI suggest barcode"
-                      disabled={!!aiSuggestingTarget}
-                    >
-                      {aiSuggestingTarget === "barcode" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                    </Button>
+                    {isBarcodeFeatureEnabled ? (
+                      <>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-10 rounded-xl border-slate-300 bg-white px-3 text-xs font-semibold uppercase tracking-[0.08em]"
+                          onClick={() => void handleGenerateBarcode()}
+                          title="Generate EAN-13 barcode"
+                          disabled={generatingBarcode || validatingBarcode || submitting}
+                        >
+                          {generatingBarcode ? <Loader2 className="h-4 w-4 animate-spin" /> : "Gen"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-10 w-10 rounded-xl border-slate-300 bg-white"
+                          onClick={() => void handleAiSuggestion("barcode")}
+                          title="AI suggest barcode"
+                          disabled={!!aiSuggestingTarget || generatingBarcode || validatingBarcode}
+                        >
+                          {aiSuggestingTarget === "barcode" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                        </Button>
+                      </>
+                    ) : null}
                   </div>
+                  {validatingBarcode ? (
+                    <p className="text-[11px] text-slate-500">Validating barcode...</p>
+                  ) : barcodeValidationMessage ? (
+                    <p
+                      className={`text-[11px] ${
+                        barcodeValidationTone === "success" ? "text-emerald-700" : "text-rose-600"
+                      }`}
+                    >
+                      {barcodeValidationMessage}
+                    </p>
+                  ) : null}
                 </div>
 
                 <div className="space-y-2 md:col-span-2">

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using SmartPos.Backend.Security;
 
 namespace SmartPos.Backend.Features.Products;
@@ -39,6 +40,117 @@ public static class ProductEndpoints
         })
         .RequireAuthorization(SmartPosPolicies.ManagerOrOwner)
         .WithName("GetProductCatalog")
+        .WithOpenApi();
+
+        productGroup.MapPost("/barcodes/generate", async (
+            GenerateBarcodeRequest request,
+            HttpContext httpContext,
+            IOptions<ProductBarcodeFeatureOptions> barcodeFeatureOptions,
+            ProductService productService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!IsBarcodeFeatureEnabled(barcodeFeatureOptions))
+            {
+                return Results.NotFound(new { message = "Barcode feature is disabled." });
+            }
+
+            try
+            {
+                var idempotencyKey = ResolveIdempotencyKey(httpContext);
+                var result = await productService.GenerateBarcodeAsync(request, idempotencyKey, cancellationToken);
+                return Results.Ok(result);
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.ManagerOrOwner)
+        .WithName("GenerateProductBarcode")
+        .WithOpenApi();
+
+        productGroup.MapPost("/barcodes/validate", async (
+            ValidateBarcodeRequest request,
+            IOptions<ProductBarcodeFeatureOptions> barcodeFeatureOptions,
+            ProductService productService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!IsBarcodeFeatureEnabled(barcodeFeatureOptions))
+            {
+                return Results.NotFound(new { message = "Barcode feature is disabled." });
+            }
+
+            var result = await productService.ValidateBarcodeAsync(request, cancellationToken);
+            return Results.Ok(result);
+        })
+        .RequireAuthorization(SmartPosPolicies.ManagerOrOwner)
+        .WithName("ValidateProductBarcode")
+        .WithOpenApi();
+
+        productGroup.MapPost("/{productId:guid}/barcode/generate", async (
+            Guid productId,
+            GenerateProductBarcodeRequest request,
+            HttpContext httpContext,
+            IOptions<ProductBarcodeFeatureOptions> barcodeFeatureOptions,
+            ProductService productService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!IsBarcodeFeatureEnabled(barcodeFeatureOptions))
+            {
+                return Results.NotFound(new { message = "Barcode feature is disabled." });
+            }
+
+            try
+            {
+                var idempotencyKey = ResolveIdempotencyKey(httpContext);
+                var result = await productService.GenerateAndAssignBarcodeAsync(
+                    productId,
+                    request,
+                    idempotencyKey,
+                    cancellationToken);
+                return Results.Ok(result);
+            }
+            catch (KeyNotFoundException exception)
+            {
+                return Results.NotFound(new { message = exception.Message });
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.ManagerOrOwner)
+        .WithName("GenerateAndAssignProductBarcode")
+        .WithOpenApi();
+
+        productGroup.MapPost("/barcodes/bulk-generate-missing", async (
+            BulkGenerateMissingProductBarcodesRequest request,
+            HttpContext httpContext,
+            IOptions<ProductBarcodeFeatureOptions> barcodeFeatureOptions,
+            ProductService productService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!IsBarcodeFeatureEnabled(barcodeFeatureOptions))
+            {
+                return Results.NotFound(new { message = "Barcode feature is disabled." });
+            }
+
+            try
+            {
+                var idempotencyKey = ResolveIdempotencyKey(httpContext);
+                var result = await productService.BulkGenerateMissingBarcodesAsync(
+                    request,
+                    idempotencyKey,
+                    cancellationToken);
+                return Results.Ok(result);
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.ManagerOrOwner)
+        .WithName("BulkGenerateMissingProductBarcodes")
         .WithOpenApi();
 
         productGroup.MapPost("", async (
@@ -208,5 +320,31 @@ public static class ProductEndpoints
         .WithOpenApi();
 
         return app;
+    }
+
+    private static bool IsBarcodeFeatureEnabled(IOptions<ProductBarcodeFeatureOptions> options)
+    {
+        return options.Value.Enabled;
+    }
+
+    private static string? ResolveIdempotencyKey(HttpContext httpContext)
+    {
+        if (!httpContext.Request.Headers.TryGetValue("Idempotency-Key", out var values))
+        {
+            return null;
+        }
+
+        var normalized = values.FirstOrDefault()?.Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        if (normalized.Length > 128)
+        {
+            throw new InvalidOperationException("Header 'Idempotency-Key' must be 128 characters or less.");
+        }
+
+        return normalized;
     }
 }

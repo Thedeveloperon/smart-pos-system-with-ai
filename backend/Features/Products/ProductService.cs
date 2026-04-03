@@ -8,6 +8,8 @@ namespace SmartPos.Backend.Features.Products;
 public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService auditLogService)
 {
     private const decimal DefaultLowStockThreshold = 5m;
+    private const int MaxBarcodeGenerationAttempts = 40;
+    private const int MaxBarcodePersistenceRetries = 6;
 
     public async Task<ProductSearchResponse> SearchProductsAsync(
         string? query,
@@ -87,13 +89,284 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
         };
     }
 
+    public async Task<GenerateBarcodeResponse> GenerateBarcodeAsync(
+        GenerateBarcodeRequest request,
+        string? idempotencyKey,
+        CancellationToken cancellationToken)
+    {
+        var normalizedIdempotencyKey = NormalizeIdempotencyKey(idempotencyKey);
+        var seed = BuildBarcodeSeed(request.Name, request.Sku, request.Seed);
+        var barcode = await GenerateUniqueBarcodeValueAsync(
+            seed,
+            null,
+            null,
+            null,
+            normalizedIdempotencyKey,
+            cancellationToken);
+
+        return new GenerateBarcodeResponse
+        {
+            Barcode = barcode,
+            Format = "ean-13",
+            GeneratedAt = DateTimeOffset.UtcNow
+        };
+    }
+
+    public async Task<ValidateBarcodeResponse> ValidateBarcodeAsync(
+        ValidateBarcodeRequest request,
+        CancellationToken cancellationToken)
+    {
+        var validation = ProductBarcodeRules.Validate(request.Barcode);
+        var exists = false;
+
+        if (validation.IsValid && request.CheckExisting)
+        {
+            exists = await BarcodeExistsAsync(
+                validation.Normalized,
+                request.ExcludeProductId,
+                cancellationToken);
+        }
+
+        return new ValidateBarcodeResponse
+        {
+            Barcode = (request.Barcode ?? string.Empty).Trim(),
+            NormalizedBarcode = validation.Normalized,
+            IsValid = validation.IsValid,
+            Format = validation.Format,
+            Message = validation.Message,
+            Exists = exists
+        };
+    }
+
+    public async Task<ProductCatalogItemResponse> GenerateAndAssignBarcodeAsync(
+        Guid productId,
+        GenerateProductBarcodeRequest request,
+        string? idempotencyKey,
+        CancellationToken cancellationToken)
+    {
+        var product = await dbContext.Products
+            .Include(x => x.Inventory)
+            .FirstOrDefaultAsync(x => x.Id == productId, cancellationToken)
+            ?? throw new KeyNotFoundException("Product not found.");
+
+        if (!request.ForceReplace && !string.IsNullOrWhiteSpace(product.Barcode))
+        {
+            throw new InvalidOperationException(
+                "Product already has a barcode. Set force_replace=true to replace it.");
+        }
+
+        var normalizedIdempotencyKey = NormalizeIdempotencyKey(idempotencyKey);
+        var seed = BuildBarcodeSeed(product.Name, product.Sku, request.Seed);
+        for (var retry = 0; retry < MaxBarcodePersistenceRetries; retry++)
+        {
+            var barcode = await GenerateUniqueBarcodeValueAsync(
+                seed,
+                product.StoreId,
+                product.Id,
+                null,
+                normalizedIdempotencyKey,
+                cancellationToken);
+
+            var before = new
+            {
+                product.Barcode
+            };
+
+            product.Barcode = barcode;
+            product.UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+            auditLogService.Queue(
+                action: request.ForceReplace ? "product_barcode_regenerated" : "product_barcode_generated",
+                entityName: "product",
+                entityId: product.Id.ToString(),
+                before: before,
+                after: new
+                {
+                    product.Barcode,
+                    force_replace = request.ForceReplace
+                });
+
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+                return await GetSingleCatalogItemAsync(product.Id, DefaultLowStockThreshold, cancellationToken);
+            }
+            catch (DbUpdateException exception) when (IsBarcodeUniquenessViolation(exception))
+            {
+                DiscardPendingAuditLogs();
+                await dbContext.Entry(product).ReloadAsync(cancellationToken);
+
+                if (!request.ForceReplace && !string.IsNullOrWhiteSpace(product.Barcode))
+                {
+                    throw new InvalidOperationException(
+                        "Product already has a barcode. Set force_replace=true to replace it.");
+                }
+            }
+        }
+
+        throw new InvalidOperationException("Unable to save generated barcode right now. Please retry.");
+    }
+
+    public async Task<BulkGenerateMissingProductBarcodesResponse> BulkGenerateMissingBarcodesAsync(
+        BulkGenerateMissingProductBarcodesRequest request,
+        string? idempotencyKey,
+        CancellationToken cancellationToken)
+    {
+        var normalizedTake = Math.Clamp(request.Take, 1, 1000);
+        var now = DateTimeOffset.UtcNow;
+        var normalizedIdempotencyKey = NormalizeIdempotencyKey(idempotencyKey);
+
+        var productQuery = dbContext.Products
+            .Include(x => x.Inventory)
+            .AsQueryable();
+
+        if (!request.IncludeInactive)
+        {
+            productQuery = productQuery.Where(x => x.IsActive);
+        }
+
+        List<Product> products;
+        if (dbContext.Database.IsSqlite())
+        {
+            products = (await productQuery
+                    .ToListAsync(cancellationToken))
+                .OrderBy(x => x.CreatedAtUtc)
+                .Take(normalizedTake)
+                .ToList();
+        }
+        else
+        {
+            products = await productQuery
+                .OrderBy(x => x.CreatedAtUtc)
+                .Take(normalizedTake)
+                .ToListAsync(cancellationToken);
+        }
+
+        var generatedInBatch = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var response = new BulkGenerateMissingProductBarcodesResponse
+        {
+            DryRun = request.DryRun,
+            Scanned = products.Count,
+            ProcessedAt = now
+        };
+
+        foreach (var product in products)
+        {
+            if (!string.IsNullOrWhiteSpace(product.Barcode))
+            {
+                response.SkippedExisting++;
+                response.Items.Add(new BulkGenerateMissingProductBarcodeItemResponse
+                {
+                    ProductId = product.Id,
+                    Name = product.Name,
+                    Barcode = product.Barcode,
+                    Status = "skipped_existing",
+                    Message = "Product already has a barcode."
+                });
+                continue;
+            }
+
+            try
+            {
+                var seed = BuildBarcodeSeed(product.Name, product.Sku, null);
+
+                if (request.DryRun)
+                {
+                    var barcode = await GenerateUniqueBarcodeValueAsync(
+                        seed,
+                        product.StoreId,
+                        product.Id,
+                        generatedInBatch,
+                        normalizedIdempotencyKey,
+                        cancellationToken);
+
+                    generatedInBatch.Add(barcode);
+                    response.WouldGenerate++;
+                    response.Items.Add(new BulkGenerateMissingProductBarcodeItemResponse
+                    {
+                        ProductId = product.Id,
+                        Name = product.Name,
+                        Barcode = barcode,
+                        Status = "would_generate",
+                        Message = "Dry run only."
+                    });
+                    continue;
+                }
+
+                var assignedBarcode = await TryAssignGeneratedBarcodeWithRetryAsync(
+                    product,
+                    seed,
+                    generatedInBatch,
+                    now,
+                    normalizedIdempotencyKey,
+                    cancellationToken);
+
+                if (string.IsNullOrWhiteSpace(assignedBarcode))
+                {
+                    response.SkippedExisting++;
+                    response.Items.Add(new BulkGenerateMissingProductBarcodeItemResponse
+                    {
+                        ProductId = product.Id,
+                        Name = product.Name,
+                        Barcode = product.Barcode,
+                        Status = "skipped_existing",
+                        Message = "Product already has a barcode."
+                    });
+                    continue;
+                }
+
+                generatedInBatch.Add(assignedBarcode);
+                response.Generated++;
+                response.Items.Add(new BulkGenerateMissingProductBarcodeItemResponse
+                {
+                    ProductId = product.Id,
+                    Name = product.Name,
+                    Barcode = assignedBarcode,
+                    Status = "generated"
+                });
+            }
+            catch (InvalidOperationException exception)
+            {
+                response.Failed++;
+                response.Items.Add(new BulkGenerateMissingProductBarcodeItemResponse
+                {
+                    ProductId = product.Id,
+                    Name = product.Name,
+                    Status = "failed",
+                    Message = exception.Message
+                });
+            }
+        }
+
+        if (!request.DryRun && response.Generated > 0)
+        {
+            auditLogService.Queue(
+                action: "product_barcodes_bulk_generated",
+                entityName: "product",
+                entityId: "bulk",
+                after: new
+                {
+                    response.Generated,
+                    response.Scanned,
+                    response.SkippedExisting,
+                    response.Failed,
+                    request.IncludeInactive,
+                    Take = normalizedTake
+                });
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        return response;
+    }
+
     public async Task<ProductCatalogItemResponse> CreateProductAsync(
         CreateProductRequest request,
         CancellationToken cancellationToken)
     {
         var normalizedName = NormalizeRequired(request.Name, "Product name is required.");
         var normalizedSku = NormalizeOptional(request.Sku);
-        var normalizedBarcode = NormalizeOptional(request.Barcode);
+        var normalizedBarcode = NormalizeOptionalBarcode(request.Barcode);
         var normalizedImageUrl = NormalizeOptional(request.ImageUrl);
 
         ValidateMoneyValue(request.UnitPrice, "Unit price cannot be negative.");
@@ -165,7 +438,7 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
 
         var normalizedName = NormalizeRequired(request.Name, "Product name is required.");
         var normalizedSku = NormalizeOptional(request.Sku);
-        var normalizedBarcode = NormalizeOptional(request.Barcode);
+        var normalizedBarcode = NormalizeOptionalBarcode(request.Barcode);
         var normalizedImageUrl = NormalizeOptional(request.ImageUrl);
 
         ValidateMoneyValue(request.UnitPrice, "Unit price cannot be negative.");
@@ -544,6 +817,93 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
         }
     }
 
+    private async Task<string> GenerateUniqueBarcodeValueAsync(
+        string seed,
+        Guid? storeId,
+        Guid? productId,
+        HashSet<string>? reservedBarcodes,
+        string? idempotencyKey,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < MaxBarcodeGenerationAttempts; attempt++)
+        {
+            var candidate = ProductBarcodeRules.GenerateCandidateEan13(seed, storeId, attempt, idempotencyKey);
+            if (reservedBarcodes is not null && reservedBarcodes.Contains(candidate))
+            {
+                continue;
+            }
+
+            if (await BarcodeExistsAsync(candidate, productId, cancellationToken))
+            {
+                continue;
+            }
+
+            return candidate;
+        }
+
+        throw new InvalidOperationException("Unable to generate a unique barcode right now. Please retry.");
+    }
+
+    private async Task<string?> TryAssignGeneratedBarcodeWithRetryAsync(
+        Product product,
+        string seed,
+        HashSet<string> reservedBarcodes,
+        DateTimeOffset updatedAtUtc,
+        string? idempotencyKey,
+        CancellationToken cancellationToken)
+    {
+        for (var retry = 0; retry < MaxBarcodePersistenceRetries; retry++)
+        {
+            if (!string.IsNullOrWhiteSpace(product.Barcode))
+            {
+                return null;
+            }
+
+            var barcode = await GenerateUniqueBarcodeValueAsync(
+                seed,
+                product.StoreId,
+                product.Id,
+                reservedBarcodes,
+                idempotencyKey,
+                cancellationToken);
+
+            product.Barcode = barcode;
+            product.UpdatedAtUtc = updatedAtUtc;
+
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+                return barcode;
+            }
+            catch (DbUpdateException exception) when (IsBarcodeUniquenessViolation(exception))
+            {
+                await dbContext.Entry(product).ReloadAsync(cancellationToken);
+            }
+        }
+
+        throw new InvalidOperationException("Unable to save generated barcode right now. Please retry.");
+    }
+
+    private async Task<bool> BarcodeExistsAsync(
+        string barcode,
+        Guid? productId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(barcode))
+        {
+            return false;
+        }
+
+        var normalized = barcode.Trim().ToLowerInvariant();
+        return await dbContext.Products
+            .AsNoTracking()
+            .AnyAsync(
+                x => x.Barcode != null &&
+                     x.Barcode.ToLower() == normalized &&
+                     (!productId.HasValue || x.Id != productId.Value),
+                cancellationToken);
+    }
+
     private async Task EnsureUniqueBarcodeAsync(
         string? barcode,
         Guid? productId,
@@ -554,19 +914,48 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
             return;
         }
 
-        var normalized = barcode.Trim().ToLowerInvariant();
-        var exists = await dbContext.Products
-            .AsNoTracking()
-            .AnyAsync(
-                x => x.Barcode != null &&
-                     x.Barcode.ToLower() == normalized &&
-                     (!productId.HasValue || x.Id != productId.Value),
-                cancellationToken);
+        var exists = await BarcodeExistsAsync(barcode, productId, cancellationToken);
 
         if (exists)
         {
             throw new InvalidOperationException("Barcode already exists.");
         }
+    }
+
+    private void DiscardPendingAuditLogs()
+    {
+        foreach (var auditEntry in dbContext.ChangeTracker.Entries<AuditLog>()
+                     .Where(x => x.State == EntityState.Added))
+        {
+            auditEntry.State = EntityState.Detached;
+        }
+    }
+
+    private static bool IsBarcodeUniquenessViolation(DbUpdateException exception)
+    {
+        var message = exception.InnerException?.Message ?? exception.Message;
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return false;
+        }
+
+        return message.Contains("IX_products_Barcode_Normalized", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("IX_products_StoreId_Barcode_Normalized", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("products.Barcode", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("products.\"Barcode\"", StringComparison.OrdinalIgnoreCase) ||
+               (message.Contains("duplicate key value", StringComparison.OrdinalIgnoreCase) &&
+                message.Contains("barcode", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string? NormalizeIdempotencyKey(string? idempotencyKey)
+    {
+        var normalized = (idempotencyKey ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        return normalized.Length <= 128 ? normalized : normalized[..128];
     }
 
     private async Task EnsureUniqueSkuAsync(
@@ -670,6 +1059,36 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
     {
         var normalized = value?.Trim();
         return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
+    private static string? NormalizeOptionalBarcode(string? value)
+    {
+        var normalized = ProductBarcodeRules.NormalizeOptionalForStorage(value);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        var validation = ProductBarcodeRules.Validate(normalized);
+        if (!validation.IsValid)
+        {
+            throw new InvalidOperationException(validation.Message ?? "Barcode is invalid.");
+        }
+
+        return validation.Normalized;
+    }
+
+    private static string BuildBarcodeSeed(
+        string? name,
+        string? sku,
+        string? explicitSeed)
+    {
+        var values = new[] { explicitSeed, name, sku }
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x!.Trim());
+
+        var seed = string.Join(' ', values).Trim();
+        return string.IsNullOrWhiteSpace(seed) ? "NEW ITEM" : seed;
     }
 
     private static void ValidateMoneyValue(decimal value, string errorMessage)

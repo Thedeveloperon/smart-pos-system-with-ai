@@ -1,10 +1,24 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type KeyboardEvent } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Search, ScanBarcode, Keyboard, Package, Plus } from "lucide-react";
 import ProductCard from "./ProductCard";
 import type { Product } from "./types";
 import { POS_SHORTCUT_INLINE_HINT, POS_SHORTCUT_LABELS } from "./shortcuts";
+
+const SCANNER_BURST_INTERVAL_MS = 45;
+const SCANNER_ENTER_GRACE_MS = 120;
+const SCANNER_BURST_MIN_CHARS = 6;
+const normalizeBarcode = (value: string) => value.trim().toLowerCase();
+const isBarcodeFeatureEnabled = import.meta.env.VITE_BARCODE_FEATURE_ENABLED !== "false";
 
 interface ProductSearchPanelProps {
   products: Product[];
@@ -21,15 +35,32 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
   ({ products, onAddToCart, showShortcutHints = false, expertMode = false }, ref) => {
     const [searchQuery, setSearchQuery] = useState("");
     const [searchMode, setSearchMode] = useState<"manual" | "barcode">("manual");
+    const [barcodeFeedback, setBarcodeFeedback] = useState<string | null>(null);
     const searchInputRef = useRef<HTMLInputElement>(null);
+    const scannerBurstRef = useRef({ charCount: 0, lastKeyAt: 0 });
     const lastAutoAddKeyRef = useRef<string | null>(null);
 
-    useImperativeHandle(ref, () => ({
-      focusSearch: () => {
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
-      },
-    }), []);
+    const focusAndSelectSearch = useCallback(() => {
+      const input = searchInputRef.current;
+      if (!input) {
+        return;
+      }
+
+      input.focus();
+      input.select();
+    }, []);
+
+    const resetScannerBurst = useCallback(() => {
+      scannerBurstRef.current = { charCount: 0, lastKeyAt: 0 };
+    }, []);
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        focusSearch: focusAndSelectSearch,
+      }),
+      [focusAndSelectSearch],
+    );
 
     const normalizedQuery = searchQuery.trim().toLowerCase();
     const filtered = products.filter((p) => {
@@ -40,8 +71,147 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
         (p.barcode && p.barcode.toLowerCase().includes(q))
       );
     });
+
+    const submitBarcodeQuery = useCallback(
+      (scannerLike: boolean) => {
+        const rawQuery = searchQuery.trim();
+        if (!rawQuery) {
+          return;
+        }
+
+        const normalizedBarcodeQuery = normalizeBarcode(rawQuery);
+        const matchedProduct = products.find((product) => {
+          if (!product.barcode) {
+            return false;
+          }
+
+          return normalizeBarcode(product.barcode) === normalizedBarcodeQuery;
+        });
+
+        if (matchedProduct) {
+          onAddToCart(matchedProduct, 1);
+          setSearchQuery("");
+          setBarcodeFeedback(null);
+        } else {
+          setBarcodeFeedback(
+            scannerLike
+              ? `No product matched scanned barcode "${rawQuery}".`
+              : `No product matched barcode "${rawQuery}".`,
+          );
+        }
+
+        resetScannerBurst();
+        focusAndSelectSearch();
+      },
+      [focusAndSelectSearch, onAddToCart, products, resetScannerBurst, searchQuery],
+    );
+
+    const handleBarcodeInputKeyDown = useCallback(
+      (event: ReactKeyboardEvent<HTMLInputElement>) => {
+        if (!isBarcodeFeatureEnabled || searchMode !== "barcode") {
+          return;
+        }
+
+        const now = Date.now();
+
+        if (event.key === "Enter") {
+          event.preventDefault();
+
+          const scannerLike =
+            scannerBurstRef.current.charCount >= SCANNER_BURST_MIN_CHARS &&
+            now - scannerBurstRef.current.lastKeyAt <= SCANNER_ENTER_GRACE_MS;
+
+          submitBarcodeQuery(scannerLike);
+          return;
+        }
+
+        if (event.key === "Backspace" || event.key === "Delete") {
+          resetScannerBurst();
+          return;
+        }
+
+        if (event.key.length !== 1 || event.altKey || event.ctrlKey || event.metaKey) {
+          return;
+        }
+
+        const isBurst = now - scannerBurstRef.current.lastKeyAt <= SCANNER_BURST_INTERVAL_MS;
+        scannerBurstRef.current = {
+          charCount: isBurst ? scannerBurstRef.current.charCount + 1 : 1,
+          lastKeyAt: now,
+        };
+      },
+      [resetScannerBurst, searchMode, submitBarcodeQuery],
+    );
+
+    const handleAddProduct = useCallback(
+      (product: Product) => {
+        onAddToCart(product, 1);
+        setSearchQuery("");
+        window.setTimeout(() => {
+          focusAndSelectSearch();
+        }, 0);
+      },
+      [focusAndSelectSearch, onAddToCart],
+    );
+
+    const handleSearchKeyDown = useCallback(
+      (event: ReactKeyboardEvent<HTMLInputElement>) => {
+        if (searchMode === "barcode") {
+          handleBarcodeInputKeyDown(event);
+          return;
+        }
+
+        if (!expertMode) {
+          return;
+        }
+
+        if (event.key !== "Enter") {
+          return;
+        }
+
+        if (normalizedQuery.length === 0) {
+          return;
+        }
+
+        const nextProduct = filtered[0];
+        if (!nextProduct) {
+          return;
+        }
+
+        event.preventDefault();
+        handleAddProduct(nextProduct);
+      },
+      [expertMode, filtered, handleAddProduct, handleBarcodeInputKeyDown, normalizedQuery.length, searchMode],
+    );
+
+    const toggleSearchMode = useCallback(() => {
+      if (!isBarcodeFeatureEnabled) {
+        return;
+      }
+
+      if (searchMode === "barcode") {
+        setSearchMode("manual");
+        setBarcodeFeedback(null);
+        return;
+      }
+
+      setSearchQuery("");
+      setSearchMode("barcode");
+      setBarcodeFeedback(null);
+    }, [searchMode]);
+
     useEffect(() => {
-      if (!expertMode || normalizedQuery.length === 0) {
+      if (searchMode !== "barcode") {
+        return;
+      }
+
+      focusAndSelectSearch();
+      resetScannerBurst();
+      setBarcodeFeedback(null);
+    }, [focusAndSelectSearch, resetScannerBurst, searchMode]);
+
+    useEffect(() => {
+      if (!expertMode || searchMode !== "manual" || normalizedQuery.length === 0) {
         lastAutoAddKeyRef.current = null;
         return;
       }
@@ -63,44 +233,11 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
       }
 
       lastAutoAddKeyRef.current = autoAddKey;
-      onAddToCart(exactMatch, 1);
-      setSearchQuery("");
-      window.setTimeout(() => {
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
-      }, 0);
-    }, [expertMode, filtered, normalizedQuery, onAddToCart]);
-
-    const handleAddProduct = (product: Product) => {
-      onAddToCart(product, 1);
-      setSearchQuery("");
-      window.setTimeout(() => {
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
-      }, 0);
-    };
-
-    const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-      if (event.key !== "Enter") {
-        return;
-      }
-
-      if (normalizedQuery.length === 0) {
-        return;
-      }
-
-      const nextProduct = filtered[0];
-      if (!nextProduct) {
-        return;
-      }
-
-      event.preventDefault();
-      handleAddProduct(nextProduct);
-    };
+      handleAddProduct(exactMatch);
+    }, [expertMode, filtered, handleAddProduct, normalizedQuery, searchMode]);
 
     return (
       <div className="flex flex-col h-full">
-        {/* Search Bar */}
         <div className="p-3 border-b border-border bg-card pos-shadow-md sticky top-0 z-10">
           <div className="flex gap-2">
             <div className="relative flex-1">
@@ -108,7 +245,12 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
               <Input
                 ref={searchInputRef}
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(event) => {
+                  setSearchQuery(event.target.value);
+                  if (searchMode === "barcode" && barcodeFeedback) {
+                    setBarcodeFeedback(null);
+                  }
+                }}
                 onKeyDown={handleSearchKeyDown}
                 placeholder={
                   searchMode === "barcode"
@@ -120,39 +262,42 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
                 title={showShortcutHints ? `Focus Search (${POS_SHORTCUT_LABELS.focusSearch})` : undefined}
               />
             </div>
-            <Button
-              variant={searchMode === "barcode" ? "default" : "outline"}
-              size="icon"
-              className="h-11 w-11 shrink-0 rounded-xl"
-              onClick={() =>
-                setSearchMode((m) => (m === "barcode" ? "manual" : "barcode"))
-              }
-              title={searchMode === "barcode" ? "Barcode mode" : "Manual mode"}
-            >
-              {searchMode === "barcode" ? (
-                <ScanBarcode className="h-5 w-5" />
-              ) : (
-                <Keyboard className="h-5 w-5" />
-              )}
-            </Button>
+            {isBarcodeFeatureEnabled ? (
+              <Button
+                variant={searchMode === "barcode" ? "default" : "outline"}
+                size="icon"
+                className="h-11 w-11 shrink-0 rounded-xl"
+                onClick={toggleSearchMode}
+                aria-label={searchMode === "barcode" ? "Switch to manual mode" : "Switch to barcode mode"}
+                title={searchMode === "barcode" ? "Barcode mode" : "Manual mode"}
+              >
+                {searchMode === "barcode" ? (
+                  <ScanBarcode className="h-5 w-5" />
+                ) : (
+                  <Keyboard className="h-5 w-5" />
+                )}
+              </Button>
+            ) : null}
           </div>
           <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
             <span>{filtered.length} products</span>
             {searchQuery && (
-              <button
-                className="text-primary hover:underline"
-                onClick={() => setSearchQuery("")}
-              >
+              <button className="text-primary hover:underline" onClick={() => setSearchQuery("")}>
                 Clear search
               </button>
             )}
-            {showShortcutHints && (
-              <span className="ml-auto hidden lg:inline">
-                Shortcuts: {POS_SHORTCUT_INLINE_HINT}
-              </span>
-            )}
+            {showShortcutHints && <span className="ml-auto hidden lg:inline">Shortcuts: {POS_SHORTCUT_INLINE_HINT}</span>}
           </div>
-          {expertMode && (
+          {isBarcodeFeatureEnabled && searchMode === "barcode" && (
+            <p
+              className={`mt-2 text-xs ${barcodeFeedback ? "text-destructive font-medium" : "text-muted-foreground"}`}
+              role="status"
+              aria-live="polite"
+            >
+              {barcodeFeedback || "Barcode mode active: scan and press Enter to add item to cart."}
+            </p>
+          )}
+          {expertMode && searchMode === "manual" && (
             <p className="mt-2 text-[11px] text-muted-foreground">
               Expert mode: exact matches add automatically. Press Enter to add the first result.
             </p>
@@ -166,9 +311,7 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
                 <Search className="h-10 w-10 opacity-50" />
                 <div className="space-y-1">
                   <p className="text-sm font-medium text-foreground">Search-first billing</p>
-                  <p className="text-xs">
-                    Type a product name, SKU, or barcode to filter results and add items fast.
-                  </p>
+                  <p className="text-xs">Type a product name, SKU, or barcode to filter results and add items fast.</p>
                 </div>
               </div>
             ) : filtered.length === 0 ? (
@@ -201,11 +344,7 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
                     </div>
                   </button>
                 ))}
-                {filtered.length > 24 && (
-                  <p className="px-1 text-xs text-muted-foreground">
-                    Showing first 24 matches.
-                  </p>
-                )}
+                {filtered.length > 24 && <p className="px-1 text-xs text-muted-foreground">Showing first 24 matches.</p>}
               </div>
             )}
           </div>
@@ -219,11 +358,7 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
                 {filtered.map((product) => (
-                  <ProductCard
-                    key={product.id}
-                    product={product}
-                    onAdd={onAddToCart}
-                  />
+                  <ProductCard key={product.id} product={product} onAdd={onAddToCart} />
                 ))}
               </div>
             )}

@@ -1,13 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, Loader2, Package, PencilLine, Search, Trash2 } from "lucide-react";
-import type { CatalogProduct, UpdateProductRequest } from "@/lib/api";
+import { AlertTriangle, Loader2, Package, PencilLine, Printer, RefreshCw, Search, Trash2 } from "lucide-react";
+import type {
+  BulkGenerateMissingProductBarcodesResponse,
+  CatalogProduct,
+  UpdateProductRequest
+} from "@/lib/api";
 import {
+  bulkGenerateMissingProductBarcodes,
   deleteProduct,
   hardDeleteProduct,
   fetchCategories,
   fetchProductCatalogItems,
+  generateAndAssignProductBarcode,
   updateProduct,
+  validateProductBarcode,
 } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,6 +41,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
+import BarcodeLabelPrintDialog from "./BarcodeLabelPrintDialog";
 
 type CategoryOption = {
   category_id: string;
@@ -79,6 +88,7 @@ const emptyFormState = (): ProductFormState => ({
   allowNegativeStock: true,
   isActive: true,
 });
+const isBarcodeFeatureEnabled = import.meta.env.VITE_BARCODE_FEATURE_ENABLED !== "false";
 
 type ProductThumbnailProps = {
   imageUrl?: string;
@@ -112,13 +122,18 @@ type ProductEditorDialogProps = {
   product: CatalogProduct | null;
   onOpenChange: (open: boolean) => void;
   onSaved: () => Promise<void> | void;
+  onPrintLabel: (product: CatalogProduct) => void;
 };
 
-function ProductEditorDialog({ open, product, onOpenChange, onSaved }: ProductEditorDialogProps) {
+function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabel }: ProductEditorDialogProps) {
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [loadingCategories, setLoadingCategories] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [generatingBarcode, setGeneratingBarcode] = useState(false);
+  const [validatingBarcode, setValidatingBarcode] = useState(false);
+  const [barcodeValidationMessage, setBarcodeValidationMessage] = useState("");
+  const [barcodeValidationTone, setBarcodeValidationTone] = useState<"neutral" | "success" | "error">("neutral");
   const [form, setForm] = useState<ProductFormState>(emptyFormState());
 
   useEffect(() => {
@@ -128,6 +143,8 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved }: ProductEd
 
     if (product) {
       setForm(buildFormState(product));
+      setBarcodeValidationMessage("");
+      setBarcodeValidationTone("neutral");
     }
 
     let alive = true;
@@ -155,6 +172,10 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved }: ProductEd
   }, [open, product]);
 
   const updateField = (field: keyof ProductFormState, value: string | boolean) => {
+    if (field === "barcode") {
+      setBarcodeValidationMessage("");
+      setBarcodeValidationTone("neutral");
+    }
     setForm((current) => ({ ...current, [field]: value }));
   };
 
@@ -246,10 +267,109 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved }: ProductEd
     }
   };
 
+  const handleGenerateBarcode = async (forceReplace: boolean) => {
+    if (!isBarcodeFeatureEnabled) {
+      toast.info("Barcode feature is disabled for this rollout.");
+      return;
+    }
+
+    if (!product || generatingBarcode) {
+      return;
+    }
+
+    if (forceReplace && form.barcode.trim()) {
+      const confirmed = window.confirm("Regenerate barcode and replace the current value?");
+      if (!confirmed) {
+        return;
+      }
+    }
+
+    setGeneratingBarcode(true);
+    try {
+      const updated = await generateAndAssignProductBarcode(product.id, {
+        force_replace: forceReplace,
+        seed: form.sku.trim() || form.name.trim() || null,
+      });
+
+      setForm(buildFormState(updated));
+      setBarcodeValidationMessage("Generated EAN-13 barcode is ready.");
+      setBarcodeValidationTone("success");
+      toast.success(forceReplace ? "Barcode regenerated." : "Barcode generated.");
+      await onSaved();
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Failed to generate barcode.");
+    } finally {
+      setGeneratingBarcode(false);
+    }
+  };
+
+  const handleBarcodeBlur = async () => {
+    if (!isBarcodeFeatureEnabled) {
+      setBarcodeValidationMessage("");
+      setBarcodeValidationTone("neutral");
+      return;
+    }
+
+    if (!product) {
+      return;
+    }
+
+    const barcode = form.barcode.trim();
+    if (!barcode) {
+      setBarcodeValidationMessage("");
+      setBarcodeValidationTone("neutral");
+      return;
+    }
+
+    setValidatingBarcode(true);
+    try {
+      const response = await validateProductBarcode({
+        barcode,
+        exclude_product_id: product.id,
+        check_existing: true,
+      });
+
+      if (!response.is_valid) {
+        setBarcodeValidationMessage(response.message || "Barcode format is invalid.");
+        setBarcodeValidationTone("error");
+        return;
+      }
+
+      if (response.exists) {
+        setBarcodeValidationMessage("Barcode already exists in another product.");
+        setBarcodeValidationTone("error");
+        return;
+      }
+
+      setBarcodeValidationMessage(`Barcode is valid (${response.format}).`);
+      setBarcodeValidationTone("success");
+    } catch (error) {
+      console.error(error);
+      setBarcodeValidationMessage(error instanceof Error ? error.message : "Failed to validate barcode.");
+      setBarcodeValidationTone("error");
+    } finally {
+      setValidatingBarcode(false);
+    }
+  };
+
   const selectedCategoryName = form.categoryId
     ? categories.find((category) => category.category_id === form.categoryId)?.name || "Selected category"
     : product?.categoryName || "No category";
   const imagePreviewUrl = form.imageUrl.trim() || product?.image || "";
+  const printableProduct: CatalogProduct | null = product
+    ? {
+        ...product,
+        name: form.name.trim() || product.name,
+        sku: form.sku.trim() || product.sku,
+        barcode: form.barcode.trim() || undefined,
+        image: form.imageUrl.trim() || product.image,
+        imageUrl: form.imageUrl.trim() || product.imageUrl || null,
+        categoryId: form.categoryId || null,
+        categoryName: selectedCategoryName === "No category" ? null : selectedCategoryName,
+        unitPrice: Number.isFinite(Number(form.unitPrice)) ? Number(form.unitPrice) : product.unitPrice,
+      }
+    : null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -317,12 +437,50 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved }: ProductEd
                     <Label htmlFor="manage-barcode" className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
                       Barcode
                     </Label>
-                    <Input
-                      id="manage-barcode"
-                      value={form.barcode}
-                      onChange={(event) => updateField("barcode", event.target.value)}
-                      className="h-10 rounded-xl border-slate-300 bg-white"
-                    />
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="manage-barcode"
+                        value={form.barcode}
+                        onChange={(event) => updateField("barcode", event.target.value)}
+                        onBlur={() => void handleBarcodeBlur()}
+                        className="h-10 rounded-xl border-slate-300 bg-white"
+                      />
+                      {isBarcodeFeatureEnabled ? (
+                        <>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-10 rounded-xl border-slate-300 bg-white px-3 text-xs font-semibold uppercase tracking-[0.08em]"
+                            onClick={() => void handleGenerateBarcode(false)}
+                            disabled={saving || deleting || generatingBarcode || validatingBarcode || !!form.barcode.trim()}
+                            title={form.barcode.trim() ? "Clear barcode or use Regenerate." : "Generate EAN-13 barcode"}
+                          >
+                            {generatingBarcode ? <Loader2 className="h-4 w-4 animate-spin" /> : "Gen"}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-10 rounded-xl border-slate-300 bg-white px-3 text-xs font-semibold uppercase tracking-[0.08em]"
+                            onClick={() => void handleGenerateBarcode(true)}
+                            disabled={saving || deleting || generatingBarcode || validatingBarcode}
+                            title="Regenerate and replace barcode"
+                          >
+                            Reg
+                          </Button>
+                        </>
+                      ) : null}
+                    </div>
+                    {validatingBarcode ? (
+                      <p className="text-[11px] text-slate-500">Validating barcode...</p>
+                    ) : barcodeValidationMessage ? (
+                      <p
+                        className={`text-[11px] ${
+                          barcodeValidationTone === "success" ? "text-emerald-700" : "text-rose-600"
+                        }`}
+                      >
+                        {barcodeValidationMessage}
+                      </p>
+                    ) : null}
                   </div>
 
                   <div className="space-y-2 md:col-span-2">
@@ -503,7 +661,7 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved }: ProductEd
               type="button"
               variant="destructive"
               onClick={handleDelete}
-              disabled={saving || deleting || !product || product.isActive}
+              disabled={saving || deleting || generatingBarcode || validatingBarcode || !product || product.isActive}
               title={product?.isActive ? "Deactivate and save first to enable permanent delete." : undefined}
               className="h-10 rounded-xl px-6 text-[1rem] font-semibold"
             >
@@ -511,16 +669,33 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved }: ProductEd
               Delete
             </Button>
             <div className="flex items-center gap-2 sm:justify-end">
+              {isBarcodeFeatureEnabled ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    if (printableProduct) {
+                      onPrintLabel(printableProduct);
+                    }
+                  }}
+                  disabled={saving || deleting || generatingBarcode || validatingBarcode || !printableProduct?.barcode}
+                  title={printableProduct?.barcode ? "Preview and print label" : "Add/generate barcode before printing label."}
+                  className="h-10 rounded-xl border-slate-300 bg-white px-6 text-[1rem] font-semibold"
+                >
+                  <Printer className="h-4 w-4" />
+                  Print label
+                </Button>
+              ) : null}
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => onOpenChange(false)}
-                disabled={saving || deleting}
+                disabled={saving || deleting || generatingBarcode || validatingBarcode}
                 className="h-10 rounded-xl border-slate-300 bg-white px-6 text-[1rem] font-semibold"
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={saving || deleting} className="h-10 rounded-xl px-6 text-[1rem] font-semibold">
+              <Button type="submit" disabled={saving || deleting || generatingBarcode || validatingBarcode} className="h-10 rounded-xl px-6 text-[1rem] font-semibold">
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <PencilLine className="h-4 w-4" />}
                 Save changes
               </Button>
@@ -546,6 +721,11 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
   const [selectedProduct, setSelectedProduct] = useState<CatalogProduct | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CatalogProduct | null>(null);
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
+  const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
+  const [labelDialogOpen, setLabelDialogOpen] = useState(false);
+  const [labelDialogProducts, setLabelDialogProducts] = useState<CatalogProduct[]>([]);
+  const [bulkGeneratingBarcodes, setBulkGeneratingBarcodes] = useState(false);
+  const [lastBulkBarcodeResult, setLastBulkBarcodeResult] = useState<BulkGenerateMissingProductBarcodesResponse | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -563,6 +743,7 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
         }
 
         setProducts(items.sort((left, right) => left.name.localeCompare(right.name)));
+        setSelectedProductIds(new Set());
       } catch (error) {
         if (!alive) {
           return;
@@ -605,11 +786,141 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
   const handleSaved = async () => {
     const items = await fetchProductCatalogItems(200, true);
     setProducts(items.sort((left, right) => left.name.localeCompare(right.name)));
+    setSelectedProductIds(new Set());
     await onChanged?.();
   };
 
   const handleDeleteRequest = (product: CatalogProduct) => {
     setDeleteTarget(product);
+  };
+
+  const handleSinglePrint = (product: CatalogProduct) => {
+    setLabelDialogProducts([product]);
+    setLabelDialogOpen(true);
+  };
+
+  const handleBulkPrint = () => {
+    const selected = products.filter((product) => selectedProductIds.has(product.id));
+    if (selected.length === 0) {
+      toast.error("Select at least one product to print labels.");
+      return;
+    }
+
+    setLabelDialogProducts(selected);
+    setLabelDialogOpen(true);
+  };
+
+  const selectedCountInFiltered = filtered.reduce(
+    (count, product) => (selectedProductIds.has(product.id) ? count + 1 : count),
+    0
+  );
+  const allFilteredSelected = filtered.length > 0 && selectedCountInFiltered === filtered.length;
+  const hasPartiallySelectedFiltered = selectedCountInFiltered > 0 && selectedCountInFiltered < filtered.length;
+
+  const toggleAllFiltered = (checked: boolean) => {
+    setSelectedProductIds((current) => {
+      const next = new Set(current);
+      if (checked) {
+        filtered.forEach((product) => next.add(product.id));
+      } else {
+        filtered.forEach((product) => next.delete(product.id));
+      }
+      return next;
+    });
+  };
+
+  const toggleSingleSelection = (productId: string, checked: boolean) => {
+    setSelectedProductIds((current) => {
+      const next = new Set(current);
+      if (checked) {
+        next.add(productId);
+      } else {
+        next.delete(productId);
+      }
+      return next;
+    });
+  };
+
+  const handleGenerateMissingBarcodes = async () => {
+    if (bulkGeneratingBarcodes) {
+      return;
+    }
+
+    setBulkGeneratingBarcodes(true);
+    try {
+      const dryRun = await bulkGenerateMissingProductBarcodes({
+        take: 200,
+        include_inactive: true,
+        dry_run: true,
+      });
+
+      if (dryRun.would_generate <= 0) {
+        setLastBulkBarcodeResult(dryRun);
+        toast.info("No products with missing barcodes were found.");
+        return;
+      }
+
+      const shouldApply = window.confirm(
+        `Found ${dryRun.would_generate} product(s) without barcodes. Generate now?`
+      );
+      if (!shouldApply) {
+        setLastBulkBarcodeResult(dryRun);
+        return;
+      }
+
+      const applied = await bulkGenerateMissingProductBarcodes({
+        take: 200,
+        include_inactive: true,
+        dry_run: false,
+      });
+
+      setLastBulkBarcodeResult(applied);
+      await handleSaved();
+      toast.success(
+        `Barcodes generated: ${applied.generated}, skipped existing: ${applied.skipped_existing}, failed: ${applied.failed}.`
+      );
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Failed to bulk generate barcodes.");
+    } finally {
+      setBulkGeneratingBarcodes(false);
+    }
+  };
+
+  const handleExportBulkBarcodeResult = () => {
+    if (!lastBulkBarcodeResult) {
+      return;
+    }
+
+    const headers = ["product_id", "name", "status", "barcode", "message"];
+    const lines = [
+      headers.join(","),
+      ...lastBulkBarcodeResult.items.map((item) =>
+        [
+          item.product_id,
+          item.name,
+          item.status,
+          item.barcode || "",
+          item.message || "",
+        ]
+          .map((value) => {
+            const normalized = String(value ?? "");
+            return `"${normalized.replaceAll('"', '""')}"`;
+          })
+          .join(",")
+      ),
+    ];
+
+    const csvContent = lines.join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `barcode-bulk-result-${new Date().toISOString().slice(0, 19).replaceAll(":", "-")}.csv`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
   };
 
   const handleConfirmDelete = async () => {
@@ -668,15 +979,68 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
                     className="pl-9"
                   />
                 </div>
-                <Badge variant="secondary" className="w-fit">
-                  {filtered.length} products
-                </Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary" className="w-fit">
+                    {filtered.length} products
+                  </Badge>
+                  <Badge variant="outline" className="w-fit">
+                    {selectedProductIds.size} selected
+                  </Badge>
+                  {isBarcodeFeatureEnabled ? (
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-9"
+                        onClick={() => void handleGenerateMissingBarcodes()}
+                        disabled={loading || bulkGeneratingBarcodes}
+                        title="Generate barcodes for products missing one"
+                      >
+                        {bulkGeneratingBarcodes ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                        Generate Missing
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-9"
+                        onClick={handleBulkPrint}
+                        disabled={selectedProductIds.size === 0}
+                        title={selectedProductIds.size === 0 ? "Select products first." : "Preview and print selected labels"}
+                      >
+                        <Printer className="h-4 w-4" />
+                        Print Selected
+                      </Button>
+                    </>
+                  ) : null}
+                </div>
               </div>
+
+              {isBarcodeFeatureEnabled && lastBulkBarcodeResult ? (
+                <div className="rounded-xl border border-border bg-muted/20 p-3">
+                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                    <p className="text-sm text-muted-foreground">
+                      Last barcode batch: scanned {lastBulkBarcodeResult.scanned}, generated {lastBulkBarcodeResult.generated},
+                      skipped {lastBulkBarcodeResult.skipped_existing}, failed {lastBulkBarcodeResult.failed}
+                      {lastBulkBarcodeResult.dry_run ? " (dry run)" : ""}
+                    </p>
+                    <Button type="button" variant="outline" className="h-8 w-fit" onClick={handleExportBulkBarcodeResult}>
+                      Export CSV
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
 
               <div className="overflow-hidden rounded-2xl border border-border">
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead className="w-[46px]">
+                        <Checkbox
+                          checked={allFilteredSelected ? true : hasPartiallySelectedFiltered ? "indeterminate" : false}
+                          onCheckedChange={(checked) => toggleAllFiltered(Boolean(checked))}
+                          aria-label="Select all filtered products"
+                        />
+                      </TableHead>
                       <TableHead>Product</TableHead>
                       <TableHead className="hidden md:table-cell">Category</TableHead>
                       <TableHead className="text-right">Unit Price</TableHead>
@@ -688,19 +1052,26 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
                   <TableBody>
                     {loading ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                        <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
                           Loading products...
                         </TableCell>
                       </TableRow>
                     ) : filtered.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                        <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
                           No products found.
                         </TableCell>
                       </TableRow>
                     ) : (
                       filtered.map((product) => (
                         <TableRow key={product.id}>
+                          <TableCell>
+                            <Checkbox
+                              checked={selectedProductIds.has(product.id)}
+                              onCheckedChange={(checked) => toggleSingleSelection(product.id, Boolean(checked))}
+                              aria-label={`Select ${product.name}`}
+                            />
+                          </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-3">
                               <ProductThumbnail imageUrl={product.image} name={product.name} />
@@ -723,6 +1094,18 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
                           </TableCell>
                           <TableCell className="text-right">
                             <div className="flex justify-end gap-1">
+                              {isBarcodeFeatureEnabled ? (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleSinglePrint(product)}
+                                  disabled={!product.barcode}
+                                  title={product.barcode ? "Preview and print label" : "Product has no barcode"}
+                                >
+                                  <Printer className="h-4 w-4" />
+                                  Print
+                                </Button>
+                              ) : null}
                               <Button variant="ghost" size="sm" onClick={() => handleEdit(product)}>
                                 <PencilLine className="h-4 w-4" />
                                 Edit
@@ -759,7 +1142,16 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
         product={selectedProduct}
         onOpenChange={setEditorOpen}
         onSaved={handleSaved}
+        onPrintLabel={handleSinglePrint}
       />
+
+      {isBarcodeFeatureEnabled ? (
+        <BarcodeLabelPrintDialog
+          open={labelDialogOpen}
+          onOpenChange={setLabelDialogOpen}
+          products={labelDialogProducts}
+        />
+      ) : null}
 
       <AlertDialog
         open={Boolean(deleteTarget)}

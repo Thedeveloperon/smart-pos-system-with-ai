@@ -190,6 +190,129 @@ public sealed class UpdateProductRequest
     public bool IsActive { get; set; } = true;
 }
 
+public sealed class GenerateBarcodeRequest
+{
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("sku")]
+    public string? Sku { get; set; }
+
+    [JsonPropertyName("seed")]
+    public string? Seed { get; set; }
+}
+
+public sealed class GenerateProductBarcodeRequest
+{
+    [JsonPropertyName("force_replace")]
+    public bool ForceReplace { get; set; }
+
+    [JsonPropertyName("seed")]
+    public string? Seed { get; set; }
+}
+
+public sealed class GenerateBarcodeResponse
+{
+    [JsonPropertyName("barcode")]
+    public string Barcode { get; set; } = string.Empty;
+
+    [JsonPropertyName("format")]
+    public string Format { get; set; } = "ean-13";
+
+    [JsonPropertyName("generated_at")]
+    public DateTimeOffset GeneratedAt { get; set; }
+}
+
+public sealed class ValidateBarcodeRequest
+{
+    [JsonPropertyName("barcode")]
+    public string Barcode { get; set; } = string.Empty;
+
+    [JsonPropertyName("exclude_product_id")]
+    public Guid? ExcludeProductId { get; set; }
+
+    [JsonPropertyName("check_existing")]
+    public bool CheckExisting { get; set; } = true;
+}
+
+public sealed class ValidateBarcodeResponse
+{
+    [JsonPropertyName("barcode")]
+    public string Barcode { get; set; } = string.Empty;
+
+    [JsonPropertyName("normalized_barcode")]
+    public string NormalizedBarcode { get; set; } = string.Empty;
+
+    [JsonPropertyName("is_valid")]
+    public bool IsValid { get; set; }
+
+    [JsonPropertyName("format")]
+    public string Format { get; set; } = "unknown";
+
+    [JsonPropertyName("message")]
+    public string? Message { get; set; }
+
+    [JsonPropertyName("exists")]
+    public bool Exists { get; set; }
+}
+
+public sealed class BulkGenerateMissingProductBarcodesRequest
+{
+    [JsonPropertyName("take")]
+    public int Take { get; set; } = 200;
+
+    [JsonPropertyName("include_inactive")]
+    public bool IncludeInactive { get; set; }
+
+    [JsonPropertyName("dry_run")]
+    public bool DryRun { get; set; }
+}
+
+public sealed class BulkGenerateMissingProductBarcodesResponse
+{
+    [JsonPropertyName("dry_run")]
+    public bool DryRun { get; set; }
+
+    [JsonPropertyName("scanned")]
+    public int Scanned { get; set; }
+
+    [JsonPropertyName("generated")]
+    public int Generated { get; set; }
+
+    [JsonPropertyName("would_generate")]
+    public int WouldGenerate { get; set; }
+
+    [JsonPropertyName("skipped_existing")]
+    public int SkippedExisting { get; set; }
+
+    [JsonPropertyName("failed")]
+    public int Failed { get; set; }
+
+    [JsonPropertyName("processed_at")]
+    public DateTimeOffset ProcessedAt { get; set; }
+
+    [JsonPropertyName("items")]
+    public List<BulkGenerateMissingProductBarcodeItemResponse> Items { get; set; } = [];
+}
+
+public sealed class BulkGenerateMissingProductBarcodeItemResponse
+{
+    [JsonPropertyName("product_id")]
+    public Guid ProductId { get; set; }
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = string.Empty;
+
+    [JsonPropertyName("barcode")]
+    public string? Barcode { get; set; }
+
+    [JsonPropertyName("message")]
+    public string? Message { get; set; }
+}
+
 public sealed class StockAdjustmentRequest
 {
     [JsonPropertyName("delta_quantity")]
