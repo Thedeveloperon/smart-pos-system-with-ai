@@ -249,7 +249,7 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
           )}
           <Button
             variant="pos-primary"
-            className="h-11 w-full rounded-xl text-sm"
+            className="h-11 w-full rounded-xl px-4 text-sm justify-center"
             disabled={!canComplete}
             onPointerDown={() => {
               void primeConfirmationSound();
@@ -265,7 +265,7 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
           <div className="grid grid-cols-2 gap-1.5">
             <Button
               variant="pos-outline"
-              className="h-10 rounded-xl text-sm"
+              className="h-10 w-full rounded-xl px-4 text-sm justify-center"
               onClick={onHoldBill}
               disabled={items.length === 0}
             >
@@ -274,7 +274,7 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
             </Button>
             <Button
               variant="pos-danger"
-              className="h-10 rounded-xl text-sm"
+              className="h-10 w-full rounded-xl px-4 text-sm justify-center"
               onClick={onCancelSale}
               disabled={items.length === 0}
             >

@@ -42,6 +42,7 @@ import {
 import { isSuperAdminBackendRole } from "@/lib/auth";
 import { flushOfflineSyncQueue, getOfflineSyncQueueSummary } from "@/lib/offlineSyncQueue";
 import { playCartAddSound } from "@/lib/sound";
+import { isExpertModeEnabled, setExpertModeEnabled } from "@/lib/posPreferences";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { usePosShortcuts } from "@/hooks/usePosShortcuts";
 import { POS_SHORTCUTS } from "@/components/pos/shortcuts";
@@ -87,6 +88,7 @@ const IndexInner = () => {
   const [showShopSettings, setShowShopSettings] = useState(false);
   const [showAiInsights, setShowAiInsights] = useState(false);
   const [showLicenseAccount, setShowLicenseAccount] = useState(false);
+  const [expertModeEnabled, setExpertModeEnabledState] = useState(() => isExpertModeEnabled());
   const [aiCreditsBalance, setAiCreditsBalance] = useState<number | null>(null);
   const [refundSaleId, setRefundSaleId] = useState<string | null>(null);
   const [salesRefreshToken, setSalesRefreshToken] = useState(0);
@@ -666,19 +668,30 @@ const IndexInner = () => {
         />
       ) : (
         <>
-          <div className="flex-1 hidden md:grid md:grid-cols-[5fr_3fr] overflow-hidden">
+          <div
+            className={`flex-1 hidden md:grid overflow-hidden ${
+              expertModeEnabled
+                ? "md:grid-cols-[minmax(320px,0.95fr)_minmax(0,1.35fr)]"
+                : "md:grid-cols-[minmax(0,5fr)_minmax(0,3fr)]"
+            }`}
+          >
             <div className="min-h-0 min-w-0 border-r border-border overflow-hidden">
               <ProductSearchPanel
                 ref={desktopSearchRef}
                 products={products}
                 onAddToCart={handleAddToCart}
                 showShortcutHints={isPosShortcutsFeatureEnabled}
+                expertMode={expertModeEnabled}
               />
             </div>
             <div className="scrollbar-thin min-h-0 overflow-y-auto bg-card">
               <div className="grid h-full min-h-0" style={{ gridTemplateRows: "38% 62%" }}>
                 <div className="min-h-0 overflow-hidden border-b border-border">
-                  <CartPanel items={cartItems} onUpdateQty={handleUpdateQty} onRemove={handleRemove} />
+                  <CartPanel
+                    items={cartItems}
+                    onUpdateQty={handleUpdateQty}
+                    onRemove={handleRemove}
+                  />
                 </div>
                 <div className="min-h-0 overflow-hidden">
                   <CheckoutPanel
@@ -703,11 +716,16 @@ const IndexInner = () => {
                 products={products}
                 onAddToCart={handleAddToCart}
                 showShortcutHints={isPosShortcutsFeatureEnabled}
+                expertMode={expertModeEnabled}
               />
             )}
             {mobileTab === "cart" && (
               <div className="h-full overflow-y-auto">
-                <CartPanel items={cartItems} onUpdateQty={handleUpdateQty} onRemove={handleRemove} />
+                <CartPanel
+                  items={cartItems}
+                  onUpdateQty={handleUpdateQty}
+                  onRemove={handleRemove}
+                />
               </div>
             )}
             {mobileTab === "checkout" && (
@@ -813,6 +831,11 @@ const IndexInner = () => {
       <ShopProfileDialog
         open={showShopSettings}
         onOpenChange={setShowShopSettings}
+        expertModeEnabled={expertModeEnabled}
+        onExpertModeEnabledChange={(enabled) => {
+          setExpertModeEnabledState(enabled);
+          setExpertModeEnabled(enabled);
+        }}
       />
 
       <LicenseAccountDialog
