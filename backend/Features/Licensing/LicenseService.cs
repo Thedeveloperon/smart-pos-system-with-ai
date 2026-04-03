@@ -273,13 +273,22 @@ public sealed class LicenseService(
             }
         }
 
-        var issuedLicense = await IssueLicenseAsync(
-            shop,
-            existingDevice,
-            subscription,
-            now,
-            TokenRotationMode.Immediate,
-            cancellationToken);
+        IssuedLicenseResult issuedLicense;
+        try
+        {
+            issuedLicense = await IssueLicenseAsync(
+                shop,
+                existingDevice,
+                subscription,
+                now,
+                TokenRotationMode.Immediate,
+                cancellationToken);
+        }
+        catch (Exception ex) when (IsLicensingConfigurationException(ex))
+        {
+            throw CreateLicensingConfigurationException(ex);
+        }
+
         if (requiresSeat)
         {
             await ForceReissueLicensesForShopAsync(
@@ -319,7 +328,16 @@ public sealed class LicenseService(
         await dbContext.SaveChangesAsync(cancellationToken);
         metrics.RecordActivation();
 
-        var status = await ResolveStatusSnapshotAsync(deviceCode, issuedLicense.PlainToken, strictTokenValidation: true, cancellationToken);
+        LicenseStatusSnapshot status;
+        try
+        {
+            status = await ResolveStatusSnapshotAsync(deviceCode, issuedLicense.PlainToken, strictTokenValidation: true, cancellationToken);
+        }
+        catch (Exception ex) when (IsLicensingConfigurationException(ex))
+        {
+            throw CreateLicensingConfigurationException(ex);
+        }
+
         return CreateResponse(status with { LicenseToken = issuedLicense.PlainToken });
     }
 
@@ -434,11 +452,19 @@ public sealed class LicenseService(
             };
         }
 
-        var snapshot = await ResolveStatusSnapshotAsync(
-            normalizedDeviceCode,
-            licenseToken,
-            strictTokenValidation: !string.IsNullOrWhiteSpace(licenseToken),
-            cancellationToken);
+        LicenseStatusSnapshot snapshot;
+        try
+        {
+            snapshot = await ResolveStatusSnapshotAsync(
+                normalizedDeviceCode,
+                licenseToken,
+                strictTokenValidation: !string.IsNullOrWhiteSpace(licenseToken),
+                cancellationToken);
+        }
+        catch (Exception ex) when (IsLicensingConfigurationException(ex))
+        {
+            throw CreateLicensingConfigurationException(ex);
+        }
 
         return CreateResponse(snapshot);
     }
@@ -460,12 +486,20 @@ public sealed class LicenseService(
 
         var now = DateTimeOffset.UtcNow;
         var requestSource = ResolveRequestSourceContext();
-        var currentStatus = await ResolveStatusSnapshotAsync(
-            deviceCode,
-            request.LicenseToken,
-            strictTokenValidation: true,
-            cancellationToken,
-            tokenValidationPurpose: TokenValidationPurpose.Heartbeat);
+        LicenseStatusSnapshot currentStatus;
+        try
+        {
+            currentStatus = await ResolveStatusSnapshotAsync(
+                deviceCode,
+                request.LicenseToken,
+                strictTokenValidation: true,
+                cancellationToken,
+                tokenValidationPurpose: TokenValidationPurpose.Heartbeat);
+        }
+        catch (Exception ex) when (IsLicensingConfigurationException(ex))
+        {
+            throw CreateLicensingConfigurationException(ex);
+        }
 
         if (currentStatus.State == LicenseState.Unprovisioned)
         {
@@ -506,13 +540,21 @@ public sealed class LicenseService(
 
         provisionedDevice.LastHeartbeatAtUtc = now;
 
-        var refreshedLicense = await IssueLicenseAsync(
-            (await dbContext.Shops.FirstAsync(x => x.Id == provisionedDevice.ShopId, cancellationToken)),
-            provisionedDevice,
-            subscription,
-            now,
-            TokenRotationMode.Overlap,
-            cancellationToken);
+        IssuedLicenseResult refreshedLicense;
+        try
+        {
+            refreshedLicense = await IssueLicenseAsync(
+                (await dbContext.Shops.FirstAsync(x => x.Id == provisionedDevice.ShopId, cancellationToken)),
+                provisionedDevice,
+                subscription,
+                now,
+                TokenRotationMode.Overlap,
+                cancellationToken);
+        }
+        catch (Exception ex) when (IsLicensingConfigurationException(ex))
+        {
+            throw CreateLicensingConfigurationException(ex);
+        }
 
         dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
         {
@@ -535,7 +577,16 @@ public sealed class LicenseService(
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        var status = await ResolveStatusSnapshotAsync(deviceCode, refreshedLicense.PlainToken, strictTokenValidation: true, cancellationToken);
+        LicenseStatusSnapshot status;
+        try
+        {
+            status = await ResolveStatusSnapshotAsync(deviceCode, refreshedLicense.PlainToken, strictTokenValidation: true, cancellationToken);
+        }
+        catch (Exception ex) when (IsLicensingConfigurationException(ex))
+        {
+            throw CreateLicensingConfigurationException(ex);
+        }
+
         return CreateResponse(status with { LicenseToken = refreshedLicense.PlainToken });
     }
 
@@ -7316,6 +7367,21 @@ public sealed class LicenseService(
         }
 
         return Convert.FromBase64String(normalized);
+    }
+
+    private static bool IsLicensingConfigurationException(Exception exception)
+    {
+        return exception is InvalidOperationException
+            or CryptographicException
+            or ArgumentException;
+    }
+
+    private static LicenseException CreateLicensingConfigurationException(Exception exception)
+    {
+        return new LicenseException(
+            LicenseErrorCodes.LicensingConfigurationError,
+            $"Licensing configuration error: {exception.Message}",
+            StatusCodes.Status500InternalServerError);
     }
 
     private static string GetSignaturePart(string token)
