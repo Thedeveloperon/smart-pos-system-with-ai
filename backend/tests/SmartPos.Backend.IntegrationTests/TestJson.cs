@@ -7,7 +7,13 @@ internal static class TestJson
 {
     public static async Task<JsonObject> ReadObjectAsync(HttpResponseMessage response)
     {
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            var raw = await response.Content.ReadAsStringAsync();
+            throw new InvalidOperationException(
+                $"Expected success status but received {(int)response.StatusCode} ({response.StatusCode}). Body: {raw}");
+        }
+
         var payload = await response.Content.ReadFromJsonAsync<JsonObject>();
         return payload ?? throw new InvalidOperationException("Response body was empty.");
     }

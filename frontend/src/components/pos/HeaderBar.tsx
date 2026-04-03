@@ -23,6 +23,7 @@ import {
   Loader2,
   KeyRound,
   Menu,
+  Sparkles,
 } from "lucide-react";
 
 interface HeaderBarProps {
@@ -34,6 +35,8 @@ interface HeaderBarProps {
   onManageProducts?: () => void;
   onReports?: () => void;
   onImportSupplierBill: () => void;
+  onAiInsights?: () => void;
+  aiCredits?: number | null;
   onShopSettings?: () => void;
   onMyAccountLicenses?: () => void;
   onSyncOffline?: () => void;
@@ -55,6 +58,8 @@ const HeaderBar = ({
   onManageProducts,
   onReports,
   onImportSupplierBill,
+  onAiInsights,
+  aiCredits = null,
   onShopSettings,
   onMyAccountLicenses,
   onSyncOffline,
@@ -121,6 +126,23 @@ const HeaderBar = ({
           >
             <BarChart3 className="h-4 w-4" />
             <span className="hidden md:inline ml-1">Reports</span>
+          </Button>
+        )}
+
+        {isAdmin && onAiInsights && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onAiInsights}
+            className="text-pos-header-foreground hover:bg-pos-header-foreground/10 relative"
+          >
+            <Sparkles className="h-4 w-4" />
+            <span className="hidden md:inline ml-1">AI Insights</span>
+            {aiCredits !== null && (
+              <Badge className="absolute -top-1 -right-1 h-5 min-w-5 px-1.5 flex items-center justify-center text-[10px] bg-emerald-500 text-white">
+                {aiCredits > 999 ? "999+" : aiCredits.toFixed(0)}
+              </Badge>
+            )}
           </Button>
         )}
 
@@ -275,6 +297,18 @@ const HeaderBar = ({
               <DropdownMenuItem onSelect={() => onReports()} className="min-h-11 px-3 py-2 text-base">
                 <BarChart3 className="mr-3 h-5 w-5" />
                 Reports
+              </DropdownMenuItem>
+            )}
+
+            {isAdmin && onAiInsights && (
+              <DropdownMenuItem onSelect={() => onAiInsights()} className="min-h-11 px-3 py-2 text-base">
+                <Sparkles className="mr-3 h-5 w-5" />
+                AI Insights
+                {aiCredits !== null && (
+                  <Badge className="ml-auto h-5 min-w-5 px-1 text-[10px]">
+                    {aiCredits > 999 ? "999+" : aiCredits.toFixed(0)}
+                  </Badge>
+                )}
               </DropdownMenuItem>
             )}
 
