@@ -55,6 +55,15 @@ const ManageDrawerDialog = ({ open, session, onClose, onSave }: ManageDrawerDial
   const coinCount = counts
     .filter((count) => count.denomination <= 10)
     .reduce((sum, count) => sum + count.quantity, 0);
+  const latestDrawerEntry = [...(session?.auditLog ?? [])]
+    .filter((entry) =>
+      entry.action === "cash_drawer_updated" ||
+      entry.action === "cash_session_sale_recorded" ||
+      entry.action === "cash_session_opened"
+    )
+    .sort((a, b) => b.performedAt.getTime() - a.performedAt.getTime())[0];
+  const lastUpdatedAtLabel = session?.drawer.updatedAt ? session.drawer.updatedAt.toLocaleString() : "Not updated yet";
+  const lastUpdatedBy = latestDrawerEntry?.performedBy || session?.opening.submittedBy || session?.cashierName || "Unknown";
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
@@ -71,58 +80,57 @@ const ManageDrawerDialog = ({ open, session, onClose, onSave }: ManageDrawerDial
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-4 pr-4 scrollbar-thin">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <div className="rounded-2xl border border-slate-300 bg-white px-4 py-3">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-6 py-3">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-2xl border border-slate-300 bg-white px-4 py-2.5">
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                 Cash balance
               </p>
-              <p className="mt-1 text-2xl font-bold tabular-nums text-primary">
+              <p className="mt-0.5 text-[1.9rem] font-bold tabular-nums text-primary">
                 Rs. {total.toLocaleString()}
               </p>
             </div>
-            <div className="rounded-2xl border border-slate-300 bg-white px-4 py-3">
+            <div className="rounded-2xl border border-slate-300 bg-white px-4 py-2.5">
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                 Expected cash
               </p>
-              <p className="mt-1 text-2xl font-bold tabular-nums text-slate-800">
+              <p className="mt-0.5 text-[1.9rem] font-bold tabular-nums text-slate-800">
                 Rs. {expectedCash.toLocaleString()}
               </p>
             </div>
-            <div className="rounded-2xl border border-slate-300 bg-white px-4 py-3">
+            <div className="rounded-2xl border border-slate-300 bg-white px-4 py-2.5">
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                 Notes available
               </p>
-              <p className="mt-1 text-2xl font-bold tabular-nums text-slate-800">
+              <p className="mt-0.5 text-[1.9rem] font-bold tabular-nums text-slate-800">
                 {noteCount.toLocaleString()}
               </p>
             </div>
-            <div className="rounded-2xl border border-slate-300 bg-white px-4 py-3">
+            <div className="rounded-2xl border border-slate-300 bg-white px-4 py-2.5">
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                 Coins available
               </p>
-              <p className="mt-1 text-2xl font-bold tabular-nums text-slate-800">
+              <p className="mt-0.5 text-[1.9rem] font-bold tabular-nums text-slate-800">
                 {coinCount.toLocaleString()}
               </p>
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-300 bg-white px-4 py-3">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-              Last updated
-            </p>
-            <p className="mt-1 text-sm font-medium text-slate-700">
-              {session?.drawer.updatedAt ? session.drawer.updatedAt.toLocaleString() : "Not updated yet"}
-            </p>
-            <p className={`mt-1 text-xs ${cashBalance >= 0 ? "text-emerald-600" : "text-destructive"}`}>
-              Variance vs expected: Rs. {cashBalance.toLocaleString()}
+          <div className="rounded-2xl border border-slate-300 bg-white px-4 py-2.5">
+            <p className="truncate text-sm font-medium text-slate-700">
+              Last updated <span className="font-semibold">{lastUpdatedAtLabel}</span> by{" "}
+              <span className="font-semibold">{lastUpdatedBy}</span>{" "}
+              <span className={`${cashBalance >= 0 ? "text-emerald-600" : "text-destructive"}`}>
+                Variance vs expected: Rs. {cashBalance.toLocaleString()}
+              </span>
             </p>
           </div>
 
-          <div className="rounded-2xl border border-slate-300 bg-white p-3">
+          <div className="flex-1 min-h-0 overflow-hidden rounded-2xl border border-slate-300 bg-white p-3">
             <DenominationCounter
               key={resetKey}
               initialCounts={counts.length > 0 ? counts : openingCounts}
+              compact
               onChange={(nextCounts, nextTotal) => {
                 setCounts(nextCounts);
                 setTotal(nextTotal);

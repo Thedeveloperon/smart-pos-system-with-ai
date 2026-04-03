@@ -1,4 +1,4 @@
-import { AlertCircle, AlertTriangle, ShieldAlert, ShieldCheck } from "lucide-react";
+import { AlertCircle, AlertTriangle, ShieldAlert, ShieldCheck, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +33,7 @@ type LicenseOfflineBannerProps = {
   pendingSyncCount?: number;
   isRefreshing?: boolean;
   onRefresh: () => void;
+  onDismiss?: () => void;
 };
 
 const formatDateTime = (value?: Date | null) => {
@@ -306,6 +307,7 @@ export const LicenseOfflineBanner = ({
   pendingSyncCount = 0,
   isRefreshing,
   onRefresh,
+  onDismiss,
 }: LicenseOfflineBannerProps) => {
   if (!status.offlineGrantToken) {
     return null;
@@ -328,15 +330,28 @@ export const LicenseOfflineBanner = ({
           )}
         </div>
 
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-8 border-sky-700/40 bg-transparent text-sky-900 hover:bg-sky-500/20 dark:text-sky-100"
-          onClick={onRefresh}
-          disabled={isRefreshing}
-        >
-          {isRefreshing ? "Refreshing..." : "Refresh"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 border-sky-700/40 bg-transparent text-sky-900 hover:bg-sky-500/20 dark:text-sky-100"
+            onClick={onRefresh}
+            disabled={isRefreshing}
+          >
+            {isRefreshing ? "Refreshing..." : "Refresh"}
+          </Button>
+          {onDismiss && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 rounded-full text-sky-900 hover:bg-sky-500/20 dark:text-sky-100"
+              onClick={onDismiss}
+              aria-label="Close offline fallback banner"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );

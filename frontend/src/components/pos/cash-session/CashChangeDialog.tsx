@@ -9,6 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useEffect, useMemo, useState } from "react";
 import { Banknote, Coins, CheckCircle2 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { buildChangeBreakdown, splitChangeBreakdown } from "./changeBreakdown";
 import DenominationCounter from "./DenominationCounter";
 import type { DenominationCount } from "./types";
@@ -17,6 +18,7 @@ interface CashChangeDialogProps {
   open: boolean;
   changeAmount: number;
   availableCounts?: DenominationCount[];
+  allowCustomPayout?: boolean;
   onClose: () => void;
   onConfirm: (counts: DenominationCount[]) => void;
 }
@@ -25,6 +27,7 @@ const CashChangeDialog = ({
   open,
   changeAmount,
   availableCounts = [],
+  allowCustomPayout = false,
   onClose,
   onConfirm,
 }: CashChangeDialogProps) => {
@@ -45,21 +48,26 @@ const CashChangeDialog = ({
   const hasBalanceToReturn = normalizedChange > 0;
   const isFullyCovered = hasBalanceToReturn && allocatedChange >= normalizedChange;
   const needsManualAdjustment = hasBalanceToReturn && !isFullyCovered;
+  const [isCustomPayoutEnabled, setIsCustomPayoutEnabled] = useState(false);
   const [manualCounts, setManualCounts] = useState<DenominationCount[]>(breakdown);
   const [manualTotal, setManualTotal] = useState(allocatedChange);
 
   useEffect(() => {
-    if (!open || !needsManualAdjustment) {
+    if (!open) {
       return;
     }
 
+    setIsCustomPayoutEnabled(false);
     setManualCounts(breakdown);
     setManualTotal(allocatedChange);
-  }, [allocatedChange, breakdown, needsManualAdjustment, open]);
+  }, [allocatedChange, breakdown, open]);
 
-  const selectedCounts = needsManualAdjustment ? manualCounts : breakdown;
-  const selectedTotal = needsManualAdjustment ? manualTotal : allocatedChange;
-  const canProceed = !hasBalanceToReturn || !needsManualAdjustment || manualTotal === normalizedChange;
+  const isCustomMode = allowCustomPayout && isCustomPayoutEnabled;
+  const showEditableCounter = needsManualAdjustment || isCustomMode;
+  const selectedCounts = showEditableCounter ? manualCounts : breakdown;
+  const selectedTotal = showEditableCounter ? manualTotal : allocatedChange;
+  const isExactMatch = selectedTotal === normalizedChange;
+  const canProceed = !hasBalanceToReturn || !showEditableCounter || isCustomMode || isExactMatch;
 
   const renderEntry = (denomination: number, quantity: number) => (
     <div
@@ -85,15 +93,29 @@ const CashChangeDialog = ({
       <DialogContent className="max-h-[92vh] w-[min(96vw,52rem)] overflow-hidden rounded-2xl border border-slate-300 bg-[#f7f8fa] p-0 shadow-xl sm:max-w-3xl">
         <div className="flex max-h-[92vh] min-h-0 flex-col">
           <DialogHeader className="border-b border-slate-300 px-6 py-4 pr-14">
-            <DialogTitle className="text-[1.5rem] font-semibold tracking-tight text-slate-800">
-              Change breakdown
-            </DialogTitle>
+            <div className="flex items-start justify-between gap-3">
+              <DialogTitle className="text-[1.5rem] font-semibold tracking-tight text-slate-800">
+                Change breakdown
+              </DialogTitle>
+              {allowCustomPayout && hasBalanceToReturn && (
+                <div className="flex items-center gap-2 rounded-full border border-slate-300 bg-white px-2.5 py-1">
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                    Custom Payout
+                  </span>
+                  <Switch
+                    checked={isCustomPayoutEnabled}
+                    onCheckedChange={setIsCustomPayoutEnabled}
+                    aria-label="Enable custom payout"
+                  />
+                </div>
+              )}
+            </div>
             <DialogDescription>
               Review the note and coin payout before completing the sale.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-6 py-4">
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-6 py-3">
             <div className="rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3">
               <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
                 Balance to return
@@ -113,28 +135,35 @@ const CashChangeDialog = ({
               ) : null}
             </div>
 
-            {needsManualAdjustment ? (
+            {showEditableCounter ? (
               <div className="min-h-0 flex-1 rounded-2xl border border-slate-300 bg-white p-3">
                 <DenominationCounter
                   key={`${normalizedChange}-${availableCountsKey}`}
                   initialCounts={breakdown}
+                  compact
                   onChange={(counts, total) => {
                     setManualCounts(counts);
                     setManualTotal(total);
                   }}
                 />
-                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+                <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm">
                   <p className="font-medium text-slate-700">
                     Selected total: Rs. {selectedTotal.toLocaleString()}
                   </p>
                   <p
                     className={`mt-1 text-xs ${
-                      manualTotal === normalizedChange ? "text-emerald-600" : "text-destructive"
+                      isCustomMode
+                        ? (manualTotal === normalizedChange ? "text-emerald-600" : "text-amber-600")
+                        : (manualTotal === normalizedChange ? "text-emerald-600" : "text-destructive")
                     }`}
                   >
-                    {manualTotal === normalizedChange
-                      ? "The selected notes and coins match the balance to return."
-                      : "Adjust the counts until the selected total matches the balance to return."}
+                    {isCustomMode
+                      ? (manualTotal === normalizedChange
+                        ? "The selected notes and coins match the balance to return."
+                        : "Custom payout override is enabled. You can proceed with this payout set.")
+                      : (manualTotal === normalizedChange
+                        ? "The selected notes and coins match the balance to return."
+                        : "Adjust the counts until the selected total matches the balance to return.")}
                   </p>
                 </div>
               </div>

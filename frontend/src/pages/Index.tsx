@@ -91,6 +91,7 @@ const IndexInner = () => {
   const [isOfflineSyncing, setIsOfflineSyncing] = useState(false);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const [showShortcutOnboarding, setShowShortcutOnboarding] = useState(false);
+  const [dismissedOfflineGrantToken, setDismissedOfflineGrantToken] = useState<string | null>(null);
   const isOfflineFlushInProgressRef = useRef(false);
   const desktopSearchRef = useRef<ProductSearchPanelHandle | null>(null);
   const mobileSearchRef = useRef<ProductSearchPanelHandle | null>(null);
@@ -525,6 +526,17 @@ const IndexInner = () => {
     }
   }, [canSell]);
 
+  useEffect(() => {
+    if (!licenseStatus?.offlineGrantToken) {
+      setDismissedOfflineGrantToken(null);
+      return;
+    }
+
+    if (dismissedOfflineGrantToken && dismissedOfflineGrantToken !== licenseStatus.offlineGrantToken) {
+      setDismissedOfflineGrantToken(null);
+    }
+  }, [dismissedOfflineGrantToken, licenseStatus?.offlineGrantToken]);
+
   return (
     <div className="h-screen flex flex-col overflow-hidden">
       <HeaderBar
@@ -563,14 +575,21 @@ const IndexInner = () => {
       )}
 
       {(licenseStatus?.state === "active" || licenseStatus?.state === "grace") && (
-        <LicenseOfflineBanner
-          status={licenseStatus}
-          pendingSyncCount={offlinePendingCount}
-          isRefreshing={isLicenseRefreshing}
-          onRefresh={() => {
-            void refreshLicenseStatus();
-          }}
-        />
+        <>
+          {licenseStatus.offlineGrantToken !== dismissedOfflineGrantToken && (
+            <LicenseOfflineBanner
+              status={licenseStatus}
+              pendingSyncCount={offlinePendingCount}
+              isRefreshing={isLicenseRefreshing}
+              onRefresh={() => {
+                void refreshLicenseStatus();
+              }}
+              onDismiss={() => {
+                setDismissedOfflineGrantToken(licenseStatus.offlineGrantToken ?? null);
+              }}
+            />
+          )}
+        </>
       )}
 
       {canSell && <CashSessionBanner onEndShift={handleEndShift} onManageDrawer={handleManageDrawer} />}
@@ -641,6 +660,7 @@ const IndexInner = () => {
                     ref={desktopCheckoutRef}
                     items={cartItems}
                     cashDrawer={session?.drawer}
+                    allowCustomPayout={isAdmin}
                     onCompleteSale={handleCompleteSale}
                     onHoldBill={() => void handleHoldBill()}
                     onCancelSale={handleCancelSale}
@@ -671,6 +691,7 @@ const IndexInner = () => {
                   ref={mobileCheckoutRef}
                   items={cartItems}
                   cashDrawer={session?.drawer}
+                  allowCustomPayout={isAdmin}
                   onCompleteSale={handleCompleteSale}
                   onHoldBill={() => void handleHoldBill()}
                   onCancelSale={handleCancelSale}
