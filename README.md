@@ -143,3 +143,24 @@ SMART POS SHORTCUTS
 F2 Search   F4 Hold   F8 Cash   F9 Complete
 F1/? Help   Esc Close Help
 ```
+
+## 9. AI insights setup (credits + OpenAI)
+
+Required for production OpenAI provider:
+
+```bash
+export OPENAI_API_KEY="sk-..."
+export SMARTPOS_AI_WEBHOOK_SIGNING_SECRET="replace-with-strong-random-secret"
+```
+
+Recommended production config values:
+
+- `AiInsights:Provider=OpenAI`
+- `AiInsights:PricingRulesVersion=ai_pricing_v1_2026_04_03`
+- `AiInsights:Model=gpt-5.4-mini`
+- `AiInsights:AllowedModels=["gpt-5.4-mini","local-pos-insights-v1"]`
+- `AiInsights:EnableManualWalletTopUp=false`
+
+Credit pack catalog and pricing policy are documented in:
+
+- `AI_INSIGHTS_PRICING_RULES_V1_2026-04-03.md`

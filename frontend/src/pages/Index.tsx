@@ -4,6 +4,7 @@ import { useAuth } from "@/components/auth/AuthContext";
 import { useLicensing } from "@/components/licensing/LicensingContext";
 import { LicenseGraceBanner, LicenseOfflineBanner } from "@/components/licensing/LicenseScreens";
 import HeaderBar from "@/components/pos/HeaderBar";
+import AiInsightsDialog from "@/components/pos/AiInsightsDialog";
 import LicenseAccountDialog from "@/components/pos/LicenseAccountDialog";
 import NewItemDialog from "@/components/pos/NewItemDialog";
 import ImportSupplierBillDialog from "@/components/pos/ImportSupplierBillDialog";
@@ -28,6 +29,7 @@ import type { CartItem, HeldBill, PaymentMethod, Product } from "@/components/po
 import type { DenominationCount } from "@/components/pos/cash-session/types";
 import {
   completeSale,
+  fetchAiWallet,
   fetchHeldBill,
   fetchHeldBills,
   fetchProducts,
@@ -83,7 +85,9 @@ const IndexInner = () => {
   const [showAuditLog, setShowAuditLog] = useState(false);
   const [showImportSupplierBill, setShowImportSupplierBill] = useState(false);
   const [showShopSettings, setShowShopSettings] = useState(false);
+  const [showAiInsights, setShowAiInsights] = useState(false);
   const [showLicenseAccount, setShowLicenseAccount] = useState(false);
+  const [aiCreditsBalance, setAiCreditsBalance] = useState<number | null>(null);
   const [refundSaleId, setRefundSaleId] = useState<string | null>(null);
   const [salesRefreshToken, setSalesRefreshToken] = useState(0);
   const [mobileTab, setMobileTab] = useState<"products" | "cart" | "checkout">("products");
@@ -141,9 +145,28 @@ const IndexInner = () => {
     }
   }, []);
 
+  const loadAiWallet = useCallback(async () => {
+    if (!isAdmin) {
+      setAiCreditsBalance(null);
+      return;
+    }
+
+    try {
+      const wallet = await fetchAiWallet();
+      setAiCreditsBalance(wallet.available_credits);
+    } catch (error) {
+      console.error(error);
+      setAiCreditsBalance(null);
+    }
+  }, [isAdmin]);
+
   useEffect(() => {
     void Promise.all([loadProducts(), loadHeldBills()]);
   }, [loadHeldBills, loadProducts]);
+
+  useEffect(() => {
+    void loadAiWallet();
+  }, [loadAiWallet]);
 
   const refreshOfflineQueueSummary = useCallback(async () => {
     try {
@@ -547,6 +570,8 @@ const IndexInner = () => {
         onNewItem={() => setShowNewItem(true)}
         onManageProducts={() => setShowProductManagement(true)}
         onReports={() => setShowReports(true)}
+        onAiInsights={() => setShowAiInsights(true)}
+        aiCredits={aiCreditsBalance}
         onImportSupplierBill={() => setShowImportSupplierBill(true)}
         onShopSettings={() => setShowShopSettings(true)}
         onMyAccountLicenses={() => setShowLicenseAccount(true)}
@@ -796,6 +821,12 @@ const IndexInner = () => {
         onChanged={() => {
           void refreshLicenseStatus();
         }}
+      />
+
+      <AiInsightsDialog
+        open={showAiInsights}
+        onOpenChange={setShowAiInsights}
+        onBalanceChange={setAiCreditsBalance}
       />
 
       <RefundSaleDialog

@@ -563,6 +563,104 @@ public sealed class CustomerActivationEntitlement
     public required Shop Shop { get; set; }
 }
 
+public sealed class AiCreditWallet
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid UserId { get; set; }
+    public decimal AvailableCredits { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+
+    public required AppUser User { get; set; }
+    public ICollection<AiCreditLedgerEntry> LedgerEntries { get; set; } = [];
+}
+
+public sealed class AiCreditLedgerEntry
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid UserId { get; set; }
+    public Guid WalletId { get; set; }
+    public Guid? AiInsightRequestId { get; set; }
+    public AiCreditLedgerEntryType EntryType { get; set; } = AiCreditLedgerEntryType.Adjustment;
+    public decimal DeltaCredits { get; set; }
+    public decimal BalanceAfterCredits { get; set; }
+    public string? Reference { get; set; }
+    public string? Description { get; set; }
+    public string? MetadataJson { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+
+    public required AppUser User { get; set; }
+    public required AiCreditWallet Wallet { get; set; }
+    public AiInsightRequest? AiInsightRequest { get; set; }
+}
+
+public sealed class AiInsightRequest
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid UserId { get; set; }
+    public string IdempotencyKey { get; set; } = string.Empty;
+    public AiInsightRequestStatus Status { get; set; } = AiInsightRequestStatus.Pending;
+    public string Provider { get; set; } = "local";
+    public string Model { get; set; } = string.Empty;
+    public string PromptHash { get; set; } = string.Empty;
+    public int PromptCharCount { get; set; }
+    public decimal ReservedCredits { get; set; }
+    public decimal ChargedCredits { get; set; }
+    public int InputTokens { get; set; }
+    public int OutputTokens { get; set; }
+    public string? ResponseText { get; set; }
+    public string? ErrorCode { get; set; }
+    public string? ErrorMessage { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+    public DateTimeOffset? CompletedAtUtc { get; set; }
+
+    public required AppUser User { get; set; }
+    public ICollection<AiCreditLedgerEntry> LedgerEntries { get; set; } = [];
+}
+
+public sealed class AiCreditPayment
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid UserId { get; set; }
+    public AiCreditPaymentStatus Status { get; set; } = AiCreditPaymentStatus.Pending;
+    public string Provider { get; set; } = "mockpay";
+    public string? ProviderPaymentId { get; set; }
+    public string? ProviderCheckoutSessionId { get; set; }
+    public string ExternalReference { get; set; } = string.Empty;
+    public decimal CreditsPurchased { get; set; }
+    public decimal Amount { get; set; }
+    public string Currency { get; set; } = "USD";
+    public string? PurchaseReference { get; set; }
+    public string? LastWebhookEventId { get; set; }
+    public string? LastWebhookEventType { get; set; }
+    public string? FailureReason { get; set; }
+    public string? MetadataJson { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+    public DateTimeOffset? CompletedAtUtc { get; set; }
+
+    public required AppUser User { get; set; }
+    public ICollection<AiCreditPaymentWebhookEvent> WebhookEvents { get; set; } = [];
+}
+
+public sealed class AiCreditPaymentWebhookEvent
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Provider { get; set; } = "mockpay";
+    public string ProviderEventId { get; set; } = string.Empty;
+    public string EventType { get; set; } = string.Empty;
+    public string Status { get; set; } = "processing";
+    public Guid? PaymentId { get; set; }
+    public string? ErrorCode { get; set; }
+    public string? ErrorMessage { get; set; }
+    public DateTimeOffset ReceivedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? ProcessedAtUtc { get; set; }
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public AiCreditPayment? Payment { get; set; }
+}
+
 public enum SaleStatus
 {
     Held = 1,
@@ -668,4 +766,29 @@ public enum ActivationEntitlementStatus
     Active = 1,
     Revoked = 2,
     Expired = 3
+}
+
+public enum AiCreditLedgerEntryType
+{
+    Purchase = 1,
+    Reserve = 2,
+    Charge = 3,
+    Refund = 4,
+    Adjustment = 5
+}
+
+public enum AiInsightRequestStatus
+{
+    Pending = 1,
+    Succeeded = 2,
+    Failed = 3
+}
+
+public enum AiCreditPaymentStatus
+{
+    Pending = 1,
+    Succeeded = 2,
+    Failed = 3,
+    Refunded = 4,
+    Canceled = 5
 }

@@ -2144,6 +2144,196 @@ export async function generateProductFromImageSuggestions(requestBody: ProductFr
   });
 }
 
+export type AiInsightsRequest = {
+  prompt: string;
+  idempotency_key?: string;
+};
+
+export type AiInsightsEstimateRequest = {
+  prompt: string;
+};
+
+export type AiInsightsEstimateResponse = {
+  estimated_input_tokens: number;
+  estimated_output_tokens: number;
+  estimated_charge_credits: number;
+  reserve_credits: number;
+  available_credits: number;
+  daily_remaining_credits: number;
+  can_afford: boolean;
+  pricing_rules_version: string;
+};
+
+export type AiInsightsResponse = {
+  request_id: string;
+  status: string;
+  provider: string;
+  model: string;
+  pricing_rules_version: string;
+  insight: string;
+  input_tokens: number;
+  output_tokens: number;
+  reserved_credits: number;
+  charged_credits: number;
+  credits_used: number;
+  refunded_credits: number;
+  remaining_credits: number;
+  created_at: string;
+  completed_at: string;
+};
+
+export type AiInsightsHistoryItem = {
+  request_id: string;
+  status: string;
+  provider: string;
+  model: string;
+  pricing_rules_version: string;
+  input_tokens: number;
+  output_tokens: number;
+  reserved_credits: number;
+  charged_credits: number;
+  credits_used: number;
+  refunded_credits: number;
+  created_at: string;
+  completed_at?: string | null;
+  error_message?: string | null;
+};
+
+export type AiInsightsHistoryResponse = {
+  items: AiInsightsHistoryItem[];
+};
+
+export type AiWalletResponse = {
+  available_credits: number;
+  updated_at: string;
+};
+
+export type AiWalletTopUpRequest = {
+  user_id?: string;
+  credits: number;
+  purchase_reference: string;
+  description?: string;
+};
+
+export type AiWalletTopUpResponse = {
+  available_credits: number;
+  applied_credits: number;
+  purchase_reference: string;
+  updated_at: string;
+};
+
+export type AiWalletAdjustmentRequest = {
+  user_id?: string;
+  delta_credits: number;
+  reference: string;
+  reason?: string;
+};
+
+export type AiWalletAdjustmentResponse = {
+  available_credits: number;
+  applied_delta: number;
+  reference: string;
+  updated_at: string;
+};
+
+export type AiCreditPack = {
+  pack_code: string;
+  credits: number;
+  price: number;
+  currency: string;
+};
+
+export type AiCreditPackListResponse = {
+  items: AiCreditPack[];
+};
+
+export type AiCheckoutSessionRequest = {
+  pack_code: string;
+  idempotency_key?: string;
+};
+
+export type AiCheckoutSessionResponse = {
+  payment_id: string;
+  payment_status: string;
+  provider: string;
+  pack_code: string;
+  credits: number;
+  amount: number;
+  currency: string;
+  external_reference: string;
+  checkout_url?: string | null;
+  created_at: string;
+};
+
+export type AiPaymentHistoryItem = {
+  payment_id: string;
+  payment_status: string;
+  provider: string;
+  credits: number;
+  amount: number;
+  currency: string;
+  external_reference: string;
+  created_at: string;
+  completed_at?: string | null;
+};
+
+export type AiPaymentHistoryResponse = {
+  items: AiPaymentHistoryItem[];
+};
+
+export async function fetchAiWallet() {
+  return request<AiWalletResponse>("/api/ai/wallet");
+}
+
+export async function generateAiInsights(requestBody: AiInsightsRequest) {
+  return request<AiInsightsResponse>("/api/ai/insights", {
+    method: "POST",
+    body: JSON.stringify(requestBody),
+  });
+}
+
+export async function estimateAiInsights(requestBody: AiInsightsEstimateRequest) {
+  return request<AiInsightsEstimateResponse>("/api/ai/insights/estimate", {
+    method: "POST",
+    body: JSON.stringify(requestBody),
+  });
+}
+
+export async function fetchAiInsightsHistory(take = 10) {
+  const normalizedTake = Math.max(1, Math.min(100, Math.trunc(take || 10)));
+  return request<AiInsightsHistoryResponse>(`/api/ai/insights/history?take=${normalizedTake}`);
+}
+
+export async function topUpAiWallet(requestBody: AiWalletTopUpRequest) {
+  return request<AiWalletTopUpResponse>("/api/ai/wallet/top-up", {
+    method: "POST",
+    body: JSON.stringify(requestBody),
+  });
+}
+
+export async function adjustAiWallet(requestBody: AiWalletAdjustmentRequest) {
+  return request<AiWalletAdjustmentResponse>("/api/ai/wallet/adjust", {
+    method: "POST",
+    body: JSON.stringify(requestBody),
+  });
+}
+
+export async function fetchAiCreditPacks() {
+  return request<AiCreditPackListResponse>("/api/ai/credit-packs");
+}
+
+export async function createAiCheckoutSession(requestBody: AiCheckoutSessionRequest) {
+  return request<AiCheckoutSessionResponse>("/api/ai/payments/checkout", {
+    method: "POST",
+    body: JSON.stringify(requestBody),
+  });
+}
+
+export async function fetchAiPaymentHistory(take = 10) {
+  const normalizedTake = Math.max(1, Math.min(100, Math.trunc(take || 10)));
+  return request<AiPaymentHistoryResponse>(`/api/ai/payments?take=${normalizedTake}`);
+}
+
 export type UpdateProductRequest = {
   name: string;
   sku?: string | null;

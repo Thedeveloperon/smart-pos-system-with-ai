@@ -44,6 +44,8 @@ builder.Services.Configure<PurchasingOptions>(
     builder.Configuration.GetSection(PurchasingOptions.SectionName));
 builder.Services.Configure<AiSuggestionOptions>(
     builder.Configuration.GetSection(AiSuggestionOptions.SectionName));
+builder.Services.Configure<AiInsightOptions>(
+    builder.Configuration.GetSection(AiInsightOptions.SectionName));
 builder.Services.Configure<LicenseOptions>(
     builder.Configuration.GetSection(LicenseOptions.SectionName));
 builder.Services.Configure<AuthSecurityOptions>(
@@ -163,7 +165,10 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<AuditLogService>();
 builder.Services.AddScoped<LicenseService>();
 builder.Services.AddScoped<DeviceActionProofService>();
+builder.Services.AddScoped<AiCreditBillingService>();
+builder.Services.AddScoped<AiCreditPaymentService>();
 builder.Services.AddHttpClient<AiSuggestionService>();
+builder.Services.AddHttpClient<AiInsightService>();
 builder.Services.AddSingleton<BasicTextOcrProvider>();
 builder.Services.AddSingleton<TesseractOcrProvider>();
 builder.Services.AddSingleton<IOcrProviderCore>(serviceProvider =>
@@ -235,6 +240,7 @@ using (var scope = app.Services.CreateScope())
     await DbSchemaUpdater.EnsurePurchasingSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureLicensingSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureAuthSecuritySchemaAsync(dbContext);
+    await DbSchemaUpdater.EnsureAiInsightsSchemaAsync(dbContext);
     await DbSeeder.SeedAsync(dbContext);
 }
 

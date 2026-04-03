@@ -4,7 +4,7 @@ using Microsoft.Extensions.Configuration;
 
 namespace SmartPos.Backend.IntegrationTests;
 
-public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
+public class CustomWebApplicationFactory : WebApplicationFactory<Program>
 {
     private const string K1PrivateKeyPem = """
         -----BEGIN PRIVATE KEY-----
@@ -102,7 +102,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
         builder.ConfigureAppConfiguration((_, configBuilder) =>
         {
-            configBuilder.AddInMemoryCollection(new Dictionary<string, string?>
+            var settings = new Dictionary<string, string?>
             {
                 ["Database:Provider"] = "Sqlite",
                 ["ConnectionStrings:Sqlite"] = $"Data Source={sqliteDbPath}",
@@ -177,9 +177,34 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 ["Licensing:WebhookSecurity:SignatureHeaderName"] = "Stripe-Signature",
                 ["Licensing:WebhookSecurity:SignatureScheme"] = "v1",
                 ["Licensing:WebhookSecurity:TimestampToleranceSeconds"] = "300",
-                ["Purchasing:OcrProvider"] = "basic-text"
-            });
+                ["Purchasing:OcrProvider"] = "basic-text",
+                ["AiInsights:PaymentProvider"] = "mockpay",
+                ["AiInsights:CheckoutBaseUrl"] = "https://payments.smartpos.test/ai-checkout",
+                ["AiInsights:CreditPacks:0:PackCode"] = "pack_100",
+                ["AiInsights:CreditPacks:0:Credits"] = "100",
+                ["AiInsights:CreditPacks:0:Price"] = "5",
+                ["AiInsights:CreditPacks:0:Currency"] = "USD",
+                ["AiInsights:EnableManualWalletTopUp"] = "true",
+                ["AiInsights:PaymentWebhook:RequireSignature"] = "true",
+                ["AiInsights:PaymentWebhook:SigningSecret"] = "smartpos-ai-webhook-test-secret-2026",
+                ["AiInsights:PaymentWebhook:SigningSecretEnvironmentVariable"] = "SMARTPOS_AI_WEBHOOK_SIGNING_SECRET",
+                ["AiInsights:PaymentWebhook:SignatureHeaderName"] = "X-AI-Payment-Signature",
+                ["AiInsights:PaymentWebhook:SignatureScheme"] = "v1",
+                ["AiInsights:PaymentWebhook:TimestampToleranceSeconds"] = "300"
+            };
+
+            foreach (var (key, value) in GetAdditionalConfigurationOverrides())
+            {
+                settings[key] = value;
+            }
+
+            configBuilder.AddInMemoryCollection(settings);
         });
+    }
+
+    protected virtual IReadOnlyDictionary<string, string?> GetAdditionalConfigurationOverrides()
+    {
+        return new Dictionary<string, string?>();
     }
 
     protected override void Dispose(bool disposing)

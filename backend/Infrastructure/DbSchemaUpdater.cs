@@ -308,6 +308,24 @@ public static class DbSchemaUpdater
         }
     }
 
+    public static async Task EnsureAiInsightsSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken = default)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+
+        if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            await EnsureSqliteAiInsightsSchemaAsync(dbContext, cancellationToken);
+            return;
+        }
+
+        if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            await EnsurePostgresAiInsightsSchemaAsync(dbContext, cancellationToken);
+        }
+    }
+
     private static async Task EnsureSqliteRefundSchemaAsync(
         SmartPosDbContext dbContext,
         CancellationToken cancellationToken)
@@ -1342,5 +1360,222 @@ public static class DbSchemaUpdater
         await dbContext.Database.ExecuteSqlRawAsync(
             """CREATE INDEX IF NOT EXISTS "IX_offline_events_OfflineGrantId" ON offline_events("OfflineGrantId");""",
             cancellationToken);
+    }
+
+    private static async Task EnsureSqliteAiInsightsSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var sql = """
+            CREATE TABLE IF NOT EXISTS "ai_credit_wallets" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_ai_credit_wallets" PRIMARY KEY,
+              "UserId" TEXT NOT NULL,
+              "AvailableCredits" TEXT NOT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "UpdatedAtUtc" TEXT NOT NULL,
+              CONSTRAINT "FK_ai_credit_wallets_users_UserId" FOREIGN KEY ("UserId") REFERENCES "users" ("Id") ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS "ai_insight_requests" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_ai_insight_requests" PRIMARY KEY,
+              "UserId" TEXT NOT NULL,
+              "IdempotencyKey" TEXT NOT NULL,
+              "Status" TEXT NOT NULL,
+              "Provider" TEXT NOT NULL,
+              "Model" TEXT NOT NULL,
+              "PromptHash" TEXT NOT NULL,
+              "PromptCharCount" INTEGER NOT NULL,
+              "ReservedCredits" TEXT NOT NULL,
+              "ChargedCredits" TEXT NOT NULL,
+              "InputTokens" INTEGER NOT NULL,
+              "OutputTokens" INTEGER NOT NULL,
+              "ResponseText" TEXT NULL,
+              "ErrorCode" TEXT NULL,
+              "ErrorMessage" TEXT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "UpdatedAtUtc" TEXT NULL,
+              "CompletedAtUtc" TEXT NULL,
+              CONSTRAINT "FK_ai_insight_requests_users_UserId" FOREIGN KEY ("UserId") REFERENCES "users" ("Id") ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS "ai_credit_ledger" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_ai_credit_ledger" PRIMARY KEY,
+              "UserId" TEXT NOT NULL,
+              "WalletId" TEXT NOT NULL,
+              "AiInsightRequestId" TEXT NULL,
+              "EntryType" TEXT NOT NULL,
+              "DeltaCredits" TEXT NOT NULL,
+              "BalanceAfterCredits" TEXT NOT NULL,
+              "Reference" TEXT NULL,
+              "Description" TEXT NULL,
+              "MetadataJson" TEXT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              CONSTRAINT "FK_ai_credit_ledger_users_UserId" FOREIGN KEY ("UserId") REFERENCES "users" ("Id") ON DELETE CASCADE,
+              CONSTRAINT "FK_ai_credit_ledger_ai_credit_wallets_WalletId" FOREIGN KEY ("WalletId") REFERENCES "ai_credit_wallets" ("Id") ON DELETE CASCADE,
+              CONSTRAINT "FK_ai_credit_ledger_ai_insight_requests_AiInsightRequestId" FOREIGN KEY ("AiInsightRequestId") REFERENCES "ai_insight_requests" ("Id") ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS "ai_credit_payments" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_ai_credit_payments" PRIMARY KEY,
+              "UserId" TEXT NOT NULL,
+              "Status" TEXT NOT NULL,
+              "Provider" TEXT NOT NULL,
+              "ProviderPaymentId" TEXT NULL,
+              "ProviderCheckoutSessionId" TEXT NULL,
+              "ExternalReference" TEXT NOT NULL,
+              "CreditsPurchased" TEXT NOT NULL,
+              "Amount" TEXT NOT NULL,
+              "Currency" TEXT NOT NULL,
+              "PurchaseReference" TEXT NULL,
+              "LastWebhookEventId" TEXT NULL,
+              "LastWebhookEventType" TEXT NULL,
+              "FailureReason" TEXT NULL,
+              "MetadataJson" TEXT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "UpdatedAtUtc" TEXT NULL,
+              "CompletedAtUtc" TEXT NULL,
+              CONSTRAINT "FK_ai_credit_payments_users_UserId" FOREIGN KEY ("UserId") REFERENCES "users" ("Id") ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS "ai_credit_payment_webhook_events" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_ai_credit_payment_webhook_events" PRIMARY KEY,
+              "Provider" TEXT NOT NULL,
+              "ProviderEventId" TEXT NOT NULL,
+              "EventType" TEXT NOT NULL,
+              "Status" TEXT NOT NULL,
+              "PaymentId" TEXT NULL,
+              "ErrorCode" TEXT NULL,
+              "ErrorMessage" TEXT NULL,
+              "ReceivedAtUtc" TEXT NOT NULL,
+              "ProcessedAtUtc" TEXT NULL,
+              "UpdatedAtUtc" TEXT NULL,
+              CONSTRAINT "FK_ai_credit_payment_webhook_events_ai_credit_payments_PaymentId" FOREIGN KEY ("PaymentId") REFERENCES "ai_credit_payments" ("Id") ON DELETE SET NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_credit_wallets_UserId" ON "ai_credit_wallets" ("UserId");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_insight_requests_UserId_IdempotencyKey" ON "ai_insight_requests" ("UserId", "IdempotencyKey");
+            CREATE INDEX IF NOT EXISTS "IX_ai_insight_requests_UserId_CreatedAtUtc" ON "ai_insight_requests" ("UserId", "CreatedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_ledger_UserId" ON "ai_credit_ledger" ("UserId");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_ledger_WalletId" ON "ai_credit_ledger" ("WalletId");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_ledger_UserId_CreatedAtUtc" ON "ai_credit_ledger" ("UserId", "CreatedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_ledger_AiInsightRequestId" ON "ai_credit_ledger" ("AiInsightRequestId");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_credit_payments_ExternalReference" ON "ai_credit_payments" ("ExternalReference");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_credit_payments_ProviderPaymentId" ON "ai_credit_payments" ("ProviderPaymentId");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_payments_UserId" ON "ai_credit_payments" ("UserId");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_payments_CreatedAtUtc" ON "ai_credit_payments" ("CreatedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_payments_Status" ON "ai_credit_payments" ("Status");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_credit_payment_webhook_events_ProviderEventId" ON "ai_credit_payment_webhook_events" ("ProviderEventId");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_payment_webhook_events_EventType" ON "ai_credit_payment_webhook_events" ("EventType");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_payment_webhook_events_Status" ON "ai_credit_payment_webhook_events" ("Status");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_payment_webhook_events_ReceivedAtUtc" ON "ai_credit_payment_webhook_events" ("ReceivedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_payment_webhook_events_PaymentId" ON "ai_credit_payment_webhook_events" ("PaymentId");
+            """;
+
+        await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+    }
+
+    private static async Task EnsurePostgresAiInsightsSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var sql = """
+            CREATE TABLE IF NOT EXISTS ai_credit_wallets (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "UserId" uuid NOT NULL REFERENCES users("Id") ON DELETE CASCADE,
+              "AvailableCredits" numeric(18,2) NOT NULL,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "UpdatedAtUtc" timestamptz NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS ai_insight_requests (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "UserId" uuid NOT NULL REFERENCES users("Id") ON DELETE CASCADE,
+              "IdempotencyKey" varchar(120) NOT NULL,
+              "Status" varchar(24) NOT NULL,
+              "Provider" varchar(24) NOT NULL,
+              "Model" varchar(120) NOT NULL,
+              "PromptHash" varchar(128) NOT NULL,
+              "PromptCharCount" integer NOT NULL,
+              "ReservedCredits" numeric(18,2) NOT NULL,
+              "ChargedCredits" numeric(18,2) NOT NULL,
+              "InputTokens" integer NOT NULL,
+              "OutputTokens" integer NOT NULL,
+              "ResponseText" text NULL,
+              "ErrorCode" varchar(80) NULL,
+              "ErrorMessage" varchar(500) NULL,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "UpdatedAtUtc" timestamptz NULL,
+              "CompletedAtUtc" timestamptz NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS ai_credit_ledger (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "UserId" uuid NOT NULL REFERENCES users("Id") ON DELETE CASCADE,
+              "WalletId" uuid NOT NULL REFERENCES ai_credit_wallets("Id") ON DELETE CASCADE,
+              "AiInsightRequestId" uuid NULL REFERENCES ai_insight_requests("Id") ON DELETE SET NULL,
+              "EntryType" varchar(24) NOT NULL,
+              "DeltaCredits" numeric(18,2) NOT NULL,
+              "BalanceAfterCredits" numeric(18,2) NOT NULL,
+              "Reference" varchar(120) NULL,
+              "Description" varchar(250) NULL,
+              "MetadataJson" text NULL,
+              "CreatedAtUtc" timestamptz NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS ai_credit_payments (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "UserId" uuid NOT NULL REFERENCES users("Id") ON DELETE CASCADE,
+              "Status" varchar(24) NOT NULL,
+              "Provider" varchar(32) NOT NULL,
+              "ProviderPaymentId" varchar(160) NULL,
+              "ProviderCheckoutSessionId" varchar(160) NULL,
+              "ExternalReference" varchar(120) NOT NULL,
+              "CreditsPurchased" numeric(18,2) NOT NULL,
+              "Amount" numeric(18,2) NOT NULL,
+              "Currency" varchar(8) NOT NULL,
+              "PurchaseReference" varchar(120) NULL,
+              "LastWebhookEventId" varchar(160) NULL,
+              "LastWebhookEventType" varchar(80) NULL,
+              "FailureReason" varchar(300) NULL,
+              "MetadataJson" text NULL,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "UpdatedAtUtc" timestamptz NULL,
+              "CompletedAtUtc" timestamptz NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS ai_credit_payment_webhook_events (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "Provider" varchar(32) NOT NULL,
+              "ProviderEventId" varchar(160) NOT NULL,
+              "EventType" varchar(80) NOT NULL,
+              "Status" varchar(24) NOT NULL,
+              "PaymentId" uuid NULL REFERENCES ai_credit_payments("Id") ON DELETE SET NULL,
+              "ErrorCode" varchar(80) NULL,
+              "ErrorMessage" varchar(300) NULL,
+              "ReceivedAtUtc" timestamptz NOT NULL,
+              "ProcessedAtUtc" timestamptz NULL,
+              "UpdatedAtUtc" timestamptz NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_credit_wallets_UserId" ON ai_credit_wallets("UserId");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_insight_requests_UserId_IdempotencyKey" ON ai_insight_requests("UserId", "IdempotencyKey");
+            CREATE INDEX IF NOT EXISTS "IX_ai_insight_requests_UserId_CreatedAtUtc" ON ai_insight_requests("UserId", "CreatedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_ledger_UserId" ON ai_credit_ledger("UserId");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_ledger_WalletId" ON ai_credit_ledger("WalletId");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_ledger_UserId_CreatedAtUtc" ON ai_credit_ledger("UserId", "CreatedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_ledger_AiInsightRequestId" ON ai_credit_ledger("AiInsightRequestId");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_credit_payments_ExternalReference" ON ai_credit_payments("ExternalReference");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_credit_payments_ProviderPaymentId" ON ai_credit_payments("ProviderPaymentId");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_payments_UserId" ON ai_credit_payments("UserId");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_payments_CreatedAtUtc" ON ai_credit_payments("CreatedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_payments_Status" ON ai_credit_payments("Status");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_credit_payment_webhook_events_ProviderEventId" ON ai_credit_payment_webhook_events("ProviderEventId");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_payment_webhook_events_EventType" ON ai_credit_payment_webhook_events("EventType");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_payment_webhook_events_Status" ON ai_credit_payment_webhook_events("Status");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_payment_webhook_events_ReceivedAtUtc" ON ai_credit_payment_webhook_events("ReceivedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_payment_webhook_events_PaymentId" ON ai_credit_payment_webhook_events("PaymentId");
+            """;
+
+        await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
     }
 }
