@@ -5,6 +5,7 @@ using System.Net.Mail;
 using System.Text;
 using System.Text.Json;
 using System.Globalization;
+using System.Linq;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -7106,7 +7107,7 @@ public sealed class LicenseService(
 
     private static string? TryDerivePublicKeyPem(string? privateKeyPem)
     {
-        var normalizedPrivateKeyPem = NormalizePem(privateKeyPem);
+        var normalizedPrivateKeyPem = NormalizePrivateKeyPem(privateKeyPem);
         if (string.IsNullOrWhiteSpace(normalizedPrivateKeyPem))
         {
             return null;
@@ -7126,7 +7127,7 @@ public sealed class LicenseService(
 
     private string ResolveSigningPrivateKeyPem(string? inlinePrivateKeyPem, string keyId)
     {
-        var normalizedInline = NormalizePem(inlinePrivateKeyPem);
+        var normalizedInline = NormalizePrivateKeyPem(inlinePrivateKeyPem);
         var envVarName = NormalizeOptionalValue(options.SigningPrivateKeyEnvironmentVariable)
                          ?? "SMARTPOS_LICENSE_SIGNING_PRIVATE_KEY_PEM";
 
@@ -7135,7 +7136,7 @@ public sealed class LicenseService(
             return normalizedInline;
         }
 
-        var fromEnvironment = ResolvePemFromEnvironmentVariable(envVarName, keyId);
+        var fromEnvironment = NormalizePrivateKeyPem(ResolvePemFromEnvironmentVariable(envVarName, keyId));
         if (!string.IsNullOrWhiteSpace(fromEnvironment))
         {
             return fromEnvironment;
@@ -7214,7 +7215,7 @@ public sealed class LicenseService(
         if (Path.IsPathRooted(normalized)
             || normalized.StartsWith("./", StringComparison.Ordinal)
             || normalized.StartsWith("../", StringComparison.Ordinal)
-            || normalized.IndexOfAny(new[] { '/', '\\' }) >= 0
+            || (normalized.IndexOfAny(new[] { '/', '\\' }) >= 0 && !LooksLikeBase64KeyBody(normalized))
             || normalized.EndsWith(".pem", StringComparison.OrdinalIgnoreCase)
             || normalized.EndsWith(".key", StringComparison.OrdinalIgnoreCase)
             || File.Exists(normalized))
@@ -7224,6 +7225,63 @@ public sealed class LicenseService(
         }
 
         return false;
+    }
+
+    private static string NormalizePrivateKeyPem(string? keyMaterial)
+    {
+        var normalized = NormalizePem(keyMaterial);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return string.Empty;
+        }
+
+        if (normalized.Contains("-----BEGIN", StringComparison.Ordinal)
+            || normalized.Contains("-----END", StringComparison.Ordinal))
+        {
+            return normalized;
+        }
+
+        return LooksLikeBase64KeyBody(normalized)
+            ? WrapAsPem(normalized, "PRIVATE KEY")
+            : normalized;
+    }
+
+    private static bool LooksLikeBase64KeyBody(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var compact = RemoveWhitespace(value);
+        if (compact.Length < 128)
+        {
+            return false;
+        }
+
+        return compact.All(static c => char.IsLetterOrDigit(c) || c is '+' or '/' or '=');
+    }
+
+    private static string WrapAsPem(string base64Body, string label)
+    {
+        var compact = RemoveWhitespace(base64Body);
+        var builder = new StringBuilder(capacity: compact.Length + 128);
+        builder.Append("-----BEGIN ").Append(label).AppendLine("-----");
+
+        const int lineLength = 64;
+        for (var index = 0; index < compact.Length; index += lineLength)
+        {
+            var take = Math.Min(lineLength, compact.Length - index);
+            builder.AppendLine(compact.Substring(index, take));
+        }
+
+        builder.Append("-----END ").Append(label).Append("-----");
+        return builder.ToString();
+    }
+
+    private static string RemoveWhitespace(string value)
+    {
+        return string.Concat(value.Where(static c => !char.IsWhiteSpace(c)));
     }
 
     private static string NormalizePem(string? keyMaterial)
