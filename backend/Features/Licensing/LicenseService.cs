@@ -7135,7 +7135,7 @@ public sealed class LicenseService(
             return normalizedInline;
         }
 
-        var fromEnvironment = NormalizePem(Environment.GetEnvironmentVariable(envVarName));
+        var fromEnvironment = ResolvePemFromEnvironmentVariable(envVarName, keyId);
         if (!string.IsNullOrWhiteSpace(fromEnvironment))
         {
             return fromEnvironment;
@@ -7156,11 +7156,98 @@ public sealed class LicenseService(
             $"Licensing private signing key '{keyId}' is not configured. Set environment variable '{envVarName}'.");
     }
 
+    private static string ResolvePemFromEnvironmentVariable(string envVarName, string keyId)
+    {
+        var normalizedValue = NormalizePem(Environment.GetEnvironmentVariable(envVarName));
+        if (string.IsNullOrWhiteSpace(normalizedValue))
+        {
+            return string.Empty;
+        }
+
+        if (!TryResolvePemFilePath(normalizedValue, out var keyFilePath))
+        {
+            return normalizedValue;
+        }
+
+        if (!File.Exists(keyFilePath))
+        {
+            throw new InvalidOperationException(
+                $"Licensing signing key '{keyId}' environment variable '{envVarName}' points to '{keyFilePath}', but the file was not found.");
+        }
+
+        var filePem = NormalizePem(File.ReadAllText(keyFilePath));
+        if (string.IsNullOrWhiteSpace(filePem))
+        {
+            throw new InvalidOperationException(
+                $"Licensing signing key '{keyId}' file '{keyFilePath}' is empty.");
+        }
+
+        return filePem;
+    }
+
+    private static bool TryResolvePemFilePath(string value, out string filePath)
+    {
+        var normalized = value.Trim();
+        filePath = string.Empty;
+
+        if (normalized.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!Uri.TryCreate(normalized, UriKind.Absolute, out var fileUri) || !fileUri.IsFile)
+            {
+                throw new InvalidOperationException($"Invalid PEM file URI '{normalized}'.");
+            }
+
+            filePath = fileUri.LocalPath;
+            return true;
+        }
+
+        if (normalized.StartsWith("~/", StringComparison.Ordinal))
+        {
+            var homeDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (!string.IsNullOrWhiteSpace(homeDirectory))
+            {
+                filePath = Path.Combine(homeDirectory, normalized[2..]);
+                return true;
+            }
+        }
+
+        if (Path.IsPathRooted(normalized)
+            || normalized.StartsWith("./", StringComparison.Ordinal)
+            || normalized.StartsWith("../", StringComparison.Ordinal)
+            || normalized.IndexOfAny(new[] { '/', '\\' }) >= 0
+            || normalized.EndsWith(".pem", StringComparison.OrdinalIgnoreCase)
+            || normalized.EndsWith(".key", StringComparison.OrdinalIgnoreCase)
+            || File.Exists(normalized))
+        {
+            filePath = normalized;
+            return true;
+        }
+
+        return false;
+    }
+
     private static string NormalizePem(string? keyMaterial)
     {
-        return string.IsNullOrWhiteSpace(keyMaterial)
-            ? string.Empty
-            : keyMaterial.Replace("\\n", "\n").Trim();
+        if (string.IsNullOrWhiteSpace(keyMaterial))
+        {
+            return string.Empty;
+        }
+
+        var normalized = keyMaterial.Trim();
+        if (normalized.Length >= 2 &&
+            ((normalized[0] == '"' && normalized[^1] == '"')
+             || (normalized[0] == '\'' && normalized[^1] == '\'')))
+        {
+            normalized = normalized[1..^1].Trim();
+        }
+
+        if (normalized.Contains("-----BEGIN", StringComparison.Ordinal)
+            || normalized.Contains("-----END", StringComparison.Ordinal))
+        {
+            normalized = normalized.Replace("\\n", "\n");
+        }
+
+        return normalized.Trim();
     }
 
     private string ProtectSensitiveValue(string? value)
