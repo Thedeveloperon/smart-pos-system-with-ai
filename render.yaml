@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: smartpos-backend
+    runtime: docker
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    autoDeployTrigger: commit
+    healthCheckPath: /health
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: Database__Provider
+        value: Sqlite
+      - key: ConnectionStrings__Sqlite
+        value: Data Source=smartpos.db
+      - key: JwtAuth__SecureCookie
+        value: "true"
+      - key: Licensing__TokenCookieSecure
+        value: "true"
+      - key: SMARTPOS_JWT_SECRET
+        sync: false
+      - key: SMARTPOS_LICENSE_SIGNING_PRIVATE_KEY_PEM
+        sync: false
+      - key: Licensing__VerificationPublicKeyPem
+        sync: false
+      - key: Licensing__AccessSuccessPageBaseUrl
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
