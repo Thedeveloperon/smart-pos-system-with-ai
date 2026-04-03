@@ -7,13 +7,20 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { fetchShopProfile, updateShopProfile, type ShopProfile } from "@/lib/api";
-import { isQuickSaleEnabled, setQuickSaleEnabled } from "@/lib/posPreferences";
+import {
+  isExpertModeEnabled,
+  isQuickSaleEnabled,
+  setExpertModeEnabled,
+  setQuickSaleEnabled,
+} from "@/lib/posPreferences";
 import { isConfirmationSoundEnabled, setConfirmationSoundEnabled } from "@/lib/sound";
 
 interface ShopProfileDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved?: () => void;
+  expertModeEnabled: boolean;
+  onExpertModeEnabledChange: (enabled: boolean) => void;
 }
 
 const emptyProfile = (): ShopProfile => ({
@@ -30,10 +37,17 @@ const emptyProfile = (): ShopProfile => ({
   updatedAt: null,
 });
 
-const ShopProfileDialog = ({ open, onOpenChange, onSaved }: ShopProfileDialogProps) => {
+const ShopProfileDialog = ({
+  open,
+  onOpenChange,
+  onSaved,
+  expertModeEnabled,
+  onExpertModeEnabledChange,
+}: ShopProfileDialogProps) => {
   const [profile, setProfile] = useState<ShopProfile>(emptyProfile);
   const [confirmationSoundEnabled, setConfirmationSoundEnabledState] = useState(true);
   const [quickSaleEnabled, setQuickSaleEnabledState] = useState(false);
+  const [expertModeEnabledState, setExpertModeEnabledState] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -46,6 +60,7 @@ const ShopProfileDialog = ({ open, onOpenChange, onSaved }: ShopProfileDialogPro
     setIsLoading(true);
     setConfirmationSoundEnabledState(isConfirmationSoundEnabled());
     setQuickSaleEnabledState(isQuickSaleEnabled());
+    setExpertModeEnabledState(isExpertModeEnabled());
 
     void fetchShopProfile()
       .then((data) => {
@@ -70,6 +85,14 @@ const ShopProfileDialog = ({ open, onOpenChange, onSaved }: ShopProfileDialogPro
       alive = false;
     };
   }, [open]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    setExpertModeEnabledState(expertModeEnabled);
+  }, [expertModeEnabled, open]);
 
   const updateField = (field: keyof ShopProfile, value: string) => {
     setProfile((current) => ({ ...current, [field]: value }));
@@ -116,9 +139,15 @@ const ShopProfileDialog = ({ open, onOpenChange, onSaved }: ShopProfileDialogPro
     setQuickSaleEnabled(enabled);
   };
 
+  const handleExpertModeToggle = (enabled: boolean) => {
+    setExpertModeEnabledState(enabled);
+    setExpertModeEnabled(enabled);
+    onExpertModeEnabledChange(enabled);
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="max-h-[90vh] w-[min(94vw,920px)] overflow-y-auto sm:max-w-none">
         <DialogHeader>
           <DialogTitle>Shop details</DialogTitle>
           <DialogDescription>
@@ -240,6 +269,18 @@ const ShopProfileDialog = ({ open, onOpenChange, onSaved }: ShopProfileDialogPro
                   </p>
                 </div>
                 <Switch checked={quickSaleEnabled} onCheckedChange={handleQuickSaleToggle} />
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-border bg-muted/20 p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">Expert mode</p>
+                  <p className="text-xs text-muted-foreground">
+                    Hides the product grid and uses search-first billing with automatic cart add.
+                  </p>
+                </div>
+                <Switch checked={expertModeEnabledState} onCheckedChange={handleExpertModeToggle} />
               </div>
             </div>
           </div>
