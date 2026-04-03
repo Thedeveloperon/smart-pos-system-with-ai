@@ -182,8 +182,13 @@ public sealed class CheckoutService(
             .Sum(x => x.Amount);
         if (cashPaidTotal > 0m)
         {
+            var cashNetTotal = decimal.Round(
+                decimal.Max(0m, cashPaidTotal - change),
+                2,
+                MidpointRounding.AwayFromZero);
+
             await cashSessionService.RecordCashSaleAsync(
-                cashPaidTotal,
+                cashNetTotal,
                 request.CashReceivedCounts,
                 request.CashChangeCounts,
                 sale.Id,

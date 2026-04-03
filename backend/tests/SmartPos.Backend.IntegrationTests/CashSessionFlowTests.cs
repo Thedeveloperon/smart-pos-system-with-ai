@@ -146,7 +146,7 @@ public sealed class CashSessionFlowTests(CustomWebApplicationFactory factory)
         var productId = Guid.Parse(TestJson.GetString(firstProduct, "id"));
         var unitPrice = TestJson.GetDecimal(firstProduct, "unitPrice");
 
-        await TestJson.ReadObjectAsync(
+        var openedSession = await TestJson.ReadObjectAsync(
             await client.PostAsJsonAsync("/api/cash-sessions/open", new
             {
                 counts = new[]
@@ -187,8 +187,19 @@ public sealed class CashSessionFlowTests(CustomWebApplicationFactory factory)
 
         var currentAfterSale = await TestJson.ReadObjectAsync(
             await client.GetAsync("/api/cash-sessions/current"));
-        Assert.Equal(unitPrice + 100m, TestJson.GetDecimal(currentAfterSale, "cash_sales_total"));
+        Assert.Equal(unitPrice, TestJson.GetDecimal(currentAfterSale, "cash_sales_total"));
         Assert.Equal(1000m + unitPrice, TestJson.GetDecimal(currentAfterSale["drawer"]!, "total"));
+
+        var sessionId = Guid.Parse(TestJson.GetString(openedSession, "cash_session_id"));
+        var closedSession = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync($"/api/cash-sessions/{sessionId}/close", new
+            {
+                counts = BuildCounts(1000m + unitPrice),
+                total = 1000m + unitPrice
+            }));
+
+        Assert.Equal(1000m + unitPrice, TestJson.GetDecimal(closedSession, "expected_cash"));
+        Assert.Equal(0m, TestJson.GetDecimal(closedSession, "difference"));
     }
 
     private static JsonObject FirstObjectFromArray(JsonNode root, string propertyName)
