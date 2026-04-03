@@ -1,29 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
-
-const DEFAULT_BACKEND_API_URL = "http://127.0.0.1:5080";
-
-function resolveBackendApiUrl() {
-  const configured = process.env.SMARTPOS_BACKEND_API_URL?.trim();
-  return configured || DEFAULT_BACKEND_API_URL;
-}
+import { forwardPaymentRequest } from "../_proxy";
 
 export async function POST(request: NextRequest) {
-  const formData = await request.formData();
-  const backendResponse = await fetch(`${resolveBackendApiUrl()}/api/license/public/payment-proof-upload`, {
-    method: "POST",
-    headers: {
-      "Idempotency-Key": request.headers.get("Idempotency-Key")?.trim() || crypto.randomUUID(),
-    },
-    body: formData,
-    cache: "no-store",
-  });
+  let formData: FormData;
+  try {
+    formData = await request.formData();
+  } catch {
+    return NextResponse.json(
+      {
+        error: {
+          code: "INVALID_REQUEST",
+          message: "Request body must be valid multipart/form-data.",
+        },
+      },
+      { status: 400 },
+    );
+  }
 
-  const contentType = backendResponse.headers.get("content-type") || "application/json";
-  const bodyText = await backendResponse.text();
-  return new NextResponse(bodyText, {
-    status: backendResponse.status,
-    headers: {
-      "Content-Type": contentType,
-    },
+  return forwardPaymentRequest({
+    request,
+    backendPath: "/api/license/public/payment-proof-upload",
+    body: formData,
   });
 }
