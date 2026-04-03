@@ -220,8 +220,9 @@ builder.Services.AddDbContext<SmartPosDbContext>(options =>
 });
 
 var app = builder.Build();
-var staticFilesAvailable = Directory.Exists(
-    Path.Combine(app.Environment.ContentRootPath, "wwwroot"));
+var webRootPath = Path.Combine(app.Environment.ContentRootPath, "wwwroot");
+var staticFilesAvailable = Directory.Exists(webRootPath);
+var staticIndexFileAvailable = File.Exists(Path.Combine(webRootPath, "index.html"));
 
 if (app.Environment.IsDevelopment())
 {
@@ -269,6 +270,22 @@ app.MapGet("/health", () =>
 .WithName("Health")
 .WithOpenApi();
 
+if (!staticIndexFileAvailable)
+{
+    app.MapGet("/", () =>
+    {
+        return Results.Ok(new
+        {
+            status = "ok",
+            service = "smartpos-api",
+            message = "API is running. Use /health for service health checks.",
+            timestamp = DateTimeOffset.UtcNow
+        });
+    })
+    .WithName("Root")
+    .WithOpenApi();
+}
+
 app.MapAuthEndpoints();
 app.MapLicensingEndpoints();
 app.MapDeviceActionProofEndpoints();
@@ -283,7 +300,7 @@ app.MapRefundEndpoints();
 app.MapSettingsEndpoints();
 app.MapReportEndpoints();
 
-if (staticFilesAvailable)
+if (staticIndexFileAvailable)
 {
     app.MapFallbackToFile("index.html");
 }
