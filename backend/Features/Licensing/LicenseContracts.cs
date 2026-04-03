@@ -1752,6 +1752,7 @@ internal static class LicenseErrorCodes
     public const string ActivationEntitlementNotFound = "ACTIVATION_ENTITLEMENT_NOT_FOUND";
     public const string InvalidActivationEntitlement = "INVALID_ACTIVATION_ENTITLEMENT";
     public const string ActivationEntitlementExpired = "ACTIVATION_ENTITLEMENT_EXPIRED";
+    public const string LicensingConfigurationError = "LICENSING_CONFIGURATION_ERROR";
     public const string SelfServiceDeactivationLimitReached = "SELF_SERVICE_DEVICE_DEACTIVATION_LIMIT_REACHED";
     public const string InvoiceNotFound = "INVOICE_NOT_FOUND";
     public const string PaymentNotFound = "PAYMENT_NOT_FOUND";
