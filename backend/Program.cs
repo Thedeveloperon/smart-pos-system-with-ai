@@ -60,15 +60,34 @@ builder.Services.AddHostedService(
 builder.Services.AddHostedService<LicenseTokenSessionCleanupService>();
 builder.Services.AddHostedService<BillingStateReconciliationService>();
 builder.Services.AddHttpContextAccessor();
+var corsFromArray = builder.Configuration
+    .GetSection("Cors:AllowedOrigins")
+    .Get<string[]>() ?? Array.Empty<string>();
+var corsFromCsv = (builder.Configuration["Cors:AllowedOriginsCsv"] ?? string.Empty)
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+var corsOrigins = corsFromArray
+    .Concat(corsFromCsv)
+    .Select(origin => origin.Trim().TrimEnd('/'))
+    .Where(origin => !string.IsNullOrWhiteSpace(origin))
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray();
+
+if (corsOrigins.Length == 0)
+{
+    corsOrigins =
+    [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:8080",
+        "http://127.0.0.1:8080"
+    ];
+}
+
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("frontend-dev", policy =>
+    options.AddPolicy("frontend", policy =>
     {
-        policy.WithOrigins(
-                "http://localhost:5173",
-                "http://127.0.0.1:5173",
-                "http://localhost:8080",
-                "http://127.0.0.1:8080")
+        policy.WithOrigins(corsOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
@@ -251,7 +270,7 @@ if (staticFilesAvailable)
     app.UseStaticFiles();
 }
 
-app.UseCors("frontend-dev");
+app.UseCors("frontend");
 app.UseMiddleware<ProvisioningRateLimitMiddleware>();
 app.UseAuthentication();
 app.UseMiddleware<LicenseEnforcementMiddleware>();

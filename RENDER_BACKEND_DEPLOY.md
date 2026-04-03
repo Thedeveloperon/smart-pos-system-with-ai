@@ -1,51 +1,66 @@
-# Render Backend Deploy (Temporary)
+# Render Deploy (Backend + POS Frontend)
 
-This deploy path hosts only the ASP.NET backend on Render, then connects your Vercel marketing site to it.
+This deployment path hosts both the ASP.NET backend and the POS frontend on Render using `render.yaml`.
 
-## 1. Deploy the backend from blueprint
+## 1. Deploy from blueprint
 
 In Render:
 
 1. Click **New -> Blueprint**.
 2. Select this repository.
 3. Render will detect `render.yaml`.
-4. Create the `smartpos-backend` service.
+4. Create both services:
+   - `smartpos-backend`
+   - `smartpos-pos-frontend`
 
-This blueprint uses SQLite for temporary testing, so you can start without creating Render Postgres.
+## 2. Set backend secrets
 
-## 2. Set required secrets in Render
-
-Open the `smartpos-backend` service, then set:
+Open the `smartpos-backend` service and set:
 
 - `SMARTPOS_JWT_SECRET`
 - `SMARTPOS_LICENSE_SIGNING_PRIVATE_KEY_PEM`
 - `Licensing__VerificationPublicKeyPem`
-- `Licensing__AccessSuccessPageBaseUrl` = `https://smart-pos-system-with-ai.vercel.app/license/success`
+- `Licensing__AccessSuccessPageBaseUrl`
+
+Recommended value for `Licensing__AccessSuccessPageBaseUrl` while using Render URLs:
+
+- `https://<your-pos-frontend>.onrender.com/license/success`
 
 Optional:
 
 - `OPENAI_API_KEY`
 
-## 3. Verify backend health
+## 3. Configure POS frontend upstream
 
-After deploy, open:
+Open the `smartpos-pos-frontend` service and confirm:
 
-`https://<your-render-service>.onrender.com/health`
+- `BACKEND_UPSTREAM=https://<your-backend>.onrender.com`
 
-Expected: JSON with `"status":"ok"`.
+The frontend service proxies `/api/*` to this backend URL.
 
-## 4. Connect Vercel website to backend
+## 4. Verify services
 
-In Vercel project env vars:
+Backend health:
 
-- `SMARTPOS_BACKEND_API_URL=https://<your-render-service>.onrender.com`
-- `NEXT_PUBLIC_SITE_URL=https://smart-pos-system-with-ai.vercel.app`
+- `https://<your-backend>.onrender.com/health`
 
-Redeploy the website after updating env vars.
+Frontend health:
 
-## 5. Notes for temporary testing
+- `https://<your-pos-frontend>.onrender.com/health`
 
-- SQLite on Render is ephemeral. Data can reset after deploy/restart.
-- For persistent production data, switch to Postgres and set:
+POS app:
+
+- `https://<your-pos-frontend>.onrender.com/`
+
+Super admin login:
+
+- `https://<your-pos-frontend>.onrender.com/admin/login`
+
+## 5. Notes
+
+- This setup works without a custom domain.
+- Keeping POS UI and API traffic through the frontend proxy avoids browser CORS/cookie friction.
+- Current blueprint uses SQLite (`Database__Provider=Sqlite`) for temporary testing.
+- For persistent production data, switch backend to Postgres:
   - `Database__Provider=Postgres`
   - `ConnectionStrings__Postgres=<postgres-connection-string>`

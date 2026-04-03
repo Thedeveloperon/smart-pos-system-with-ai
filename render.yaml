@@ -27,3 +27,14 @@ services:
         sync: false
       - key: OPENAI_API_KEY
         sync: false
+
+  - type: web
+    name: smartpos-pos-frontend
+    runtime: docker
+    dockerContext: ./frontend
+    dockerfilePath: ./frontend/Dockerfile.render
+    autoDeployTrigger: commit
+    healthCheckPath: /health
+    envVars:
+      - key: BACKEND_UPSTREAM
+        value: https://smartpos-backend.onrender.com
