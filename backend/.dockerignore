@@ -1,0 +1,8 @@
+bin/
+obj/
+tests/
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
+appsettings.Development.json
