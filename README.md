@@ -41,6 +41,15 @@ export SMARTPOS_INSTALLER_DOWNLOAD_SIGNING_SECRET="replace-with-strong-secret"
 export Licensing__InstallerChecksumSha256="paste-installer-sha256"
 ```
 
+Optional (staged rollout gate for barcode generation/validation endpoints):
+
+```bash
+# default is enabled; set false to disable barcode feature APIs
+export ProductBarcodes__Enabled=true
+```
+
+Barcode mutation endpoints (`/api/products/{id}/barcode/generate`, `/api/products/barcodes/bulk-generate-missing`) also honor `Idempotency-Key` for deterministic safe retries.
+
 ## 3. Run frontend
 
 ```bash
@@ -54,6 +63,15 @@ Optional (pilot rollout gate for POS keyboard shortcuts):
 # default is enabled; set false to disable shortcuts, labels, and onboarding
 export VITE_POS_SHORTCUTS_ENABLED=true
 ```
+
+Optional (staged rollout gate for barcode UI actions):
+
+```bash
+# default is enabled; set false to hide barcode generate/regenerate/print/scanner UX
+export VITE_BARCODE_FEATURE_ENABLED=true
+```
+
+Barcode label print supports both desktop Chromium and Electron shell runtimes with runtime-specific print trigger behavior.
 
 ## 4. URLs
 

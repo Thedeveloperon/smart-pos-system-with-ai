@@ -1,10 +1,24 @@
-import { forwardRef, useImperativeHandle, useRef, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Search, ScanBarcode, Keyboard, Package } from "lucide-react";
 import ProductCard from "./ProductCard";
 import type { Product } from "./types";
 import { POS_SHORTCUT_INLINE_HINT, POS_SHORTCUT_LABELS } from "./shortcuts";
+
+const SCANNER_BURST_INTERVAL_MS = 45;
+const SCANNER_ENTER_GRACE_MS = 120;
+const SCANNER_BURST_MIN_CHARS = 6;
+const normalizeBarcode = (value: string) => value.trim().toLowerCase();
+const isBarcodeFeatureEnabled = import.meta.env.VITE_BARCODE_FEATURE_ENABLED !== "false";
 
 interface ProductSearchPanelProps {
   products: Product[];
@@ -20,14 +34,124 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
   ({ products, onAddToCart, showShortcutHints = false }, ref) => {
     const [searchQuery, setSearchQuery] = useState("");
     const [searchMode, setSearchMode] = useState<"manual" | "barcode">("manual");
+    const [barcodeFeedback, setBarcodeFeedback] = useState<string | null>(null);
     const searchInputRef = useRef<HTMLInputElement>(null);
+    const scannerBurstRef = useRef({ charCount: 0, lastKeyAt: 0 });
+
+    const focusAndSelectSearch = useCallback(() => {
+      const input = searchInputRef.current;
+      if (!input) {
+        return;
+      }
+
+      input.focus();
+      input.select();
+    }, []);
+
+    const resetScannerBurst = useCallback(() => {
+      scannerBurstRef.current = { charCount: 0, lastKeyAt: 0 };
+    }, []);
+
+    const submitBarcodeQuery = useCallback(
+      (scannerLike: boolean) => {
+        const rawQuery = searchQuery.trim();
+        if (!rawQuery) {
+          return;
+        }
+
+        const normalizedQuery = normalizeBarcode(rawQuery);
+        const matchedProduct = products.find((product) => {
+          if (!product.barcode) {
+            return false;
+          }
+
+          return normalizeBarcode(product.barcode) === normalizedQuery;
+        });
+
+        if (matchedProduct) {
+          onAddToCart(matchedProduct, 1);
+          setSearchQuery("");
+          setBarcodeFeedback(null);
+        } else {
+          setBarcodeFeedback(
+            scannerLike
+              ? `No product matched scanned barcode "${rawQuery}".`
+              : `No product matched barcode "${rawQuery}".`,
+          );
+        }
+
+        resetScannerBurst();
+        focusAndSelectSearch();
+      },
+      [focusAndSelectSearch, onAddToCart, products, resetScannerBurst, searchQuery],
+    );
+
+    const handleBarcodeInputKeyDown = useCallback(
+      (event: ReactKeyboardEvent<HTMLInputElement>) => {
+        if (!isBarcodeFeatureEnabled || searchMode !== "barcode") {
+          return;
+        }
+
+        const now = Date.now();
+
+        if (event.key === "Enter") {
+          event.preventDefault();
+
+          const scannerLike =
+            scannerBurstRef.current.charCount >= SCANNER_BURST_MIN_CHARS &&
+            now - scannerBurstRef.current.lastKeyAt <= SCANNER_ENTER_GRACE_MS;
+
+          submitBarcodeQuery(scannerLike);
+          return;
+        }
+
+        if (event.key === "Backspace" || event.key === "Delete") {
+          resetScannerBurst();
+          return;
+        }
+
+        if (event.key.length !== 1 || event.altKey || event.ctrlKey || event.metaKey) {
+          return;
+        }
+
+        const isBurst = now - scannerBurstRef.current.lastKeyAt <= SCANNER_BURST_INTERVAL_MS;
+        scannerBurstRef.current = {
+          charCount: isBurst ? scannerBurstRef.current.charCount + 1 : 1,
+          lastKeyAt: now,
+        };
+      },
+      [resetScannerBurst, searchMode, submitBarcodeQuery],
+    );
+
+    const toggleSearchMode = useCallback(() => {
+      if (!isBarcodeFeatureEnabled) {
+        return;
+      }
+
+      if (searchMode === "barcode") {
+        setSearchMode("manual");
+        setBarcodeFeedback(null);
+        return;
+      }
+
+      setSearchQuery("");
+      setSearchMode("barcode");
+      setBarcodeFeedback(null);
+    }, [searchMode]);
+
+    useEffect(() => {
+      if (searchMode !== "barcode") {
+        return;
+      }
+
+      focusAndSelectSearch();
+      resetScannerBurst();
+      setBarcodeFeedback(null);
+    }, [focusAndSelectSearch, resetScannerBurst, searchMode]);
 
     useImperativeHandle(ref, () => ({
-      focusSearch: () => {
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
-      },
-    }), []);
+      focusSearch: focusAndSelectSearch,
+    }), [focusAndSelectSearch]);
 
     const filtered = products.filter((p) => {
       const q = searchQuery.toLowerCase();
@@ -48,7 +172,13 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
               <Input
                 ref={searchInputRef}
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(event) => {
+                  setSearchQuery(event.target.value);
+                  if (searchMode === "barcode" && barcodeFeedback) {
+                    setBarcodeFeedback(null);
+                  }
+                }}
+                onKeyDown={handleBarcodeInputKeyDown}
                 placeholder={
                   searchMode === "barcode"
                     ? "Scan or enter barcode..."
@@ -59,21 +189,22 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
                 title={showShortcutHints ? `Focus Search (${POS_SHORTCUT_LABELS.focusSearch})` : undefined}
               />
             </div>
-            <Button
-              variant={searchMode === "barcode" ? "default" : "outline"}
-              size="icon"
-              className="h-11 w-11 shrink-0 rounded-xl"
-              onClick={() =>
-                setSearchMode((m) => (m === "barcode" ? "manual" : "barcode"))
-              }
-              title={searchMode === "barcode" ? "Barcode mode" : "Manual mode"}
-            >
-              {searchMode === "barcode" ? (
-                <ScanBarcode className="h-5 w-5" />
-              ) : (
-                <Keyboard className="h-5 w-5" />
-              )}
-            </Button>
+            {isBarcodeFeatureEnabled ? (
+              <Button
+                variant={searchMode === "barcode" ? "default" : "outline"}
+                size="icon"
+                className="h-11 w-11 shrink-0 rounded-xl"
+                onClick={toggleSearchMode}
+                aria-label={searchMode === "barcode" ? "Switch to manual mode" : "Switch to barcode mode"}
+                title={searchMode === "barcode" ? "Barcode mode" : "Manual mode"}
+              >
+                {searchMode === "barcode" ? (
+                  <ScanBarcode className="h-5 w-5" />
+                ) : (
+                  <Keyboard className="h-5 w-5" />
+                )}
+              </Button>
+            ) : null}
           </div>
           <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
             <span>{filtered.length} products</span>
@@ -91,6 +222,15 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
               </span>
             )}
           </div>
+          {isBarcodeFeatureEnabled && searchMode === "barcode" && (
+            <p
+              className={`mt-2 text-xs ${barcodeFeedback ? "text-destructive font-medium" : "text-muted-foreground"}`}
+              role="status"
+              aria-live="polite"
+            >
+              {barcodeFeedback || "Barcode mode active: scan and press Enter to add item to cart."}
+            </p>
+          )}
         </div>
 
         {/* Product Grid */}

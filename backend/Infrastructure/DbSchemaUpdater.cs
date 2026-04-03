@@ -36,6 +36,46 @@ public static class DbSchemaUpdater
         }
     }
 
+    public static async Task EnsureProductBarcodeSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken = default)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+
+        if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            if (await HasDuplicateNormalizedBarcodesAsync(dbContext, cancellationToken))
+            {
+                return;
+            }
+
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS "IX_products_Barcode_Normalized"
+                ON "products" (lower(trim("Barcode")))
+                WHERE "Barcode" IS NOT NULL AND trim("Barcode") <> '';
+                """,
+                cancellationToken);
+            return;
+        }
+
+        if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            if (await HasDuplicateNormalizedBarcodesAsync(dbContext, cancellationToken))
+            {
+                return;
+            }
+
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS "IX_products_StoreId_Barcode_Normalized"
+                ON products (COALESCE("StoreId", '00000000-0000-0000-0000-000000000000'::uuid), lower(btrim("Barcode")))
+                WHERE "Barcode" IS NOT NULL AND btrim("Barcode") <> '';
+                """,
+                cancellationToken);
+        }
+    }
+
     public static async Task EnsureShopProfileSchemaAsync(
         SmartPosDbContext dbContext,
         CancellationToken cancellationToken = default)
@@ -386,6 +426,42 @@ public static class DbSchemaUpdater
         var sql = provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase)
             ? $"""SELECT 1 FROM pragma_table_info('{tableName}') WHERE name = '{columnName}' LIMIT 1;"""
             : $"""SELECT 1 FROM information_schema.columns WHERE table_name = '{tableName}' AND column_name = '{columnName}' LIMIT 1;""";
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is not null && result is not DBNull;
+    }
+
+    private static async Task<bool> HasDuplicateNormalizedBarcodesAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+        var connection = dbContext.Database.GetDbConnection();
+
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync(cancellationToken);
+        }
+
+        var sql = provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase)
+            ? """
+              SELECT 1
+              FROM "products"
+              WHERE "Barcode" IS NOT NULL AND trim("Barcode") <> ''
+              GROUP BY lower(trim("Barcode"))
+              HAVING COUNT(*) > 1
+              LIMIT 1;
+              """
+            : """
+              SELECT 1
+              FROM products
+              WHERE "Barcode" IS NOT NULL AND btrim("Barcode") <> ''
+              GROUP BY COALESCE("StoreId", '00000000-0000-0000-0000-000000000000'::uuid), lower(btrim("Barcode"))
+              HAVING COUNT(*) > 1
+              LIMIT 1;
+              """;
 
         await using var command = connection.CreateCommand();
         command.CommandText = sql;

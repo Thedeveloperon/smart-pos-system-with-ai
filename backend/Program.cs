@@ -42,6 +42,8 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.Configure<PurchasingOptions>(
     builder.Configuration.GetSection(PurchasingOptions.SectionName));
+builder.Services.Configure<ProductBarcodeFeatureOptions>(
+    builder.Configuration.GetSection(ProductBarcodeFeatureOptions.SectionName));
 builder.Services.Configure<AiSuggestionOptions>(
     builder.Configuration.GetSection(AiSuggestionOptions.SectionName));
 builder.Services.Configure<AiInsightOptions>(
@@ -339,6 +341,7 @@ using (var scope = app.Services.CreateScope())
     var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
     dbContext.Database.EnsureCreated();
     await DbSchemaUpdater.EnsureProductImageSchemaAsync(dbContext);
+    await DbSchemaUpdater.EnsureProductBarcodeSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureShopProfileSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureRefundSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureCashSessionSchemaAsync(dbContext);
