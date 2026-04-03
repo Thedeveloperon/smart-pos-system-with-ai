@@ -76,8 +76,33 @@ function normalizePlanCode(rawValue: string | null): PlanCode {
 }
 
 function parseErrorMessage(payload: unknown): string {
+  if (typeof payload === "string" && payload.trim()) {
+    return payload.trim();
+  }
+
   const candidate = payload as ApiErrorPayload;
   return candidate?.error?.message?.trim() || "Request failed. Please try again.";
+}
+
+async function parseApiPayload(response: Response): Promise<unknown> {
+  const responseText = await response.text();
+  if (!responseText.trim()) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(responseText) as unknown;
+  } catch {
+    return responseText;
+  }
+}
+
+function requireObjectPayload<T>(payload: unknown, errorMessage: string): T {
+  if (!payload || typeof payload !== "object") {
+    throw new Error(errorMessage);
+  }
+
+  return payload as T;
 }
 
 function formatDate(value?: string | null) {
@@ -168,12 +193,15 @@ export default function StartPage() {
         }),
       });
 
-      const payload = await response.json();
+      const payload = await parseApiPayload(response);
       if (!response.ok) {
         throw new Error(parseErrorMessage(payload));
       }
 
-      const data = payload as PaymentRequestResponse;
+      const data = requireObjectPayload<PaymentRequestResponse>(
+        payload,
+        "Payment service returned an empty response. Please try again.",
+      );
       setRequestResult(data);
       setAmountPaid(String(data.amount_due || 0));
       setPaymentMethod(data.instructions?.payment_method || paymentMethod);
@@ -221,12 +249,15 @@ export default function StartPage() {
             body: uploadFormData,
           });
 
-          const uploadPayload = await uploadResponse.json();
+          const uploadPayload = await parseApiPayload(uploadResponse);
           if (!uploadResponse.ok) {
             throw new Error(parseErrorMessage(uploadPayload));
           }
 
-          const uploaded = uploadPayload as PaymentProofUploadResponse;
+          const uploaded = requireObjectPayload<PaymentProofUploadResponse>(
+            uploadPayload,
+            "Payment proof upload returned an empty response. Please try again.",
+          );
           resolvedDepositSlipUrl = uploaded.proof_url;
           setSlipUrl(uploaded.proof_url);
           trackMarketingEvent("marketing_payment_proof_uploaded", {
@@ -259,12 +290,15 @@ export default function StartPage() {
         }),
       });
 
-      const payload = await response.json();
+      const payload = await parseApiPayload(response);
       if (!response.ok) {
         throw new Error(parseErrorMessage(payload));
       }
 
-      const data = payload as PaymentSubmitResponse;
+      const data = requireObjectPayload<PaymentSubmitResponse>(
+        payload,
+        "Payment submission returned an empty response. Please try again.",
+      );
       setSubmitResult(data);
       trackMarketingEvent("marketing_payment_submitted", {
         locale,
