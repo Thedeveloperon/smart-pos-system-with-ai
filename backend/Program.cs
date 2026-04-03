@@ -213,6 +213,91 @@ builder.Services.AddSingleton<IOcrProviderCore>(serviceProvider =>
 });
 builder.Services.AddSingleton<IOcrProvider, ResilientOcrProvider>();
 builder.Services.AddSingleton<IBillMalwareScanner, NoOpBillMalwareScanner>();
+
+string NormalizePostgresConnectionString(string connectionString)
+{
+    var normalized = connectionString.Trim();
+    if (string.IsNullOrWhiteSpace(normalized))
+    {
+        return normalized;
+    }
+
+    if (!Uri.TryCreate(normalized, UriKind.Absolute, out var uri) ||
+        (!uri.Scheme.Equals("postgres", StringComparison.OrdinalIgnoreCase) &&
+         !uri.Scheme.Equals("postgresql", StringComparison.OrdinalIgnoreCase)))
+    {
+        return normalized;
+    }
+
+    var builder = new Npgsql.NpgsqlConnectionStringBuilder
+    {
+        Host = uri.Host,
+        Port = uri.IsDefaultPort ? 5432 : uri.Port,
+        Database = Uri.UnescapeDataString(uri.AbsolutePath.Trim('/'))
+    };
+
+    var userInfoParts = uri.UserInfo.Split(':', 2, StringSplitOptions.None);
+    if (userInfoParts.Length > 0 && !string.IsNullOrWhiteSpace(userInfoParts[0]))
+    {
+        builder.Username = Uri.UnescapeDataString(userInfoParts[0]);
+    }
+
+    if (userInfoParts.Length > 1 && !string.IsNullOrWhiteSpace(userInfoParts[1]))
+    {
+        builder.Password = Uri.UnescapeDataString(userInfoParts[1]);
+    }
+
+    if (string.IsNullOrWhiteSpace(builder.Database))
+    {
+        throw new InvalidOperationException("Postgres connection URI must include a database name.");
+    }
+
+    var query = uri.Query.StartsWith('?') ? uri.Query[1..] : uri.Query;
+    if (!string.IsNullOrWhiteSpace(query))
+    {
+        foreach (var segment in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separatorIndex = segment.IndexOf('=');
+            var rawKey = separatorIndex >= 0 ? segment[..separatorIndex] : segment;
+            var rawValue = separatorIndex >= 0 ? segment[(separatorIndex + 1)..] : string.Empty;
+
+            var key = Uri.UnescapeDataString(rawKey.Replace("+", "%20"));
+            var value = Uri.UnescapeDataString(rawValue.Replace("+", "%20"));
+
+            if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            if (key.Equals("host", StringComparison.OrdinalIgnoreCase) ||
+                key.Equals("port", StringComparison.OrdinalIgnoreCase) ||
+                key.Equals("username", StringComparison.OrdinalIgnoreCase) ||
+                key.Equals("user id", StringComparison.OrdinalIgnoreCase) ||
+                key.Equals("userid", StringComparison.OrdinalIgnoreCase) ||
+                key.Equals("password", StringComparison.OrdinalIgnoreCase) ||
+                key.Equals("database", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            try
+            {
+                builder[key] = value;
+            }
+            catch (ArgumentException)
+            {
+                // Ignore unsupported key names from provider-specific URL params.
+            }
+            catch (KeyNotFoundException)
+            {
+                // Ignore unsupported key names from provider-specific URL params.
+            }
+        }
+    }
+
+    return builder.ConnectionString;
+}
+
 builder.Services.AddDbContext<SmartPosDbContext>(options =>
 {
     var provider = builder.Configuration.GetValue<string>("Database:Provider") ?? "Postgres";
@@ -235,7 +320,7 @@ builder.Services.AddDbContext<SmartPosDbContext>(options =>
         throw new InvalidOperationException("Connection string 'Postgres' is not configured.");
     }
 
-    options.UseNpgsql(postgresConnectionString);
+    options.UseNpgsql(NormalizePostgresConnectionString(postgresConnectionString));
 });
 
 var app = builder.Build();
