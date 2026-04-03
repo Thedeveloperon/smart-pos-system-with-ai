@@ -21,6 +21,8 @@ services:
         sync: false
       - key: SMARTPOS_LICENSE_SIGNING_PRIVATE_KEY_PEM
         sync: false
+      - key: SMARTPOS_LICENSE_DATA_ENCRYPTION_KEY
+        sync: false
       - key: Licensing__VerificationPublicKeyPem
         sync: false
       - key: Licensing__AccessSuccessPageBaseUrl
@@ -38,3 +40,16 @@ services:
     envVars:
       - key: BACKEND_UPSTREAM
         value: https://smartpos-backend.onrender.com
+
+  - type: web
+    name: smartpos-marketing-website
+    runtime: node
+    rootDir: website
+    autoDeployTrigger: commit
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NEXT_PUBLIC_SITE_URL
+        sync: false
+      - key: SMARTPOS_BACKEND_API_URL
+        sync: false
