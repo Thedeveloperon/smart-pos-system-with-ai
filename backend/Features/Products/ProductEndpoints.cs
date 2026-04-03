@@ -127,6 +127,29 @@ public static class ProductEndpoints
         .WithName("DeleteProduct")
         .WithOpenApi();
 
+        productGroup.MapDelete("/{productId:guid}/hard-delete", async (
+            Guid productId,
+            ProductService productService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                await productService.HardDeleteInactiveProductAsync(productId, cancellationToken);
+                return Results.NoContent();
+            }
+            catch (KeyNotFoundException exception)
+            {
+                return Results.NotFound(new { message = exception.Message });
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.ManagerOrOwner)
+        .WithName("HardDeleteInactiveProduct")
+        .WithOpenApi();
+
         categoryGroup.MapGet("", async (
             bool? include_inactive,
             ProductService productService,

@@ -1,15 +1,25 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, Loader2, PencilLine, Search, Trash2 } from "lucide-react";
+import { AlertTriangle, Loader2, Package, PencilLine, Search, Trash2 } from "lucide-react";
 import type { CatalogProduct, UpdateProductRequest } from "@/lib/api";
 import {
   deleteProduct,
+  hardDeleteProduct,
   fetchCategories,
   fetchProductCatalogItems,
   updateProduct,
 } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -69,6 +79,33 @@ const emptyFormState = (): ProductFormState => ({
   allowNegativeStock: true,
   isActive: true,
 });
+
+type ProductThumbnailProps = {
+  imageUrl?: string;
+  name: string;
+};
+
+function ProductThumbnail({ imageUrl, name }: ProductThumbnailProps) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const showImage = Boolean(imageUrl) && !imageFailed;
+
+  return (
+    <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-border bg-muted/50">
+      {showImage ? (
+        <img
+          src={imageUrl}
+          alt={name}
+          className="h-full w-full object-cover"
+          onError={() => setImageFailed(true)}
+        />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+          <Package className="h-5 w-5" />
+        </div>
+      )}
+    </div>
+  );
+}
 
 type ProductEditorDialogProps = {
   open: boolean;
@@ -183,8 +220,13 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved }: ProductEd
       return;
     }
 
+    if (product.isActive) {
+      toast.error("Only inactive products can be permanently deleted. Deactivate and save first.");
+      return;
+    }
+
     const confirmed = window.confirm(
-      `Deactivate "${product.name}"? It will be hidden from sales but remain in history.`
+      `Permanently delete "${product.name}"? This cannot be undone.`
     );
     if (!confirmed) {
       return;
@@ -192,13 +234,13 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved }: ProductEd
 
     setDeleting(true);
     try {
-      await deleteProduct(product.id);
-      toast.success("Product deactivated.");
+      await hardDeleteProduct(product.id);
+      toast.success("Product permanently deleted.");
       await onSaved();
       onOpenChange(false);
     } catch (error) {
       console.error(error);
-      toast.error(error instanceof Error ? error.message : "Failed to deactivate product.");
+      toast.error(error instanceof Error ? error.message : "Failed to permanently delete product.");
     } finally {
       setDeleting(false);
     }
@@ -215,7 +257,7 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved }: ProductEd
                 Manage Product
               </DialogTitle>
               <DialogDescription className="text-pos-header-foreground/70">
-                Edit price, stock settings, and active status. Deleting a product will deactivate it.
+                Edit price, stock settings, and active status. Permanent delete is only for inactive products.
               </DialogDescription>
             </DialogHeader>
             <DialogClose asChild>
@@ -396,7 +438,7 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved }: ProductEd
                   <div className="space-y-1">
                     <p className="text-sm font-semibold">Delete safety</p>
                     <p className="text-sm text-amber-900/80">
-                      Deleting a product only deactivates it so sales history stays intact.
+                      Permanently deleting is allowed only for inactive products without transaction history.
                     </p>
                   </div>
                 </div>
@@ -410,10 +452,11 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved }: ProductEd
             type="button"
             variant="destructive"
             onClick={handleDelete}
-            disabled={saving || deleting || !product}
+            disabled={saving || deleting || !product || product.isActive}
+            title={product?.isActive ? "Deactivate and save first to enable permanent delete." : undefined}
           >
             {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-            Deactivate
+            Delete
           </Button>
           <div className="flex gap-2 sm:justify-end">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={saving || deleting}>
@@ -442,6 +485,8 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
   const [search, setSearch] = useState("");
   const [editorOpen, setEditorOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<CatalogProduct | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<CatalogProduct | null>(null);
+  const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -502,6 +547,29 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
     const items = await fetchProductCatalogItems(200, true);
     setProducts(items.sort((left, right) => left.name.localeCompare(right.name)));
     await onChanged?.();
+  };
+
+  const handleDeleteRequest = (product: CatalogProduct) => {
+    setDeleteTarget(product);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) {
+      return;
+    }
+
+    setDeletingProductId(deleteTarget.id);
+    try {
+      await deleteProduct(deleteTarget.id);
+      toast.success(`"${deleteTarget.name}" deactivated.`);
+      await handleSaved();
+      setDeleteTarget(null);
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Failed to deactivate product.");
+    } finally {
+      setDeletingProductId(null);
+    }
   };
 
   return (
@@ -575,11 +643,14 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
                       filtered.map((product) => (
                         <TableRow key={product.id}>
                           <TableCell>
-                            <div className="space-y-1">
-                              <div className="font-medium">{product.name}</div>
-                              <div className="text-xs text-muted-foreground">
-                                {product.sku}
-                                {product.barcode ? ` | ${product.barcode}` : ""}
+                            <div className="flex items-center gap-3">
+                              <ProductThumbnail imageUrl={product.image} name={product.name} />
+                              <div className="space-y-1">
+                                <div className="font-medium">{product.name}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  {product.sku}
+                                  {product.barcode ? ` | ${product.barcode}` : ""}
+                                </div>
                               </div>
                             </div>
                           </TableCell>
@@ -592,10 +663,26 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
                             </Badge>
                           </TableCell>
                           <TableCell className="text-right">
-                            <Button variant="ghost" size="sm" onClick={() => handleEdit(product)}>
-                              <PencilLine className="h-4 w-4" />
-                              Edit
-                            </Button>
+                            <div className="flex justify-end gap-1">
+                              <Button variant="ghost" size="sm" onClick={() => handleEdit(product)}>
+                                <PencilLine className="h-4 w-4" />
+                                Edit
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-destructive hover:text-destructive"
+                                onClick={() => handleDeleteRequest(product)}
+                                disabled={deletingProductId === product.id}
+                              >
+                                {deletingProductId === product.id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Trash2 className="h-4 w-4" />
+                                )}
+                                Deactivate
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))
@@ -614,6 +701,38 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
         onOpenChange={setEditorOpen}
         onSaved={handleSaved}
       />
+
+      <AlertDialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(openState) => {
+          if (!openState && !deletingProductId) {
+            setDeleteTarget(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Deactivate product?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget
+                ? `Deactivate "${deleteTarget.name}"? It will be hidden from active sales.`
+                : "This will hide the product from active sales."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={Boolean(deletingProductId)}>Cancel</AlertDialogCancel>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={handleConfirmDelete}
+              disabled={Boolean(deletingProductId)}
+            >
+              {deletingProductId ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              Deactivate
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

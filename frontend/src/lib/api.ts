@@ -2362,6 +2362,12 @@ export async function deleteProduct(productId: string) {
   });
 }
 
+export async function hardDeleteProduct(productId: string) {
+  return request<void>(`/api/products/${productId}/hard-delete`, {
+    method: "DELETE",
+  });
+}
+
 export async function fetchHeldBills() {
   const response = await request<HeldSalesResponse>("/api/checkout/held");
   const details = await Promise.all(
