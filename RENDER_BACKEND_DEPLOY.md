@@ -36,13 +36,16 @@ Optional:
 
 - `OPENAI_API_KEY`
 
+Database configuration is already wired in `render.yaml`:
+
+- Blueprint creates `smartpos-postgres` (Render managed Postgres)
+- Backend receives `ConnectionStrings__Postgres` from that database
+- Backend uses `Database__Provider=Postgres`
+
 ## 3. Configure POS frontend upstream
 
-Open the `smartpos-pos-frontend` service and confirm:
-
-- `BACKEND_UPSTREAM=https://<your-backend>.onrender.com`
-
-The frontend service proxies `/api/*` to this backend URL.
+The frontend `BACKEND_UPSTREAM` is wired in `render.yaml` from backend
+`RENDER_EXTERNAL_URL`, so no manual URL hardcoding is required.
 
 ## 4. Configure marketing website env
 
@@ -77,7 +80,4 @@ Marketing website:
 
 - This setup works without a custom domain.
 - Keeping POS UI and API traffic through the frontend proxy avoids browser CORS/cookie friction.
-- Current blueprint uses SQLite (`Database__Provider=Sqlite`) for temporary testing.
-- For persistent production data, switch backend to Postgres:
-  - `Database__Provider=Postgres`
-  - `ConnectionStrings__Postgres=<postgres-connection-string>`
+- Current blueprint uses Render managed Postgres for persistent production data.
