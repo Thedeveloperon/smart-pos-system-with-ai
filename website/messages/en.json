@@ -13,6 +13,7 @@
   "nav": {
     "links": {
       "features": "Features",
+      "liveDemo": "Live Demo",
       "howItWorks": "How It Works",
       "pricing": "Pricing"
     },
@@ -124,6 +125,60 @@
       { "type": "insight", "text": "Biscuits sold better than last week. Consider restocking soon." }
     ],
     "askPlaceholder": "Ask SmartPOS anything..."
+  },
+  "liveDemo": {
+    "badge": "Live Demo",
+    "titlePart1": "Preview the",
+    "titleHighlight": "AI Workflow",
+    "titlePart2": "Before You Start",
+    "description": "Try realistic low-stock, best/worst seller, and smart report questions using seeded read-only demo data.",
+    "readOnlyTag": "Read-only demo data",
+    "modeMock": "Mock Data",
+    "modeSandbox": "Sandbox API",
+    "sandboxNotice": "Sandbox API mode will be available in a later release. Use Mock Data for now.",
+    "queryLabel": "Sample question",
+    "resultLabel": "Demo response",
+    "confidence": "Confidence",
+    "citations": "Grounded references",
+    "run": "Run Query",
+    "running": "Running...",
+    "empty": "No demo cards available.",
+    "cards": [
+      {
+        "id": "low-stock",
+        "title": "Low stock check",
+        "query": "Show items below stock level 10 right now.",
+        "summary": "4 items are below threshold 10. Highest risk: Milk Powder (2 units), Ballpoint Pen Blue (6 units), A4 Exercise Book (8 units), and Dish Soap 500ml (9 units).",
+        "confidence": "high",
+        "citations": [
+          "reports.low_stock.threshold_10",
+          "inventory.snapshot.default_store"
+        ]
+      },
+      {
+        "id": "best-worst",
+        "title": "Best vs worst sellers",
+        "query": "What sold best and worst this week?",
+        "summary": "Best seller this week: Biscuits Family Pack (net qty 184). Lowest performer: Stapler Pins Small (net qty 7). Suggested action: bundle stapler pins with notebooks near checkout.",
+        "confidence": "high",
+        "citations": [
+          "reports.top_items.last_7_days",
+          "reports.worst_items.last_7_days"
+        ]
+      },
+      {
+        "id": "smart-report",
+        "title": "Smart report preview",
+        "query": "Generate a monthly smart report summary with restock guidance.",
+        "summary": "Monthly net sales trend is +9.4%. Forecast for next month is Rs. 1,240,000 net sales. Focus restock increase on milk powder and family biscuits; keep stationery reorder at current level.",
+        "confidence": "medium",
+        "citations": [
+          "reports.monthly_forecast.last_6_months",
+          "reports.low_stock.threshold_10",
+          "reports.top_items.last_30_days"
+        ]
+      }
+    ]
   },
   "howItWorks": {
     "badge": "How It Works",

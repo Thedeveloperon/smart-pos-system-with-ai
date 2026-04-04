@@ -937,7 +937,7 @@ const ManagerReportsDrawer = ({
 
     const methodInput = await openPromptDialog({
       title: "Record Payment",
-      description: "Payment method must be cash, bank_deposit, or bank_transfer.",
+      description: "Method rules: cash requires reference. bank_deposit/bank_transfer require reference + deposit slip URL.",
       label: "Payment method",
       defaultValue: "bank_deposit",
       confirmLabel: "Continue",
@@ -977,13 +977,41 @@ const ManagerReportsDrawer = ({
 
     const bankReference = await openPromptDialog({
       title: "Record Payment",
-      description: "Optional bank reference or deposit slip number.",
-      label: "Bank reference (optional)",
-      required: false,
+      description: "Reference number is required for cash, bank_deposit, and bank_transfer.",
+      label: "Reference number",
       confirmLabel: "Continue",
     });
-    if (bankReference === null) {
+    if (!bankReference) {
       return;
+    }
+
+    let depositSlipUrl: string | null = null;
+    if (method !== "cash") {
+      depositSlipUrl = await openPromptDialog({
+        title: "Record Payment",
+        description: "Deposit slip URL is required for bank_deposit and bank_transfer.",
+        label: "Deposit slip URL",
+        placeholder: "https://...",
+        confirmLabel: "Continue",
+        validate: (value) => {
+          const normalized = value.trim();
+          if (!normalized) {
+            return "Deposit slip URL is required.";
+          }
+
+          try {
+            const parsed = new URL(normalized);
+            return parsed.protocol === "http:" || parsed.protocol === "https:"
+              ? null
+              : "Deposit slip URL must use http or https.";
+          } catch {
+            return "Deposit slip URL must be a valid absolute URL.";
+          }
+        },
+      });
+      if (!depositSlipUrl) {
+        return;
+      }
     }
 
     const notes = await openPromptDialog({
@@ -1014,6 +1042,7 @@ const ManagerReportsDrawer = ({
         amount,
         currency: "LKR",
         bank_reference: bankReference || undefined,
+        deposit_slip_url: depositSlipUrl || undefined,
         notes: notes || undefined,
         actor: "support-ui",
         reason_code: "manual_payment_pending_verification",

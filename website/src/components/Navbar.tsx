@@ -13,6 +13,7 @@ const Navbar = () => {
 
   const navLinks = [
     { href: "#features", label: t("nav.links.features") },
+    { href: "#live-demo", label: t("nav.links.liveDemo") },
     { href: "#how-it-works", label: t("nav.links.howItWorks") },
     { href: "#pricing", label: t("nav.links.pricing") },
   ];

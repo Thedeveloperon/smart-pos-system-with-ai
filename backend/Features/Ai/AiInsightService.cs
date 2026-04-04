@@ -21,6 +21,9 @@ public sealed class AiInsightService(
 {
     private const string ProviderOpenAi = "openai";
     private const string ProviderLocal = "local";
+    private const string UsageTypeQuickInsights = "quick_insights";
+    private const string UsageTypeAdvancedAnalysis = "advanced_analysis";
+    private const string UsageTypeSmartReports = "smart_reports";
     private const int GroundingContextReserveTokenBuffer = 300;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly JsonSerializerOptions CaseInsensitiveJsonOptions = new(JsonSerializerDefaults.Web)
@@ -31,6 +34,7 @@ public sealed class AiInsightService(
     public async Task<AiInsightEstimateResponse> EstimateInsightAsync(
         Guid userId,
         string prompt,
+        string? usageType,
         CancellationToken cancellationToken)
     {
         var aiOptions = options.Value;
@@ -46,7 +50,8 @@ public sealed class AiInsightService(
             runModeration: false,
             cancellationToken);
 
-        var estimate = BuildInsightEstimate(normalizedPrompt, aiOptions);
+        var usagePolicy = ResolveUsagePolicy(usageType, aiOptions);
+        var estimate = BuildInsightEstimate(normalizedPrompt, aiOptions, usagePolicy);
         var wallet = await creditBillingService.GetWalletAsync(userId, cancellationToken);
         var dailyRemainingCredits = await GetDailyRemainingCreditsAsync(userId, aiOptions, cancellationToken);
         var canAffordByBalance = wallet.AvailableCredits >= estimate.ReserveCredits;
@@ -61,7 +66,8 @@ public sealed class AiInsightService(
             AvailableCredits = wallet.AvailableCredits,
             DailyRemainingCredits = dailyRemainingCredits,
             CanAfford = canAffordByBalance && canAffordByDailyLimit,
-            PricingRulesVersion = ResolvePricingRulesVersion(aiOptions)
+            PricingRulesVersion = ResolvePricingRulesVersion(aiOptions),
+            UsageType = usagePolicy.ApiValue
         };
     }
 
@@ -114,6 +120,7 @@ public sealed class AiInsightService(
                         ReservedCredits = x.ReservedCredits,
                         ChargedCredits = x.ChargedCredits,
                         RefundedCredits = refundedCredits,
+                        UsageType = MapUsageType(x.UsageType),
                         CreatedAt = x.CreatedAtUtc,
                         CompletedAt = x.CompletedAtUtc,
                         ErrorMessage = x.ErrorMessage
@@ -127,6 +134,7 @@ public sealed class AiInsightService(
         Guid userId,
         string prompt,
         string idempotencyKey,
+        string? usageType,
         CancellationToken cancellationToken)
     {
         var aiOptions = options.Value;
@@ -155,7 +163,8 @@ public sealed class AiInsightService(
             aiOptions,
             runModeration: true,
             cancellationToken);
-        var estimate = BuildInsightEstimate(normalizedPrompt, aiOptions);
+        var usagePolicy = ResolveUsagePolicy(usageType, aiOptions);
+        var estimate = BuildInsightEstimate(normalizedPrompt, aiOptions, usagePolicy);
         await EnforceUsageLimitsAsync(
             userId,
             estimate.EstimatedChargeCredits,
@@ -163,7 +172,7 @@ public sealed class AiInsightService(
             cancellationToken);
 
         var provider = NormalizeProvider(aiOptions.Provider);
-        var model = ResolveModel(aiOptions, provider == ProviderOpenAi ? "gpt-5.4-mini" : "local-pos-insights-v1");
+        var model = ResolveModelForUsageType(aiOptions, provider, usagePolicy);
         var requestRecord = new AiInsightRequest
         {
             UserId = userId,
@@ -171,6 +180,7 @@ public sealed class AiInsightService(
             Status = AiInsightRequestStatus.Pending,
             Provider = provider,
             Model = model,
+            UsageType = usagePolicy.UsageType,
             PromptHash = ComputePromptHash(normalizedPrompt),
             PromptCharCount = normalizedPrompt.Length,
             ReservedCredits = 0m,
@@ -240,6 +250,7 @@ public sealed class AiInsightService(
                     normalizedPrompt,
                     posFacts,
                     aiOptions,
+                    usagePolicy.MaxOutputTokens,
                     cancellationToken);
             }
 
@@ -254,7 +265,8 @@ public sealed class AiInsightService(
             var chargedCredits = CalculateCredits(
                 providerResult.InputTokens,
                 providerResult.OutputTokens,
-                aiOptions);
+                aiOptions,
+                usagePolicy.CreditMultiplier);
 
             var settled = await creditBillingService.SettleReservationAsync(
                 userId,
@@ -302,6 +314,7 @@ public sealed class AiInsightService(
                 ChargedCredits = settled.ChargedCredits,
                 RefundedCredits = settled.RefundedCredits,
                 RemainingCredits = settled.RemainingCredits,
+                UsageType = usagePolicy.ApiValue,
                 CreatedAt = requestRecord.CreatedAtUtc,
                 CompletedAt = requestRecord.CompletedAtUtc ?? DateTimeOffset.UtcNow
             };
@@ -396,6 +409,7 @@ public sealed class AiInsightService(
             ChargedCredits = existingRequest.ChargedCredits,
             RefundedCredits = refundedCredits,
             RemainingCredits = wallet.AvailableCredits,
+            UsageType = MapUsageType(existingRequest.UsageType),
             CreatedAt = existingRequest.CreatedAtUtc,
             CompletedAt = existingRequest.CompletedAtUtc ?? existingRequest.UpdatedAtUtc ?? existingRequest.CreatedAtUtc
         };
@@ -408,11 +422,12 @@ public sealed class AiInsightService(
         string originalPrompt,
         PosInsightFacts posFacts,
         AiInsightOptions aiOptions,
+        int maxOutputTokens,
         CancellationToken cancellationToken)
     {
         return provider switch
         {
-            ProviderOpenAi => await GenerateWithOpenAiAsync(model, groundedPrompt, aiOptions, cancellationToken),
+            ProviderOpenAi => await GenerateWithOpenAiAsync(model, groundedPrompt, aiOptions, maxOutputTokens, cancellationToken),
             ProviderLocal => GenerateWithLocalProvider(model, originalPrompt, posFacts),
             _ => throw new InvalidOperationException("Unsupported AI provider.")
         };
@@ -422,6 +437,7 @@ public sealed class AiInsightService(
         string model,
         string groundedPrompt,
         AiInsightOptions aiOptions,
+        int maxOutputTokens,
         CancellationToken cancellationToken)
     {
         var apiBaseUrl = (aiOptions.ApiBaseUrl ?? string.Empty).Trim();
@@ -471,7 +487,7 @@ public sealed class AiInsightService(
                         }
                     },
                     temperature = 0.1,
-                    max_output_tokens = Math.Clamp(aiOptions.MaxOutputTokens, 128, 1200)
+                    max_output_tokens = Math.Clamp(maxOutputTokens, 128, 2000)
                 }, JsonOptions),
                 Encoding.UTF8,
                 "application/json")
@@ -1545,15 +1561,85 @@ public sealed class AiInsightService(
         };
     }
 
-    private InsightEstimateData BuildInsightEstimate(string prompt, AiInsightOptions aiOptions)
+    private static string MapUsageType(AiUsageType usageType)
+    {
+        return usageType switch
+        {
+            AiUsageType.QuickInsights => UsageTypeQuickInsights,
+            AiUsageType.AdvancedAnalysis => UsageTypeAdvancedAnalysis,
+            AiUsageType.SmartReports => UsageTypeSmartReports,
+            _ => UsageTypeQuickInsights
+        };
+    }
+
+    private static UsageTypePolicy ResolveUsagePolicy(string? usageType, AiInsightOptions aiOptions)
+    {
+        var normalized = (usageType ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "" or UsageTypeQuickInsights => new UsageTypePolicy(
+                AiUsageType.QuickInsights,
+                UsageTypeQuickInsights,
+                NormalizeOutputTokenLimit(aiOptions.QuickInsightsMaxOutputTokens, aiOptions.MaxOutputTokens),
+                NormalizeUsageMultiplier(aiOptions.QuickInsightsCreditMultiplier, 1.0m),
+                (aiOptions.QuickInsightsModel ?? string.Empty).Trim()),
+            UsageTypeAdvancedAnalysis => new UsageTypePolicy(
+                AiUsageType.AdvancedAnalysis,
+                UsageTypeAdvancedAnalysis,
+                NormalizeOutputTokenLimit(aiOptions.AdvancedAnalysisMaxOutputTokens, aiOptions.MaxOutputTokens),
+                NormalizeUsageMultiplier(aiOptions.AdvancedAnalysisCreditMultiplier, 1.8m),
+                (aiOptions.AdvancedAnalysisModel ?? string.Empty).Trim()),
+            UsageTypeSmartReports => new UsageTypePolicy(
+                AiUsageType.SmartReports,
+                UsageTypeSmartReports,
+                NormalizeOutputTokenLimit(aiOptions.SmartReportsMaxOutputTokens, aiOptions.MaxOutputTokens),
+                NormalizeUsageMultiplier(aiOptions.SmartReportsCreditMultiplier, 3.0m),
+                (aiOptions.SmartReportsModel ?? string.Empty).Trim()),
+            _ => throw new InvalidOperationException(
+                "Invalid usage_type. Use quick_insights, advanced_analysis, or smart_reports.")
+        };
+    }
+
+    private static int NormalizeOutputTokenLimit(int configured, int fallback)
+    {
+        var baseline = configured > 0 ? configured : fallback;
+        return Math.Clamp(baseline, 32, 2000);
+    }
+
+    private static decimal NormalizeUsageMultiplier(decimal configured, decimal fallback)
+    {
+        return configured > 0m ? configured : fallback;
+    }
+
+    private static string ResolveModelForUsageType(
+        AiInsightOptions aiOptions,
+        string provider,
+        UsageTypePolicy usagePolicy)
+    {
+        var fallback = provider == ProviderOpenAi
+            ? string.IsNullOrWhiteSpace(usagePolicy.PreferredModel)
+                ? "gpt-5.4-mini"
+                : usagePolicy.PreferredModel
+            : "local-pos-insights-v1";
+        return ResolveModel(aiOptions, fallback);
+    }
+
+    private InsightEstimateData BuildInsightEstimate(
+        string prompt,
+        AiInsightOptions aiOptions,
+        UsageTypePolicy usagePolicy)
     {
         var estimatedInput = Math.Max(
             1,
             EstimateTokenCount(prompt) +
             Math.Max(0, aiOptions.EstimatedSystemPromptTokens) +
             GroundingContextReserveTokenBuffer);
-        var estimatedOutput = Math.Max(32, aiOptions.MaxOutputTokens);
-        var estimatedCharge = CalculateCredits(estimatedInput, estimatedOutput, aiOptions);
+        var estimatedOutput = Math.Max(32, usagePolicy.MaxOutputTokens);
+        var estimatedCharge = CalculateCredits(
+            estimatedInput,
+            estimatedOutput,
+            aiOptions,
+            usagePolicy.CreditMultiplier);
         var reserved = RoundCredits(estimatedCharge * Math.Max(1.0m, aiOptions.ReserveSafetyMultiplier));
         var reserveCredits = Math.Max(
             RoundCredits(Math.Max(0.1m, aiOptions.MinimumReserveCredits)),
@@ -1566,11 +1652,15 @@ public sealed class AiInsightService(
             reserveCredits);
     }
 
-    private static decimal CalculateCredits(int inputTokens, int outputTokens, AiInsightOptions aiOptions)
+    private static decimal CalculateCredits(
+        int inputTokens,
+        int outputTokens,
+        AiInsightOptions aiOptions,
+        decimal usageMultiplier)
     {
         var inputCredits = (Math.Max(0, inputTokens) / 1000m) * Math.Max(0m, aiOptions.InputCreditsPer1KTokens);
         var outputCredits = (Math.Max(0, outputTokens) / 1000m) * Math.Max(0m, aiOptions.OutputCreditsPer1KTokens);
-        var computed = RoundCredits(inputCredits + outputCredits);
+        var computed = RoundCredits((inputCredits + outputCredits) * Math.Max(0.1m, usageMultiplier));
         var minimum = RoundCredits(Math.Max(0.1m, aiOptions.MinimumChargeCredits));
         return computed < minimum ? minimum : computed;
     }
@@ -1787,6 +1877,13 @@ public sealed class AiInsightService(
         int EstimatedOutputTokens,
         decimal EstimatedChargeCredits,
         decimal ReserveCredits);
+
+    private readonly record struct UsageTypePolicy(
+        AiUsageType UsageType,
+        string ApiValue,
+        int MaxOutputTokens,
+        decimal CreditMultiplier,
+        string PreferredModel);
 
     private readonly record struct PosInsightFacts(
         string ContextJson,

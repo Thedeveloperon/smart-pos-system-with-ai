@@ -1459,6 +1459,7 @@ public static class DbSchemaUpdater
               "Status" TEXT NOT NULL,
               "Provider" TEXT NOT NULL,
               "Model" TEXT NOT NULL,
+              "UsageType" TEXT NOT NULL DEFAULT 'QuickInsights',
               "PromptHash" TEXT NOT NULL,
               "PromptCharCount" INTEGER NOT NULL,
               "ReservedCredits" TEXT NOT NULL,
@@ -1528,9 +1529,124 @@ public static class DbSchemaUpdater
               CONSTRAINT "FK_ai_credit_payment_webhook_events_ai_credit_payments_PaymentId" FOREIGN KEY ("PaymentId") REFERENCES "ai_credit_payments" ("Id") ON DELETE SET NULL
             );
 
+            CREATE TABLE IF NOT EXISTS "ai_credit_orders" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_ai_credit_orders" PRIMARY KEY,
+              "ShopId" TEXT NOT NULL,
+              "InvoiceId" TEXT NULL,
+              "PaymentId" TEXT NULL,
+              "TargetUserId" TEXT NULL,
+              "TargetUsername" TEXT NULL,
+              "PackageCode" TEXT NULL,
+              "RequestedCredits" TEXT NOT NULL,
+              "SettledCredits" TEXT NOT NULL,
+              "Status" TEXT NOT NULL,
+              "Source" TEXT NOT NULL,
+              "WalletLedgerReference" TEXT NULL,
+              "SettlementError" TEXT NULL,
+              "MetadataJson" TEXT NULL,
+              "SubmittedAtUtc" TEXT NOT NULL,
+              "VerifiedAtUtc" TEXT NULL,
+              "RejectedAtUtc" TEXT NULL,
+              "SettledAtUtc" TEXT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "UpdatedAtUtc" TEXT NULL,
+              CONSTRAINT "FK_ai_credit_orders_shops_ShopId" FOREIGN KEY ("ShopId") REFERENCES "shops" ("Id") ON DELETE CASCADE,
+              CONSTRAINT "FK_ai_credit_orders_manual_billing_invoices_InvoiceId" FOREIGN KEY ("InvoiceId") REFERENCES "manual_billing_invoices" ("Id") ON DELETE SET NULL,
+              CONSTRAINT "FK_ai_credit_orders_manual_billing_payments_PaymentId" FOREIGN KEY ("PaymentId") REFERENCES "manual_billing_payments" ("Id") ON DELETE SET NULL,
+              CONSTRAINT "FK_ai_credit_orders_users_TargetUserId" FOREIGN KEY ("TargetUserId") REFERENCES "users" ("Id") ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS "ai_conversations" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_ai_conversations" PRIMARY KEY,
+              "UserId" TEXT NOT NULL,
+              "Title" TEXT NOT NULL,
+              "DefaultUsageType" TEXT NOT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "UpdatedAtUtc" TEXT NOT NULL,
+              "LastMessageAtUtc" TEXT NULL,
+              CONSTRAINT "FK_ai_conversations_users_UserId" FOREIGN KEY ("UserId") REFERENCES "users" ("Id") ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS "ai_conversation_messages" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_ai_conversation_messages" PRIMARY KEY,
+              "ConversationId" TEXT NOT NULL,
+              "UserId" TEXT NOT NULL,
+              "Role" TEXT NOT NULL,
+              "Status" TEXT NOT NULL,
+              "UsageType" TEXT NOT NULL,
+              "Content" TEXT NOT NULL,
+              "IdempotencyKey" TEXT NULL,
+              "CitationsJson" TEXT NULL,
+              "Confidence" TEXT NULL,
+              "ReservedCredits" TEXT NOT NULL,
+              "ChargedCredits" TEXT NOT NULL,
+              "RefundedCredits" TEXT NOT NULL,
+              "InputTokens" INTEGER NOT NULL,
+              "OutputTokens" INTEGER NOT NULL,
+              "ErrorCode" TEXT NULL,
+              "ErrorMessage" TEXT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "CompletedAtUtc" TEXT NULL,
+              CONSTRAINT "FK_ai_conversation_messages_ai_conversations_ConversationId" FOREIGN KEY ("ConversationId") REFERENCES "ai_conversations" ("Id") ON DELETE CASCADE,
+              CONSTRAINT "FK_ai_conversation_messages_users_UserId" FOREIGN KEY ("UserId") REFERENCES "users" ("Id") ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS "ai_smart_report_jobs" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_ai_smart_report_jobs" PRIMARY KEY,
+              "UserId" TEXT NOT NULL,
+              "Cadence" TEXT NOT NULL,
+              "Status" TEXT NOT NULL,
+              "PeriodStartUtc" TEXT NOT NULL,
+              "PeriodEndUtc" TEXT NOT NULL,
+              "Title" TEXT NOT NULL,
+              "Summary" TEXT NULL,
+              "PayloadJson" TEXT NULL,
+              "ErrorMessage" TEXT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "StartedAtUtc" TEXT NULL,
+              "CompletedAtUtc" TEXT NULL,
+              "UpdatedAtUtc" TEXT NULL,
+              CONSTRAINT "FK_ai_smart_report_jobs_users_UserId" FOREIGN KEY ("UserId") REFERENCES "users" ("Id") ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS "reminder_rules" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_reminder_rules" PRIMARY KEY,
+              "UserId" TEXT NOT NULL,
+              "RuleType" TEXT NOT NULL,
+              "IsEnabled" INTEGER NOT NULL,
+              "LowStockThreshold" TEXT NULL,
+              "SnoozedUntilUtc" TEXT NULL,
+              "LastEvaluatedAtUtc" TEXT NULL,
+              "LastTriggeredAtUtc" TEXT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "UpdatedAtUtc" TEXT NULL,
+              CONSTRAINT "FK_reminder_rules_users_UserId" FOREIGN KEY ("UserId") REFERENCES "users" ("Id") ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS "reminder_events" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_reminder_events" PRIMARY KEY,
+              "UserId" TEXT NOT NULL,
+              "RuleId" TEXT NULL,
+              "EventType" TEXT NOT NULL,
+              "Severity" TEXT NOT NULL,
+              "Status" TEXT NOT NULL,
+              "Title" TEXT NOT NULL,
+              "Message" TEXT NOT NULL,
+              "ActionPath" TEXT NULL,
+              "Fingerprint" TEXT NULL,
+              "MetadataJson" TEXT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "AcknowledgedAtUtc" TEXT NULL,
+              "ExpiresAtUtc" TEXT NULL,
+              "UpdatedAtUtc" TEXT NULL,
+              CONSTRAINT "FK_reminder_events_users_UserId" FOREIGN KEY ("UserId") REFERENCES "users" ("Id") ON DELETE CASCADE,
+              CONSTRAINT "FK_reminder_events_reminder_rules_RuleId" FOREIGN KEY ("RuleId") REFERENCES "reminder_rules" ("Id") ON DELETE SET NULL
+            );
+
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_credit_wallets_UserId" ON "ai_credit_wallets" ("UserId");
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_insight_requests_UserId_IdempotencyKey" ON "ai_insight_requests" ("UserId", "IdempotencyKey");
             CREATE INDEX IF NOT EXISTS "IX_ai_insight_requests_UserId_CreatedAtUtc" ON "ai_insight_requests" ("UserId", "CreatedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_ai_insight_requests_UserId_UsageType_CreatedAtUtc" ON "ai_insight_requests" ("UserId", "UsageType", "CreatedAtUtc");
             CREATE INDEX IF NOT EXISTS "IX_ai_credit_ledger_UserId" ON "ai_credit_ledger" ("UserId");
             CREATE INDEX IF NOT EXISTS "IX_ai_credit_ledger_WalletId" ON "ai_credit_ledger" ("WalletId");
             CREATE INDEX IF NOT EXISTS "IX_ai_credit_ledger_UserId_CreatedAtUtc" ON "ai_credit_ledger" ("UserId", "CreatedAtUtc");
@@ -1545,9 +1661,41 @@ public static class DbSchemaUpdater
             CREATE INDEX IF NOT EXISTS "IX_ai_credit_payment_webhook_events_Status" ON "ai_credit_payment_webhook_events" ("Status");
             CREATE INDEX IF NOT EXISTS "IX_ai_credit_payment_webhook_events_ReceivedAtUtc" ON "ai_credit_payment_webhook_events" ("ReceivedAtUtc");
             CREATE INDEX IF NOT EXISTS "IX_ai_credit_payment_webhook_events_PaymentId" ON "ai_credit_payment_webhook_events" ("PaymentId");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_orders_ShopId" ON "ai_credit_orders" ("ShopId");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_orders_InvoiceId" ON "ai_credit_orders" ("InvoiceId");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_orders_PaymentId" ON "ai_credit_orders" ("PaymentId");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_orders_TargetUserId" ON "ai_credit_orders" ("TargetUserId");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_orders_Status" ON "ai_credit_orders" ("Status");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_orders_CreatedAtUtc" ON "ai_credit_orders" ("CreatedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_ai_conversations_UserId" ON "ai_conversations" ("UserId");
+            CREATE INDEX IF NOT EXISTS "IX_ai_conversations_UserId_UpdatedAtUtc" ON "ai_conversations" ("UserId", "UpdatedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_ai_conversation_messages_ConversationId" ON "ai_conversation_messages" ("ConversationId");
+            CREATE INDEX IF NOT EXISTS "IX_ai_conversation_messages_ConversationId_CreatedAtUtc" ON "ai_conversation_messages" ("ConversationId", "CreatedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_ai_conversation_messages_ConversationId_IdempotencyKey" ON "ai_conversation_messages" ("ConversationId", "IdempotencyKey");
+            CREATE INDEX IF NOT EXISTS "IX_ai_smart_report_jobs_UserId" ON "ai_smart_report_jobs" ("UserId");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_smart_report_jobs_UserId_Cadence_PeriodStartUtc" ON "ai_smart_report_jobs" ("UserId", "Cadence", "PeriodStartUtc");
+            CREATE INDEX IF NOT EXISTS "IX_ai_smart_report_jobs_UserId_CreatedAtUtc" ON "ai_smart_report_jobs" ("UserId", "CreatedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_reminder_rules_UserId" ON "reminder_rules" ("UserId");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_reminder_rules_UserId_RuleType" ON "reminder_rules" ("UserId", "RuleType");
+            CREATE INDEX IF NOT EXISTS "IX_reminder_rules_UserId_IsEnabled" ON "reminder_rules" ("UserId", "IsEnabled");
+            CREATE INDEX IF NOT EXISTS "IX_reminder_events_UserId" ON "reminder_events" ("UserId");
+            CREATE INDEX IF NOT EXISTS "IX_reminder_events_UserId_Status_CreatedAtUtc" ON "reminder_events" ("UserId", "Status", "CreatedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_reminder_events_RuleId" ON "reminder_events" ("RuleId");
+            CREATE INDEX IF NOT EXISTS "IX_reminder_events_UserId_Fingerprint" ON "reminder_events" ("UserId", "Fingerprint");
             """;
 
         await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+
+        if (!await ColumnExistsAsync(dbContext, "ai_insight_requests", "UsageType", cancellationToken))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "ai_insight_requests" ADD COLUMN "UsageType" TEXT NOT NULL DEFAULT 'QuickInsights';""",
+                cancellationToken);
+        }
+
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE INDEX IF NOT EXISTS "IX_ai_insight_requests_UserId_UsageType_CreatedAtUtc" ON "ai_insight_requests" ("UserId", "UsageType", "CreatedAtUtc");""",
+            cancellationToken);
     }
 
     private static async Task EnsurePostgresAiInsightsSchemaAsync(
@@ -1570,6 +1718,7 @@ public static class DbSchemaUpdater
               "Status" varchar(24) NOT NULL,
               "Provider" varchar(24) NOT NULL,
               "Model" varchar(120) NOT NULL,
+              "UsageType" varchar(32) NOT NULL DEFAULT 'QuickInsights',
               "PromptHash" varchar(128) NOT NULL,
               "PromptCharCount" integer NOT NULL,
               "ReservedCredits" numeric(18,2) NOT NULL,
@@ -1633,9 +1782,113 @@ public static class DbSchemaUpdater
               "UpdatedAtUtc" timestamptz NULL
             );
 
+            CREATE TABLE IF NOT EXISTS ai_credit_orders (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "ShopId" uuid NOT NULL REFERENCES shops("Id") ON DELETE CASCADE,
+              "InvoiceId" uuid NULL REFERENCES manual_billing_invoices("Id") ON DELETE SET NULL,
+              "PaymentId" uuid NULL REFERENCES manual_billing_payments("Id") ON DELETE SET NULL,
+              "TargetUserId" uuid NULL REFERENCES users("Id") ON DELETE SET NULL,
+              "TargetUsername" varchar(64) NULL,
+              "PackageCode" varchar(80) NULL,
+              "RequestedCredits" numeric(18,2) NOT NULL,
+              "SettledCredits" numeric(18,2) NOT NULL,
+              "Status" varchar(32) NOT NULL,
+              "Source" varchar(80) NOT NULL,
+              "WalletLedgerReference" varchar(120) NULL,
+              "SettlementError" varchar(500) NULL,
+              "MetadataJson" text NULL,
+              "SubmittedAtUtc" timestamptz NOT NULL,
+              "VerifiedAtUtc" timestamptz NULL,
+              "RejectedAtUtc" timestamptz NULL,
+              "SettledAtUtc" timestamptz NULL,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "UpdatedAtUtc" timestamptz NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS ai_conversations (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "UserId" uuid NOT NULL REFERENCES users("Id") ON DELETE CASCADE,
+              "Title" varchar(120) NOT NULL,
+              "DefaultUsageType" varchar(32) NOT NULL,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "UpdatedAtUtc" timestamptz NOT NULL,
+              "LastMessageAtUtc" timestamptz NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS ai_conversation_messages (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "ConversationId" uuid NOT NULL REFERENCES ai_conversations("Id") ON DELETE CASCADE,
+              "UserId" uuid NOT NULL REFERENCES users("Id") ON DELETE CASCADE,
+              "Role" varchar(24) NOT NULL,
+              "Status" varchar(24) NOT NULL,
+              "UsageType" varchar(32) NOT NULL,
+              "Content" text NOT NULL,
+              "IdempotencyKey" varchar(120) NULL,
+              "CitationsJson" text NULL,
+              "Confidence" varchar(24) NULL,
+              "ReservedCredits" numeric(18,2) NOT NULL,
+              "ChargedCredits" numeric(18,2) NOT NULL,
+              "RefundedCredits" numeric(18,2) NOT NULL,
+              "InputTokens" integer NOT NULL,
+              "OutputTokens" integer NOT NULL,
+              "ErrorCode" varchar(80) NULL,
+              "ErrorMessage" varchar(500) NULL,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "CompletedAtUtc" timestamptz NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS ai_smart_report_jobs (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "UserId" uuid NOT NULL REFERENCES users("Id") ON DELETE CASCADE,
+              "Cadence" varchar(24) NOT NULL,
+              "Status" varchar(24) NOT NULL,
+              "PeriodStartUtc" timestamptz NOT NULL,
+              "PeriodEndUtc" timestamptz NOT NULL,
+              "Title" varchar(180) NOT NULL,
+              "Summary" text NULL,
+              "PayloadJson" text NULL,
+              "ErrorMessage" varchar(500) NULL,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "StartedAtUtc" timestamptz NULL,
+              "CompletedAtUtc" timestamptz NULL,
+              "UpdatedAtUtc" timestamptz NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS reminder_rules (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "UserId" uuid NOT NULL REFERENCES users("Id") ON DELETE CASCADE,
+              "RuleType" varchar(32) NOT NULL,
+              "IsEnabled" boolean NOT NULL,
+              "LowStockThreshold" numeric(18,3) NULL,
+              "SnoozedUntilUtc" timestamptz NULL,
+              "LastEvaluatedAtUtc" timestamptz NULL,
+              "LastTriggeredAtUtc" timestamptz NULL,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "UpdatedAtUtc" timestamptz NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS reminder_events (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "UserId" uuid NOT NULL REFERENCES users("Id") ON DELETE CASCADE,
+              "RuleId" uuid NULL REFERENCES reminder_rules("Id") ON DELETE SET NULL,
+              "EventType" varchar(32) NOT NULL,
+              "Severity" varchar(16) NOT NULL,
+              "Status" varchar(16) NOT NULL,
+              "Title" varchar(180) NOT NULL,
+              "Message" varchar(600) NOT NULL,
+              "ActionPath" varchar(220) NULL,
+              "Fingerprint" varchar(180) NULL,
+              "MetadataJson" text NULL,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "AcknowledgedAtUtc" timestamptz NULL,
+              "ExpiresAtUtc" timestamptz NULL,
+              "UpdatedAtUtc" timestamptz NULL
+            );
+
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_credit_wallets_UserId" ON ai_credit_wallets("UserId");
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_insight_requests_UserId_IdempotencyKey" ON ai_insight_requests("UserId", "IdempotencyKey");
             CREATE INDEX IF NOT EXISTS "IX_ai_insight_requests_UserId_CreatedAtUtc" ON ai_insight_requests("UserId", "CreatedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_ai_insight_requests_UserId_UsageType_CreatedAtUtc" ON ai_insight_requests("UserId", "UsageType", "CreatedAtUtc");
             CREATE INDEX IF NOT EXISTS "IX_ai_credit_ledger_UserId" ON ai_credit_ledger("UserId");
             CREATE INDEX IF NOT EXISTS "IX_ai_credit_ledger_WalletId" ON ai_credit_ledger("WalletId");
             CREATE INDEX IF NOT EXISTS "IX_ai_credit_ledger_UserId_CreatedAtUtc" ON ai_credit_ledger("UserId", "CreatedAtUtc");
@@ -1650,8 +1903,35 @@ public static class DbSchemaUpdater
             CREATE INDEX IF NOT EXISTS "IX_ai_credit_payment_webhook_events_Status" ON ai_credit_payment_webhook_events("Status");
             CREATE INDEX IF NOT EXISTS "IX_ai_credit_payment_webhook_events_ReceivedAtUtc" ON ai_credit_payment_webhook_events("ReceivedAtUtc");
             CREATE INDEX IF NOT EXISTS "IX_ai_credit_payment_webhook_events_PaymentId" ON ai_credit_payment_webhook_events("PaymentId");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_orders_ShopId" ON ai_credit_orders("ShopId");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_orders_InvoiceId" ON ai_credit_orders("InvoiceId");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_orders_PaymentId" ON ai_credit_orders("PaymentId");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_orders_TargetUserId" ON ai_credit_orders("TargetUserId");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_orders_Status" ON ai_credit_orders("Status");
+            CREATE INDEX IF NOT EXISTS "IX_ai_credit_orders_CreatedAtUtc" ON ai_credit_orders("CreatedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_ai_conversations_UserId" ON ai_conversations("UserId");
+            CREATE INDEX IF NOT EXISTS "IX_ai_conversations_UserId_UpdatedAtUtc" ON ai_conversations("UserId", "UpdatedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_ai_conversation_messages_ConversationId" ON ai_conversation_messages("ConversationId");
+            CREATE INDEX IF NOT EXISTS "IX_ai_conversation_messages_ConversationId_CreatedAtUtc" ON ai_conversation_messages("ConversationId", "CreatedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_ai_conversation_messages_ConversationId_IdempotencyKey" ON ai_conversation_messages("ConversationId", "IdempotencyKey");
+            CREATE INDEX IF NOT EXISTS "IX_ai_smart_report_jobs_UserId" ON ai_smart_report_jobs("UserId");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_smart_report_jobs_UserId_Cadence_PeriodStartUtc" ON ai_smart_report_jobs("UserId", "Cadence", "PeriodStartUtc");
+            CREATE INDEX IF NOT EXISTS "IX_ai_smart_report_jobs_UserId_CreatedAtUtc" ON ai_smart_report_jobs("UserId", "CreatedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_reminder_rules_UserId" ON reminder_rules("UserId");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_reminder_rules_UserId_RuleType" ON reminder_rules("UserId", "RuleType");
+            CREATE INDEX IF NOT EXISTS "IX_reminder_rules_UserId_IsEnabled" ON reminder_rules("UserId", "IsEnabled");
+            CREATE INDEX IF NOT EXISTS "IX_reminder_events_UserId" ON reminder_events("UserId");
+            CREATE INDEX IF NOT EXISTS "IX_reminder_events_UserId_Status_CreatedAtUtc" ON reminder_events("UserId", "Status", "CreatedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_reminder_events_RuleId" ON reminder_events("RuleId");
+            CREATE INDEX IF NOT EXISTS "IX_reminder_events_UserId_Fingerprint" ON reminder_events("UserId", "Fingerprint");
             """;
 
         await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE ai_insight_requests ADD COLUMN IF NOT EXISTS "UsageType" varchar(32) NOT NULL DEFAULT 'QuickInsights';""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE INDEX IF NOT EXISTS "IX_ai_insight_requests_UserId_UsageType_CreatedAtUtc" ON ai_insight_requests("UserId", "UsageType", "CreatedAtUtc");""",
+            cancellationToken);
     }
 }

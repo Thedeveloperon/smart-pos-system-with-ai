@@ -191,6 +191,81 @@ public sealed class TopItemReportRow
     public decimal NetSales { get; set; }
 }
 
+public sealed class WorstItemsReportResponse
+{
+    [JsonPropertyName("from_date")]
+    public DateOnly FromDate { get; set; }
+
+    [JsonPropertyName("to_date")]
+    public DateOnly ToDate { get; set; }
+
+    [JsonPropertyName("take")]
+    public int Take { get; set; }
+
+    [JsonPropertyName("items")]
+    public List<WorstItemReportRow> Items { get; set; } = [];
+}
+
+public sealed class WorstItemReportRow
+{
+    [JsonPropertyName("product_id")]
+    public Guid ProductId { get; set; }
+
+    [JsonPropertyName("product_name")]
+    public string ProductName { get; set; } = string.Empty;
+
+    [JsonPropertyName("sold_quantity")]
+    public decimal SoldQuantity { get; set; }
+
+    [JsonPropertyName("refunded_quantity")]
+    public decimal RefundedQuantity { get; set; }
+
+    [JsonPropertyName("net_quantity")]
+    public decimal NetQuantity { get; set; }
+
+    [JsonPropertyName("net_sales")]
+    public decimal NetSales { get; set; }
+}
+
+public sealed class MonthlySalesForecastReportResponse
+{
+    [JsonPropertyName("generated_at")]
+    public DateTimeOffset GeneratedAt { get; set; }
+
+    [JsonPropertyName("months")]
+    public int Months { get; set; }
+
+    [JsonPropertyName("average_monthly_net_sales")]
+    public decimal AverageMonthlyNetSales { get; set; }
+
+    [JsonPropertyName("trend_percent")]
+    public decimal TrendPercent { get; set; }
+
+    [JsonPropertyName("forecast_next_month_net_sales")]
+    public decimal ForecastNextMonthNetSales { get; set; }
+
+    [JsonPropertyName("confidence")]
+    public string Confidence { get; set; } = "medium";
+
+    [JsonPropertyName("items")]
+    public List<MonthlySalesForecastRow> Items { get; set; } = [];
+}
+
+public sealed class MonthlySalesForecastRow
+{
+    [JsonPropertyName("month")]
+    public string Month { get; set; } = string.Empty;
+
+    [JsonPropertyName("sales_count")]
+    public int SalesCount { get; set; }
+
+    [JsonPropertyName("refund_count")]
+    public int RefundCount { get; set; }
+
+    [JsonPropertyName("net_sales")]
+    public decimal NetSales { get; set; }
+}
+
 public sealed class LowStockReportResponse
 {
     [JsonPropertyName("generated_at")]

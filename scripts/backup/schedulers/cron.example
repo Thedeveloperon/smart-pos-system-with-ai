@@ -1,0 +1,8 @@
+# SmartPOS backup cron template
+# Replace /opt/smartpos and /etc/smartpos/backup.env for your environment.
+
+# Daily backup at 01:15
+15 1 * * * cd /opt/smartpos && set -a && source /etc/smartpos/backup.env && set +a && bash scripts/backup/backup-db.sh >> /var/log/smartpos/backup.log 2>&1
+
+# Weekly restore smoke test at 02:30 on Sunday
+30 2 * * 0 cd /opt/smartpos && set -a && source /etc/smartpos/backup.env && set +a && LATEST_BACKUP="$(find backups/daily -type f \( -name '*.tar.gz' -o -name '*.tar.gz.enc' \) | sort -r | head -n 1)" && [ -n "$LATEST_BACKUP" ] && bash scripts/backup/restore-smoke-test.sh "$LATEST_BACKUP" >> /var/log/smartpos/restore-smoke.log 2>&1

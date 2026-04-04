@@ -9,6 +9,11 @@ type ForwardPaymentOptions = {
   contentType?: string;
 };
 
+type ForwardPaymentGetOptions = {
+  request: NextRequest;
+  backendPath: string;
+};
+
 function resolveBackendApiUrl() {
   const configured = process.env.SMARTPOS_BACKEND_API_URL?.trim();
   return (configured || DEFAULT_BACKEND_API_URL).replace(/\/+$/, "");
@@ -98,6 +103,66 @@ export async function forwardPaymentRequest(options: ForwardPaymentOptions) {
     });
   } catch (error) {
     console.error("Payment proxy upstream request failed.", {
+      backendUrl,
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    const configHint = isDefaultBackendUrlInProduction(backendApiUrl)
+      ? " Set SMARTPOS_BACKEND_API_URL on the website service."
+      : "";
+    return toErrorResponse(
+      502,
+      "UPSTREAM_UNREACHABLE",
+      `Unable to reach payment service.${configHint}`,
+    );
+  }
+}
+
+export async function forwardPaymentGetRequest(options: ForwardPaymentGetOptions) {
+  const backendApiUrl = resolveBackendApiUrl();
+  const backendUrl = `${backendApiUrl}${options.backendPath}`;
+
+  try {
+    const backendResponse = await fetch(backendUrl, {
+      method: "GET",
+      headers: {
+        "Idempotency-Key": resolveIdempotencyKey(options.request),
+      },
+      cache: "no-store",
+    });
+
+    const contentType = backendResponse.headers.get("content-type") || "application/json";
+    const bodyText = await backendResponse.text();
+
+    if (!bodyText.trim()) {
+      if (backendResponse.ok) {
+        return toErrorResponse(
+          502,
+          "UPSTREAM_EMPTY_RESPONSE",
+          "Payment service returned an empty response.",
+        );
+      }
+
+      return toErrorResponse(
+        backendResponse.status,
+        "UPSTREAM_EMPTY_RESPONSE",
+        "Payment service returned an empty error response.",
+      );
+    }
+
+    if (!backendResponse.ok && !contentType.toLowerCase().includes("application/json")) {
+      const errorMessage = getUpstreamErrorMessage(bodyText) || "Payment service request failed.";
+      return toErrorResponse(backendResponse.status, "UPSTREAM_ERROR", errorMessage);
+    }
+
+    return new NextResponse(bodyText, {
+      status: backendResponse.status,
+      headers: {
+        "Content-Type": contentType,
+      },
+    });
+  } catch (error) {
+    console.error("Payment proxy upstream GET request failed.", {
       backendUrl,
       error: error instanceof Error ? error.message : String(error),
     });

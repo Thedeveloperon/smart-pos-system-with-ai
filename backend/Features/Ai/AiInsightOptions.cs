@@ -5,6 +5,7 @@ public sealed class AiInsightOptions
     public const string SectionName = "AiInsights";
 
     public bool Enabled { get; set; } = true;
+    public bool AllowNonOpenAiInNonProduction { get; set; } = false;
     public string Provider { get; set; } = "Local";
     public string ApiBaseUrl { get; set; } = "https://api.openai.com/v1";
     public string OpenAiApiKey { get; set; } = string.Empty;
@@ -14,6 +15,15 @@ public sealed class AiInsightOptions
     public string[] AllowedModels { get; set; } = ["gpt-5.4-mini", "local-pos-insights-v1"];
     public int RequestTimeoutMs { get; set; } = 15000;
     public int MaxOutputTokens { get; set; } = 320;
+    public int QuickInsightsMaxOutputTokens { get; set; } = 320;
+    public int AdvancedAnalysisMaxOutputTokens { get; set; } = 640;
+    public int SmartReportsMaxOutputTokens { get; set; } = 1000;
+    public decimal QuickInsightsCreditMultiplier { get; set; } = 1.0m;
+    public decimal AdvancedAnalysisCreditMultiplier { get; set; } = 1.8m;
+    public decimal SmartReportsCreditMultiplier { get; set; } = 3.0m;
+    public string QuickInsightsModel { get; set; } = "gpt-5.4-mini";
+    public string AdvancedAnalysisModel { get; set; } = "gpt-5.4-mini";
+    public string SmartReportsModel { get; set; } = "gpt-5.4";
     public decimal InputCreditsPer1KTokens { get; set; } = 1.0m;
     public decimal OutputCreditsPer1KTokens { get; set; } = 3.0m;
     public decimal ReserveSafetyMultiplier { get; set; } = 1.35m;

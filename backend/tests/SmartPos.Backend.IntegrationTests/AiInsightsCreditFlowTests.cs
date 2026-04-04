@@ -314,6 +314,85 @@ public sealed class AiInsightsCreditFlowTests(CustomWebApplicationFactory factor
     }
 
     [Fact]
+    public async Task EstimateInsights_WithUsageTypes_ShouldApplyTierPricingAndOutputCaps()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+        await ResetWalletAsync("manager");
+
+        const string prompt = "Summarize this week performance and suggest stock actions.";
+
+        var quickPayload = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/ai/insights/estimate", new
+            {
+                prompt,
+                usage_type = "quick_insights"
+            }));
+
+        var advancedPayload = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/ai/insights/estimate", new
+            {
+                prompt,
+                usage_type = "advanced_analysis"
+            }));
+
+        var smartPayload = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/ai/insights/estimate", new
+            {
+                prompt,
+                usage_type = "smart_reports"
+            }));
+
+        Assert.Equal("quick_insights", TestJson.GetString(quickPayload, "usage_type"));
+        Assert.Equal("advanced_analysis", TestJson.GetString(advancedPayload, "usage_type"));
+        Assert.Equal("smart_reports", TestJson.GetString(smartPayload, "usage_type"));
+
+        var quickCharge = TestJson.GetDecimal(quickPayload, "estimated_charge_credits");
+        var advancedCharge = TestJson.GetDecimal(advancedPayload, "estimated_charge_credits");
+        var smartCharge = TestJson.GetDecimal(smartPayload, "estimated_charge_credits");
+        Assert.True(advancedCharge > quickCharge);
+        Assert.True(smartCharge > advancedCharge);
+
+        var quickOutputTokens = quickPayload["estimated_output_tokens"]?.GetValue<int>() ?? 0;
+        var advancedOutputTokens = advancedPayload["estimated_output_tokens"]?.GetValue<int>() ?? 0;
+        var smartOutputTokens = smartPayload["estimated_output_tokens"]?.GetValue<int>() ?? 0;
+        Assert.True(advancedOutputTokens > quickOutputTokens);
+        Assert.True(smartOutputTokens > advancedOutputTokens);
+    }
+
+    [Fact]
+    public async Task GenerateInsights_WithUsageType_ShouldPersistUsageTypeOnRequest()
+    {
+        await TestAuth.SignInAsBillingAdminAsync(client);
+
+        await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/ai/wallet/top-up", new
+            {
+                credits = 30m,
+                purchase_reference = $"it-tier-topup-{Guid.NewGuid():N}",
+                description = "integration_test_usage_type_topup"
+            }));
+
+        var insightPayload = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/ai/insights", new
+            {
+                prompt = "Generate monthly smart report summary.",
+                usage_type = "smart_reports",
+                idempotency_key = $"it-tier-generate-{Guid.NewGuid():N}"
+            }));
+
+        var requestId = Guid.Parse(TestJson.GetString(insightPayload, "request_id"));
+        Assert.Equal("smart_reports", TestJson.GetString(insightPayload, "usage_type"));
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+        var request = await dbContext.AiInsightRequests
+            .AsNoTracking()
+            .SingleAsync(x => x.Id == requestId);
+
+        Assert.Equal(AiUsageType.SmartReports, request.UsageType);
+    }
+
+    [Fact]
     public async Task WalletAdjustmentAndHistoryEndpoints_ShouldWorkForBillingAdmin()
     {
         await TestAuth.SignInAsBillingAdminAsync(client);

@@ -47,6 +47,7 @@ public sealed class LicenseService(
     private const string EmergencyActionForceReauth = "force_reauth";
     private const string MarketingInvoiceMetadataPrefix = "MARKETING_REQUEST:";
     private const string MarketingPaymentSubmissionMetadataPrefix = "MARKETING_PAYMENT_SUBMISSION:";
+    private const string AiCreditOrderSettlementReferencePrefix = "ai_order";
     private const int MarketingBankReferenceMaxLength = 128;
     private static readonly HashSet<string> EmergencyActions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -67,6 +68,13 @@ public sealed class LicenseService(
         ["starter"] = new MarketingPlanQuote("starter", "trial", 0m, "USD", false),
         ["pro"] = new MarketingPlanQuote("pro", "growth", 19m, "USD", true),
         ["business"] = new MarketingPlanQuote("business", "pro", 49m, "USD", true)
+    };
+    private static readonly Dictionary<string, decimal> MarketingAiCreditPackageCatalog = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["trial_credits"] = 25m,
+        ["pack_100"] = 100m,
+        ["pack_500"] = 500m,
+        ["pack_2000"] = 2000m
     };
 
     private enum TokenRotationMode
@@ -2619,9 +2627,34 @@ public sealed class LicenseService(
         var normalizedCampaign = NormalizeOptionalValue(request.Campaign);
         var normalizedLocale = NormalizeOptionalValue(request.Locale);
         var customerNotes = NormalizeOptionalValue(request.Notes);
+        var normalizedTargetUsername = NormalizeOptionalValue(request.TargetUsername);
+        var normalizedAiPackageCode = NormalizeOptionalValue(request.AiPackageCode);
+        var requestedAiCredits = ResolveRequestedAiCredits(request.AiCreditsRequested, normalizedAiPackageCode);
+
+        AppUser? targetWalletUser = null;
+        if (requestedAiCredits.HasValue)
+        {
+            if (string.IsNullOrWhiteSpace(normalizedTargetUsername))
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.InvalidAdminRequest,
+                    "target_username is required when ai_credits_requested or ai_package_code is provided.",
+                    StatusCodes.Status400BadRequest);
+            }
+
+            targetWalletUser = await ResolveAiCreditOrderTargetUserAsync(normalizedTargetUsername, cancellationToken);
+        }
 
         if (!quote.RequiresPayment || quote.AmountDue <= 0m)
         {
+            if (requestedAiCredits.HasValue)
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.InvalidAdminRequest,
+                    "AI credit orders require a paid marketing request in this phase.",
+                    StatusCodes.Status400BadRequest);
+            }
+
             return new MarketingPaymentRequestCreateResponse
             {
                 GeneratedAt = now,
@@ -2658,6 +2691,9 @@ public sealed class LicenseService(
             normalizedSource,
             normalizedCampaign,
             normalizedLocale,
+            normalizedTargetUsername,
+            normalizedAiPackageCode,
+            requestedAiCredits,
             customerNotes);
         var actorNote = $"plan={quote.InternalPlanCode}; method={paymentMethod}; source={normalizedSource}";
 
@@ -2689,6 +2725,45 @@ public sealed class LicenseService(
 
         var resolvedShopCode = shop?.Code ?? invoiceRow.ShopCode;
         var resolvedShopName = shop?.Name ?? shopName;
+        var persistedShop = shop ??
+                            await dbContext.Shops
+                                .FirstOrDefaultAsync(x => x.Id == invoiceRow.ShopId, cancellationToken) ??
+                            throw new LicenseException(
+                                LicenseErrorCodes.InvalidAdminRequest,
+                                "Shop was not found for marketing payment request.",
+                                StatusCodes.Status404NotFound);
+
+        AiCreditOrder? aiCreditOrder = null;
+        if (requestedAiCredits.HasValue && targetWalletUser is not null)
+        {
+            aiCreditOrder = new AiCreditOrder
+            {
+                ShopId = persistedShop.Id,
+                Shop = persistedShop,
+                InvoiceId = invoiceRow.InvoiceId,
+                TargetUserId = targetWalletUser.Id,
+                TargetUser = targetWalletUser,
+                TargetUsername = targetWalletUser.Username,
+                PackageCode = normalizedAiPackageCode,
+                RequestedCredits = requestedAiCredits.Value,
+                SettledCredits = 0m,
+                Status = AiCreditOrderStatus.Submitted,
+                Source = normalizedSource,
+                MetadataJson = JsonSerializer.Serialize(new
+                {
+                    marketing_plan_code = quote.MarketingPlanCode,
+                    requested_internal_plan = quote.InternalPlanCode,
+                    source = normalizedSource,
+                    campaign = normalizedCampaign,
+                    locale = normalizedLocale,
+                    invoice_number = invoiceRow.InvoiceNumber
+                }),
+                SubmittedAtUtc = now,
+                CreatedAtUtc = now
+            };
+            dbContext.AiCreditOrders.Add(aiCreditOrder);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
 
         return new MarketingPaymentRequestCreateResponse
         {
@@ -2711,7 +2786,10 @@ public sealed class LicenseService(
                 Status = invoiceRow.Status,
                 DueAt = invoiceRow.DueAt
             },
-            Instructions = BuildMarketingPaymentInstructions(paymentMethod)
+            Instructions = BuildMarketingPaymentInstructions(paymentMethod),
+            AiCreditOrder = aiCreditOrder is null
+                ? null
+                : MapMarketingAiCreditOrderSummary(aiCreditOrder)
         };
     }
 
@@ -2737,17 +2815,14 @@ public sealed class LicenseService(
         var normalizedNotes = NormalizeOptionalValue(request.Notes);
         var normalizedBankReference = NormalizeMarketingBankReference(request.BankReference);
         var normalizedDepositSlipUrl = ValidateDepositSlipUrl(request.DepositSlipUrl);
+        var manualPaymentMethod = ParseManualBillingPaymentMethod(paymentMethod);
         var actorNote = "customer submitted payment details via marketing website";
 
-        if (!string.Equals(paymentMethod, "cash", StringComparison.OrdinalIgnoreCase) &&
-            string.IsNullOrWhiteSpace(normalizedBankReference) &&
-            string.IsNullOrWhiteSpace(normalizedDepositSlipUrl))
-        {
-            throw new LicenseException(
-                LicenseErrorCodes.InvalidAdminRequest,
-                "bank_reference or deposit_slip_url is required for bank deposits.",
-                StatusCodes.Status400BadRequest);
-        }
+        ValidateManualPaymentEvidence(
+            manualPaymentMethod,
+            normalizedBankReference,
+            normalizedDepositSlipUrl,
+            "submit");
 
         var invoice = await ResolveManualBillingInvoiceForPaymentAsync(
             new AdminManualBillingPaymentRecordRequest
@@ -2819,6 +2894,29 @@ public sealed class LicenseService(
                 "Invoice was not found after payment submission.",
                 StatusCodes.Status404NotFound);
 
+        AiCreditOrder? aiCreditOrder;
+        var aiCreditOrderQuery = dbContext.AiCreditOrders
+            .Where(x => x.InvoiceId == paymentRow.InvoiceId);
+        if (dbContext.Database.IsSqlite())
+        {
+            aiCreditOrder = (await aiCreditOrderQuery.ToListAsync(cancellationToken))
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .FirstOrDefault();
+        }
+        else
+        {
+            aiCreditOrder = await aiCreditOrderQuery
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+        if (aiCreditOrder is not null)
+        {
+            aiCreditOrder.PaymentId = paymentRow.PaymentId;
+            aiCreditOrder.Status = AiCreditOrderStatus.PendingVerification;
+            aiCreditOrder.UpdatedAtUtc = now;
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
         return new MarketingPaymentSubmissionResponse
         {
             ProcessedAt = now,
@@ -2829,7 +2927,110 @@ public sealed class LicenseService(
             PaymentId = paymentRow.PaymentId,
             PaymentStatus = paymentRow.Status,
             Message = "Payment submitted successfully. Verification is pending with the billing team.",
-            NextStep = "await_admin_verification"
+            NextStep = "await_admin_verification",
+            AiCreditOrder = aiCreditOrder is null
+                ? null
+                : MapMarketingAiCreditOrderSummary(aiCreditOrder)
+        };
+    }
+
+    public async Task<MarketingAiCreditOrderStatusResponse> GetMarketingAiCreditOrderStatusAsync(
+        Guid? orderId,
+        string? invoiceNumber,
+        CancellationToken cancellationToken)
+    {
+        var normalizedInvoiceNumber = NormalizeOptionalValue(invoiceNumber);
+        var hasOrderId = orderId.HasValue && orderId.Value != Guid.Empty;
+        if (!hasOrderId && string.IsNullOrWhiteSpace(normalizedInvoiceNumber))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Either order_id or invoice_number is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        AiCreditOrder? order;
+        if (hasOrderId)
+        {
+            order = await dbContext.AiCreditOrders
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == orderId!.Value, cancellationToken);
+        }
+        else
+        {
+            var invoice = await dbContext.ManualBillingInvoices
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    x => x.InvoiceNumber.ToLower() == normalizedInvoiceNumber!.ToLower(),
+                    cancellationToken);
+            if (invoice is null)
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.InvoiceNotFound,
+                    "Invoice was not found.",
+                    StatusCodes.Status404NotFound);
+            }
+
+            var query = dbContext.AiCreditOrders
+                .AsNoTracking()
+                .Where(x => x.InvoiceId == invoice.Id);
+            if (dbContext.Database.IsSqlite())
+            {
+                order = (await query.ToListAsync(cancellationToken))
+                    .OrderByDescending(x => x.CreatedAtUtc)
+                    .FirstOrDefault();
+            }
+            else
+            {
+                order = await query
+                    .OrderByDescending(x => x.CreatedAtUtc)
+                    .FirstOrDefaultAsync(cancellationToken);
+            }
+        }
+
+        if (order is null)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvoiceNotFound,
+                "AI credit order was not found.",
+                StatusCodes.Status404NotFound);
+        }
+
+        ManualBillingInvoice? invoiceRow = null;
+        if (order.InvoiceId.HasValue)
+        {
+            invoiceRow = await dbContext.ManualBillingInvoices
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == order.InvoiceId.Value, cancellationToken);
+        }
+
+        ManualBillingPayment? paymentRow = null;
+        if (order.PaymentId.HasValue)
+        {
+            paymentRow = await dbContext.ManualBillingPayments
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == order.PaymentId.Value, cancellationToken);
+        }
+
+        var shopCode = await dbContext.Shops
+                           .AsNoTracking()
+                           .Where(x => x.Id == order.ShopId)
+                           .Select(x => x.Code)
+                           .FirstOrDefaultAsync(cancellationToken)
+                       ?? ResolveShopCode(null);
+
+        return new MarketingAiCreditOrderStatusResponse
+        {
+            GeneratedAt = DateTimeOffset.UtcNow,
+            ShopCode = shopCode,
+            InvoiceNumber = invoiceRow?.InvoiceNumber,
+            InvoiceStatus = invoiceRow is null
+                ? null
+                : MapManualBillingInvoiceStatusValue(invoiceRow.Status),
+            PaymentStatus = paymentRow is null
+                ? null
+                : MapManualBillingPaymentStatusValue(paymentRow.Status),
+            Order = MapMarketingAiCreditOrderSummary(order)
         };
     }
 
@@ -3281,6 +3482,12 @@ public sealed class LicenseService(
         var actor = overrideContext.Actor;
         var normalizedBankReference = NormalizeMarketingBankReference(request.BankReference);
         var normalizedDepositSlipUrl = ValidateDepositSlipUrl(request.DepositSlipUrl);
+        var paymentMethod = ParseManualBillingPaymentMethod(request.Method);
+        ValidateManualPaymentEvidence(
+            paymentMethod,
+            normalizedBankReference,
+            normalizedDepositSlipUrl,
+            "record");
         var invoice = await ResolveManualBillingInvoiceForPaymentAsync(request, cancellationToken);
         if (invoice.Status is ManualBillingInvoiceStatus.Paid or ManualBillingInvoiceStatus.Canceled)
         {
@@ -3296,7 +3503,7 @@ public sealed class LicenseService(
             Shop = invoice.Shop,
             InvoiceId = invoice.Id,
             Invoice = invoice,
-            Method = ParseManualBillingPaymentMethod(request.Method),
+            Method = paymentMethod,
             Amount = decimal.Round(request.Amount, 2),
             Currency = ResolveCurrency(request.Currency ?? invoice.Currency),
             Status = ManualBillingPaymentStatus.PendingVerification,
@@ -3393,6 +3600,12 @@ public sealed class LicenseService(
                 "Only pending-verification payments can be verified.",
                 StatusCodes.Status409Conflict);
         }
+
+        ValidateManualPaymentEvidence(
+            payment.Method,
+            payment.BankReference,
+            payment.DepositSlipUrl,
+            "verify");
 
         var invoice = payment.Invoice;
         if (invoice.Status == ManualBillingInvoiceStatus.Canceled)
@@ -3522,6 +3735,21 @@ public sealed class LicenseService(
             excludedProvisionedDeviceId: null,
             cancellationToken);
 
+        AiCreditOrder? settledAiCreditOrder = null;
+        var aiCreditOrder = await ResolveAiCreditOrderForManualPaymentAsync(
+            invoice.Id,
+            payment.Id,
+            cancellationToken);
+        if (aiCreditOrder is not null)
+        {
+            aiCreditOrder.PaymentId ??= payment.Id;
+            aiCreditOrder.Status = AiCreditOrderStatus.Verified;
+            aiCreditOrder.VerifiedAtUtc = now;
+            aiCreditOrder.UpdatedAtUtc = now;
+            await SettleAiCreditOrderAsync(aiCreditOrder, actor, now, cancellationToken);
+            settledAiCreditOrder = aiCreditOrder;
+        }
+
         dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
         {
             ShopId = invoice.ShopId,
@@ -3547,6 +3775,13 @@ public sealed class LicenseService(
                 access_delivery_recipient = resolvedCustomerEmail,
                 access_delivery_email_status = accessDelivery?.EmailDelivery.Status,
                 access_delivery_success_page_url = accessDelivery?.SuccessPageUrl,
+                ai_credit_order_id = settledAiCreditOrder?.Id,
+                ai_credit_order_status = settledAiCreditOrder is null
+                    ? null
+                    : MapAiCreditOrderStatusValue(settledAiCreditOrder.Status),
+                ai_credit_requested = settledAiCreditOrder?.RequestedCredits,
+                ai_credit_settled = settledAiCreditOrder?.SettledCredits,
+                ai_wallet_ledger_reference = settledAiCreditOrder?.WalletLedgerReference,
                 reissued_devices = reissueOutcome.ReissuedCount,
                 revoked_licenses = reissueOutcome.RevokedCount,
                 reason_code = overrideContext.ReasonCode,
@@ -3574,6 +3809,13 @@ public sealed class LicenseService(
                 activation_entitlement_id = activationEntitlement?.EntitlementId,
                 access_delivery_recipient = resolvedCustomerEmail,
                 access_delivery_email_status = accessDelivery?.EmailDelivery.Status,
+                ai_credit_order_id = settledAiCreditOrder?.Id,
+                ai_credit_order_status = settledAiCreditOrder is null
+                    ? null
+                    : MapAiCreditOrderStatusValue(settledAiCreditOrder.Status),
+                ai_credit_requested = settledAiCreditOrder?.RequestedCredits,
+                ai_credit_settled = settledAiCreditOrder?.SettledCredits,
+                ai_wallet_ledger_reference = settledAiCreditOrder?.WalletLedgerReference,
                 reason_code = overrideContext.ReasonCode,
                 actor_note = overrideContext.ActorNote
             },
@@ -3592,6 +3834,9 @@ public sealed class LicenseService(
             PeriodEnd = subscription.PeriodEndUtc,
             ActivationEntitlement = activationEntitlement,
             AccessDelivery = accessDelivery,
+            AiCreditOrder = settledAiCreditOrder is null
+                ? null
+                : MapMarketingAiCreditOrderSummary(settledAiCreditOrder),
             ProcessedAt = now
         };
     }
@@ -3654,6 +3899,18 @@ public sealed class LicenseService(
         invoice.Status = hasOtherPending ? ManualBillingInvoiceStatus.PendingVerification : ManualBillingInvoiceStatus.Open;
         invoice.UpdatedAtUtc = now;
 
+        var aiCreditOrder = await ResolveAiCreditOrderForManualPaymentAsync(
+            invoice.Id,
+            payment.Id,
+            cancellationToken);
+        if (aiCreditOrder is not null)
+        {
+            aiCreditOrder.Status = AiCreditOrderStatus.Rejected;
+            aiCreditOrder.RejectedAtUtc = now;
+            aiCreditOrder.SettlementError = "payment_rejected";
+            aiCreditOrder.UpdatedAtUtc = now;
+        }
+
         dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
         {
             ShopId = invoice.ShopId,
@@ -3665,6 +3922,10 @@ public sealed class LicenseService(
                 payment_id = payment.Id,
                 invoice_id = invoice.Id,
                 invoice_number = invoice.InvoiceNumber,
+                ai_credit_order_id = aiCreditOrder?.Id,
+                ai_credit_order_status = aiCreditOrder is null
+                    ? null
+                    : MapAiCreditOrderStatusValue(aiCreditOrder.Status),
                 reason_code = overrideContext.ReasonCode,
                 actor_note = overrideContext.ActorNote
             })
@@ -5877,6 +6138,9 @@ public sealed class LicenseService(
         string source,
         string? campaign,
         string? locale,
+        string? targetUsername,
+        string? aiPackageCode,
+        decimal? aiCreditsRequested,
         string? customerNotes)
     {
         var metadata = JsonSerializer.Serialize(new
@@ -5887,6 +6151,9 @@ public sealed class LicenseService(
             contact_name = contactName,
             contact_email = contactEmail,
             contact_phone = contactPhone,
+            target_username = targetUsername,
+            ai_package_code = aiPackageCode,
+            ai_credits_requested = aiCreditsRequested,
             source,
             campaign,
             locale
@@ -6078,6 +6345,40 @@ public sealed class LicenseService(
         }
 
         return normalized;
+    }
+
+    private static void ValidateManualPaymentEvidence(
+        ManualBillingPaymentMethod method,
+        string? bankReference,
+        string? depositSlipUrl,
+        string operation)
+    {
+        var normalizedOperation = NormalizeOptionalValue(operation) ?? "process";
+        var hasReference = !string.IsNullOrWhiteSpace(NormalizeOptionalValue(bankReference));
+        var hasDepositSlipUrl = !string.IsNullOrWhiteSpace(NormalizeOptionalValue(depositSlipUrl));
+
+        if (method == ManualBillingPaymentMethod.Cash)
+        {
+            if (hasReference)
+            {
+                return;
+            }
+
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                $"bank_reference is required for cash payments during {normalizedOperation}.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        if (hasReference && hasDepositSlipUrl)
+        {
+            return;
+        }
+
+        throw new LicenseException(
+            LicenseErrorCodes.InvalidAdminRequest,
+            $"bank_reference and deposit_slip_url are both required for {MapManualBillingPaymentMethodValue(method)} payments during {normalizedOperation}.",
+            StatusCodes.Status400BadRequest);
     }
 
     private async Task<ValidatedMarketingProofFile> ValidateAndReadMarketingProofFileAsync(
@@ -6830,6 +7131,265 @@ public sealed class LicenseService(
             ManualBillingPaymentMethod.BankTransfer => "bank_transfer",
             _ => "bank_deposit"
         };
+    }
+
+    private static MarketingAiCreditOrderSummaryResponse MapMarketingAiCreditOrderSummary(AiCreditOrder order)
+    {
+        return new MarketingAiCreditOrderSummaryResponse
+        {
+            OrderId = order.Id,
+            Status = MapAiCreditOrderStatusValue(order.Status),
+            RequestedCredits = order.RequestedCredits,
+            SettledCredits = order.SettledCredits,
+            TargetUsername = order.TargetUsername,
+            PackageCode = order.PackageCode,
+            WalletLedgerReference = order.WalletLedgerReference,
+            SettlementError = order.SettlementError,
+            SubmittedAt = order.SubmittedAtUtc,
+            VerifiedAt = order.VerifiedAtUtc,
+            RejectedAt = order.RejectedAtUtc,
+            SettledAt = order.SettledAtUtc
+        };
+    }
+
+    private static string MapAiCreditOrderStatusValue(AiCreditOrderStatus status)
+    {
+        return status switch
+        {
+            AiCreditOrderStatus.Submitted => "submitted",
+            AiCreditOrderStatus.PendingVerification => "pending_verification",
+            AiCreditOrderStatus.Verified => "verified",
+            AiCreditOrderStatus.Rejected => "rejected",
+            AiCreditOrderStatus.Settled => "settled",
+            _ => "submitted"
+        };
+    }
+
+    private async Task<AiCreditOrder?> ResolveAiCreditOrderForManualPaymentAsync(
+        Guid invoiceId,
+        Guid paymentId,
+        CancellationToken cancellationToken)
+    {
+        var query = dbContext.AiCreditOrders
+            .Where(x => x.InvoiceId == invoiceId && (x.PaymentId == null || x.PaymentId == paymentId));
+        if (dbContext.Database.IsSqlite())
+        {
+            return (await query.ToListAsync(cancellationToken))
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .FirstOrDefault();
+        }
+
+        return await query
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    private async Task<AppUser> ResolveAiCreditOrderTargetUserAsync(
+        string username,
+        CancellationToken cancellationToken)
+    {
+        var normalizedUsername = NormalizeOptionalValue(username);
+        if (string.IsNullOrWhiteSpace(normalizedUsername))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "target_username is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var targetUser = await dbContext.Users
+            .FirstOrDefaultAsync(
+                x => x.Username.ToLower() == normalizedUsername.ToLower(),
+                cancellationToken);
+        if (targetUser is null)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "target_username was not found.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        return targetUser;
+    }
+
+    private async Task SettleAiCreditOrderAsync(
+        AiCreditOrder order,
+        string actor,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var creditsToSettle = RoundAiCredits(order.RequestedCredits);
+        if (creditsToSettle <= 0m)
+        {
+            order.SettledCredits = 0m;
+            order.Status = AiCreditOrderStatus.Settled;
+            order.SettledAtUtc = now;
+            order.UpdatedAtUtc = now;
+            order.SettlementError = null;
+            return;
+        }
+
+        AppUser targetUser;
+        if (order.TargetUserId.HasValue)
+        {
+            targetUser = await dbContext.Users
+                .FirstOrDefaultAsync(x => x.Id == order.TargetUserId.Value, cancellationToken)
+                ?? throw new LicenseException(
+                    LicenseErrorCodes.InvalidAdminRequest,
+                    "AI credit order target user was not found.",
+                    StatusCodes.Status400BadRequest);
+        }
+        else
+        {
+            targetUser = await ResolveAiCreditOrderTargetUserAsync(
+                order.TargetUsername ?? string.Empty,
+                cancellationToken);
+            order.TargetUserId = targetUser.Id;
+            order.TargetUser = targetUser;
+        }
+
+        var settlementReference = $"{AiCreditOrderSettlementReferencePrefix}:{order.Id:N}";
+        var existingSettlement = await dbContext.AiCreditLedgerEntries
+            .FirstOrDefaultAsync(
+                x => x.Reference == settlementReference &&
+                     x.EntryType == AiCreditLedgerEntryType.Purchase,
+                cancellationToken);
+        if (existingSettlement is not null)
+        {
+            order.SettledCredits = Math.Abs(existingSettlement.DeltaCredits);
+            order.WalletLedgerReference = settlementReference;
+            order.SettledAtUtc ??= now;
+            order.Status = AiCreditOrderStatus.Settled;
+            order.SettlementError = null;
+            order.UpdatedAtUtc = now;
+            return;
+        }
+
+        var wallet = await GetOrCreateAiWalletForSettlementAsync(targetUser, now, cancellationToken);
+        wallet.AvailableCredits = RoundAiCredits(wallet.AvailableCredits + creditsToSettle);
+        wallet.UpdatedAtUtc = now;
+
+        dbContext.AiCreditLedgerEntries.Add(new AiCreditLedgerEntry
+        {
+            UserId = targetUser.Id,
+            User = targetUser,
+            WalletId = wallet.Id,
+            Wallet = wallet,
+            EntryType = AiCreditLedgerEntryType.Purchase,
+            DeltaCredits = creditsToSettle,
+            BalanceAfterCredits = wallet.AvailableCredits,
+            Reference = settlementReference,
+            Description = "ai_credit_order_settlement",
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                ai_credit_order_id = order.Id,
+                shop_id = order.ShopId,
+                invoice_id = order.InvoiceId,
+                payment_id = order.PaymentId,
+                actor
+            }),
+            CreatedAtUtc = now
+        });
+
+        order.SettledCredits = creditsToSettle;
+        order.WalletLedgerReference = settlementReference;
+        order.SettledAtUtc = now;
+        order.Status = AiCreditOrderStatus.Settled;
+        order.SettlementError = null;
+        order.UpdatedAtUtc = now;
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = order.ShopId,
+            Action = "ai_credit_order_settled",
+            Actor = actor,
+            Reason = "ai_credit_order_settlement",
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                ai_credit_order_id = order.Id,
+                target_user_id = targetUser.Id,
+                target_username = targetUser.Username,
+                credits_settled = creditsToSettle,
+                wallet_ledger_reference = settlementReference
+            })
+        });
+    }
+
+    private async Task<AiCreditWallet> GetOrCreateAiWalletForSettlementAsync(
+        AppUser targetUser,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var wallet = await dbContext.AiCreditWallets
+            .FirstOrDefaultAsync(x => x.UserId == targetUser.Id, cancellationToken);
+        if (wallet is not null)
+        {
+            return wallet;
+        }
+
+        wallet = new AiCreditWallet
+        {
+            UserId = targetUser.Id,
+            User = targetUser,
+            AvailableCredits = 0m,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+        dbContext.AiCreditWallets.Add(wallet);
+        return wallet;
+    }
+
+    private static decimal? ResolveRequestedAiCredits(decimal? requestedAiCredits, string? packageCode)
+    {
+        var normalizedPackageCode = NormalizeOptionalValue(packageCode);
+        var packageCredits = ResolveAiCreditsFromPackageCode(normalizedPackageCode);
+        if (!requestedAiCredits.HasValue)
+        {
+            return packageCredits;
+        }
+
+        var normalizedRequested = RoundAiCredits(requestedAiCredits.Value);
+        if (normalizedRequested <= 0m)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "ai_credits_requested must be greater than zero.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        if (normalizedRequested > 100_000m)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "ai_credits_requested is too high for a single order.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        return normalizedRequested;
+    }
+
+    private static decimal? ResolveAiCreditsFromPackageCode(string? packageCode)
+    {
+        var normalizedPackageCode = NormalizeOptionalValue(packageCode);
+        if (string.IsNullOrWhiteSpace(normalizedPackageCode))
+        {
+            return null;
+        }
+
+        if (!MarketingAiCreditPackageCatalog.TryGetValue(normalizedPackageCode, out var credits))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "ai_package_code must be one of: trial_credits, pack_100, pack_500, pack_2000.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        return RoundAiCredits(credits);
+    }
+
+    private static decimal RoundAiCredits(decimal value)
+    {
+        return decimal.Round(value, 2, MidpointRounding.AwayFromZero);
     }
 
     private LicenseTokenPayload ParseAndValidateToken(string token)

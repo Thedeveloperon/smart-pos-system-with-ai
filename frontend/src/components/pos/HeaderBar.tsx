@@ -24,6 +24,7 @@ import {
   KeyRound,
   Menu,
   Sparkles,
+  Bell,
 } from "lucide-react";
 
 interface HeaderBarProps {
@@ -37,6 +38,8 @@ interface HeaderBarProps {
   onImportSupplierBill: () => void;
   onAiInsights?: () => void;
   aiCredits?: number | null;
+  onReminders?: () => void;
+  openReminderCount?: number;
   onShopSettings?: () => void;
   onMyAccountLicenses?: () => void;
   onSyncOffline?: () => void;
@@ -60,6 +63,8 @@ const HeaderBar = ({
   onImportSupplierBill,
   onAiInsights,
   aiCredits = null,
+  onReminders,
+  openReminderCount = 0,
   onShopSettings,
   onMyAccountLicenses,
   onSyncOffline,
@@ -141,6 +146,23 @@ const HeaderBar = ({
             {aiCredits !== null && (
               <Badge className="absolute -top-1 -right-1 h-5 min-w-5 px-1.5 flex items-center justify-center text-[10px] bg-emerald-500 text-white">
                 {aiCredits > 999 ? "999+" : aiCredits.toFixed(0)}
+              </Badge>
+            )}
+          </Button>
+        )}
+
+        {onReminders && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onReminders}
+            className="text-pos-header-foreground hover:bg-pos-header-foreground/10 relative"
+          >
+            <Bell className="h-4 w-4" />
+            <span className="hidden md:inline ml-1">Reminders</span>
+            {openReminderCount > 0 && (
+              <Badge className="absolute -top-1 -right-1 h-5 min-w-5 px-1.5 flex items-center justify-center text-[10px] bg-amber-500 text-white">
+                {openReminderCount > 99 ? "99+" : openReminderCount}
               </Badge>
             )}
           </Button>
@@ -307,6 +329,18 @@ const HeaderBar = ({
                 {aiCredits !== null && (
                   <Badge className="ml-auto h-5 min-w-5 px-1 text-[10px]">
                     {aiCredits > 999 ? "999+" : aiCredits.toFixed(0)}
+                  </Badge>
+                )}
+              </DropdownMenuItem>
+            )}
+
+            {onReminders && (
+              <DropdownMenuItem onSelect={() => onReminders()} className="min-h-11 px-3 py-2 text-base">
+                <Bell className="mr-3 h-5 w-5" />
+                Reminders
+                {openReminderCount > 0 && (
+                  <Badge className="ml-auto h-5 min-w-5 px-1 text-[10px]">
+                    {openReminderCount > 99 ? "99+" : openReminderCount}
                   </Badge>
                 )}
               </DropdownMenuItem>

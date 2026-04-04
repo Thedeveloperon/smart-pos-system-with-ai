@@ -2254,11 +2254,15 @@ export async function generateProductFromImageSuggestions(requestBody: ProductFr
 export type AiInsightsRequest = {
   prompt: string;
   idempotency_key?: string;
+  usage_type?: AiInsightsUsageType;
 };
 
 export type AiInsightsEstimateRequest = {
   prompt: string;
+  usage_type?: AiInsightsUsageType;
 };
+
+export type AiInsightsUsageType = "quick_insights" | "advanced_analysis" | "smart_reports";
 
 export type AiInsightsEstimateResponse = {
   estimated_input_tokens: number;
@@ -2269,6 +2273,7 @@ export type AiInsightsEstimateResponse = {
   daily_remaining_credits: number;
   can_afford: boolean;
   pricing_rules_version: string;
+  usage_type: AiInsightsUsageType;
 };
 
 export type AiInsightsResponse = {
@@ -2285,6 +2290,7 @@ export type AiInsightsResponse = {
   credits_used: number;
   refunded_credits: number;
   remaining_credits: number;
+  usage_type: AiInsightsUsageType;
   created_at: string;
   completed_at: string;
 };
@@ -2301,6 +2307,7 @@ export type AiInsightsHistoryItem = {
   charged_credits: number;
   credits_used: number;
   refunded_credits: number;
+  usage_type: AiInsightsUsageType;
   created_at: string;
   completed_at?: string | null;
   error_message?: string | null;
@@ -2308,6 +2315,141 @@ export type AiInsightsHistoryItem = {
 
 export type AiInsightsHistoryResponse = {
   items: AiInsightsHistoryItem[];
+};
+
+export type AiChatUsageType = AiInsightsUsageType;
+
+export type AiChatCreateSessionRequest = {
+  title?: string;
+  usage_type?: AiChatUsageType;
+};
+
+export type AiChatMessageCreateRequest = {
+  message: string;
+  usage_type?: AiChatUsageType;
+  idempotency_key?: string;
+};
+
+export type AiChatCitation = {
+  bucket_key: string;
+  title: string;
+  summary: string;
+};
+
+export type AiChatMessage = {
+  message_id: string;
+  role: "user" | "assistant" | "system" | string;
+  status: "pending" | "succeeded" | "failed" | string;
+  usage_type: AiChatUsageType;
+  content: string;
+  confidence?: string | null;
+  citations: AiChatCitation[];
+  input_tokens: number;
+  output_tokens: number;
+  reserved_credits: number;
+  charged_credits: number;
+  refunded_credits: number;
+  created_at: string;
+  completed_at?: string | null;
+  error_message?: string | null;
+};
+
+export type AiChatSessionSummary = {
+  session_id: string;
+  title: string;
+  default_usage_type: AiChatUsageType;
+  message_count: number;
+  created_at: string;
+  updated_at: string;
+  last_message_at?: string | null;
+};
+
+export type AiChatHistoryResponse = {
+  items: AiChatSessionSummary[];
+};
+
+export type AiChatSessionDetailResponse = {
+  session: AiChatSessionSummary;
+  messages: AiChatMessage[];
+};
+
+export type AiChatPostMessageResponse = {
+  session: AiChatSessionSummary;
+  user_message: AiChatMessage;
+  assistant_message: AiChatMessage;
+  remaining_credits: number;
+};
+
+export type ReminderRuleType =
+  | "low_stock"
+  | "update_available"
+  | "subscription_follow_up"
+  | "weekly_report"
+  | "monthly_report";
+
+export type ReminderSeverity = "info" | "warning" | "critical" | string;
+export type ReminderStatus = "open" | "acknowledged" | string;
+
+export type ReminderRule = {
+  rule_id: string;
+  reminder_type: ReminderRuleType | string;
+  enabled: boolean;
+  low_stock_threshold?: number | null;
+  snoozed_until?: string | null;
+  last_evaluated_at?: string | null;
+  last_triggered_at?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+export type ReminderItem = {
+  reminder_id: string;
+  rule_id?: string | null;
+  event_type: string;
+  severity: ReminderSeverity;
+  status: ReminderStatus;
+  title: string;
+  message: string;
+  action_path?: string | null;
+  created_at: string;
+  acknowledged_at?: string | null;
+  metadata_json?: string | null;
+};
+
+export type RemindersResponse = {
+  generated_at: string;
+  open_count: number;
+  items: ReminderItem[];
+};
+
+export type UpsertReminderRuleRequest = {
+  reminder_type: ReminderRuleType;
+  enabled?: boolean;
+  low_stock_threshold?: number | null;
+  snooze_minutes?: number | null;
+  clear_snooze?: boolean;
+};
+
+export type SmartReportJobSummary = {
+  job_id: string;
+  cadence: "weekly" | "monthly" | string;
+  status: string;
+  period_start_utc: string;
+  period_end_utc: string;
+  title: string;
+  summary?: string | null;
+  created_at: string;
+  completed_at?: string | null;
+  error_message?: string | null;
+};
+
+export type RunRemindersNowResponse = {
+  executed_at: string;
+  processed_rules: number;
+  skipped_rules: number;
+  created_events: number;
+  generated_reports: number;
+  jobs: SmartReportJobSummary[];
 };
 
 export type AiWalletResponse = {
@@ -2409,6 +2551,59 @@ export async function estimateAiInsights(requestBody: AiInsightsEstimateRequest)
 export async function fetchAiInsightsHistory(take = 10) {
   const normalizedTake = Math.max(1, Math.min(100, Math.trunc(take || 10)));
   return request<AiInsightsHistoryResponse>(`/api/ai/insights/history?take=${normalizedTake}`);
+}
+
+export async function createAiChatSession(requestBody: AiChatCreateSessionRequest) {
+  return request<AiChatSessionSummary>("/api/ai/chat/sessions", {
+    method: "POST",
+    body: JSON.stringify(requestBody),
+  });
+}
+
+export async function postAiChatMessage(sessionId: string, requestBody: AiChatMessageCreateRequest) {
+  return request<AiChatPostMessageResponse>(`/api/ai/chat/sessions/${sessionId}/messages`, {
+    method: "POST",
+    body: JSON.stringify(requestBody),
+  });
+}
+
+export async function fetchAiChatSession(sessionId: string, take = 50) {
+  const normalizedTake = Math.max(1, Math.min(200, Math.trunc(take || 50)));
+  return request<AiChatSessionDetailResponse>(`/api/ai/chat/sessions/${sessionId}?take=${normalizedTake}`);
+}
+
+export async function fetchAiChatHistory(take = 20) {
+  const normalizedTake = Math.max(1, Math.min(100, Math.trunc(take || 20)));
+  return request<AiChatHistoryResponse>(`/api/ai/chat/history?take=${normalizedTake}`);
+}
+
+export async function fetchReminders(take = 20, includeAcknowledged = false) {
+  const normalizedTake = Math.max(1, Math.min(100, Math.trunc(take || 20)));
+  const query = new URLSearchParams({
+    take: String(normalizedTake),
+    include_acknowledged: includeAcknowledged ? "true" : "false",
+  }).toString();
+
+  return request<RemindersResponse>(`/api/reminders?${query}`);
+}
+
+export async function upsertReminderRule(requestBody: UpsertReminderRuleRequest) {
+  return request<ReminderRule>("/api/reminders/rules", {
+    method: "POST",
+    body: JSON.stringify(requestBody),
+  });
+}
+
+export async function acknowledgeReminder(reminderId: string) {
+  return request<ReminderItem>(`/api/reminders/${reminderId}/ack`, {
+    method: "POST",
+  });
+}
+
+export async function runRemindersNow() {
+  return request<RunRemindersNowResponse>("/api/reminders/run-now", {
+    method: "POST",
+  });
 }
 
 export async function topUpAiWallet(requestBody: AiWalletTopUpRequest) {

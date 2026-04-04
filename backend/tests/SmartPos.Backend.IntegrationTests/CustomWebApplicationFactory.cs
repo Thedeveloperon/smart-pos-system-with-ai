@@ -190,7 +190,17 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 ["AiInsights:PaymentWebhook:SigningSecretEnvironmentVariable"] = "SMARTPOS_AI_WEBHOOK_SIGNING_SECRET",
                 ["AiInsights:PaymentWebhook:SignatureHeaderName"] = "X-AI-Payment-Signature",
                 ["AiInsights:PaymentWebhook:SignatureScheme"] = "v1",
-                ["AiInsights:PaymentWebhook:TimestampToleranceSeconds"] = "300"
+                ["AiInsights:PaymentWebhook:TimestampToleranceSeconds"] = "300",
+                ["Reminders:Enabled"] = "true",
+                ["Reminders:SchedulerEnabled"] = "false",
+                ["Reminders:SchedulerIntervalSeconds"] = "300",
+                ["Reminders:AutoSeedDefaultRules"] = "true",
+                ["Reminders:DefaultLowStockThreshold"] = "10",
+                ["Reminders:LowStockTake"] = "20",
+                ["Reminders:CurrentAppVersion"] = "1.0.0-test",
+                ["Reminders:LatestAppVersion"] = "",
+                ["Reminders:WeeklyReportDay"] = "Monday",
+                ["Reminders:MonthlyReportDay"] = "1"
             };
 
             foreach (var (key, value) in GetAdditionalConfigurationOverrides())

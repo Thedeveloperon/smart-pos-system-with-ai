@@ -45,6 +45,7 @@ public sealed class LicensingManualBillingFlowTests(CustomWebApplicationFactory 
                 method = "bank_deposit",
                 amount = 8000m,
                 bank_reference = "DEP-REF-001",
+                deposit_slip_url = "https://proofs.smartpos.test/dep-ref-001.png",
                 actor = "support_admin",
                 reason_code = "manual_payment_pending_verification",
                 actor_note = "customer bank deposit submitted"
@@ -160,6 +161,7 @@ public sealed class LicensingManualBillingFlowTests(CustomWebApplicationFactory 
                 invoice_number = invoiceNumber,
                 method = "cash",
                 amount = 5000m,
+                bank_reference = "CASH-REF-001",
                 actor = "support_admin",
                 reason_code = "manual_payment_pending_verification",
                 actor_note = "cash payment received"
@@ -220,6 +222,7 @@ public sealed class LicensingManualBillingFlowTests(CustomWebApplicationFactory 
                 method = "bank_transfer",
                 amount = 60000m,
                 bank_reference = "HV-DEP-001",
+                deposit_slip_url = "https://proofs.smartpos.test/hv-dep-001.pdf",
                 actor = "billing_admin",
                 reason_code = "manual_payment_pending_verification",
                 actor_note = "high value transfer recorded"
@@ -307,10 +310,12 @@ public sealed class LicensingManualBillingFlowTests(CustomWebApplicationFactory 
                 invoice_id = TestJson.GetString(invoiceA, "invoice_id"),
                 method = "bank_deposit",
                 amount = 1000m,
+                bank_reference = "UNIQUE-REF-001",
+                deposit_slip_url = "https://proofs.smartpos.test/unique-ref-001.png",
                 received_at = receivedAt,
                 actor = "support_admin",
                 reason_code = "manual_payment_pending_verification",
-                actor_note = "bank deposit recorded without reference"
+                actor_note = "bank deposit recorded with unique reference"
             }));
 
         var verifiedCandidate = await TestJson.ReadObjectAsync(
@@ -320,6 +325,7 @@ public sealed class LicensingManualBillingFlowTests(CustomWebApplicationFactory 
                 method = "bank_deposit",
                 amount = 2000m,
                 bank_reference = "DUP-REF-001",
+                deposit_slip_url = "https://proofs.smartpos.test/dup-ref-001-a.png",
                 received_at = receivedAt,
                 actor = "support_admin",
                 reason_code = "manual_payment_pending_verification",
@@ -334,6 +340,7 @@ public sealed class LicensingManualBillingFlowTests(CustomWebApplicationFactory 
                 method = "bank_transfer",
                 amount = 500m,
                 bank_reference = "DUP-REF-001",
+                deposit_slip_url = "https://proofs.smartpos.test/dup-ref-001-b.png",
                 received_at = receivedAt,
                 actor = "support_admin",
                 reason_code = "manual_payment_pending_verification",
@@ -364,7 +371,6 @@ public sealed class LicensingManualBillingFlowTests(CustomWebApplicationFactory 
             .OfType<string>()
             .ToHashSet(StringComparer.OrdinalIgnoreCase)
             ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        Assert.Contains("missing_bank_reference", mismatchReasons);
         Assert.Contains("duplicate_bank_reference", mismatchReasons);
         Assert.Contains("expected_bank_total_mismatch", mismatchReasons);
 
@@ -373,9 +379,127 @@ public sealed class LicensingManualBillingFlowTests(CustomWebApplicationFactory 
             .OfType<string>()
             .ToHashSet(StringComparer.OrdinalIgnoreCase)
             ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        Assert.Contains("BANK_REFERENCE_MISSING", alertCodes);
         Assert.Contains("BANK_REFERENCE_DUPLICATE", alertCodes);
         Assert.Contains("BANK_TOTAL_MISMATCH", alertCodes);
+    }
+
+    [Fact]
+    public async Task ManualPayment_Record_ShouldEnforceMethodEvidenceRules()
+    {
+        await TestAuth.SignInAsSupportAdminAsync(client);
+
+        var shopCode = $"manual-billing-evidence-shop-{Guid.NewGuid():N}";
+        var invoiceResponse = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/admin/licensing/billing/invoices", new
+            {
+                shop_code = shopCode,
+                amount_due = 5000m,
+                currency = "LKR",
+                due_at = DateTimeOffset.UtcNow.AddDays(5),
+                notes = "evidence matrix",
+                actor = "support_admin",
+                reason_code = "manual_billing_invoice_created",
+                actor_note = "evidence matrix"
+            }));
+        var invoiceId = TestJson.GetString(invoiceResponse, "invoice_id");
+
+        var cashWithoutReference = await client.PostAsJsonAsync("/api/admin/licensing/billing/payments/record", new
+        {
+            invoice_id = invoiceId,
+            method = "cash",
+            amount = 1000m,
+            actor = "support_admin",
+            reason_code = "manual_payment_pending_verification",
+            actor_note = "missing cash reference"
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, cashWithoutReference.StatusCode);
+
+        var bankWithoutSlip = await client.PostAsJsonAsync("/api/admin/licensing/billing/payments/record", new
+        {
+            invoice_id = invoiceId,
+            method = "bank_deposit",
+            amount = 1000m,
+            bank_reference = "BANK-REF-ONLY",
+            actor = "support_admin",
+            reason_code = "manual_payment_pending_verification",
+            actor_note = "missing bank slip"
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, bankWithoutSlip.StatusCode);
+
+        var bankWithFullEvidence = await client.PostAsJsonAsync("/api/admin/licensing/billing/payments/record", new
+        {
+            invoice_id = invoiceId,
+            method = "bank_deposit",
+            amount = 1000m,
+            bank_reference = "BANK-REF-OK",
+            deposit_slip_url = "https://proofs.smartpos.test/bank-ref-ok.png",
+            actor = "support_admin",
+            reason_code = "manual_payment_pending_verification",
+            actor_note = "bank evidence complete"
+        });
+        Assert.Equal(HttpStatusCode.OK, bankWithFullEvidence.StatusCode);
+    }
+
+    [Fact]
+    public async Task ManualPayment_Verify_ShouldRejectLegacyRecordWithoutRequiredEvidence()
+    {
+        await TestAuth.SignInAsSupportAdminAsync(client);
+
+        var shopCode = $"manual-billing-legacy-evidence-shop-{Guid.NewGuid():N}";
+        var invoiceResponse = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/admin/licensing/billing/invoices", new
+            {
+                shop_code = shopCode,
+                amount_due = 4000m,
+                currency = "LKR",
+                due_at = DateTimeOffset.UtcNow.AddDays(5),
+                notes = "legacy evidence verify guard",
+                actor = "support_admin",
+                reason_code = "manual_billing_invoice_created",
+                actor_note = "legacy evidence verify guard"
+            }));
+        var invoiceId = TestJson.GetString(invoiceResponse, "invoice_id");
+
+        var paymentResponse = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/admin/licensing/billing/payments/record", new
+            {
+                invoice_id = invoiceId,
+                method = "bank_deposit",
+                amount = 4000m,
+                bank_reference = "LEGACY-REF-001",
+                deposit_slip_url = "https://proofs.smartpos.test/legacy-ref-001.png",
+                actor = "support_admin",
+                reason_code = "manual_payment_pending_verification",
+                actor_note = "recorded with full evidence"
+            }));
+        var paymentId = TestJson.GetString(paymentResponse, "payment_id");
+
+        await using (var scope = appFactory.Services.CreateAsyncScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+            var payment = await dbContext.ManualBillingPayments
+                .SingleAsync(x => x.Id == Guid.Parse(paymentId));
+            payment.DepositSlipUrl = null;
+            payment.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            await dbContext.SaveChangesAsync();
+        }
+
+        await TestAuth.SignInAsBillingAdminAsync(client);
+        var verifyResponse = await client.PostAsJsonAsync(
+            $"/api/admin/licensing/billing/payments/{Uri.EscapeDataString(paymentId)}/verify",
+            new
+            {
+                reason_code = "manual_payment_verified",
+                actor_note = "attempt verify legacy partial evidence",
+                reason = "attempt verify legacy partial evidence",
+                extend_days = 30,
+                actor = "billing_admin"
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, verifyResponse.StatusCode);
+        var payload = await ReadJsonAsync(verifyResponse);
+        var message = payload["error"]?["message"]?.GetValue<string>() ?? string.Empty;
+        Assert.Contains("bank_reference and deposit_slip_url are both required", message, StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task<JsonObject> ReadJsonAsync(HttpResponseMessage response)

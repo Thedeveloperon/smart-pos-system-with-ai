@@ -99,6 +99,7 @@ public static class AiSuggestionEndpoints
                     userId.Value,
                     request.Prompt,
                     idempotencyKey,
+                    request.UsageType,
                     cancellationToken);
                 return Results.Ok(result);
             }
@@ -213,6 +214,7 @@ public static class AiSuggestionEndpoints
                 var result = await aiInsightService.EstimateInsightAsync(
                     userId.Value,
                     request.Prompt,
+                    request.UsageType,
                     cancellationToken);
                 return Results.Ok(result);
             }
