@@ -1,0 +1,31 @@
+name: Backup Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/backup/**'
+      - 'BACKUP_DR_RUNBOOK.md'
+      - 'AI_MARKETING_WORKFLOW_IMPLEMENTATION_PLAN_2026-04-04.md'
+  pull_request:
+    paths:
+      - 'scripts/backup/**'
+      - 'BACKUP_DR_RUNBOOK.md'
+      - 'AI_MARKETING_WORKFLOW_IMPLEMENTATION_PLAN_2026-04-04.md'
+
+jobs:
+  backup-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install SQLite
+        run: sudo apt-get update && sudo apt-get install -y sqlite3
+
+      - name: Run backup smoke suite
+        run: |
+          chmod +x scripts/backup/*.sh
+          bash scripts/backup/ci-smoke-test.sh

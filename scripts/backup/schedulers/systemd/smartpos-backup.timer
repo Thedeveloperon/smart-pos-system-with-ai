@@ -1,0 +1,10 @@
+[Unit]
+Description=Run SmartPOS Daily Backup
+
+[Timer]
+OnCalendar=*-*-* 01:15:00
+Persistent=true
+Unit=smartpos-backup.service
+
+[Install]
+WantedBy=timers.target

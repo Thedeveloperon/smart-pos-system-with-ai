@@ -5,6 +5,7 @@ import HeroSection from "@/components/HeroSection";
 import QuickValueStrip from "@/components/QuickValueStrip";
 import FeaturesSection from "@/components/FeaturesSection";
 import AIAssistantSection from "@/components/AIAssistantSection";
+import LiveDemoSection from "@/components/LiveDemoSection";
 import HowItWorksSection from "@/components/HowItWorksSection";
 import BuiltForShopsSection from "@/components/BuiltForShopsSection";
 import BeforeAfterSection from "@/components/BeforeAfterSection";
@@ -20,6 +21,7 @@ export default function HomePage() {
       <QuickValueStrip />
       <FeaturesSection />
       <AIAssistantSection />
+      <LiveDemoSection />
       <HowItWorksSection />
       <BuiltForShopsSection />
       <BeforeAfterSection />

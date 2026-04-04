@@ -5,6 +5,7 @@ public sealed class AiSuggestionOptions
     public const string SectionName = "AiSuggestions";
 
     public bool Enabled { get; set; } = true;
+    public bool AllowNonOpenAiInNonProduction { get; set; } = false;
     public string Provider { get; set; } = "Local";
     public string ApiBaseUrl { get; set; } = "https://api.openai.com/v1";
     public string Model { get; set; } = "gpt-5.4-mini";

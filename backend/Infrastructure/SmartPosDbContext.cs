@@ -43,6 +43,12 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
     public DbSet<AiInsightRequest> AiInsightRequests => Set<AiInsightRequest>();
     public DbSet<AiCreditPayment> AiCreditPayments => Set<AiCreditPayment>();
     public DbSet<AiCreditPaymentWebhookEvent> AiCreditPaymentWebhookEvents => Set<AiCreditPaymentWebhookEvent>();
+    public DbSet<AiCreditOrder> AiCreditOrders => Set<AiCreditOrder>();
+    public DbSet<AiConversation> AiConversations => Set<AiConversation>();
+    public DbSet<AiConversationMessage> AiConversationMessages => Set<AiConversationMessage>();
+    public DbSet<AiSmartReportJob> AiSmartReportJobs => Set<AiSmartReportJob>();
+    public DbSet<ReminderRule> ReminderRules => Set<ReminderRule>();
+    public DbSet<ReminderEvent> ReminderEvents => Set<ReminderEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -610,6 +616,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(24);
             entity.Property(x => x.Provider).HasMaxLength(24);
             entity.Property(x => x.Model).HasMaxLength(120);
+            entity.Property(x => x.UsageType).HasConversion<string>().HasMaxLength(32);
             entity.Property(x => x.PromptHash).HasMaxLength(128);
             entity.Property(x => x.ReservedCredits).HasPrecision(18, 2);
             entity.Property(x => x.ChargedCredits).HasPrecision(18, 2);
@@ -618,6 +625,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.ErrorMessage).HasMaxLength(500);
             entity.HasIndex(x => new { x.UserId, x.IdempotencyKey }).IsUnique();
             entity.HasIndex(x => new { x.UserId, x.CreatedAtUtc });
+            entity.HasIndex(x => new { x.UserId, x.UsageType, x.CreatedAtUtc });
             entity.HasOne(x => x.User)
                 .WithMany()
                 .HasForeignKey(x => x.UserId)
@@ -668,6 +676,140 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.HasOne(x => x.Payment)
                 .WithMany(x => x.WebhookEvents)
                 .HasForeignKey(x => x.PaymentId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<AiCreditOrder>(entity =>
+        {
+            entity.ToTable("ai_credit_orders");
+            entity.Property(x => x.TargetUsername).HasMaxLength(64);
+            entity.Property(x => x.PackageCode).HasMaxLength(80);
+            entity.Property(x => x.RequestedCredits).HasPrecision(18, 2);
+            entity.Property(x => x.SettledCredits).HasPrecision(18, 2);
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.Source).HasMaxLength(80);
+            entity.Property(x => x.WalletLedgerReference).HasMaxLength(120);
+            entity.Property(x => x.SettlementError).HasMaxLength(500);
+            entity.Property(x => x.MetadataJson).HasColumnType("text");
+            entity.HasIndex(x => x.ShopId);
+            entity.HasIndex(x => x.InvoiceId);
+            entity.HasIndex(x => x.PaymentId);
+            entity.HasIndex(x => x.TargetUserId);
+            entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => x.CreatedAtUtc);
+            entity.HasOne(x => x.Shop)
+                .WithMany(x => x.AiCreditOrders)
+                .HasForeignKey(x => x.ShopId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Invoice)
+                .WithMany()
+                .HasForeignKey(x => x.InvoiceId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(x => x.Payment)
+                .WithMany()
+                .HasForeignKey(x => x.PaymentId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(x => x.TargetUser)
+                .WithMany()
+                .HasForeignKey(x => x.TargetUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<AiConversation>(entity =>
+        {
+            entity.ToTable("ai_conversations");
+            entity.Property(x => x.Title).HasMaxLength(120);
+            entity.Property(x => x.DefaultUsageType).HasConversion<string>().HasMaxLength(32);
+            entity.HasIndex(x => x.UserId);
+            entity.HasIndex(x => new { x.UserId, x.UpdatedAtUtc });
+            entity.HasOne(x => x.User)
+                .WithMany(x => x.AiConversations)
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AiConversationMessage>(entity =>
+        {
+            entity.ToTable("ai_conversation_messages");
+            entity.Property(x => x.Role).HasConversion<string>().HasMaxLength(24);
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(24);
+            entity.Property(x => x.UsageType).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.Content).HasColumnType("text");
+            entity.Property(x => x.IdempotencyKey).HasMaxLength(120);
+            entity.Property(x => x.CitationsJson).HasColumnType("text");
+            entity.Property(x => x.Confidence).HasMaxLength(24);
+            entity.Property(x => x.ReservedCredits).HasPrecision(18, 2);
+            entity.Property(x => x.ChargedCredits).HasPrecision(18, 2);
+            entity.Property(x => x.RefundedCredits).HasPrecision(18, 2);
+            entity.Property(x => x.ErrorCode).HasMaxLength(80);
+            entity.Property(x => x.ErrorMessage).HasMaxLength(500);
+            entity.HasIndex(x => x.ConversationId);
+            entity.HasIndex(x => new { x.ConversationId, x.CreatedAtUtc });
+            entity.HasIndex(x => new { x.ConversationId, x.IdempotencyKey });
+            entity.HasOne(x => x.Conversation)
+                .WithMany(x => x.Messages)
+                .HasForeignKey(x => x.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.User)
+                .WithMany(x => x.AiConversationMessages)
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AiSmartReportJob>(entity =>
+        {
+            entity.ToTable("ai_smart_report_jobs");
+            entity.Property(x => x.Cadence).HasConversion<string>().HasMaxLength(24);
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(24);
+            entity.Property(x => x.Title).HasMaxLength(180);
+            entity.Property(x => x.Summary).HasColumnType("text");
+            entity.Property(x => x.PayloadJson).HasColumnType("text");
+            entity.Property(x => x.ErrorMessage).HasMaxLength(500);
+            entity.HasIndex(x => x.UserId);
+            entity.HasIndex(x => new { x.UserId, x.Cadence, x.PeriodStartUtc }).IsUnique();
+            entity.HasIndex(x => new { x.UserId, x.CreatedAtUtc });
+            entity.HasOne(x => x.User)
+                .WithMany(x => x.AiSmartReportJobs)
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ReminderRule>(entity =>
+        {
+            entity.ToTable("reminder_rules");
+            entity.Property(x => x.RuleType).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.LowStockThreshold).HasPrecision(18, 3);
+            entity.HasIndex(x => x.UserId);
+            entity.HasIndex(x => new { x.UserId, x.RuleType }).IsUnique();
+            entity.HasIndex(x => new { x.UserId, x.IsEnabled });
+            entity.HasOne(x => x.User)
+                .WithMany(x => x.ReminderRules)
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ReminderEvent>(entity =>
+        {
+            entity.ToTable("reminder_events");
+            entity.Property(x => x.EventType).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.Severity).HasConversion<string>().HasMaxLength(16);
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(16);
+            entity.Property(x => x.Title).HasMaxLength(180);
+            entity.Property(x => x.Message).HasMaxLength(600);
+            entity.Property(x => x.ActionPath).HasMaxLength(220);
+            entity.Property(x => x.Fingerprint).HasMaxLength(180);
+            entity.Property(x => x.MetadataJson).HasColumnType("text");
+            entity.HasIndex(x => x.UserId);
+            entity.HasIndex(x => new { x.UserId, x.Status, x.CreatedAtUtc });
+            entity.HasIndex(x => x.RuleId);
+            entity.HasIndex(x => new { x.UserId, x.Fingerprint });
+            entity.HasOne(x => x.User)
+                .WithMany(x => x.ReminderEvents)
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Rule)
+                .WithMany(x => x.Events)
+                .HasForeignKey(x => x.RuleId)
                 .OnDelete(DeleteBehavior.SetNull);
         });
     }

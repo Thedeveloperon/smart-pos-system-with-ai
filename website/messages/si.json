@@ -13,6 +13,7 @@
   "nav": {
     "links": {
       "features": "විශේෂාංග",
+      "liveDemo": "Live Demo",
       "howItWorks": "කෙසේ ක්‍රියා කරයි",
       "pricing": "මිල ගණන්"
     },
@@ -124,6 +125,60 @@
       { "type": "insight", "text": "පසුගිය සතියට වඩා බිස්කට් වැඩි වශයෙන් විකුණුණි. නැවත ස්ටොක් කරන්න." }
     ],
     "askPlaceholder": "SmartPOS ඕනෑම දෙයක් අසන්න..."
+  },
+  "liveDemo": {
+    "badge": "Live Demo",
+    "titlePart1": "ආරම්භ කිරීමට පෙර",
+    "titleHighlight": "AI Workflow",
+    "titlePart2": "පෙරදසුන බලන්න",
+    "description": "Seeded read-only දත්ත භාවිතයෙන් low-stock, best/worst seller සහ smart report ප්‍රශ්න පෙරදසුනක් බලන්න.",
+    "readOnlyTag": "Read-only demo data",
+    "modeMock": "Mock Data",
+    "modeSandbox": "Sandbox API",
+    "sandboxNotice": "Sandbox API mode ඉදිරි සංස්කරණයකදී සක්‍රීය වේ. දැනට Mock Data භාවිත කරන්න.",
+    "queryLabel": "Sample question",
+    "resultLabel": "Demo response",
+    "confidence": "Confidence",
+    "citations": "Grounded references",
+    "run": "Run Query",
+    "running": "Running...",
+    "empty": "Demo cards නොමැත.",
+    "cards": [
+      {
+        "id": "low-stock",
+        "title": "Low stock check",
+        "query": "දැන් stock level 10ට අඩු items පෙන්නන්න.",
+        "summary": "Threshold 10ට අඩු items 4ක් හමු වුණා. වැඩි අවදානම: Milk Powder (2 units), Ballpoint Pen Blue (6 units), A4 Exercise Book (8 units), Dish Soap 500ml (9 units).",
+        "confidence": "high",
+        "citations": [
+          "reports.low_stock.threshold_10",
+          "inventory.snapshot.default_store"
+        ]
+      },
+      {
+        "id": "best-worst",
+        "title": "Best vs worst sellers",
+        "query": "මේ සතියේ වැඩියෙන්ම සහ අඩුවෙන්ම විකුණුණ items මොනවාද?",
+        "summary": "Best seller: Biscuits Family Pack (net qty 184). Lowest performer: Stapler Pins Small (net qty 7). Action: checkout area එකට notebook bundle එකක් එක්කර stapler pins push කරන්න.",
+        "confidence": "high",
+        "citations": [
+          "reports.top_items.last_7_days",
+          "reports.worst_items.last_7_days"
+        ]
+      },
+      {
+        "id": "smart-report",
+        "title": "Smart report preview",
+        "query": "Next month restock guidance එක්ක monthly smart report summary එකක් දෙන්න.",
+        "summary": "Monthly net sales trend +9.4%. Next month forecast net sales Rs. 1,240,000. Milk powder සහ family biscuits restock වැඩි කරන්න; stationery reorder current level එකම තබන්න.",
+        "confidence": "medium",
+        "citations": [
+          "reports.monthly_forecast.last_6_months",
+          "reports.low_stock.threshold_10",
+          "reports.top_items.last_30_days"
+        ]
+      }
+    ]
   },
   "howItWorks": {
     "badge": "කෙසේ ක්‍රියා කරයි",

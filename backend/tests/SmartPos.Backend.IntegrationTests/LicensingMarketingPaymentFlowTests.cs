@@ -3,12 +3,17 @@ using System.Net.Http.Json;
 using System.Net.Http.Headers;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using SmartPos.Backend.Domain;
+using SmartPos.Backend.Infrastructure;
 
 namespace SmartPos.Backend.IntegrationTests;
 
 public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFactory factory)
     : IClassFixture<CustomWebApplicationFactory>
 {
+    private readonly CustomWebApplicationFactory appFactory = factory;
     private readonly HttpClient client = factory.CreateClient();
 
     [Fact]
@@ -44,6 +49,7 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
             amount = 19m,
             currency = "USD",
             bank_reference = "DEP-REF-MKT-001",
+            deposit_slip_url = "https://proofs.smartpos.test/dep-ref-mkt-001.png",
             contact_name = "Nelu",
             contact_email = "nelu@example.com"
         });
@@ -93,6 +99,92 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
     }
 
     [Fact]
+    public async Task MarketingPaymentFlow_WithAiCredits_ShouldSettleWalletOnVerification()
+    {
+        var createResponse = await PostJsonAsync("/api/license/public/payment-request", new
+        {
+            shop_name = "AI Credits Shop",
+            contact_name = "AI Owner",
+            contact_email = "ai-owner@example.com",
+            plan_code = "pro",
+            payment_method = "bank_deposit",
+            source = "website_pricing",
+            target_username = "owner",
+            ai_package_code = "pack_100"
+        });
+
+        var invoiceId = createResponse["invoice"]?["invoice_id"]?.GetValue<Guid>()
+            ?? throw new InvalidOperationException("Missing invoice_id.");
+        var aiOrder = createResponse["ai_credit_order"]?.AsObject()
+            ?? throw new InvalidOperationException("Missing ai_credit_order on create response.");
+        var orderId = aiOrder["order_id"]?.GetValue<Guid>()
+            ?? throw new InvalidOperationException("Missing order_id.");
+        Assert.Equal("submitted", aiOrder["status"]?.GetValue<string>());
+        Assert.Equal(100m, aiOrder["requested_credits"]?.GetValue<decimal>());
+
+        var submitResponse = await PostJsonAsync("/api/license/public/payment-submit", new
+        {
+            invoice_id = invoiceId,
+            payment_method = "bank_deposit",
+            amount = 19m,
+            currency = "USD",
+            bank_reference = "DEP-REF-AI-001",
+            deposit_slip_url = "https://proofs.smartpos.test/dep-ref-ai-001.png",
+            contact_name = "AI Owner",
+            contact_email = "ai-owner@example.com"
+        });
+
+        Assert.Equal("pending_verification", TestJson.GetString(submitResponse, "payment_status"));
+        Assert.Equal(
+            "pending_verification",
+            submitResponse["ai_credit_order"]?["status"]?.GetValue<string>());
+
+        var paymentId = submitResponse["payment_id"]?.GetValue<Guid>()
+            ?? throw new InvalidOperationException("Missing payment_id.");
+
+        await TestAuth.SignInAsBillingAdminAsync(client);
+
+        var verifyResponse = await PostJsonAsync(
+            $"/api/admin/licensing/billing/payments/{paymentId}/verify",
+            new
+            {
+                reason_code = "manual_payment_verified",
+                actor_note = "ai credits settlement verification",
+                reason = "ai credits settlement verification",
+                extend_days = 30,
+                actor = "billing_admin"
+            });
+
+        Assert.Equal("settled", verifyResponse["ai_credit_order"]?["status"]?.GetValue<string>());
+        Assert.Equal(100m, verifyResponse["ai_credit_order"]?["settled_credits"]?.GetValue<decimal>());
+        Assert.False(string.IsNullOrWhiteSpace(
+            verifyResponse["ai_credit_order"]?["wallet_ledger_reference"]?.GetValue<string>()));
+
+        var statusResponse = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/license/public/ai-credit-order-status?order_id={orderId}"));
+        Assert.Equal("settled", statusResponse["order"]?["status"]?.GetValue<string>());
+        Assert.Equal("verified", statusResponse["payment_status"]?.GetValue<string>());
+
+        await using var scope = appFactory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+        var orderRecord = await dbContext.AiCreditOrders
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == orderId);
+        Assert.NotNull(orderRecord);
+        Assert.Equal(AiCreditOrderStatus.Settled, orderRecord!.Status);
+        Assert.Equal(100m, orderRecord.SettledCredits);
+
+        var ledgerReference = orderRecord.WalletLedgerReference;
+        Assert.False(string.IsNullOrWhiteSpace(ledgerReference));
+        var settlementLedger = await dbContext.AiCreditLedgerEntries
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Reference == ledgerReference);
+        Assert.NotNull(settlementLedger);
+        Assert.Equal(AiCreditLedgerEntryType.Purchase, settlementLedger!.EntryType);
+        Assert.Equal(100m, settlementLedger.DeltaCredits);
+    }
+
+    [Fact]
     public async Task MarketingPaymentFlow_ShouldRejectDuplicateSubmissionForSameInvoice()
     {
         var createResponse = await PostJsonAsync("/api/license/public/payment-request", new
@@ -115,6 +207,7 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
             amount = 19m,
             currency = "USD",
             bank_reference = "DEP-REF-DUP-001",
+            deposit_slip_url = "https://proofs.smartpos.test/dep-ref-dup-001-a.png",
             contact_name = "Owner",
             contact_email = "owner+dup@example.com"
         });
@@ -126,6 +219,7 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
             amount = 19m,
             currency = "USD",
             bank_reference = "DEP-REF-DUP-001",
+            deposit_slip_url = "https://proofs.smartpos.test/dep-ref-dup-001-b.png",
             contact_name = "Owner",
             contact_email = "owner+dup@example.com"
         });
@@ -191,6 +285,7 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
             amount = 19m,
             currency = "USD",
             bank_reference = "DEP-REF-TRACK-001",
+            deposit_slip_url = "https://proofs.smartpos.test/dep-ref-track-001.png",
             contact_name = "Tracker Owner",
             contact_email = "tracker@example.com"
         });

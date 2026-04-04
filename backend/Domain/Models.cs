@@ -254,6 +254,11 @@ public sealed class AppUser
     public ICollection<UserRole> UserRoles { get; set; } = [];
     public ICollection<Device> Devices { get; set; } = [];
     public ICollection<PurchaseBill> CreatedPurchaseBills { get; set; } = [];
+    public ICollection<AiConversation> AiConversations { get; set; } = [];
+    public ICollection<AiConversationMessage> AiConversationMessages { get; set; } = [];
+    public ICollection<AiSmartReportJob> AiSmartReportJobs { get; set; } = [];
+    public ICollection<ReminderRule> ReminderRules { get; set; } = [];
+    public ICollection<ReminderEvent> ReminderEvents { get; set; } = [];
 }
 
 public sealed class AppRole
@@ -369,6 +374,7 @@ public sealed class Shop
     public ICollection<ManualBillingInvoice> ManualBillingInvoices { get; set; } = [];
     public ICollection<ManualBillingPayment> ManualBillingPayments { get; set; } = [];
     public ICollection<CustomerActivationEntitlement> CustomerActivationEntitlements { get; set; } = [];
+    public ICollection<AiCreditOrder> AiCreditOrders { get; set; } = [];
 }
 
 public sealed class Subscription
@@ -602,6 +608,7 @@ public sealed class AiInsightRequest
     public AiInsightRequestStatus Status { get; set; } = AiInsightRequestStatus.Pending;
     public string Provider { get; set; } = "local";
     public string Model { get; set; } = string.Empty;
+    public AiUsageType UsageType { get; set; } = AiUsageType.QuickInsights;
     public string PromptHash { get; set; } = string.Empty;
     public int PromptCharCount { get; set; }
     public decimal ReservedCredits { get; set; }
@@ -659,6 +666,134 @@ public sealed class AiCreditPaymentWebhookEvent
     public DateTimeOffset? UpdatedAtUtc { get; set; }
 
     public AiCreditPayment? Payment { get; set; }
+}
+
+public sealed class AiCreditOrder
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ShopId { get; set; }
+    public Guid? InvoiceId { get; set; }
+    public Guid? PaymentId { get; set; }
+    public Guid? TargetUserId { get; set; }
+    public string? TargetUsername { get; set; }
+    public string? PackageCode { get; set; }
+    public decimal RequestedCredits { get; set; }
+    public decimal SettledCredits { get; set; }
+    public AiCreditOrderStatus Status { get; set; } = AiCreditOrderStatus.Submitted;
+    public string Source { get; set; } = "marketing_website";
+    public string? WalletLedgerReference { get; set; }
+    public string? SettlementError { get; set; }
+    public string? MetadataJson { get; set; }
+    public DateTimeOffset SubmittedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? VerifiedAtUtc { get; set; }
+    public DateTimeOffset? RejectedAtUtc { get; set; }
+    public DateTimeOffset? SettledAtUtc { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public required Shop Shop { get; set; }
+    public ManualBillingInvoice? Invoice { get; set; }
+    public ManualBillingPayment? Payment { get; set; }
+    public AppUser? TargetUser { get; set; }
+}
+
+public sealed class AiConversation
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid UserId { get; set; }
+    public string Title { get; set; } = "AI Chat";
+    public AiUsageType DefaultUsageType { get; set; } = AiUsageType.QuickInsights;
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? LastMessageAtUtc { get; set; }
+
+    public required AppUser User { get; set; }
+    public ICollection<AiConversationMessage> Messages { get; set; } = [];
+}
+
+public sealed class AiConversationMessage
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ConversationId { get; set; }
+    public Guid UserId { get; set; }
+    public AiConversationMessageRole Role { get; set; } = AiConversationMessageRole.User;
+    public AiConversationMessageStatus Status { get; set; } = AiConversationMessageStatus.Pending;
+    public AiUsageType UsageType { get; set; } = AiUsageType.QuickInsights;
+    public string Content { get; set; } = string.Empty;
+    public string? IdempotencyKey { get; set; }
+    public string? CitationsJson { get; set; }
+    public string? Confidence { get; set; }
+    public decimal ReservedCredits { get; set; }
+    public decimal ChargedCredits { get; set; }
+    public decimal RefundedCredits { get; set; }
+    public int InputTokens { get; set; }
+    public int OutputTokens { get; set; }
+    public string? ErrorCode { get; set; }
+    public string? ErrorMessage { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? CompletedAtUtc { get; set; }
+
+    public required AiConversation Conversation { get; set; }
+    public required AppUser User { get; set; }
+}
+
+public sealed class AiSmartReportJob
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid UserId { get; set; }
+    public AiSmartReportCadence Cadence { get; set; } = AiSmartReportCadence.Weekly;
+    public AiSmartReportJobStatus Status { get; set; } = AiSmartReportJobStatus.Pending;
+    public DateTimeOffset PeriodStartUtc { get; set; }
+    public DateTimeOffset PeriodEndUtc { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string? Summary { get; set; }
+    public string? PayloadJson { get; set; }
+    public string? ErrorMessage { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? StartedAtUtc { get; set; }
+    public DateTimeOffset? CompletedAtUtc { get; set; }
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public required AppUser User { get; set; }
+}
+
+public sealed class ReminderRule
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid UserId { get; set; }
+    public ReminderRuleType RuleType { get; set; } = ReminderRuleType.LowStock;
+    public bool IsEnabled { get; set; } = true;
+    public decimal? LowStockThreshold { get; set; }
+    public DateTimeOffset? SnoozedUntilUtc { get; set; }
+    public DateTimeOffset? LastEvaluatedAtUtc { get; set; }
+    public DateTimeOffset? LastTriggeredAtUtc { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public required AppUser User { get; set; }
+    public ICollection<ReminderEvent> Events { get; set; } = [];
+}
+
+public sealed class ReminderEvent
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid UserId { get; set; }
+    public Guid? RuleId { get; set; }
+    public ReminderEventType EventType { get; set; } = ReminderEventType.LowStockThresholdCrossed;
+    public ReminderSeverity Severity { get; set; } = ReminderSeverity.Info;
+    public ReminderEventStatus Status { get; set; } = ReminderEventStatus.Open;
+    public string Title { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
+    public string? ActionPath { get; set; }
+    public string? Fingerprint { get; set; }
+    public string? MetadataJson { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? AcknowledgedAtUtc { get; set; }
+    public DateTimeOffset? ExpiresAtUtc { get; set; }
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public required AppUser User { get; set; }
+    public ReminderRule? Rule { get; set; }
 }
 
 public enum SaleStatus
@@ -791,4 +926,79 @@ public enum AiCreditPaymentStatus
     Failed = 3,
     Refunded = 4,
     Canceled = 5
+}
+
+public enum AiCreditOrderStatus
+{
+    Submitted = 1,
+    PendingVerification = 2,
+    Verified = 3,
+    Rejected = 4,
+    Settled = 5
+}
+
+public enum AiUsageType
+{
+    QuickInsights = 1,
+    AdvancedAnalysis = 2,
+    SmartReports = 3
+}
+
+public enum AiConversationMessageRole
+{
+    User = 1,
+    Assistant = 2,
+    System = 3
+}
+
+public enum AiConversationMessageStatus
+{
+    Pending = 1,
+    Succeeded = 2,
+    Failed = 3
+}
+
+public enum AiSmartReportCadence
+{
+    Weekly = 1,
+    Monthly = 2
+}
+
+public enum AiSmartReportJobStatus
+{
+    Pending = 1,
+    Running = 2,
+    Succeeded = 3,
+    Failed = 4
+}
+
+public enum ReminderRuleType
+{
+    LowStock = 1,
+    UpdateAvailable = 2,
+    SubscriptionFollowUp = 3,
+    WeeklySmartReport = 4,
+    MonthlySmartReport = 5
+}
+
+public enum ReminderEventType
+{
+    LowStockThresholdCrossed = 1,
+    UpdateAvailable = 2,
+    SubscriptionFollowUp = 3,
+    WeeklyReportReady = 4,
+    MonthlyReportReady = 5
+}
+
+public enum ReminderSeverity
+{
+    Info = 1,
+    Warning = 2,
+    Critical = 3
+}
+
+public enum ReminderEventStatus
+{
+    Open = 1,
+    Acknowledged = 2
 }

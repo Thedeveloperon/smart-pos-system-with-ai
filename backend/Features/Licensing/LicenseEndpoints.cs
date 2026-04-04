@@ -410,6 +410,29 @@ public static class LicenseEndpoints
         .WithName("SubmitMarketingPayment")
         .WithOpenApi();
 
+        publicBilling.MapGet("/ai-credit-order-status", async (
+            Guid? order_id,
+            string? invoice_number,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var response = await licenseService.GetMarketingAiCreditOrderStatusAsync(
+                    order_id,
+                    invoice_number,
+                    cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .AllowAnonymous()
+        .WithName("GetMarketingAiCreditOrderStatus")
+        .WithOpenApi();
+
         publicBilling.MapPost("/download-track", async (
             MarketingLicenseDownloadTrackRequest request,
             HttpContext httpContext,

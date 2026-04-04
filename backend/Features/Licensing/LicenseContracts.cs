@@ -987,6 +987,15 @@ public sealed class MarketingPaymentRequestCreateRequest
 
     [JsonPropertyName("notes")]
     public string? Notes { get; set; }
+
+    [JsonPropertyName("target_username")]
+    public string? TargetUsername { get; set; }
+
+    [JsonPropertyName("ai_package_code")]
+    public string? AiPackageCode { get; set; }
+
+    [JsonPropertyName("ai_credits_requested")]
+    public decimal? AiCreditsRequested { get; set; }
 }
 
 public sealed class MarketingPaymentInstructionsResponse
@@ -1059,6 +1068,9 @@ public sealed class MarketingPaymentRequestCreateResponse
 
     [JsonPropertyName("next_step")]
     public string NextStep { get; set; } = "await_customer_payment";
+
+    [JsonPropertyName("ai_credit_order")]
+    public MarketingAiCreditOrderSummaryResponse? AiCreditOrder { get; set; }
 }
 
 public sealed class MarketingPaymentSubmissionRequest
@@ -1128,6 +1140,69 @@ public sealed class MarketingPaymentSubmissionResponse
 
     [JsonPropertyName("next_step")]
     public string NextStep { get; set; } = "await_admin_verification";
+
+    [JsonPropertyName("ai_credit_order")]
+    public MarketingAiCreditOrderSummaryResponse? AiCreditOrder { get; set; }
+}
+
+public sealed class MarketingAiCreditOrderSummaryResponse
+{
+    [JsonPropertyName("order_id")]
+    public Guid OrderId { get; set; }
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "submitted";
+
+    [JsonPropertyName("requested_credits")]
+    public decimal RequestedCredits { get; set; }
+
+    [JsonPropertyName("settled_credits")]
+    public decimal SettledCredits { get; set; }
+
+    [JsonPropertyName("target_username")]
+    public string? TargetUsername { get; set; }
+
+    [JsonPropertyName("package_code")]
+    public string? PackageCode { get; set; }
+
+    [JsonPropertyName("wallet_ledger_reference")]
+    public string? WalletLedgerReference { get; set; }
+
+    [JsonPropertyName("settlement_error")]
+    public string? SettlementError { get; set; }
+
+    [JsonPropertyName("submitted_at")]
+    public DateTimeOffset SubmittedAt { get; set; }
+
+    [JsonPropertyName("verified_at")]
+    public DateTimeOffset? VerifiedAt { get; set; }
+
+    [JsonPropertyName("rejected_at")]
+    public DateTimeOffset? RejectedAt { get; set; }
+
+    [JsonPropertyName("settled_at")]
+    public DateTimeOffset? SettledAt { get; set; }
+}
+
+public sealed class MarketingAiCreditOrderStatusResponse
+{
+    [JsonPropertyName("generated_at")]
+    public DateTimeOffset GeneratedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("shop_code")]
+    public string ShopCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("invoice_number")]
+    public string? InvoiceNumber { get; set; }
+
+    [JsonPropertyName("invoice_status")]
+    public string? InvoiceStatus { get; set; }
+
+    [JsonPropertyName("payment_status")]
+    public string? PaymentStatus { get; set; }
+
+    [JsonPropertyName("order")]
+    public MarketingAiCreditOrderSummaryResponse Order { get; set; } = new();
 }
 
 public sealed class MarketingPaymentProofUploadResponse
@@ -1464,6 +1539,9 @@ public sealed class AdminManualBillingPaymentVerificationResponse
 
     [JsonPropertyName("access_delivery")]
     public LicenseAccessDeliveryResponse? AccessDelivery { get; set; }
+
+    [JsonPropertyName("ai_credit_order")]
+    public MarketingAiCreditOrderSummaryResponse? AiCreditOrder { get; set; }
 
     [JsonPropertyName("processed_at")]
     public DateTimeOffset ProcessedAt { get; set; } = DateTimeOffset.UtcNow;

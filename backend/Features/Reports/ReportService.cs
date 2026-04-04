@@ -252,6 +252,165 @@ public sealed class ReportService(
         };
     }
 
+    public async Task<WorstItemsReportResponse> GetWorstItemsReportAsync(
+        DateOnly? fromDate,
+        DateOnly? toDate,
+        int take,
+        CancellationToken cancellationToken)
+    {
+        var normalizedTake = Math.Clamp(take, 1, 50);
+        var range = NormalizeDateRange(fromDate, toDate, defaultDays: 7);
+
+        var sales = await dbContext.Sales
+            .AsNoTracking()
+            .Include(x => x.Items)
+            .ToListAsync(cancellationToken);
+        var refunds = await dbContext.Refunds
+            .AsNoTracking()
+            .Include(x => x.Items)
+            .ToListAsync(cancellationToken);
+
+        var soldByProduct = sales
+            .Where(x => IsFinancialSaleStatus(x.Status) && IsInRange(GetSaleTimestamp(x), range))
+            .SelectMany(x => x.Items)
+            .GroupBy(x => x.ProductId)
+            .ToDictionary(
+                x => x.Key,
+                x => new ItemAgg(
+                    ProductName: x.Select(y => y.ProductNameSnapshot).FirstOrDefault() ?? string.Empty,
+                    Quantity: x.Sum(y => y.Quantity),
+                    Amount: x.Sum(y => y.LineTotal)));
+
+        var refundedByProduct = refunds
+            .Where(x => IsInRange(x.CreatedAtUtc, range))
+            .SelectMany(x => x.Items)
+            .GroupBy(x => x.ProductId)
+            .ToDictionary(
+                x => x.Key,
+                x => new ItemAgg(
+                    ProductName: x.Select(y => y.ProductNameSnapshot).FirstOrDefault() ?? string.Empty,
+                    Quantity: x.Sum(y => y.Quantity),
+                    Amount: x.Sum(y => y.TotalAmount)));
+
+        var items = soldByProduct.Keys
+            .Select(productId =>
+            {
+                var sold = soldByProduct.GetValueOrDefault(productId, ItemAgg.Empty);
+                var refunded = refundedByProduct.GetValueOrDefault(productId, ItemAgg.Empty);
+
+                var soldQty = RoundQuantity(sold.Quantity);
+                var refundedQty = RoundQuantity(refunded.Quantity);
+                var netQty = RoundQuantity(soldQty - refundedQty);
+                var netSales = RoundMoney(sold.Amount - refunded.Amount);
+                var name = string.IsNullOrWhiteSpace(sold.ProductName)
+                    ? refunded.ProductName
+                    : sold.ProductName;
+
+                return new WorstItemReportRow
+                {
+                    ProductId = productId,
+                    ProductName = name,
+                    SoldQuantity = soldQty,
+                    RefundedQuantity = refundedQty,
+                    NetQuantity = netQty,
+                    NetSales = netSales
+                };
+            })
+            .OrderBy(x => x.NetQuantity)
+            .ThenBy(x => x.NetSales)
+            .Take(normalizedTake)
+            .ToList();
+
+        return new WorstItemsReportResponse
+        {
+            FromDate = range.FromDate,
+            ToDate = range.ToDate,
+            Take = normalizedTake,
+            Items = items
+        };
+    }
+
+    public async Task<MonthlySalesForecastReportResponse> GetMonthlySalesForecastReportAsync(
+        int months,
+        CancellationToken cancellationToken)
+    {
+        var normalizedMonths = Math.Clamp(months, 3, 24);
+        var currentMonthStart = new DateOnly(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
+        var fromMonth = currentMonthStart.AddMonths(-(normalizedMonths - 1));
+        var toMonth = currentMonthStart;
+        var range = NormalizeDateRange(fromMonth, toMonth.AddMonths(1).AddDays(-1), defaultDays: 30);
+
+        var sales = await dbContext.Sales
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+        var refunds = await dbContext.Refunds
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        var monthRows = new Dictionary<string, MonthlySalesForecastRow>(StringComparer.Ordinal);
+        for (var monthCursor = fromMonth; monthCursor <= toMonth; monthCursor = monthCursor.AddMonths(1))
+        {
+            var monthKey = $"{monthCursor:yyyy-MM}";
+            monthRows[monthKey] = new MonthlySalesForecastRow
+            {
+                Month = monthKey
+            };
+        }
+
+        foreach (var sale in sales.Where(x => IsFinancialSaleStatus(x.Status) && IsInRange(GetSaleTimestamp(x), range)))
+        {
+            var key = $"{DateOnly.FromDateTime(GetSaleTimestamp(sale).UtcDateTime):yyyy-MM}";
+            if (!monthRows.TryGetValue(key, out var row))
+            {
+                continue;
+            }
+
+            row.SalesCount += 1;
+            row.NetSales = RoundMoney(row.NetSales + sale.GrandTotal);
+        }
+
+        foreach (var refund in refunds.Where(x => IsInRange(x.CreatedAtUtc, range)))
+        {
+            var key = $"{DateOnly.FromDateTime(refund.CreatedAtUtc.UtcDateTime):yyyy-MM}";
+            if (!monthRows.TryGetValue(key, out var row))
+            {
+                continue;
+            }
+
+            row.RefundCount += 1;
+            row.NetSales = RoundMoney(row.NetSales - refund.GrandTotal);
+        }
+
+        var rows = monthRows.Values
+            .OrderBy(x => x.Month, StringComparer.Ordinal)
+            .ToList();
+
+        var average = rows.Count == 0
+            ? 0m
+            : RoundMoney(rows.Average(x => x.NetSales));
+        var firstNetSales = rows.FirstOrDefault()?.NetSales ?? 0m;
+        var lastNetSales = rows.LastOrDefault()?.NetSales ?? 0m;
+        var slope = rows.Count <= 1
+            ? 0m
+            : RoundMoney((lastNetSales - firstNetSales) / (rows.Count - 1));
+        var forecast = RoundMoney(lastNetSales + slope);
+        var trendPercent = firstNetSales == 0m
+            ? (lastNetSales == 0m ? 0m : 100m)
+            : RoundMoney(((lastNetSales - firstNetSales) / firstNetSales) * 100m);
+        var confidence = ResolveForecastConfidence(rows, normalizedMonths);
+
+        return new MonthlySalesForecastReportResponse
+        {
+            GeneratedAt = DateTimeOffset.UtcNow,
+            Months = normalizedMonths,
+            AverageMonthlyNetSales = average,
+            TrendPercent = trendPercent,
+            ForecastNextMonthNetSales = forecast,
+            Confidence = confidence,
+            Items = rows
+        };
+    }
+
     public async Task<LowStockReportResponse> GetLowStockReportAsync(
         int take,
         decimal threshold,
@@ -561,6 +720,29 @@ public sealed class ReportService(
     private static decimal RoundQuantity(decimal value)
     {
         return decimal.Round(value, 3, MidpointRounding.AwayFromZero);
+    }
+
+    private static string ResolveForecastConfidence(
+        IReadOnlyCollection<MonthlySalesForecastRow> rows,
+        int months)
+    {
+        if (rows.Count < 4 || months < 4)
+        {
+            return "low";
+        }
+
+        var monthsWithSales = rows.Count(x => x.SalesCount > 0);
+        if (monthsWithSales < Math.Max(2, months / 2))
+        {
+            return "low";
+        }
+
+        if (monthsWithSales < months)
+        {
+            return "medium";
+        }
+
+        return "high";
     }
 
     private static SupportLicenseState ResolveSupportState(

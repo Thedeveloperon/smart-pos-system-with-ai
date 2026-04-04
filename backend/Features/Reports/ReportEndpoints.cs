@@ -88,6 +88,44 @@ public static class ReportEndpoints
         .WithName("GetTopItemsReport")
         .WithOpenApi();
 
+        group.MapGet("/worst-items", async (
+            DateOnly? from,
+            DateOnly? to,
+            int? take,
+            ReportService reportService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var result = await reportService.GetWorstItemsReportAsync(from, to, take ?? 10, cancellationToken);
+                return Results.Ok(result);
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .WithName("GetWorstItemsReport")
+        .WithOpenApi();
+
+        group.MapGet("/monthly-forecast", async (
+            int? months,
+            ReportService reportService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var result = await reportService.GetMonthlySalesForecastReportAsync(months ?? 6, cancellationToken);
+                return Results.Ok(result);
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .WithName("GetMonthlySalesForecastReport")
+        .WithOpenApi();
+
         group.MapGet("/low-stock", async (
             int? take,
             decimal? threshold,

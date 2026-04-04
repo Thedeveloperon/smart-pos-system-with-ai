@@ -2,12 +2,26 @@ import { useState } from "react";
 import { ShieldCheck } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthContext";
 import ManagerReportsDrawer from "@/components/pos/ManagerReportsDrawer";
+import BillingAdminWorkspace from "@/components/pos/BillingAdminWorkspace";
 import { Button } from "@/components/ui/button";
 
 const AdminConsole = () => {
   const { user, logout } = useAuth();
+  const normalizedBackendRole = (user?.backendRole || "").trim().toLowerCase();
+  const isBillingAdmin = normalizedBackendRole === "billing_admin";
   const [showReports, setShowReports] = useState(true);
   const [refreshToken, setRefreshToken] = useState(0);
+
+  if (isBillingAdmin) {
+    return (
+      <BillingAdminWorkspace
+        username={user?.username}
+        onSignOut={() => {
+          void logout();
+        }}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background p-6">

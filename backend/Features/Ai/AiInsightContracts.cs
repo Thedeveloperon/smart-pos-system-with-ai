@@ -9,12 +9,18 @@ public sealed class AiInsightRequestPayload
 
     [JsonPropertyName("idempotency_key")]
     public string? IdempotencyKey { get; set; }
+
+    [JsonPropertyName("usage_type")]
+    public string? UsageType { get; set; }
 }
 
 public sealed class AiInsightEstimateRequestPayload
 {
     [JsonPropertyName("prompt")]
     public string Prompt { get; set; } = string.Empty;
+
+    [JsonPropertyName("usage_type")]
+    public string? UsageType { get; set; }
 }
 
 public sealed class AiInsightEstimateResponse
@@ -42,6 +48,9 @@ public sealed class AiInsightEstimateResponse
 
     [JsonPropertyName("pricing_rules_version")]
     public string PricingRulesVersion { get; set; } = string.Empty;
+
+    [JsonPropertyName("usage_type")]
+    public string UsageType { get; set; } = "quick_insights";
 }
 
 public sealed class AiInsightResponse
@@ -90,6 +99,9 @@ public sealed class AiInsightResponse
 
     [JsonPropertyName("completed_at")]
     public DateTimeOffset CompletedAt { get; set; }
+
+    [JsonPropertyName("usage_type")]
+    public string UsageType { get; set; } = "quick_insights";
 }
 
 public sealed class AiWalletResponse
@@ -210,6 +222,9 @@ public sealed class AiInsightHistoryItemResponse
 
     [JsonPropertyName("error_message")]
     public string? ErrorMessage { get; set; }
+
+    [JsonPropertyName("usage_type")]
+    public string UsageType { get; set; } = "quick_insights";
 }
 
 public sealed class AiCreditPackResponse

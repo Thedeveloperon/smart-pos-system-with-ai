@@ -1,0 +1,13 @@
+[Unit]
+Description=SmartPOS Daily Backup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/smartpos
+EnvironmentFile=/etc/smartpos/backup.env
+ExecStart=/bin/bash -lc 'scripts/backup/backup-db.sh'
+
+[Install]
+WantedBy=multi-user.target

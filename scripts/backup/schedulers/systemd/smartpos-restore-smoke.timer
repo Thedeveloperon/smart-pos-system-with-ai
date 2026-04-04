@@ -1,0 +1,10 @@
+[Unit]
+Description=Run SmartPOS Weekly Restore Smoke Test
+
+[Timer]
+OnCalendar=Sun *-*-* 02:30:00
+Persistent=true
+Unit=smartpos-restore-smoke.service
+
+[Install]
+WantedBy=timers.target

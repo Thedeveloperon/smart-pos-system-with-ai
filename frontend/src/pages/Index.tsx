@@ -5,6 +5,7 @@ import { useLicensing } from "@/components/licensing/LicensingContext";
 import { LicenseGraceBanner, LicenseOfflineBanner } from "@/components/licensing/LicenseScreens";
 import HeaderBar from "@/components/pos/HeaderBar";
 import AiInsightsDialog from "@/components/pos/AiInsightsDialog";
+import RemindersDialog from "@/components/pos/RemindersDialog";
 import LicenseAccountDialog from "@/components/pos/LicenseAccountDialog";
 import NewItemDialog from "@/components/pos/NewItemDialog";
 import ImportSupplierBillDialog from "@/components/pos/ImportSupplierBillDialog";
@@ -28,15 +29,19 @@ import AuditLogPanel from "@/components/pos/cash-session/AuditLogPanel";
 import type { CartItem, HeldBill, PaymentMethod, Product } from "@/components/pos/types";
 import type { DenominationCount } from "@/components/pos/cash-session/types";
 import {
+  acknowledgeReminder,
   completeSale,
   fetchAiWallet,
+  fetchReminders,
   fetchHeldBill,
   fetchHeldBills,
   fetchProducts,
   holdSale,
   fetchReceiptHtmlUrl,
+  runRemindersNow,
   updateCurrentCashDrawer,
   type PurchaseImportConfirmResponse,
+  type ReminderItem,
   voidSale,
 } from "@/lib/api";
 import { isSuperAdminBackendRole } from "@/lib/auth";
@@ -87,9 +92,14 @@ const IndexInner = () => {
   const [showImportSupplierBill, setShowImportSupplierBill] = useState(false);
   const [showShopSettings, setShowShopSettings] = useState(false);
   const [showAiInsights, setShowAiInsights] = useState(false);
+  const [showReminders, setShowReminders] = useState(false);
   const [showLicenseAccount, setShowLicenseAccount] = useState(false);
   const [expertModeEnabled, setExpertModeEnabledState] = useState(() => isExpertModeEnabled());
   const [aiCreditsBalance, setAiCreditsBalance] = useState<number | null>(null);
+  const [reminders, setReminders] = useState<ReminderItem[]>([]);
+  const [openReminderCount, setOpenReminderCount] = useState(0);
+  const [isLoadingReminders, setIsLoadingReminders] = useState(false);
+  const [isRunningRemindersNow, setIsRunningRemindersNow] = useState(false);
   const [refundSaleId, setRefundSaleId] = useState<string | null>(null);
   const [salesRefreshToken, setSalesRefreshToken] = useState(0);
   const [mobileTab, setMobileTab] = useState<"products" | "cart" | "checkout">("products");
@@ -103,6 +113,7 @@ const IndexInner = () => {
   const mobileSearchRef = useRef<ProductSearchPanelHandle | null>(null);
   const desktopCheckoutRef = useRef<CheckoutPanelHandle | null>(null);
   const mobileCheckoutRef = useRef<CheckoutPanelHandle | null>(null);
+  const seenReminderIdsRef = useRef<Set<string>>(new Set());
   const isMobile = useIsMobile();
 
   const shortcutsOnboardingStorageKey = useMemo(
@@ -169,6 +180,67 @@ const IndexInner = () => {
   useEffect(() => {
     void loadAiWallet();
   }, [loadAiWallet]);
+
+  const loadReminders = useCallback(async (options?: { includeAcknowledged?: boolean; announceNew?: boolean; quiet?: boolean }) => {
+    const includeAcknowledged = options?.includeAcknowledged ?? true;
+    const announceNew = options?.announceNew ?? false;
+    const quiet = options?.quiet ?? false;
+
+    setIsLoadingReminders(true);
+    try {
+      const result = await fetchReminders(30, includeAcknowledged);
+      setReminders(result.items);
+      setOpenReminderCount(result.open_count);
+
+      const seenIds = seenReminderIdsRef.current;
+      if (seenIds.size === 0) {
+        result.items.forEach((item) => {
+          seenIds.add(item.reminder_id);
+        });
+        return;
+      }
+
+      if (!announceNew) {
+        result.items.forEach((item) => {
+          seenIds.add(item.reminder_id);
+        });
+        return;
+      }
+
+      const newOpenItems = result.items.filter(
+        (item) => item.status === "open" && !seenIds.has(item.reminder_id),
+      );
+
+      newOpenItems.slice(0, 3).forEach((item) => {
+        toast.info(item.title, {
+          description: item.message,
+        });
+      });
+
+      result.items.forEach((item) => {
+        seenIds.add(item.reminder_id);
+      });
+    } catch (error) {
+      console.error(error);
+      if (!quiet) {
+        toast.error("Failed to load reminders.");
+      }
+    } finally {
+      setIsLoadingReminders(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadReminders({ includeAcknowledged: true, announceNew: false, quiet: true });
+
+    const intervalId = window.setInterval(() => {
+      void loadReminders({ includeAcknowledged: true, announceNew: true, quiet: true });
+    }, 60 * 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [loadReminders]);
 
   const refreshOfflineQueueSummary = useCallback(async () => {
     try {
@@ -414,6 +486,33 @@ const IndexInner = () => {
     await Promise.all([loadProducts(), loadHeldBills(), refreshSession()]);
   };
 
+  const handleAcknowledgeReminder = useCallback(async (reminderId: string) => {
+    try {
+      await acknowledgeReminder(reminderId);
+      toast.success("Reminder acknowledged.");
+      await loadReminders({ includeAcknowledged: true, announceNew: false, quiet: true });
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Failed to acknowledge reminder.");
+    }
+  }, [loadReminders]);
+
+  const handleRunRemindersNow = useCallback(async () => {
+    setIsRunningRemindersNow(true);
+    try {
+      const result = await runRemindersNow();
+      toast.success(
+        `Reminder run completed: ${result.created_events} event(s), ${result.generated_reports} report job(s).`,
+      );
+      await loadReminders({ includeAcknowledged: true, announceNew: false, quiet: true });
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Failed to run reminders.");
+    } finally {
+      setIsRunningRemindersNow(false);
+    }
+  }, [loadReminders]);
+
   const runOnTargetTab = useCallback((tab: "products" | "checkout", action: () => void) => {
     if (isMobile) {
       setMobileTab(tab);
@@ -562,6 +661,11 @@ const IndexInner = () => {
     }
   }, [dismissedOfflineGrantToken, licenseStatus?.offlineGrantToken]);
 
+  const firstOpenReminder = useMemo(
+    () => reminders.find((item) => item.status === "open") ?? null,
+    [reminders],
+  );
+
   return (
     <div className="h-screen flex flex-col overflow-hidden">
       <HeaderBar
@@ -574,6 +678,8 @@ const IndexInner = () => {
         onReports={() => setShowReports(true)}
         onAiInsights={() => setShowAiInsights(true)}
         aiCredits={aiCreditsBalance}
+        onReminders={() => setShowReminders(true)}
+        openReminderCount={openReminderCount}
         onImportSupplierBill={() => setShowImportSupplierBill(true)}
         onShopSettings={() => setShowShopSettings(true)}
         onMyAccountLicenses={() => setShowLicenseAccount(true)}
@@ -620,6 +726,29 @@ const IndexInner = () => {
       )}
 
       {canSell && <CashSessionBanner onEndShift={handleEndShift} onManageDrawer={handleManageDrawer} />}
+
+      {openReminderCount > 0 && (
+        <div className="mx-3 mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="space-y-0.5">
+              <p className="font-medium">{openReminderCount} reminder(s) need attention.</p>
+              {firstOpenReminder && (
+                <p className="text-xs text-amber-800/90">
+                  Latest: {firstOpenReminder.title}
+                </p>
+              )}
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 border-amber-300 bg-white px-2 text-amber-900 hover:bg-amber-100"
+              onClick={() => setShowReminders(true)}
+            >
+              View Reminders
+            </Button>
+          </div>
+        </div>
+      )}
 
       {isPosShortcutsFeatureEnabled && canSell && !isClosed && showShortcutOnboarding && (
         <div className="mx-3 mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
@@ -850,6 +979,25 @@ const IndexInner = () => {
         open={showAiInsights}
         onOpenChange={setShowAiInsights}
         onBalanceChange={setAiCreditsBalance}
+      />
+
+      <RemindersDialog
+        open={showReminders}
+        onOpenChange={setShowReminders}
+        reminders={reminders}
+        openCount={openReminderCount}
+        loading={isLoadingReminders}
+        onRefresh={() => {
+          void loadReminders({ includeAcknowledged: true, announceNew: false, quiet: false });
+        }}
+        onAcknowledge={(reminderId) => {
+          void handleAcknowledgeReminder(reminderId);
+        }}
+        onRunNow={() => {
+          void handleRunRemindersNow();
+        }}
+        canRunNow={isAdmin}
+        isRunningNow={isRunningRemindersNow}
       />
 
       <RefundSaleDialog

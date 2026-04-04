@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.Extensions.Options;
 using SmartPos.Backend.Features.Ai;
+using SmartPos.Backend.Features.AiChat;
 using SmartPos.Backend.Features.Auth;
 using SmartPos.Backend.Features.CashSessions;
 using SmartPos.Backend.Features.Checkout;
@@ -10,6 +11,7 @@ using SmartPos.Backend.Features.Licensing;
 using SmartPos.Backend.Features.Products;
 using SmartPos.Backend.Features.Purchases;
 using SmartPos.Backend.Features.Reports;
+using SmartPos.Backend.Features.Reminders;
 using SmartPos.Backend.Features.Receipts;
 using SmartPos.Backend.Features.Refunds;
 using SmartPos.Backend.Features.Settings;
@@ -48,10 +50,110 @@ builder.Services.Configure<AiSuggestionOptions>(
     builder.Configuration.GetSection(AiSuggestionOptions.SectionName));
 builder.Services.Configure<AiInsightOptions>(
     builder.Configuration.GetSection(AiInsightOptions.SectionName));
+builder.Services.Configure<ReminderOptions>(
+    builder.Configuration.GetSection(ReminderOptions.SectionName));
 builder.Services.Configure<LicenseOptions>(
     builder.Configuration.GetSection(LicenseOptions.SectionName));
 builder.Services.Configure<AuthSecurityOptions>(
     builder.Configuration.GetSection(AuthSecurityOptions.SectionName));
+
+ValidateAiProviderPolicy(builder.Configuration, builder.Environment);
+
+static void ValidateAiProviderPolicy(IConfiguration configuration, IWebHostEnvironment environment)
+{
+    var suggestionOptions = configuration
+                                .GetSection(AiSuggestionOptions.SectionName)
+                                .Get<AiSuggestionOptions>()
+                            ?? new AiSuggestionOptions();
+    var insightOptions = configuration
+                             .GetSection(AiInsightOptions.SectionName)
+                             .Get<AiInsightOptions>()
+                         ?? new AiInsightOptions();
+
+    ValidateAiProviderPolicyForSection(
+        sectionName: AiSuggestionOptions.SectionName,
+        provider: suggestionOptions.Provider,
+        enabled: suggestionOptions.Enabled,
+        allowNonOpenAiInNonProduction: suggestionOptions.AllowNonOpenAiInNonProduction,
+        environment: environment);
+    ValidateAiProviderPolicyForSection(
+        sectionName: AiInsightOptions.SectionName,
+        provider: insightOptions.Provider,
+        enabled: insightOptions.Enabled,
+        allowNonOpenAiInNonProduction: insightOptions.AllowNonOpenAiInNonProduction,
+        environment: environment);
+
+    var needsOpenAiKey = suggestionOptions.Enabled &&
+                         IsOpenAiProvider(suggestionOptions.Provider) ||
+                         insightOptions.Enabled &&
+                         IsOpenAiProvider(insightOptions.Provider);
+    if (!needsOpenAiKey)
+    {
+        return;
+    }
+
+    var configuredEnvironmentVariable = (insightOptions.OpenAiApiKeyEnvironmentVariable ?? string.Empty).Trim();
+    var environmentVariableName = string.IsNullOrWhiteSpace(configuredEnvironmentVariable)
+        ? "OPENAI_API_KEY"
+        : configuredEnvironmentVariable;
+
+    var apiKey = Environment.GetEnvironmentVariable(environmentVariableName)
+                 ?? configuration["OpenAI:ApiKey"]
+                 ?? configuration["OPENAI_API_KEY"]
+                 ?? (insightOptions.OpenAiApiKey ?? string.Empty).Trim();
+    if (!string.IsNullOrWhiteSpace(apiKey))
+    {
+        return;
+    }
+
+    throw new InvalidOperationException(
+        $"OpenAI API key is not configured. Set environment variable '{environmentVariableName}' or configure 'OpenAI:ApiKey'.");
+}
+
+static void ValidateAiProviderPolicyForSection(
+    string sectionName,
+    string provider,
+    bool enabled,
+    bool allowNonOpenAiInNonProduction,
+    IWebHostEnvironment environment)
+{
+    if (!enabled)
+    {
+        return;
+    }
+
+    var normalizedProvider = NormalizeAiProvider(provider, defaultProvider: "local");
+    var isProtectedEnvironment = environment.IsProduction() || environment.IsStaging();
+
+    if (isProtectedEnvironment)
+    {
+        if (!IsOpenAiProvider(normalizedProvider))
+        {
+            throw new InvalidOperationException(
+                $"{sectionName}:Provider must be 'OpenAI' in {environment.EnvironmentName}.");
+        }
+
+        return;
+    }
+
+    if (!IsOpenAiProvider(normalizedProvider) && !allowNonOpenAiInNonProduction)
+    {
+        throw new InvalidOperationException(
+            $"{sectionName}:Provider '{provider}' is not allowed in {environment.EnvironmentName} unless {sectionName}:AllowNonOpenAiInNonProduction=true.");
+    }
+}
+
+static string NormalizeAiProvider(string provider, string defaultProvider)
+{
+    var normalized = (provider ?? string.Empty).Trim().ToLowerInvariant();
+    return string.IsNullOrWhiteSpace(normalized) ? defaultProvider : normalized;
+}
+
+static bool IsOpenAiProvider(string provider)
+{
+    return string.Equals(provider, "openai", StringComparison.OrdinalIgnoreCase);
+}
+
 builder.Services.AddSingleton(jwtOptions);
 builder.Services.AddSingleton<LicensingMetrics>();
 builder.Services.AddSingleton<LicensingAlertMonitor>();
@@ -61,6 +163,7 @@ builder.Services.AddHostedService(
     serviceProvider => serviceProvider.GetRequiredService<LicensingAlertMonitor>());
 builder.Services.AddHostedService<LicenseTokenSessionCleanupService>();
 builder.Services.AddHostedService<BillingStateReconciliationService>();
+builder.Services.AddHostedService<ReminderSchedulerService>();
 builder.Services.AddHttpContextAccessor();
 var corsFromArray = builder.Configuration
     .GetSection("Cors:AllowedOrigins")
@@ -188,6 +291,8 @@ builder.Services.AddScoped<LicenseService>();
 builder.Services.AddScoped<DeviceActionProofService>();
 builder.Services.AddScoped<AiCreditBillingService>();
 builder.Services.AddScoped<AiCreditPaymentService>();
+builder.Services.AddScoped<AiChatService>();
+builder.Services.AddScoped<ReminderService>();
 builder.Services.AddHttpClient<AiSuggestionService>();
 builder.Services.AddHttpClient<AiInsightService>();
 builder.Services.AddSingleton<BasicTextOcrProvider>();
@@ -397,6 +502,8 @@ app.MapAuthEndpoints();
 app.MapLicensingEndpoints();
 app.MapDeviceActionProofEndpoints();
 app.MapAiSuggestionEndpoints();
+app.MapAiChatEndpoints();
+app.MapReminderEndpoints();
 app.MapCashSessionEndpoints();
 app.MapSyncEndpoints();
 app.MapProductEndpoints();

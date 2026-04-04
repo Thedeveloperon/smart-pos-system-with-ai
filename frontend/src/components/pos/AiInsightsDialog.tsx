@@ -2,17 +2,24 @@ import { useEffect, useMemo, useState } from "react";
 import { Loader2, Sparkles, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import {
+  createAiChatSession,
   createAiCheckoutSession,
   estimateAiInsights,
+  fetchAiChatHistory,
+  fetchAiChatSession,
   fetchAiCreditPacks,
   fetchAiInsightsHistory,
   fetchAiPaymentHistory,
   fetchAiWallet,
   generateAiInsights,
+  postAiChatMessage,
   type AiCreditPack,
+  type AiChatMessage,
+  type AiChatSessionSummary,
   type AiInsightsEstimateResponse,
   type AiInsightsHistoryItem,
   type AiInsightsResponse,
+  type AiInsightsUsageType,
   type AiPaymentHistoryItem,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -32,8 +39,39 @@ interface AiInsightsDialogProps {
   onBalanceChange?: (balance: number) => void;
 }
 
+const USAGE_TYPE_OPTIONS: ReadonlyArray<{
+  value: AiInsightsUsageType;
+  label: string;
+  description: string;
+  multiplierLabel: string;
+}> = [
+  {
+    value: "quick_insights",
+    label: "Quick Insights",
+    description: "Short operational answers with lower token usage.",
+    multiplierLabel: "1.0x",
+  },
+  {
+    value: "advanced_analysis",
+    label: "Advanced Analysis",
+    description: "Deeper trend and recommendation analysis.",
+    multiplierLabel: "1.8x",
+  },
+  {
+    value: "smart_reports",
+    label: "Smart Reports",
+    description: "Longer structured summaries for weekly/monthly reporting.",
+    multiplierLabel: "3.0x",
+  },
+];
+
+function getUsageTypeLabel(value: AiInsightsUsageType): string {
+  return USAGE_TYPE_OPTIONS.find((option) => option.value === value)?.label ?? "Quick Insights";
+}
+
 const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDialogProps) => {
   const [prompt, setPrompt] = useState("");
+  const [usageType, setUsageType] = useState<AiInsightsUsageType>("quick_insights");
   const [walletCredits, setWalletCredits] = useState<number | null>(null);
   const [walletUpdatedAt, setWalletUpdatedAt] = useState<string | null>(null);
   const [estimate, setEstimate] = useState<AiInsightsEstimateResponse | null>(null);
@@ -51,8 +89,19 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
   const [isGenerating, setIsGenerating] = useState(false);
   const [isCreatingCheckout, setIsCreatingCheckout] = useState(false);
   const [isRefreshingWalletAndPayments, setIsRefreshingWalletAndPayments] = useState(false);
+  const [chatSessions, setChatSessions] = useState<AiChatSessionSummary[]>([]);
+  const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<AiChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [isLoadingChat, setIsLoadingChat] = useState(false);
+  const [isSendingChatMessage, setIsSendingChatMessage] = useState(false);
+  const [isCreatingChatSession, setIsCreatingChatSession] = useState(false);
 
   const hasInsight = Boolean(insightResult?.insight?.trim());
+  const selectedUsageTypeOption = useMemo(
+    () => USAGE_TYPE_OPTIONS.find((option) => option.value === usageType) ?? USAGE_TYPE_OPTIONS[0],
+    [usageType],
+  );
 
   const walletLabel = useMemo(() => {
     if (walletCredits === null) {
@@ -128,13 +177,67 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
     }
   };
 
+  const loadChatSession = async (sessionId: string) => {
+    setIsLoadingChat(true);
+    try {
+      const response = await fetchAiChatSession(sessionId, 80);
+      setActiveChatSessionId(response.session.session_id);
+      setChatMessages(response.messages);
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to load AI chat session.");
+    } finally {
+      setIsLoadingChat(false);
+    }
+  };
+
+  const loadChatHistory = async () => {
+    setIsLoadingChat(true);
+    try {
+      const response = await fetchAiChatHistory(20);
+      setChatSessions(response.items);
+      const firstSessionId = response.items[0]?.session_id ?? null;
+      if (firstSessionId) {
+        const sessionDetail = await fetchAiChatSession(firstSessionId, 80);
+        setActiveChatSessionId(sessionDetail.session.session_id);
+        setChatMessages(sessionDetail.messages);
+      } else {
+        setActiveChatSessionId(null);
+        setChatMessages([]);
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to load AI chat history.");
+    } finally {
+      setIsLoadingChat(false);
+    }
+  };
+
+  const handleCreateChatSession = async () => {
+    setIsCreatingChatSession(true);
+    try {
+      const session = await createAiChatSession({
+        title: "",
+        usage_type: usageType,
+      });
+      setChatSessions((previous) => [session, ...previous.filter((item) => item.session_id !== session.session_id)]);
+      setActiveChatSessionId(session.session_id);
+      setChatMessages([]);
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to create chat session.");
+    } finally {
+      setIsCreatingChatSession(false);
+    }
+  };
+
   useEffect(() => {
     if (!open) {
       setIsEstimating(false);
       return;
     }
 
-    void Promise.all([loadWallet(), loadHistory(), loadPayments(), loadCreditPacks()]);
+    void Promise.all([loadWallet(), loadHistory(), loadPayments(), loadCreditPacks(), loadChatHistory()]);
   }, [open]);
 
   useEffect(() => {
@@ -152,7 +255,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
     const timeoutId = window.setTimeout(async () => {
       setIsEstimating(true);
       try {
-        const result = await estimateAiInsights({ prompt: normalizedPrompt });
+        const result = await estimateAiInsights({ prompt: normalizedPrompt, usage_type: usageType });
         if (!isCancelled) {
           setEstimate(result);
         }
@@ -172,7 +275,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
       isCancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [open, prompt]);
+  }, [open, prompt, usageType]);
 
   const handleGenerateInsight = async () => {
     const normalizedPrompt = prompt.trim();
@@ -188,7 +291,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
 
     setIsGenerating(true);
     try {
-      const result = await generateAiInsights({ prompt: normalizedPrompt });
+      const result = await generateAiInsights({ prompt: normalizedPrompt, usage_type: usageType });
       setInsightResult(result);
       setWalletCredits(result.remaining_credits);
       setWalletUpdatedAt(result.completed_at);
@@ -211,6 +314,58 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
       toast.error(error instanceof Error ? error.message : "Failed to generate AI insight.");
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handleSendChatMessage = async () => {
+    const normalizedMessage = chatInput.trim();
+    if (!normalizedMessage) {
+      toast.error("Type a chat message first.");
+      return;
+    }
+
+    setIsSendingChatMessage(true);
+    try {
+      let sessionId = activeChatSessionId;
+      if (!sessionId) {
+        const created = await createAiChatSession({
+          title: "",
+          usage_type: usageType,
+        });
+        sessionId = created.session_id;
+        setChatSessions((previous) => [created, ...previous.filter((item) => item.session_id !== created.session_id)]);
+        setActiveChatSessionId(created.session_id);
+      }
+
+      const randomPart =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const response = await postAiChatMessage(sessionId, {
+        message: normalizedMessage,
+        usage_type: usageType,
+        idempotency_key: `chat-${randomPart}`,
+      });
+
+      setChatMessages((previous) => {
+        const map = new Map<string, AiChatMessage>();
+        previous.forEach((message) => {
+          map.set(message.message_id, message);
+        });
+        map.set(response.user_message.message_id, response.user_message);
+        map.set(response.assistant_message.message_id, response.assistant_message);
+        return Array.from(map.values()).sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at));
+      });
+      setChatInput("");
+      setWalletCredits(response.remaining_credits);
+      setWalletUpdatedAt(new Date().toISOString());
+      onBalanceChange?.(response.remaining_credits);
+      await loadChatHistory();
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Failed to send chat message.");
+    } finally {
+      setIsSendingChatMessage(false);
     }
   };
 
@@ -363,6 +518,31 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
           </div>
 
           <div className="space-y-2">
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Usage Type</p>
+              <div className="grid gap-2 sm:grid-cols-3">
+                {USAGE_TYPE_OPTIONS.map((option) => {
+                  const isSelected = option.value === usageType;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={`rounded-md border p-3 text-left transition ${
+                        isSelected
+                          ? "border-primary bg-primary/5"
+                          : "border-border bg-muted/20 hover:border-primary/40"
+                      }`}
+                      onClick={() => setUsageType(option.value)}
+                    >
+                      <p className="text-sm font-semibold text-foreground">{option.label}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{option.description}</p>
+                      <p className="mt-1 text-xs font-medium text-foreground">Credit rate: {option.multiplierLabel}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             <p className="text-sm font-medium">Prompt</p>
             <Textarea
               value={prompt}
@@ -373,6 +553,9 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
             {estimate && (
               <div className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
                 <div className="grid gap-1 sm:grid-cols-2">
+                  <p>
+                    Usage type: <span className="font-semibold text-foreground">{selectedUsageTypeOption.label}</span>
+                  </p>
                   <p>
                     Estimated usage:{" "}
                     <span className="font-semibold text-foreground">{estimate.estimated_charge_credits.toFixed(2)}</span> credits
@@ -411,6 +594,104 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
             </div>
           </div>
 
+          <div className="space-y-3 rounded-lg border border-border p-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-medium">AI Chat</p>
+                <p className="text-xs text-muted-foreground">
+                  Grounded responses with citations from POS report buckets.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  value={activeChatSessionId ?? ""}
+                  onChange={(event) => {
+                    const nextSessionId = event.target.value;
+                    if (nextSessionId) {
+                      void loadChatSession(nextSessionId);
+                    }
+                  }}
+                  className="h-9 rounded-md border border-border bg-background px-2 text-xs"
+                >
+                  <option value="">No session</option>
+                  {chatSessions.map((session) => (
+                    <option key={session.session_id} value={session.session_id}>
+                      {session.title}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleCreateChatSession()}
+                  disabled={isCreatingChatSession}
+                >
+                  {isCreatingChatSession ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  New Chat
+                </Button>
+              </div>
+            </div>
+
+            <div className="max-h-72 space-y-2 overflow-y-auto rounded-md border border-border/70 bg-muted/20 p-2.5">
+              {isLoadingChat ? (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading chat...
+                </div>
+              ) : chatMessages.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Start a conversation to see grounded chat responses.</p>
+              ) : (
+                chatMessages.map((message) => (
+                  <div
+                    key={message.message_id}
+                    className={`rounded-md border p-2 text-xs ${
+                      message.role === "assistant"
+                        ? "border-primary/30 bg-primary/5"
+                        : "border-border/70 bg-background"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-foreground">
+                        {message.role === "assistant" ? "Assistant" : message.role === "user" ? "You" : "System"}
+                      </span>
+                      <span className="text-muted-foreground">{new Date(message.created_at).toLocaleString()}</span>
+                      {message.charged_credits > 0 ? (
+                        <span className="ml-auto text-muted-foreground">{message.charged_credits.toFixed(2)} credits</span>
+                      ) : null}
+                    </div>
+                    <p className="mt-1 whitespace-pre-wrap text-foreground/90">{message.content || message.error_message || "-"}</p>
+                    {message.citations.length > 0 ? (
+                      <div className="mt-2 space-y-1 rounded-md border border-border/70 bg-background/80 p-2">
+                        <p className="text-[11px] font-medium text-foreground">Citations</p>
+                        {message.citations.map((citation) => (
+                          <p key={`${message.message_id}-${citation.bucket_key}`} className="text-[11px] text-muted-foreground">
+                            {citation.title}: {citation.summary}
+                          </p>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Textarea
+                value={chatInput}
+                onChange={(event) => setChatInput(event.target.value)}
+                placeholder="Ask: Which items are low stock, worst-selling this week, and what should I restock next month?"
+                className="min-h-[96px]"
+              />
+              <div className="flex justify-end">
+                <Button type="button" onClick={() => void handleSendChatMessage()} disabled={isSendingChatMessage}>
+                  {isSendingChatMessage ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Send Chat Message
+                </Button>
+              </div>
+            </div>
+          </div>
+
           {hasInsight && insightResult && (
             <div className="space-y-3 rounded-lg border border-border p-3">
               <p className="text-sm font-medium">Insight</p>
@@ -418,6 +699,9 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
                 {insightResult.insight}
               </div>
               <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
+                <div>
+                  Usage type: <span className="font-medium text-foreground">{getUsageTypeLabel(insightResult.usage_type)}</span>
+                </div>
                 <div>
                   Credits used: <span className="font-medium text-foreground">{insightResult.credits_used.toFixed(2)}</span>
                 </div>
@@ -453,7 +737,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
                       </span>
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {item.input_tokens} in / {item.output_tokens} out tokens
+                      {item.input_tokens} in / {item.output_tokens} out tokens • {getUsageTypeLabel(item.usage_type)}
                     </p>
                     {item.error_message ? (
                       <p className="mt-1 text-xs text-destructive">{item.error_message}</p>

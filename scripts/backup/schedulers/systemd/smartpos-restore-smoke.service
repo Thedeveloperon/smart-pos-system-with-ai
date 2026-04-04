@@ -1,0 +1,13 @@
+[Unit]
+Description=SmartPOS Weekly Restore Smoke Test
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/smartpos
+EnvironmentFile=/etc/smartpos/backup.env
+ExecStart=/bin/bash -lc 'LATEST_BACKUP="$(find backups/daily -type f \( -name '"'"'*.tar.gz'"'"' -o -name '"'"'*.tar.gz.enc'"'"' \) | sort -r | head -n 1)"; [ -n "$LATEST_BACKUP" ] || { echo "No backup archive found."; exit 1; }; scripts/backup/restore-smoke-test.sh "$LATEST_BACKUP"'
+
+[Install]
+WantedBy=multi-user.target
