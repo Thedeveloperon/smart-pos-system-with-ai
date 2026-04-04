@@ -17,6 +17,18 @@ public sealed class AiCreditPaymentService(
     private const string WebhookStatusProcessing = "processing";
     private const string WebhookStatusProcessed = "processed";
     private const string WebhookStatusFailed = "failed";
+    private const string PaymentMethodCard = "card";
+    private const string PaymentMethodCash = "cash";
+    private const string PaymentMethodBankDeposit = "bank_deposit";
+    private const string ManualPaymentProvider = "manual";
+    private static readonly HashSet<string> AllowedDepositSlipFileExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".pdf"
+    };
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> SupportedWebhookEvents = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -50,11 +62,21 @@ public sealed class AiCreditPaymentService(
         Guid userId,
         string packCode,
         string idempotencyKey,
+        string? paymentMethod,
+        string? bankReference,
+        string? depositSlipUrl,
         CancellationToken cancellationToken)
     {
         var aiOptions = options.Value;
         var pack = ResolvePack(aiOptions, packCode);
         var normalizedIdempotencyKey = NormalizeIdempotencyKey(idempotencyKey);
+        var normalizedPaymentMethod = NormalizePaymentMethod(paymentMethod);
+        var normalizedBankReference = NormalizeBankReference(bankReference);
+        var normalizedDepositSlipUrl = ValidateDepositSlipUrl(depositSlipUrl);
+        ValidateManualPaymentEvidence(
+            normalizedPaymentMethod,
+            normalizedBankReference,
+            normalizedDepositSlipUrl);
         var externalReference = BuildExternalReference(userId, normalizedIdempotencyKey);
 
         var existingPayment = await dbContext.AiCreditPayments
@@ -64,11 +86,14 @@ public sealed class AiCreditPaymentService(
         if (existingPayment is not null)
         {
             var existingPackCode = ResolvePackCodeForPayment(existingPayment, pack.PackCode);
+            var existingPaymentMethod = ResolvePaymentMethodForPayment(existingPayment, PaymentMethodCard);
             EnsureIdempotentPackConsistency(pack.PackCode, existingPackCode);
+            EnsureIdempotentPaymentMethodConsistency(normalizedPaymentMethod, existingPaymentMethod);
             return MapCheckoutSessionResponse(
                 existingPayment,
                 existingPackCode,
-                BuildCheckoutUrl(aiOptions, externalReference, existingPackCode));
+                existingPaymentMethod,
+                BuildCheckoutUrl(aiOptions, externalReference, existingPackCode, existingPaymentMethod));
         }
 
         var user = await dbContext.Users
@@ -80,7 +105,9 @@ public sealed class AiCreditPaymentService(
         {
             UserId = userId,
             Status = AiCreditPaymentStatus.Pending,
-            Provider = NormalizeProvider(aiOptions.PaymentProvider),
+            Provider = normalizedPaymentMethod == PaymentMethodCard
+                ? NormalizeProvider(aiOptions.PaymentProvider)
+                : ManualPaymentProvider,
             ProviderPaymentId = null,
             ProviderCheckoutSessionId = null,
             ExternalReference = externalReference,
@@ -94,7 +121,10 @@ public sealed class AiCreditPaymentService(
             MetadataJson = JsonSerializer.Serialize(new
             {
                 pack_code = pack.PackCode,
-                idempotency_key_hash = ComputeSha256Hex(normalizedIdempotencyKey)
+                idempotency_key_hash = ComputeSha256Hex(normalizedIdempotencyKey),
+                payment_method = normalizedPaymentMethod,
+                bank_reference = normalizedBankReference,
+                deposit_slip_url = normalizedDepositSlipUrl
             }, JsonOptions),
             CreatedAtUtc = now,
             UpdatedAtUtc = now,
@@ -124,17 +154,21 @@ public sealed class AiCreditPaymentService(
             }
 
             var conflictedPackCode = ResolvePackCodeForPayment(conflictedPayment, pack.PackCode);
+            var conflictedPaymentMethod = ResolvePaymentMethodForPayment(conflictedPayment, PaymentMethodCard);
             EnsureIdempotentPackConsistency(pack.PackCode, conflictedPackCode);
+            EnsureIdempotentPaymentMethodConsistency(normalizedPaymentMethod, conflictedPaymentMethod);
             return MapCheckoutSessionResponse(
                 conflictedPayment,
                 conflictedPackCode,
-                BuildCheckoutUrl(aiOptions, conflictedPayment.ExternalReference, conflictedPackCode));
+                conflictedPaymentMethod,
+                BuildCheckoutUrl(aiOptions, conflictedPayment.ExternalReference, conflictedPackCode, conflictedPaymentMethod));
         }
 
         return MapCheckoutSessionResponse(
             payment,
             pack.PackCode,
-            BuildCheckoutUrl(aiOptions, payment.ExternalReference, pack.PackCode));
+            normalizedPaymentMethod,
+            BuildCheckoutUrl(aiOptions, payment.ExternalReference, pack.PackCode, normalizedPaymentMethod));
     }
 
     public async Task<AiPaymentHistoryResponse> GetPaymentHistoryAsync(
@@ -143,50 +177,46 @@ public sealed class AiCreditPaymentService(
         CancellationToken cancellationToken)
     {
         var normalizedTake = Math.Clamp(take, 1, 100);
-        List<AiPaymentHistoryItemResponse> items;
+        List<AiCreditPayment> payments;
         if (dbContext.Database.IsSqlite())
         {
-            items = (await dbContext.AiCreditPayments
+            payments = (await dbContext.AiCreditPayments
                     .AsNoTracking()
                     .Where(x => x.UserId == userId)
-                    .Select(x => new AiPaymentHistoryItemResponse
-                    {
-                        PaymentId = x.Id,
-                        PaymentStatus = MapPaymentStatus(x.Status),
-                        Provider = x.Provider,
-                        Credits = x.CreditsPurchased,
-                        Amount = x.Amount,
-                        Currency = x.Currency,
-                        ExternalReference = x.ExternalReference,
-                        CreatedAt = x.CreatedAtUtc,
-                        CompletedAt = x.CompletedAtUtc
-                    })
                     .ToListAsync(cancellationToken))
-                .OrderByDescending(x => x.CreatedAt)
+                .OrderByDescending(x => x.CreatedAtUtc)
                 .Take(normalizedTake)
                 .ToList();
         }
         else
         {
-            items = await dbContext.AiCreditPayments
+            payments = await dbContext.AiCreditPayments
                 .AsNoTracking()
                 .Where(x => x.UserId == userId)
                 .OrderByDescending(x => x.CreatedAtUtc)
                 .Take(normalizedTake)
-                .Select(x => new AiPaymentHistoryItemResponse
-                {
-                    PaymentId = x.Id,
-                    PaymentStatus = MapPaymentStatus(x.Status),
-                    Provider = x.Provider,
-                    Credits = x.CreditsPurchased,
-                    Amount = x.Amount,
-                    Currency = x.Currency,
-                    ExternalReference = x.ExternalReference,
-                    CreatedAt = x.CreatedAtUtc,
-                    CompletedAt = x.CompletedAtUtc
-                })
                 .ToListAsync(cancellationToken);
         }
+
+        var items = payments
+            .Select(payment =>
+            {
+                var method = ResolvePaymentMethodForPayment(payment, PaymentMethodCard);
+                return new AiPaymentHistoryItemResponse
+                {
+                    PaymentId = payment.Id,
+                    PaymentStatus = MapPaymentStatus(payment.Status, method),
+                    PaymentMethod = method,
+                    Provider = payment.Provider,
+                    Credits = payment.CreditsPurchased,
+                    Amount = payment.Amount,
+                    Currency = payment.Currency,
+                    ExternalReference = payment.ExternalReference,
+                    CreatedAt = payment.CreatedAtUtc,
+                    CompletedAt = payment.CompletedAtUtc
+                };
+            })
+            .ToList();
 
         return new AiPaymentHistoryResponse
         {
@@ -341,7 +371,8 @@ public sealed class AiCreditPaymentService(
             await dbContext.SaveChangesAsync(cancellationToken);
             response.ProcessedAt = now;
             response.PaymentId = payment.Id;
-            response.PaymentStatus = MapPaymentStatus(payment.Status);
+            var paymentMethod = ResolvePaymentMethodForPayment(payment, PaymentMethodCard);
+            response.PaymentStatus = MapPaymentStatus(payment.Status, paymentMethod);
             return response;
         }
         catch (InvalidOperationException exception)
@@ -547,12 +578,14 @@ public sealed class AiCreditPaymentService(
     private static AiCheckoutSessionResponse MapCheckoutSessionResponse(
         AiCreditPayment payment,
         string packCode,
+        string paymentMethod,
         string? checkoutUrl)
     {
         return new AiCheckoutSessionResponse
         {
             PaymentId = payment.Id,
-            PaymentStatus = MapPaymentStatus(payment.Status),
+            PaymentStatus = MapPaymentStatus(payment.Status, paymentMethod),
+            PaymentMethod = paymentMethod,
             Provider = payment.Provider,
             PackCode = packCode,
             Credits = payment.CreditsPurchased,
@@ -564,8 +597,13 @@ public sealed class AiCreditPaymentService(
         };
     }
 
-    private static string MapPaymentStatus(AiCreditPaymentStatus status)
+    private static string MapPaymentStatus(AiCreditPaymentStatus status, string paymentMethod)
     {
+        if (status == AiCreditPaymentStatus.Pending && IsManualPaymentMethod(paymentMethod))
+        {
+            return "pending_verification";
+        }
+
         return status switch
         {
             AiCreditPaymentStatus.Pending => "pending",
@@ -596,6 +634,127 @@ public sealed class AiCreditPaymentService(
             Price = pack.Price,
             Currency = NormalizeCurrency(pack.Currency)
         };
+    }
+
+    private static string NormalizePaymentMethod(string? paymentMethod)
+    {
+        var normalized = NormalizeOptional(paymentMethod)?.ToLowerInvariant();
+        return normalized switch
+        {
+            null or "" or "card" => PaymentMethodCard,
+            "cash" => PaymentMethodCash,
+            "bank_deposit" or "bankdeposit" => PaymentMethodBankDeposit,
+            _ => throw new InvalidOperationException("payment_method must be one of: card, cash, bank_deposit.")
+        };
+    }
+
+    private static bool IsManualPaymentMethod(string paymentMethod)
+    {
+        return string.Equals(paymentMethod, PaymentMethodCash, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(paymentMethod, PaymentMethodBankDeposit, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? NormalizeBankReference(string? bankReference)
+    {
+        var normalized = NormalizeOptional(bankReference);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        if (normalized.Length > 160)
+        {
+            throw new InvalidOperationException("bank_reference must be 160 characters or less.");
+        }
+
+        return normalized;
+    }
+
+    private static string? ValidateDepositSlipUrl(string? depositSlipUrl)
+    {
+        var normalized = NormalizeOptional(depositSlipUrl);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        if (normalized.Length > 500)
+        {
+            throw new InvalidOperationException("deposit_slip_url must be 500 characters or less.");
+        }
+
+        if (!Uri.TryCreate(normalized, UriKind.Absolute, out var uri) ||
+            !(uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+        {
+            throw new InvalidOperationException("deposit_slip_url must be a valid absolute HTTP/HTTPS URL.");
+        }
+
+        var extension = Path.GetExtension(uri.AbsolutePath);
+        if (!string.IsNullOrWhiteSpace(extension) && !AllowedDepositSlipFileExtensions.Contains(extension))
+        {
+            throw new InvalidOperationException("deposit_slip_url file type must be one of: .jpg, .jpeg, .png, .webp, .pdf.");
+        }
+
+        return normalized;
+    }
+
+    private static void ValidateManualPaymentEvidence(
+        string paymentMethod,
+        string? bankReference,
+        string? depositSlipUrl)
+    {
+        if (!IsManualPaymentMethod(paymentMethod))
+        {
+            return;
+        }
+
+        var hasReference = !string.IsNullOrWhiteSpace(bankReference);
+        var hasDepositSlipUrl = !string.IsNullOrWhiteSpace(depositSlipUrl);
+
+        if (string.Equals(paymentMethod, PaymentMethodCash, StringComparison.OrdinalIgnoreCase))
+        {
+            if (hasReference)
+            {
+                return;
+            }
+
+            throw new InvalidOperationException("bank_reference is required for cash payments.");
+        }
+
+        if (hasReference && hasDepositSlipUrl)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException("bank_reference and deposit_slip_url are required for bank_deposit payments.");
+    }
+
+    private static string ResolvePaymentMethodForPayment(AiCreditPayment payment, string fallbackPaymentMethod)
+    {
+        var metadataPaymentMethod = TryReadMetadataString(payment.MetadataJson, "payment_method");
+        if (!string.IsNullOrWhiteSpace(metadataPaymentMethod))
+        {
+            try
+            {
+                return NormalizePaymentMethod(metadataPaymentMethod);
+            }
+            catch (InvalidOperationException)
+            {
+                // Ignore malformed historical values and fallback safely.
+            }
+        }
+
+        if (string.Equals(payment.Provider, PaymentMethodCash, StringComparison.OrdinalIgnoreCase))
+        {
+            return PaymentMethodCash;
+        }
+
+        if (string.Equals(payment.Provider, PaymentMethodBankDeposit, StringComparison.OrdinalIgnoreCase))
+        {
+            return PaymentMethodBankDeposit;
+        }
+
+        return fallbackPaymentMethod;
     }
 
     private string ResolveWebhookSigningSecret()
@@ -731,30 +890,42 @@ public sealed class AiCreditPaymentService(
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
-    private static string ResolvePackCodeForPayment(AiCreditPayment payment, string fallbackPackCode)
+    private static string? TryReadMetadataString(string? metadataJson, string propertyName)
     {
-        if (string.IsNullOrWhiteSpace(payment.MetadataJson))
+        if (string.IsNullOrWhiteSpace(metadataJson) || string.IsNullOrWhiteSpace(propertyName))
         {
-            return fallbackPackCode;
+            return null;
         }
 
         try
         {
-            using var document = JsonDocument.Parse(payment.MetadataJson);
+            using var document = JsonDocument.Parse(metadataJson);
             var root = document.RootElement;
-            if (root.TryGetProperty("pack_code", out var packCodeElement) &&
-                packCodeElement.ValueKind == JsonValueKind.String)
+            if (root.ValueKind != JsonValueKind.Object)
             {
-                var parsed = NormalizeOptional(packCodeElement.GetString());
-                if (!string.IsNullOrWhiteSpace(parsed))
-                {
-                    return parsed;
-                }
+                return null;
+            }
+
+            if (root.TryGetProperty(propertyName, out var propertyElement) &&
+                propertyElement.ValueKind == JsonValueKind.String)
+            {
+                return NormalizeOptional(propertyElement.GetString());
             }
         }
         catch (JsonException)
         {
             // Best-effort fallback when historical metadata is malformed.
+        }
+
+        return null;
+    }
+
+    private static string ResolvePackCodeForPayment(AiCreditPayment payment, string fallbackPackCode)
+    {
+        var parsed = TryReadMetadataString(payment.MetadataJson, "pack_code");
+        if (!string.IsNullOrWhiteSpace(parsed))
+        {
+            return parsed;
         }
 
         return fallbackPackCode;
@@ -769,8 +940,26 @@ public sealed class AiCreditPaymentService(
         }
     }
 
-    private static string? BuildCheckoutUrl(AiInsightOptions aiOptions, string externalReference, string packCode)
+    private static void EnsureIdempotentPaymentMethodConsistency(string requestedMethod, string existingMethod)
     {
+        if (!string.Equals(requestedMethod, existingMethod, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Idempotency key already exists for a different payment_method.");
+        }
+    }
+
+    private static string? BuildCheckoutUrl(
+        AiInsightOptions aiOptions,
+        string externalReference,
+        string packCode,
+        string paymentMethod)
+    {
+        if (!string.Equals(paymentMethod, PaymentMethodCard, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
         var baseUrl = NormalizeOptional(aiOptions.CheckoutBaseUrl);
         if (string.IsNullOrWhiteSpace(baseUrl))
         {

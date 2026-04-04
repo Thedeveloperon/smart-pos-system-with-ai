@@ -16,6 +16,7 @@ import {
   type AiCreditPack,
   type AiChatMessage,
   type AiChatSessionSummary,
+  type AiCheckoutPaymentMethod,
   type AiInsightsEstimateResponse,
   type AiInsightsHistoryItem,
   type AiInsightsResponse,
@@ -65,8 +66,48 @@ const USAGE_TYPE_OPTIONS: ReadonlyArray<{
   },
 ];
 
+const PAYMENT_METHOD_OPTIONS: ReadonlyArray<{
+  value: AiCheckoutPaymentMethod;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "card",
+    label: "Card",
+    description: "Open online checkout and pay instantly.",
+  },
+  {
+    value: "bank_deposit",
+    label: "Bank Deposit",
+    description: "Submit deposit reference and slip URL for verification.",
+  },
+  {
+    value: "cash",
+    label: "Cash",
+    description: "Submit cash reference for manual verification.",
+  },
+];
+
 function getUsageTypeLabel(value: AiInsightsUsageType): string {
   return USAGE_TYPE_OPTIONS.find((option) => option.value === value)?.label ?? "Quick Insights";
+}
+
+function getPaymentMethodLabel(value: string | null | undefined): string {
+  if (!value) {
+    return "Card";
+  }
+
+  const normalizedValue = value.trim().toLowerCase();
+  const matched = PAYMENT_METHOD_OPTIONS.find((option) => option.value === normalizedValue);
+  if (matched) {
+    return matched.label;
+  }
+
+  if (normalizedValue === "bankdeposit") {
+    return "Bank Deposit";
+  }
+
+  return normalizedValue.replace(/_/g, " ");
 }
 
 const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDialogProps) => {
@@ -79,6 +120,9 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
   const [paymentItems, setPaymentItems] = useState<AiPaymentHistoryItem[]>([]);
   const [creditPacks, setCreditPacks] = useState<AiCreditPack[]>([]);
   const [selectedPackCode, setSelectedPackCode] = useState("");
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<AiCheckoutPaymentMethod>("card");
+  const [bankReference, setBankReference] = useState("");
+  const [depositSlipUrl, setDepositSlipUrl] = useState("");
   const [insightResult, setInsightResult] = useState<AiInsightsResponse | null>(null);
   const [lastCheckoutUrl, setLastCheckoutUrl] = useState<string | null>(null);
   const [isLoadingWallet, setIsLoadingWallet] = useState(false);
@@ -385,6 +429,9 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
       return;
     }
 
+    const resolvedBankReference = bankReference.trim() || undefined;
+    const resolvedDepositSlipUrl = depositSlipUrl.trim() || undefined;
+
     setIsCreatingCheckout(true);
     try {
       const randomPart =
@@ -394,21 +441,28 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
 
       const result = await createAiCheckoutSession({
         pack_code: selectedPack.pack_code,
+        payment_method: selectedPaymentMethod,
+        bank_reference: selectedPaymentMethod === "card" ? undefined : resolvedBankReference,
+        deposit_slip_url: selectedPaymentMethod === "bank_deposit" ? resolvedDepositSlipUrl : undefined,
         idempotency_key: `checkout-${randomPart}`,
       });
 
-      setLastCheckoutUrl(result.checkout_url ?? null);
+      const method = (result.payment_method || selectedPaymentMethod).toString().trim().toLowerCase();
+      const isCardMethod = method === "card";
+      setLastCheckoutUrl(isCardMethod ? result.checkout_url ?? null : null);
       await loadPayments();
 
-      if (result.checkout_url) {
+      if (isCardMethod && result.checkout_url) {
         const popup = window.open(result.checkout_url, "_blank", "noopener,noreferrer");
         if (popup) {
           toast.success("Checkout opened. Complete payment, then refresh wallet status.");
         } else {
           toast.success("Checkout session created. Open the checkout link below.");
         }
-      } else {
+      } else if (isCardMethod) {
         toast.success("Checkout session created. Waiting for payment confirmation webhook.");
+      } else {
+        toast.success("Payment details submitted. Awaiting manual verification before credits are added.");
       }
     } catch (error) {
       console.error(error);
@@ -463,7 +517,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
             <div>
               <p className="text-sm font-medium">Buy Credits</p>
               <p className="text-xs text-muted-foreground">
-                Choose a pack and complete checkout. Wallet updates automatically after payment webhook confirmation.
+                Choose a pack and payment method. Card checkout is instant; cash and bank deposits require manual verification.
               </p>
             </div>
 
@@ -499,12 +553,73 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
               </div>
             )}
 
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-foreground">Payment Method</p>
+              <div className="grid gap-2 sm:grid-cols-3">
+                {PAYMENT_METHOD_OPTIONS.map((option) => {
+                  const isSelected = selectedPaymentMethod === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={`rounded-md border p-3 text-left transition ${
+                        isSelected
+                          ? "border-primary bg-primary/5"
+                          : "border-border bg-muted/20 hover:border-primary/40"
+                      }`}
+                      onClick={() => {
+                        setSelectedPaymentMethod(option.value);
+                        if (option.value !== "card") {
+                          setLastCheckoutUrl(null);
+                        }
+                      }}
+                    >
+                      <p className="text-sm font-semibold text-foreground">{option.label}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{option.description}</p>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {selectedPaymentMethod !== "card" && (
+              <div className="space-y-2 rounded-md border border-border/70 bg-muted/20 p-3">
+                <label className="block text-xs font-medium text-foreground">
+                  Reference Number
+                  <input
+                    type="text"
+                    value={bankReference}
+                    onChange={(event) => setBankReference(event.target.value)}
+                    placeholder={
+                      selectedPaymentMethod === "cash"
+                        ? "Cash receipt/reference number"
+                        : "Bank deposit reference number"
+                    }
+                    className="mt-1 h-9 w-full rounded-md border border-border bg-background px-2 text-xs"
+                  />
+                </label>
+
+                {selectedPaymentMethod === "bank_deposit" && (
+                  <label className="block text-xs font-medium text-foreground">
+                    Deposit Slip URL
+                    <input
+                      type="url"
+                      value={depositSlipUrl}
+                      onChange={(event) => setDepositSlipUrl(event.target.value)}
+                      placeholder="https://example.com/proof/deposit-slip.pdf"
+                      className="mt-1 h-9 w-full rounded-md border border-border bg-background px-2 text-xs"
+                    />
+                  </label>
+                )}
+              </div>
+            )}
+
             <div className="flex flex-wrap items-center gap-2">
               <Button onClick={() => void handleStartCheckout()} disabled={isCreatingCheckout || !selectedPack}>
                 {isCreatingCheckout ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Start Checkout
+                {selectedPaymentMethod === "card" ? "Start Checkout" : "Submit for Verification"}
               </Button>
-              {lastCheckoutUrl && (
+              {selectedPaymentMethod === "card" && lastCheckoutUrl && (
                 <a
                   href={lastCheckoutUrl}
                   target="_blank"
@@ -762,6 +877,9 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
                   <div key={item.payment_id} className="rounded-md border border-border/70 bg-muted/30 p-2.5">
                     <div className="flex flex-wrap items-center gap-2 text-xs">
                       <span className="font-medium text-foreground">{item.payment_status.replace("_", " ")}</span>
+                      <span className="rounded border border-border/70 bg-background px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                        {getPaymentMethodLabel(item.payment_method)}
+                      </span>
                       <span className="text-muted-foreground">{new Date(item.created_at).toLocaleString()}</span>
                       <span className="ml-auto text-muted-foreground">
                         {item.credits.toFixed(0)} credits ({item.currency} {item.amount.toFixed(2)})
