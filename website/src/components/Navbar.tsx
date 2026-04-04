@@ -22,7 +22,14 @@ const Navbar = () => {
     <nav className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-xl border-b border-border">
       <div className="container mx-auto flex items-center justify-between h-16 px-4">
         <Link href={`/${locale}`} className="inline-flex items-center">
-          <Image src="/logo.png" alt={t("meta.logoAlt")} width={180} height={43} priority />
+          <Image
+            src="/logo.png"
+            alt={t("meta.logoAlt")}
+            width={1018}
+            height={246}
+            priority
+            className="h-10 w-auto"
+          />
         </Link>
 
         <div className="hidden md:flex items-center gap-6">

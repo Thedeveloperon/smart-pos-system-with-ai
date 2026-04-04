@@ -1,17 +1,11 @@
 import type { Metadata } from "next";
-import { DM_Sans, Space_Grotesk } from "next/font/google";
+import { Lato } from "next/font/google";
 import "./globals.css";
 
-const dmSans = DM_Sans({
+const lato = Lato({
   subsets: ["latin"],
-  weight: ["400", "500", "600"],
-  variable: "--font-dm-sans",
-});
-
-const spaceGrotesk = Space_Grotesk({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  variable: "--font-space-grotesk",
+  weight: ["300", "400", "700", "900"],
+  variable: "--font-site",
 });
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://smartpos.lk";
@@ -30,8 +24,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${dmSans.variable} ${spaceGrotesk.variable}`}>{children}</body>
+    <html lang="en" className={lato.variable}>
+      <body>{children}</body>
     </html>
   );
 }

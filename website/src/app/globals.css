@@ -4,57 +4,57 @@
 
 @layer base {
   :root {
-    --background: 222 47% 6%;
-    --foreground: 210 40% 92%;
+    --background: 210 40% 98%;
+    --foreground: 222 47% 16%;
 
-    --card: 222 40% 10%;
-    --card-foreground: 210 40% 92%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 16%;
 
-    --popover: 222 40% 10%;
-    --popover-foreground: 210 40% 92%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 16%;
 
-    --primary: 160 84% 39%;
+    --primary: 160 70% 38%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 222 30% 14%;
-    --secondary-foreground: 210 40% 92%;
+    --secondary: 210 28% 94%;
+    --secondary-foreground: 222 45% 20%;
 
-    --muted: 222 25% 16%;
-    --muted-foreground: 215 20% 55%;
+    --muted: 210 25% 92%;
+    --muted-foreground: 215 16% 38%;
 
-    --accent: 174 70% 45%;
+    --accent: 184 70% 42%;
     --accent-foreground: 0 0% 100%;
 
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 222 25% 16%;
-    --input: 222 25% 16%;
-    --ring: 160 84% 39%;
+    --border: 214 24% 86%;
+    --input: 214 24% 86%;
+    --ring: 160 70% 38%;
 
     --radius: 0.75rem;
 
-    --hero-bg: 222 50% 5%;
-    --hero-foreground: 210 40% 96%;
-    --hero-muted: 215 20% 55%;
+    --hero-bg: 210 40% 98%;
+    --hero-foreground: 222 47% 18%;
+    --hero-muted: 215 18% 42%;
 
-    --feature-icon-bg: 160 84% 39%;
+    --feature-icon-bg: 160 70% 38%;
     --feature-icon-fg: 0 0% 100%;
 
-    --glass: 222 40% 12%;
-    --glass-border: 215 25% 20%;
-    --glow-primary: 160 84% 39%;
+    --glass: 0 0% 100%;
+    --glass-border: 214 28% 84%;
+    --glow-primary: 160 70% 38%;
 
-    --sidebar-background: 222 47% 6%;
-    --sidebar-foreground: 210 40% 92%;
-    --sidebar-primary: 160 84% 39%;
+    --sidebar-background: 210 40% 98%;
+    --sidebar-foreground: 222 47% 16%;
+    --sidebar-primary: 160 70% 38%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 222 30% 14%;
-    --sidebar-accent-foreground: 210 40% 92%;
-    --sidebar-border: 222 25% 16%;
-    --sidebar-ring: 160 84% 39%;
+    --sidebar-accent: 210 28% 94%;
+    --sidebar-accent-foreground: 222 45% 20%;
+    --sidebar-border: 214 24% 86%;
+    --sidebar-ring: 160 70% 38%;
 
-    font-family: var(--font-dm-sans), system-ui, sans-serif;
+    font-family: var(--font-site), system-ui, sans-serif;
   }
 }
 
@@ -65,6 +65,14 @@
 
   body {
     @apply bg-background text-foreground antialiased;
+    font-family: var(--font-site), system-ui, sans-serif;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font-family: inherit;
   }
 
   h1,
@@ -73,13 +81,28 @@
   h4,
   h5,
   h6 {
-    font-family: var(--font-space-grotesk), system-ui, sans-serif;
+    font-family: var(--font-site), system-ui, sans-serif;
   }
 }
 
 @layer utilities {
   .glass-card {
-    @apply bg-glass/60 backdrop-blur-xl border border-glass-border rounded-2xl;
+    @apply bg-glass/85 backdrop-blur-xl border border-glass-border rounded-2xl;
+  }
+
+  .hero-dark-theme {
+    --background: 222 47% 6%;
+    --foreground: 210 40% 92%;
+    --card: 222 40% 10%;
+    --card-foreground: 210 40% 92%;
+    --secondary: 222 30% 14%;
+    --secondary-foreground: 210 40% 92%;
+    --muted-foreground: 215 20% 60%;
+    --hero-bg: 222 50% 5%;
+    --hero-foreground: 210 40% 96%;
+    --hero-muted: 215 20% 62%;
+    --glass: 222 40% 12%;
+    --glass-border: 215 25% 20%;
   }
 
   .glow-primary {

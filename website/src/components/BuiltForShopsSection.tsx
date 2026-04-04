@@ -1,4 +1,5 @@
-﻿import { motion } from "framer-motion";
+import { useEffect, useState } from "react";
+import { motion } from "framer-motion";
 import { ShoppingCart, BookOpen, Shirt, Gift, Sparkles, Store } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
 
@@ -7,6 +8,19 @@ const icons = [ShoppingCart, BookOpen, Shirt, Gift, Sparkles, Store] as const;
 const BuiltForShopsSection = () => {
   const { t, get } = useI18n();
   const shops = get<string[]>("builtForShops.shops");
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  useEffect(() => {
+    if (shops.length === 0) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setActiveIndex((prev) => (prev + 1) % shops.length);
+    }, 1800);
+
+    return () => window.clearInterval(intervalId);
+  }, [shops.length]);
 
   return (
     <section className="py-20 md:py-28 bg-background relative overflow-hidden">
@@ -24,6 +38,8 @@ const BuiltForShopsSection = () => {
               return null;
             }
 
+            const isActive = i === activeIndex;
+
             return (
               <motion.div
                 key={shop}
@@ -31,10 +47,14 @@ const BuiltForShopsSection = () => {
                 whileInView={{ opacity: 1, scale: 1 }}
                 viewport={{ once: true }}
                 transition={{ duration: 0.3, delay: i * 0.06 }}
-                className="glass-card px-6 py-4 flex items-center gap-3 hover:border-primary/30 hover:glow-primary-sm transition-all"
+                className={`px-6 py-4 flex items-center gap-3 rounded-2xl border transition-all duration-700 ${
+                  isActive
+                    ? "bg-primary border-primary text-primary-foreground shadow-lg shadow-primary/25"
+                    : "glass-card hover:border-primary/30 hover:glow-primary-sm"
+                }`}
               >
-                <Icon size={20} className="text-primary" />
-                <span className="text-foreground text-sm font-medium">{shop}</span>
+                <Icon size={20} className={isActive ? "text-primary-foreground" : "text-primary"} />
+                <span className={`text-sm font-medium ${isActive ? "text-primary-foreground" : "text-foreground"}`}>{shop}</span>
               </motion.div>
             );
           })}

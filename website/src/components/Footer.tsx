@@ -17,7 +17,13 @@ const Footer = () => {
         <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-8">
           <div>
             <Link href={`/${locale}`} className="inline-flex items-center">
-              <Image src="/logo.png" alt={t("meta.logoAlt")} width={180} height={43} />
+              <Image
+                src="/logo.png"
+                alt={t("meta.logoAlt")}
+                width={1018}
+                height={246}
+                className="h-10 w-auto"
+              />
             </Link>
             <p className="text-muted-foreground text-sm mt-3 leading-relaxed">{t("footer.description")}</p>
           </div>
