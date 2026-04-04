@@ -42,12 +42,7 @@ public sealed class AiInsightOptions
     public string[] CanaryAllowedUsers { get; set; } = [];
     public string PaymentProvider { get; set; } = "mockpay";
     public string CheckoutBaseUrl { get; set; } = string.Empty;
-    public List<AiCreditPackOption> CreditPacks { get; set; } =
-    [
-        new() { PackCode = "pack_100", Credits = 100m, Price = 5m, Currency = "USD" },
-        new() { PackCode = "pack_500", Credits = 500m, Price = 20m, Currency = "USD" },
-        new() { PackCode = "pack_2000", Credits = 2000m, Price = 70m, Currency = "USD" }
-    ];
+    public List<AiCreditPackOption> CreditPacks { get; set; } = [];
     public AiCreditPaymentWebhookOptions PaymentWebhook { get; set; } = new();
 }
 
