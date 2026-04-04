@@ -31,6 +31,7 @@ import {
   adminTransferDeviceSeat,
   exportAdminLicenseAuditLogs,
   createAdminManualBillingInvoice,
+  fetchAiPendingManualPayments,
   runAdminEmergencyAction,
   fetchAdminManualBillingDailyReconciliation,
   fetchAdminManualBillingInvoices,
@@ -46,6 +47,8 @@ import {
   fetchTransactionsReport,
   recordAdminManualBillingPayment,
   rejectAdminManualBillingPayment,
+  type AiPendingManualPaymentItem,
+  verifyAiManualPayment,
   verifyAdminManualBillingPayment,
 } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
@@ -281,9 +284,10 @@ const StatCard = ({
 );
 
 const BadgeTone = ({ method }: { method: string }) => {
+  const normalizedMethod = method.trim().toLowerCase();
   const variant: "default" | "secondary" | "outline" =
-    method === "cash" ? "default" : method === "card" ? "secondary" : "outline";
-  return <Badge variant={variant} className="capitalize text-[10px]">{method}</Badge>;
+    normalizedMethod === "cash" ? "default" : normalizedMethod === "card" ? "secondary" : "outline";
+  return <Badge variant={variant} className="capitalize text-[10px]">{normalizedMethod.replaceAll("_", " ")}</Badge>;
 };
 
 const ManagerReportsDrawer = ({
@@ -314,6 +318,11 @@ const ManagerReportsDrawer = ({
   const [promptState, setPromptState] = useState<PromptDialogState | null>(null);
   const [confirmState, setConfirmState] = useState<ConfirmDialogState | null>(null);
   const [shareState, setShareState] = useState<ShareDialogState | null>(null);
+  const [aiVerifyReference, setAiVerifyReference] = useState("");
+  const [isVerifyingAiPayment, setIsVerifyingAiPayment] = useState(false);
+  const [verifyingAiPaymentId, setVerifyingAiPaymentId] = useState<string | null>(null);
+  const [pendingAiPayments, setPendingAiPayments] = useState<AiPendingManualPaymentItem[]>([]);
+  const [loadingPendingAiPayments, setLoadingPendingAiPayments] = useState(false);
   const promptResolveRef = useRef<((value: string | null) => void) | null>(null);
   const confirmResolveRef = useRef<((value: boolean) => void) | null>(null);
 
@@ -402,6 +411,29 @@ const ManagerReportsDrawer = ({
     };
   }, []);
 
+  const loadPendingAiPayments = useCallback(
+    async (quiet = false) => {
+      if (!isSuperAdmin) {
+        setPendingAiPayments([]);
+        return;
+      }
+
+      setLoadingPendingAiPayments(true);
+      try {
+        const response = await fetchAiPendingManualPayments(80);
+        setPendingAiPayments(response.items);
+      } catch (error) {
+        console.error(error);
+        if (!quiet) {
+          toast.error(error instanceof Error ? error.message : "Failed to load pending AI payment requests.");
+        }
+      } finally {
+        setLoadingPendingAiPayments(false);
+      }
+    },
+    [isSuperAdmin]
+  );
+
   const loadReports = useCallback(async () => {
     setLoading(true);
     try {
@@ -452,6 +484,49 @@ const ManagerReportsDrawer = ({
       setLoading(false);
     }
   }, [fromDate, isSuperAdmin, toDate]);
+
+  const refreshSupportData = useCallback(() => {
+    void loadReports();
+    if (isSuperAdmin) {
+      void loadPendingAiPayments(true);
+    }
+  }, [isSuperAdmin, loadPendingAiPayments, loadReports]);
+
+  const handleVerifyAiPayment = useCallback(
+    async (payload: { paymentId?: string; externalReference?: string }, clearReferenceInput = false) => {
+      const paymentId = payload.paymentId?.trim();
+      const externalReference = payload.externalReference?.trim();
+      if (!paymentId && !externalReference) {
+        toast.error("Payment ID or external reference is required.");
+        return;
+      }
+
+      setIsVerifyingAiPayment(true);
+      setVerifyingAiPaymentId(paymentId ?? "__by_reference__");
+      try {
+        const result = await verifyAiManualPayment({
+          payment_id: paymentId,
+          external_reference: externalReference,
+        });
+        await loadPendingAiPayments(true);
+        toast.success(
+          result.payment_status === "succeeded"
+            ? "AI payment verified and credits added."
+            : `AI payment status: ${result.payment_status.replaceAll("_", " ")}.`,
+        );
+        if (clearReferenceInput) {
+          setAiVerifyReference("");
+        }
+      } catch (error) {
+        console.error(error);
+        toast.error(error instanceof Error ? error.message : "Failed to verify AI payment.");
+      } finally {
+        setIsVerifyingAiPayment(false);
+        setVerifyingAiPaymentId(null);
+      }
+    },
+    [loadPendingAiPayments]
+  );
 
   const handleSearchAuditLogs = useCallback(async () => {
     try {
@@ -1318,7 +1393,10 @@ const ManagerReportsDrawer = ({
     }
 
     void loadReports();
-  }, [open, loadReports, refreshToken]);
+    if (isSuperAdmin) {
+      void loadPendingAiPayments(true);
+    }
+  }, [isSuperAdmin, loadPendingAiPayments, open, loadReports, refreshToken]);
 
   const overview = useMemo(() => {
     const cashierMap = new Map<string, number>();
@@ -1615,8 +1693,8 @@ const ManagerReportsDrawer = ({
                 className="bg-background text-foreground"
               />
             </div>
-            <Button onClick={() => void loadReports()} disabled={loading} className="w-fit">
-              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            <Button onClick={refreshSupportData} disabled={loading || loadingPendingAiPayments} className="w-fit">
+              <RefreshCw className={`h-4 w-4 ${loading || loadingPendingAiPayments ? "animate-spin" : ""}`} />
               Refresh
             </Button>
           </div>
@@ -2319,6 +2397,92 @@ const ManagerReportsDrawer = ({
                       )}
                     </TableBody>
                   </Table>
+                </div>
+
+                <div className="rounded-2xl border border-border bg-card shadow-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold">AI Credit Purchasing Requests</p>
+                      <p className="text-xs text-muted-foreground">
+                        Pending manual AI payments (`cash` / `bank_deposit`) for verification.
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        void loadPendingAiPayments();
+                      }}
+                      disabled={loadingPendingAiPayments}
+                    >
+                      Refresh Requests
+                    </Button>
+                  </div>
+
+                  <div className="space-y-3 p-4">
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <Input
+                        value={aiVerifyReference}
+                        onChange={(event) => setAiVerifyReference(event.target.value)}
+                        placeholder="aicpay_... external reference"
+                        className="sm:flex-1"
+                      />
+                      <Button
+                        onClick={() =>
+                          void handleVerifyAiPayment(
+                            {
+                              externalReference: aiVerifyReference,
+                            },
+                            true,
+                          )
+                        }
+                        disabled={isVerifyingAiPayment && verifyingAiPaymentId === "__by_reference__"}
+                      >
+                        {isVerifyingAiPayment && verifyingAiPaymentId === "__by_reference__"
+                          ? "Verifying..."
+                          : "Verify by Reference"}
+                      </Button>
+                    </div>
+
+                    {loadingPendingAiPayments ? (
+                      <p className="text-sm text-muted-foreground">Loading pending AI credit requests...</p>
+                    ) : pendingAiPayments.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No pending AI credit purchase requests.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {pendingAiPayments.slice(0, 20).map((item) => (
+                          <div key={item.payment_id} className="rounded-md border border-border/70 bg-muted/20 p-3">
+                            <div className="flex flex-wrap items-center gap-2 text-xs">
+                              <span className="font-semibold text-foreground">{item.payment_status.replaceAll("_", " ")}</span>
+                              <BadgeTone method={item.payment_method} />
+                              <span className="text-muted-foreground">{new Date(item.created_at).toLocaleString()}</span>
+                              <span className="ml-auto text-muted-foreground">
+                                {item.credits.toFixed(0)} credits ({item.currency} {item.amount.toFixed(2)})
+                              </span>
+                            </div>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              User: {item.target_username} • Reference: {item.external_reference}
+                            </p>
+                            <div className="mt-2 flex justify-end">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  void handleVerifyAiPayment({
+                                    paymentId: item.payment_id,
+                                    externalReference: item.external_reference,
+                                  })
+                                }
+                                disabled={isVerifyingAiPayment && verifyingAiPaymentId === item.payment_id}
+                              >
+                                {isVerifyingAiPayment && verifyingAiPaymentId === item.payment_id ? "Verifying..." : "Verify"}
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div className="rounded-2xl border border-border bg-card shadow-sm">
