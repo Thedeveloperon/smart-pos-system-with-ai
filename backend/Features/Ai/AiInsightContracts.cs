@@ -365,6 +365,15 @@ public sealed class AiPaymentHistoryResponse
     public List<AiPaymentHistoryItemResponse> Items { get; set; } = [];
 }
 
+public sealed class AiManualPaymentVerifyRequest
+{
+    [JsonPropertyName("payment_id")]
+    public Guid? PaymentId { get; set; }
+
+    [JsonPropertyName("external_reference")]
+    public string? ExternalReference { get; set; }
+}
+
 public sealed class AiPaymentHistoryItemResponse
 {
     [JsonPropertyName("payment_id")]

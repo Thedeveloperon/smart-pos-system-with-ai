@@ -224,6 +224,74 @@ public sealed class AiCreditPaymentService(
         };
     }
 
+    public async Task<AiCheckoutSessionResponse> VerifyManualPaymentAsync(
+        Guid? paymentId,
+        string? externalReference,
+        CancellationToken cancellationToken)
+    {
+        var normalizedExternalReference = NormalizeOptional(externalReference);
+        if (!paymentId.HasValue && string.IsNullOrWhiteSpace(normalizedExternalReference))
+        {
+            throw new InvalidOperationException("payment_id or external_reference is required.");
+        }
+
+        AiCreditPayment? payment;
+        if (paymentId.HasValue)
+        {
+            payment = await dbContext.AiCreditPayments
+                .FirstOrDefaultAsync(x => x.Id == paymentId.Value, cancellationToken);
+        }
+        else
+        {
+            payment = await dbContext.AiCreditPayments
+                .FirstOrDefaultAsync(x => x.ExternalReference == normalizedExternalReference, cancellationToken);
+        }
+
+        if (payment is null)
+        {
+            throw new InvalidOperationException("AI credit payment was not found.");
+        }
+
+        var paymentMethod = ResolvePaymentMethodForPayment(payment, PaymentMethodCard);
+        if (!IsManualPaymentMethod(paymentMethod))
+        {
+            throw new InvalidOperationException("Only cash or bank_deposit payments can be manually verified.");
+        }
+
+        var packCode = ResolvePackCodeForPayment(payment, "manual_payment");
+        if (payment.Status == AiCreditPaymentStatus.Succeeded)
+        {
+            return MapCheckoutSessionResponse(payment, packCode, paymentMethod, null);
+        }
+
+        if (payment.Status is AiCreditPaymentStatus.Refunded or AiCreditPaymentStatus.Canceled)
+        {
+            throw new InvalidOperationException("Payment cannot be verified in its current status.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var purchaseReference = string.IsNullOrWhiteSpace(payment.PurchaseReference)
+            ? $"ai-payment-manual-{payment.Id:N}"
+            : payment.PurchaseReference.Trim();
+
+        await creditBillingService.AddCreditsAsync(
+            payment.UserId,
+            payment.CreditsPurchased,
+            purchaseReference,
+            "ai_manual_payment_verified",
+            cancellationToken);
+
+        payment.Status = AiCreditPaymentStatus.Succeeded;
+        payment.PurchaseReference = purchaseReference;
+        payment.FailureReason = null;
+        payment.UpdatedAtUtc = now;
+        payment.CompletedAtUtc ??= now;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return MapCheckoutSessionResponse(payment, packCode, paymentMethod, null);
+    }
+
     public void VerifyWebhookSignature(string rawBody, IHeaderDictionary headers)
     {
         var webhookOptions = options.Value.PaymentWebhook;

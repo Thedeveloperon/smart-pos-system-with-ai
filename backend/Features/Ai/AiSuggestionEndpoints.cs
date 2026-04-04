@@ -194,6 +194,40 @@ public static class AiSuggestionEndpoints
         .WithName("GetAiPaymentHistory")
         .WithOpenApi();
 
+        group.MapPost("/payments/verify", async (
+            AiManualPaymentVerifyRequest request,
+            ClaimsPrincipal user,
+            IOptions<AiInsightOptions> aiInsightOptions,
+            AiCreditPaymentService paymentService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                if (!IsAiInsightsEnabledForUser(aiInsightOptions.Value, user))
+                {
+                    return Results.Forbid();
+                }
+
+                if (!CanManualWalletTopUp(user))
+                {
+                    return Results.Forbid();
+                }
+
+                var result = await paymentService.VerifyManualPaymentAsync(
+                    request.PaymentId,
+                    request.ExternalReference,
+                    cancellationToken);
+
+                return Results.Ok(result);
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .WithName("VerifyAiManualPayment")
+        .WithOpenApi();
+
         group.MapPost("/insights/estimate", async (
             AiInsightEstimateRequestPayload request,
             ClaimsPrincipal user,

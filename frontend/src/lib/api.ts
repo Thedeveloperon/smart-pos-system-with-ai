@@ -2537,6 +2537,11 @@ export type AiPaymentHistoryResponse = {
   items: AiPaymentHistoryItem[];
 };
 
+export type AiManualPaymentVerifyRequest = {
+  payment_id?: string;
+  external_reference?: string;
+};
+
 export async function fetchAiWallet() {
   return request<AiWalletResponse>("/api/ai/wallet");
 }
@@ -2641,6 +2646,13 @@ export async function createAiCheckoutSession(requestBody: AiCheckoutSessionRequ
 export async function fetchAiPaymentHistory(take = 10) {
   const normalizedTake = Math.max(1, Math.min(100, Math.trunc(take || 10)));
   return request<AiPaymentHistoryResponse>(`/api/ai/payments?take=${normalizedTake}`);
+}
+
+export async function verifyAiManualPayment(requestBody: AiManualPaymentVerifyRequest) {
+  return request<AiCheckoutSessionResponse>("/api/ai/payments/verify", {
+    method: "POST",
+    body: JSON.stringify(requestBody),
+  });
 }
 
 export type UpdateProductRequest = {
