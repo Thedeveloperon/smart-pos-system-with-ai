@@ -2496,14 +2496,20 @@ export type AiCreditPackListResponse = {
   items: AiCreditPack[];
 };
 
+export type AiCheckoutPaymentMethod = "card" | "cash" | "bank_deposit";
+
 export type AiCheckoutSessionRequest = {
   pack_code: string;
+  payment_method?: AiCheckoutPaymentMethod;
+  bank_reference?: string;
+  deposit_slip_url?: string;
   idempotency_key?: string;
 };
 
 export type AiCheckoutSessionResponse = {
   payment_id: string;
   payment_status: string;
+  payment_method: AiCheckoutPaymentMethod | string;
   provider: string;
   pack_code: string;
   credits: number;
@@ -2517,6 +2523,7 @@ export type AiCheckoutSessionResponse = {
 export type AiPaymentHistoryItem = {
   payment_id: string;
   payment_status: string;
+  payment_method: AiCheckoutPaymentMethod | string;
   provider: string;
   credits: number;
   amount: number;

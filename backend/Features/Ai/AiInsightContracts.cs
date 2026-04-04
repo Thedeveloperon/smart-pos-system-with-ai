@@ -253,6 +253,15 @@ public sealed class AiCheckoutSessionRequest
     [JsonPropertyName("pack_code")]
     public string PackCode { get; set; } = string.Empty;
 
+    [JsonPropertyName("payment_method")]
+    public string? PaymentMethod { get; set; }
+
+    [JsonPropertyName("bank_reference")]
+    public string? BankReference { get; set; }
+
+    [JsonPropertyName("deposit_slip_url")]
+    public string? DepositSlipUrl { get; set; }
+
     [JsonPropertyName("idempotency_key")]
     public string? IdempotencyKey { get; set; }
 }
@@ -264,6 +273,9 @@ public sealed class AiCheckoutSessionResponse
 
     [JsonPropertyName("payment_status")]
     public string PaymentStatus { get; set; } = "pending";
+
+    [JsonPropertyName("payment_method")]
+    public string PaymentMethod { get; set; } = "card";
 
     [JsonPropertyName("provider")]
     public string Provider { get; set; } = string.Empty;
@@ -360,6 +372,9 @@ public sealed class AiPaymentHistoryItemResponse
 
     [JsonPropertyName("payment_status")]
     public string PaymentStatus { get; set; } = string.Empty;
+
+    [JsonPropertyName("payment_method")]
+    public string PaymentMethod { get; set; } = "card";
 
     [JsonPropertyName("provider")]
     public string Provider { get; set; } = string.Empty;

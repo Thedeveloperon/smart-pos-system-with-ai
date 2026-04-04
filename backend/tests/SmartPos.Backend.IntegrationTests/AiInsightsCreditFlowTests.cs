@@ -297,6 +297,77 @@ public sealed class AiInsightsCreditFlowTests(CustomWebApplicationFactory factor
     }
 
     [Fact]
+    public async Task Checkout_WithBankDeposit_ShouldReturnPendingVerification_AndPersistMethodInHistory()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var checkoutPayload = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/ai/payments/checkout", new
+            {
+                pack_code = "pack_100",
+                payment_method = "bankdeposit",
+                bank_reference = $"BD-{Guid.NewGuid():N}"[..20],
+                deposit_slip_url = "https://example.com/payment-proofs/deposit-slip-001.pdf",
+                idempotency_key = $"it-bank-deposit-{Guid.NewGuid():N}"
+            }));
+
+        var paymentId = TestJson.GetString(checkoutPayload, "payment_id");
+        Assert.Equal("bank_deposit", TestJson.GetString(checkoutPayload, "payment_method"));
+        Assert.Equal("pending_verification", TestJson.GetString(checkoutPayload, "payment_status"));
+        Assert.True(
+            checkoutPayload["checkout_url"] is null ||
+            checkoutPayload["checkout_url"]?.GetValue<string?>() is null);
+
+        var historyPayload = await TestJson.ReadObjectAsync(await client.GetAsync("/api/ai/payments?take=10"));
+        var items = historyPayload["items"]?.AsArray() ?? throw new InvalidOperationException("Payment history items not found.");
+        var payment = items.FirstOrDefault(item => string.Equals(
+            item?["payment_id"]?.GetValue<string>(),
+            paymentId,
+            StringComparison.Ordinal));
+
+        Assert.NotNull(payment);
+        Assert.Equal("bank_deposit", payment?["payment_method"]?.GetValue<string>());
+        Assert.Equal("pending_verification", payment?["payment_status"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Checkout_WithCashPaymentWithoutReference_ShouldReturnBadRequest()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var response = await client.PostAsJsonAsync("/api/ai/payments/checkout", new
+        {
+            pack_code = "pack_100",
+            payment_method = "cash",
+            idempotency_key = $"it-cash-missing-ref-{Guid.NewGuid():N}"
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonObject>();
+        var message = payload?["message"]?.GetValue<string>() ?? string.Empty;
+        Assert.Contains("bank_reference", message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Checkout_WithBankDepositWithoutSlip_ShouldReturnBadRequest()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var response = await client.PostAsJsonAsync("/api/ai/payments/checkout", new
+        {
+            pack_code = "pack_100",
+            payment_method = "bank_deposit",
+            bank_reference = "BD-ONLY-REF-001",
+            idempotency_key = $"it-bank-missing-slip-{Guid.NewGuid():N}"
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonObject>();
+        var message = payload?["message"]?.GetValue<string>() ?? string.Empty;
+        Assert.Contains("deposit_slip_url", message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task EstimateInsights_ShouldReturnReserveAndAffordability()
     {
         await TestAuth.SignInAsManagerAsync(client);
