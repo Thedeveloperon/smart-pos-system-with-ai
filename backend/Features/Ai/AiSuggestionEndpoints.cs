@@ -194,6 +194,31 @@ public static class AiSuggestionEndpoints
         .WithName("GetAiPaymentHistory")
         .WithOpenApi();
 
+        group.MapGet("/payments/pending-manual", async (
+            ClaimsPrincipal user,
+            IOptions<AiInsightOptions> aiInsightOptions,
+            AiCreditPaymentService paymentService,
+            int? take,
+            CancellationToken cancellationToken) =>
+        {
+            if (!IsAiInsightsEnabledForUser(aiInsightOptions.Value, user))
+            {
+                return Results.Forbid();
+            }
+
+            if (!CanManualWalletTopUp(user))
+            {
+                return Results.Forbid();
+            }
+
+            var result = await paymentService.GetPendingManualPaymentsAsync(
+                take.GetValueOrDefault(40),
+                cancellationToken);
+            return Results.Ok(result);
+        })
+        .WithName("GetPendingAiManualPayments")
+        .WithOpenApi();
+
         group.MapPost("/payments/verify", async (
             AiManualPaymentVerifyRequest request,
             ClaimsPrincipal user,

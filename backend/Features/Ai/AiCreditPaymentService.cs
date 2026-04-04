@@ -224,6 +224,69 @@ public sealed class AiCreditPaymentService(
         };
     }
 
+    public async Task<AiPendingManualPaymentsResponse> GetPendingManualPaymentsAsync(
+        int take,
+        CancellationToken cancellationToken)
+    {
+        var normalizedTake = Math.Clamp(take, 1, 200);
+        var candidateTake = Math.Clamp(normalizedTake * 6, normalizedTake, 500);
+
+        List<AiCreditPayment> pendingPayments;
+        if (dbContext.Database.IsSqlite())
+        {
+            pendingPayments = (await dbContext.AiCreditPayments
+                    .AsNoTracking()
+                    .Include(x => x.User)
+                    .Where(x => x.Status == AiCreditPaymentStatus.Pending)
+                    .ToListAsync(cancellationToken))
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Take(candidateTake)
+                .ToList();
+        }
+        else
+        {
+            pendingPayments = await dbContext.AiCreditPayments
+                .AsNoTracking()
+                .Include(x => x.User)
+                .Where(x => x.Status == AiCreditPaymentStatus.Pending)
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Take(candidateTake)
+                .ToListAsync(cancellationToken);
+        }
+
+        var items = pendingPayments
+            .Select(payment =>
+            {
+                var paymentMethod = ResolvePaymentMethodForPayment(payment, PaymentMethodCard);
+                if (!IsManualPaymentMethod(paymentMethod))
+                {
+                    return null;
+                }
+
+                return new AiPendingManualPaymentItemResponse
+                {
+                    PaymentId = payment.Id,
+                    TargetUsername = payment.User.Username,
+                    PaymentStatus = MapPaymentStatus(payment.Status, paymentMethod),
+                    PaymentMethod = paymentMethod,
+                    Credits = payment.CreditsPurchased,
+                    Amount = payment.Amount,
+                    Currency = payment.Currency,
+                    ExternalReference = payment.ExternalReference,
+                    CreatedAt = payment.CreatedAtUtc
+                };
+            })
+            .Where(item => item is not null)
+            .Take(normalizedTake)
+            .Select(item => item!)
+            .ToList();
+
+        return new AiPendingManualPaymentsResponse
+        {
+            Items = items
+        };
+    }
+
     public async Task<AiCheckoutSessionResponse> VerifyManualPaymentAsync(
         Guid? paymentId,
         string? externalReference,

@@ -421,6 +421,42 @@ public sealed class AiInsightsCreditFlowTests(CustomWebApplicationFactory factor
     }
 
     [Fact]
+    public async Task PendingManualPayments_WithBillingAdmin_ShouldReturnPendingManualRequests()
+    {
+        await TestAuth.SignInAsBillingAdminAsync(client);
+        await ResetWalletAsync("billing_admin");
+
+        await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/ai/payments/checkout", new
+            {
+                pack_code = "pack_100",
+                payment_method = "bank_deposit",
+                bank_reference = $"BD-{Guid.NewGuid():N}"[..20],
+                deposit_slip_url = "https://example.com/payment-proofs/deposit-slip-002.pdf",
+                idempotency_key = $"it-pending-list-{Guid.NewGuid():N}"
+            }));
+
+        var pendingPayload = await TestJson.ReadObjectAsync(
+            await client.GetAsync("/api/ai/payments/pending-manual?take=20"));
+        var items = pendingPayload["items"]?.AsArray() ?? throw new InvalidOperationException("Pending items not found.");
+
+        Assert.NotEmpty(items);
+        Assert.Contains(items, item =>
+            string.Equals(item?["payment_status"]?.GetValue<string>(), "pending_verification", StringComparison.Ordinal) &&
+            string.Equals(item?["payment_method"]?.GetValue<string>(), "bank_deposit", StringComparison.Ordinal) &&
+            string.Equals(item?["target_username"]?.GetValue<string>(), "billing_admin", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task PendingManualPayments_WithManagerRole_ShouldReturnForbidden()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var response = await client.GetAsync("/api/ai/payments/pending-manual?take=20");
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
     public async Task EstimateInsights_ShouldReturnReserveAndAffordability()
     {
         await TestAuth.SignInAsManagerAsync(client);

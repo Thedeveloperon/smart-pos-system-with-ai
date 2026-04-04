@@ -406,3 +406,39 @@ public sealed class AiPaymentHistoryItemResponse
     [JsonPropertyName("completed_at")]
     public DateTimeOffset? CompletedAt { get; set; }
 }
+
+public sealed class AiPendingManualPaymentsResponse
+{
+    [JsonPropertyName("items")]
+    public List<AiPendingManualPaymentItemResponse> Items { get; set; } = [];
+}
+
+public sealed class AiPendingManualPaymentItemResponse
+{
+    [JsonPropertyName("payment_id")]
+    public Guid PaymentId { get; set; }
+
+    [JsonPropertyName("target_username")]
+    public string TargetUsername { get; set; } = string.Empty;
+
+    [JsonPropertyName("payment_status")]
+    public string PaymentStatus { get; set; } = "pending_verification";
+
+    [JsonPropertyName("payment_method")]
+    public string PaymentMethod { get; set; } = "bank_deposit";
+
+    [JsonPropertyName("credits")]
+    public decimal Credits { get; set; }
+
+    [JsonPropertyName("amount")]
+    public decimal Amount { get; set; }
+
+    [JsonPropertyName("currency")]
+    public string Currency { get; set; } = "USD";
+
+    [JsonPropertyName("external_reference")]
+    public string ExternalReference { get; set; } = string.Empty;
+
+    [JsonPropertyName("created_at")]
+    public DateTimeOffset CreatedAt { get; set; }
+}
