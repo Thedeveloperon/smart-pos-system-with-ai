@@ -437,13 +437,28 @@ const ManagerReportsDrawer = ({
   const loadReports = useCallback(async () => {
     setLoading(true);
     try {
-      const [summary, transactions, payments, topItems, lowStock] = await Promise.all([
-        fetchDailySalesReport(fromDate, toDate),
-        fetchTransactionsReport(fromDate, toDate, 50),
-        fetchPaymentBreakdownReport(fromDate, toDate),
-        fetchTopItemsReport(fromDate, toDate, 8),
-        fetchLowStockReport(12, 5),
-      ]);
+      let summary: Awaited<ReturnType<typeof fetchDailySalesReport>> | null = null;
+      let transactions: TransactionsItem[] = [];
+      let payments: PaymentBreakdownItem[] = [];
+      let topItems: TopItem[] = [];
+      let lowStock: LowStockItem[] = [];
+
+      if (!isSuperAdmin) {
+        const [summaryResponse, transactionsResponse, paymentsResponse, topItemsResponse, lowStockResponse] =
+          await Promise.all([
+            fetchDailySalesReport(fromDate, toDate),
+            fetchTransactionsReport(fromDate, toDate, 50),
+            fetchPaymentBreakdownReport(fromDate, toDate),
+            fetchTopItemsReport(fromDate, toDate, 8),
+            fetchLowStockReport(12, 5),
+          ]);
+
+        summary = summaryResponse;
+        transactions = transactionsResponse.items;
+        payments = paymentsResponse.items;
+        topItems = topItemsResponse.items;
+        lowStock = lowStockResponse.items;
+      }
 
       let support: SupportTriageData | null = null;
       let adminShops: AdminLicensingShopData | null = null;
@@ -465,10 +480,10 @@ const ManagerReportsDrawer = ({
 
       setReport((current) => ({
         summary,
-        transactions: transactions.items,
-        payments: payments.items,
-        topItems: topItems.items,
-        lowStock: lowStock.items,
+        transactions,
+        payments,
+        topItems,
+        lowStock,
         support,
         adminShops,
         adminAudit,
@@ -1707,10 +1722,12 @@ const ManagerReportsDrawer = ({
             <SheetHeader className="space-y-2 text-left">
               <SheetTitle className="flex items-center gap-2 text-xl font-semibold">
                 <ShieldCheck className="h-5 w-5 text-primary" />
-                Manager Reports
+                {isSuperAdmin ? "Admin Support Console" : "Manager Reports"}
               </SheetTitle>
               <SheetDescription className="text-pos-header-foreground/70">
-                Simple operational reports with cashier names, sales totals, payment mix, and stock alerts.
+                {isSuperAdmin
+                  ? "Support operations with licensing controls, payment verification, and audit workflows."
+                  : "Simple operational reports with cashier names, sales totals, payment mix, and stock alerts."}
               </SheetDescription>
             </SheetHeader>
 
@@ -1747,42 +1764,47 @@ const ManagerReportsDrawer = ({
 
         <ScrollArea className="flex-1">
           <div className="space-y-6 px-6 py-6">
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <StatCard
-                icon={<CalendarDays className="h-5 w-5" />}
-                label="Sales Count"
-                value={String(report.summary?.sales_count ?? 0)}
-                hint={`${formatDate(fromDate)} to ${formatDate(toDate)}`}
-              />
-              <StatCard
-                icon={<DollarSign className="h-5 w-5" />}
-                label="Gross Sales"
-                value={money(report.summary?.gross_sales_total ?? 0)}
-                hint="Total before refunds"
-              />
-              <StatCard
-                icon={<Wallet className="h-5 w-5" />}
-                label="Net Sales"
-                value={money(report.summary?.net_sales_total ?? 0)}
-                hint="Sales minus refunds"
-              />
-              <StatCard
-                icon={<AlertTriangle className="h-5 w-5" />}
-                label="Low Stock"
-                value={String(report.lowStock.length)}
-                hint="Products at or below alert level"
-              />
-            </div>
+            {!isSuperAdmin && (
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <StatCard
+                  icon={<CalendarDays className="h-5 w-5" />}
+                  label="Sales Count"
+                  value={String(report.summary?.sales_count ?? 0)}
+                  hint={`${formatDate(fromDate)} to ${formatDate(toDate)}`}
+                />
+                <StatCard
+                  icon={<DollarSign className="h-5 w-5" />}
+                  label="Gross Sales"
+                  value={money(report.summary?.gross_sales_total ?? 0)}
+                  hint="Total before refunds"
+                />
+                <StatCard
+                  icon={<Wallet className="h-5 w-5" />}
+                  label="Net Sales"
+                  value={money(report.summary?.net_sales_total ?? 0)}
+                  hint="Sales minus refunds"
+                />
+                <StatCard
+                  icon={<AlertTriangle className="h-5 w-5" />}
+                  label="Low Stock"
+                  value={String(report.lowStock.length)}
+                  hint="Products at or below alert level"
+                />
+              </div>
+            )}
 
-            <Tabs defaultValue="overview" className="space-y-4">
-              <TabsList className={`grid w-full ${isSuperAdmin ? "grid-cols-5" : "grid-cols-4"}`}>
-                <TabsTrigger value="overview">Overview</TabsTrigger>
-                <TabsTrigger value="sales">Sales</TabsTrigger>
-                <TabsTrigger value="items">Items</TabsTrigger>
-                <TabsTrigger value="stock">Stock</TabsTrigger>
-                {isSuperAdmin && <TabsTrigger value="support">Support</TabsTrigger>}
-              </TabsList>
+            <Tabs defaultValue={isSuperAdmin ? "support" : "overview"} className="space-y-4">
+              {!isSuperAdmin && (
+                <TabsList className="grid w-full grid-cols-4">
+                  <TabsTrigger value="overview">Overview</TabsTrigger>
+                  <TabsTrigger value="sales">Sales</TabsTrigger>
+                  <TabsTrigger value="items">Items</TabsTrigger>
+                  <TabsTrigger value="stock">Stock</TabsTrigger>
+                </TabsList>
+              )}
 
+              {!isSuperAdmin && (
+                <>
               <TabsContent value="overview" className="space-y-4">
                 <div className="grid gap-4 xl:grid-cols-[1.5fr_1fr]">
                   <div className="rounded-2xl border border-border bg-card shadow-sm">
@@ -2071,6 +2093,8 @@ const ManagerReportsDrawer = ({
                   </Table>
                 </div>
               </TabsContent>
+                </>
+              )}
 
               {isSuperAdmin && (
                 <TabsContent value="support" className="space-y-4">
