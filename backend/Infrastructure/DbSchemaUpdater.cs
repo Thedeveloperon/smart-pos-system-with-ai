@@ -1888,7 +1888,6 @@ public static class DbSchemaUpdater
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_credit_wallets_UserId" ON ai_credit_wallets("UserId");
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_insight_requests_UserId_IdempotencyKey" ON ai_insight_requests("UserId", "IdempotencyKey");
             CREATE INDEX IF NOT EXISTS "IX_ai_insight_requests_UserId_CreatedAtUtc" ON ai_insight_requests("UserId", "CreatedAtUtc");
-            CREATE INDEX IF NOT EXISTS "IX_ai_insight_requests_UserId_UsageType_CreatedAtUtc" ON ai_insight_requests("UserId", "UsageType", "CreatedAtUtc");
             CREATE INDEX IF NOT EXISTS "IX_ai_credit_ledger_UserId" ON ai_credit_ledger("UserId");
             CREATE INDEX IF NOT EXISTS "IX_ai_credit_ledger_WalletId" ON ai_credit_ledger("WalletId");
             CREATE INDEX IF NOT EXISTS "IX_ai_credit_ledger_UserId_CreatedAtUtc" ON ai_credit_ledger("UserId", "CreatedAtUtc");
