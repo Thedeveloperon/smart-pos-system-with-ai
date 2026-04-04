@@ -528,6 +528,51 @@ const ManagerReportsDrawer = ({
     [loadPendingAiPayments]
   );
 
+  const handleVerifyAiPaymentByReference = useCallback(async () => {
+    const rawReference = aiVerifyReference.trim();
+    if (!rawReference) {
+      toast.error("Enter a submitted or external reference.");
+      return;
+    }
+
+    const normalizedReference = rawReference.toLowerCase();
+    const findMatches = (items: AiPendingManualPaymentItem[]) =>
+      items.filter((item) => {
+        const externalReference = (item.external_reference || "").trim().toLowerCase();
+        const submittedReference = (item.submitted_reference || "").trim().toLowerCase();
+        return externalReference === normalizedReference || submittedReference === normalizedReference;
+      });
+
+    let matches = findMatches(pendingAiPayments);
+    if (matches.length === 0) {
+      try {
+        const refreshed = await fetchAiPendingManualPayments(200);
+        setPendingAiPayments(refreshed.items);
+        matches = findMatches(refreshed.items);
+      } catch {
+        // Keep existing message path below.
+      }
+    }
+
+    if (matches.length === 0) {
+      toast.error("No pending payment matched this reference. Refresh and try again.");
+      return;
+    }
+
+    if (matches.length > 1) {
+      toast.error("Multiple pending payments share this reference. Verify from the exact row.");
+      return;
+    }
+
+    const target = matches[0];
+    await handleVerifyAiPayment(
+      {
+        paymentId: target.payment_id,
+      },
+      true
+    );
+  }, [aiVerifyReference, handleVerifyAiPayment, pendingAiPayments]);
+
   const handleSearchAuditLogs = useCallback(async () => {
     try {
       const adminAudit = await fetchAdminLicenseAuditLogs({
@@ -2404,7 +2449,7 @@ const ManagerReportsDrawer = ({
                     <div className="space-y-1">
                       <p className="text-sm font-semibold">AI Credit Purchasing Requests</p>
                       <p className="text-xs text-muted-foreground">
-                        Pending manual AI payments (`cash` / `bank_deposit`) for verification.
+                        Pending manual AI payments (`cash` / `bank_deposit`) with submitted reference details.
                       </p>
                     </div>
                     <Button
@@ -2424,23 +2469,16 @@ const ManagerReportsDrawer = ({
                       <Input
                         value={aiVerifyReference}
                         onChange={(event) => setAiVerifyReference(event.target.value)}
-                        placeholder="aicpay_... external reference"
+                        placeholder="Submitted ref or aicpay_... external ref"
                         className="sm:flex-1"
                       />
                       <Button
-                        onClick={() =>
-                          void handleVerifyAiPayment(
-                            {
-                              externalReference: aiVerifyReference,
-                            },
-                            true,
-                          )
-                        }
-                        disabled={isVerifyingAiPayment && verifyingAiPaymentId === "__by_reference__"}
+                        onClick={() => {
+                          void handleVerifyAiPaymentByReference();
+                        }}
+                        disabled={isVerifyingAiPayment}
                       >
-                        {isVerifyingAiPayment && verifyingAiPaymentId === "__by_reference__"
-                          ? "Verifying..."
-                          : "Verify by Reference"}
+                        {isVerifyingAiPayment ? "Verifying..." : "Verify by Reference"}
                       </Button>
                     </div>
 
@@ -2461,7 +2499,12 @@ const ManagerReportsDrawer = ({
                               </span>
                             </div>
                             <p className="mt-1 text-xs text-muted-foreground">
-                              User: {item.target_username} • Reference: {item.external_reference}
+                              User: {item.target_full_name || item.target_username}
+                              {item.target_full_name ? ` (${item.target_username})` : ""}
+                              {item.shop_name ? ` • Shop: ${item.shop_name}` : ""}
+                            </p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              Submitted Ref: {item.submitted_reference || "-"} • External Ref: {item.external_reference}
                             </p>
                             <div className="mt-2 flex justify-end">
                               <Button

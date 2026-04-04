@@ -421,6 +421,12 @@ public sealed class AiPendingManualPaymentItemResponse
     [JsonPropertyName("target_username")]
     public string TargetUsername { get; set; } = string.Empty;
 
+    [JsonPropertyName("target_full_name")]
+    public string? TargetFullName { get; set; }
+
+    [JsonPropertyName("shop_name")]
+    public string? ShopName { get; set; }
+
     [JsonPropertyName("payment_status")]
     public string PaymentStatus { get; set; } = "pending_verification";
 
@@ -438,6 +444,9 @@ public sealed class AiPendingManualPaymentItemResponse
 
     [JsonPropertyName("external_reference")]
     public string ExternalReference { get; set; } = string.Empty;
+
+    [JsonPropertyName("submitted_reference")]
+    public string? SubmittedReference { get; set; }
 
     [JsonPropertyName("created_at")]
     public DateTimeOffset CreatedAt { get; set; }

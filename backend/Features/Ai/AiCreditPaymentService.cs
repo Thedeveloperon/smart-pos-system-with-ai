@@ -101,6 +101,7 @@ public sealed class AiCreditPaymentService(
             ?? throw new InvalidOperationException("User account was not found.");
 
         var now = DateTimeOffset.UtcNow;
+        var shopNameSnapshot = await ResolveCurrentShopNameAsync(cancellationToken);
         var payment = new AiCreditPayment
         {
             UserId = userId,
@@ -124,7 +125,8 @@ public sealed class AiCreditPaymentService(
                 idempotency_key_hash = ComputeSha256Hex(normalizedIdempotencyKey),
                 payment_method = normalizedPaymentMethod,
                 bank_reference = normalizedBankReference,
-                deposit_slip_url = normalizedDepositSlipUrl
+                deposit_slip_url = normalizedDepositSlipUrl,
+                shop_name = shopNameSnapshot
             }, JsonOptions),
             CreatedAtUtc = now,
             UpdatedAtUtc = now,
@@ -254,6 +256,7 @@ public sealed class AiCreditPaymentService(
                 .ToListAsync(cancellationToken);
         }
 
+        var fallbackShopName = await ResolveCurrentShopNameAsync(cancellationToken);
         var items = pendingPayments
             .Select(payment =>
             {
@@ -263,16 +266,21 @@ public sealed class AiCreditPaymentService(
                     return null;
                 }
 
+                var submittedReference = TryReadMetadataString(payment.MetadataJson, "bank_reference");
+                var metadataShopName = TryReadMetadataString(payment.MetadataJson, "shop_name");
                 return new AiPendingManualPaymentItemResponse
                 {
                     PaymentId = payment.Id,
                     TargetUsername = payment.User.Username,
+                    TargetFullName = NormalizeOptional(payment.User.FullName),
+                    ShopName = !string.IsNullOrWhiteSpace(metadataShopName) ? metadataShopName : fallbackShopName,
                     PaymentStatus = MapPaymentStatus(payment.Status, paymentMethod),
                     PaymentMethod = paymentMethod,
                     Credits = payment.CreditsPurchased,
                     Amount = payment.Amount,
                     Currency = payment.Currency,
                     ExternalReference = payment.ExternalReference,
+                    SubmittedReference = submittedReference,
                     CreatedAt = payment.CreatedAtUtc
                 };
             })
@@ -744,6 +752,18 @@ public sealed class AiCreditPaymentService(
             AiCreditPaymentStatus.Canceled => "canceled",
             _ => "unknown"
         };
+    }
+
+    private async Task<string?> ResolveCurrentShopNameAsync(CancellationToken cancellationToken)
+    {
+        var profiles = await dbContext.ShopProfiles
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        return profiles
+            .OrderByDescending(x => x.UpdatedAtUtc ?? x.CreatedAtUtc)
+            .Select(x => NormalizeOptional(x.ShopName))
+            .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
     }
 
     private static AiCreditPackOption ResolvePack(AiInsightOptions aiOptions, string packCode)

@@ -2540,12 +2540,15 @@ export type AiPaymentHistoryResponse = {
 export type AiPendingManualPaymentItem = {
   payment_id: string;
   target_username: string;
+  target_full_name?: string | null;
+  shop_name?: string | null;
   payment_status: string;
   payment_method: AiCheckoutPaymentMethod | string;
   credits: number;
   amount: number;
   currency: string;
   external_reference: string;
+  submitted_reference?: string | null;
   created_at: string;
 };
 

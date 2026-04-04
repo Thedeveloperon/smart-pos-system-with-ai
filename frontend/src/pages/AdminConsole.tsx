@@ -82,6 +82,51 @@ const AdminConsole = () => {
     [loadPendingAiPayments],
   );
 
+  const handleVerifyAiPaymentByReference = useCallback(async () => {
+    const rawReference = verifyReference.trim();
+    if (!rawReference) {
+      toast.error("Enter a submitted or external reference.");
+      return;
+    }
+
+    const normalizedReference = rawReference.toLowerCase();
+    const findMatches = (items: AiPendingManualPaymentItem[]) =>
+      items.filter((item) => {
+        const externalReference = (item.external_reference || "").trim().toLowerCase();
+        const submittedReference = (item.submitted_reference || "").trim().toLowerCase();
+        return externalReference === normalizedReference || submittedReference === normalizedReference;
+      });
+
+    let matches = findMatches(pendingAiPayments);
+    if (matches.length === 0) {
+      try {
+        const refreshed = await fetchAiPendingManualPayments(200);
+        setPendingAiPayments(refreshed.items);
+        matches = findMatches(refreshed.items);
+      } catch {
+        // Keep existing message path below.
+      }
+    }
+
+    if (matches.length === 0) {
+      toast.error("No pending payment matched this reference. Refresh and try again.");
+      return;
+    }
+
+    if (matches.length > 1) {
+      toast.error("Multiple pending payments share this reference. Verify from the exact row.");
+      return;
+    }
+
+    const target = matches[0];
+    await handleVerifyAiPayment(
+      {
+        paymentId: target.payment_id,
+      },
+      true,
+    );
+  }, [handleVerifyAiPayment, pendingAiPayments, verifyReference]);
+
   if (isBillingAdmin) {
     return (
       <BillingAdminWorkspace
@@ -145,7 +190,7 @@ const AdminConsole = () => {
           <div className="space-y-2">
             <h2 className="text-base font-semibold">AI Credit Purchasing Requests</h2>
             <p className="text-sm text-muted-foreground">
-              Pending manual AI payments (`cash` / `bank_deposit`) are listed here for verification.
+              Pending manual AI payments (`cash` / `bank_deposit`) with submitted reference details.
             </p>
           </div>
 
@@ -154,19 +199,16 @@ const AdminConsole = () => {
               type="text"
               value={verifyReference}
               onChange={(event) => setVerifyReference(event.target.value)}
-              placeholder="aicpay_... external reference"
+              placeholder="Submitted ref or aicpay_... external ref"
               className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm sm:flex-1"
             />
             <Button
-              onClick={() =>
-                void handleVerifyAiPayment(
-                  { externalReference: verifyReference },
-                  true,
-                )
-              }
-              disabled={isVerifyingAiPayment && verifyingPaymentId === "__by_reference__"}
+              onClick={() => {
+                void handleVerifyAiPaymentByReference();
+              }}
+              disabled={isVerifyingAiPayment}
             >
-              {isVerifyingAiPayment && verifyingPaymentId === "__by_reference__" ? "Verifying..." : "Verify by Reference"}
+              {isVerifyingAiPayment ? "Verifying..." : "Verify by Reference"}
             </Button>
           </div>
 
@@ -192,7 +234,12 @@ const AdminConsole = () => {
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    User: {item.target_username} • Reference: {item.external_reference}
+                    User: {item.target_full_name || item.target_username}
+                    {item.target_full_name ? ` (${item.target_username})` : ""}
+                    {item.shop_name ? ` • Shop: ${item.shop_name}` : ""}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Submitted Ref: {item.submitted_reference || "-"} • External Ref: {item.external_reference}
                   </p>
                   <div className="mt-2 flex justify-end">
                     <Button

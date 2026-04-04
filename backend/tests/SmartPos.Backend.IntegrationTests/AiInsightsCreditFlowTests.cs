@@ -425,13 +425,14 @@ public sealed class AiInsightsCreditFlowTests(CustomWebApplicationFactory factor
     {
         await TestAuth.SignInAsBillingAdminAsync(client);
         await ResetWalletAsync("billing_admin");
+        var submittedReference = $"BD-{Guid.NewGuid():N}"[..20];
 
         await TestJson.ReadObjectAsync(
             await client.PostAsJsonAsync("/api/ai/payments/checkout", new
             {
                 pack_code = "pack_100",
                 payment_method = "bank_deposit",
-                bank_reference = $"BD-{Guid.NewGuid():N}"[..20],
+                bank_reference = submittedReference,
                 deposit_slip_url = "https://example.com/payment-proofs/deposit-slip-002.pdf",
                 idempotency_key = $"it-pending-list-{Guid.NewGuid():N}"
             }));
@@ -441,10 +442,14 @@ public sealed class AiInsightsCreditFlowTests(CustomWebApplicationFactory factor
         var items = pendingPayload["items"]?.AsArray() ?? throw new InvalidOperationException("Pending items not found.");
 
         Assert.NotEmpty(items);
-        Assert.Contains(items, item =>
+        var pendingItem = items.FirstOrDefault(item =>
             string.Equals(item?["payment_status"]?.GetValue<string>(), "pending_verification", StringComparison.Ordinal) &&
             string.Equals(item?["payment_method"]?.GetValue<string>(), "bank_deposit", StringComparison.Ordinal) &&
             string.Equals(item?["target_username"]?.GetValue<string>(), "billing_admin", StringComparison.Ordinal));
+        Assert.NotNull(pendingItem);
+        Assert.Equal(submittedReference, pendingItem?["submitted_reference"]?.GetValue<string>());
+        Assert.Equal("Billing Administrator", pendingItem?["target_full_name"]?.GetValue<string>());
+        Assert.False(string.IsNullOrWhiteSpace(pendingItem?["shop_name"]?.GetValue<string>()));
     }
 
     [Fact]
