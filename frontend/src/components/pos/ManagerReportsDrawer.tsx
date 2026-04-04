@@ -95,6 +95,7 @@ type AdminLicensingShopData = Awaited<ReturnType<typeof fetchAdminLicensingShops
 type AdminLicensingAuditData = Awaited<ReturnType<typeof fetchAdminLicenseAuditLogs>>;
 type AdminManualBillingInvoicesData = Awaited<ReturnType<typeof fetchAdminManualBillingInvoices>>;
 type AdminManualBillingPaymentsData = Awaited<ReturnType<typeof fetchAdminManualBillingPayments>>;
+type AdminManualBillingPaymentItem = AdminManualBillingPaymentsData["items"][number];
 type AdminManualBillingReconciliationData = Awaited<ReturnType<typeof fetchAdminManualBillingDailyReconciliation>>;
 type AdminBillingStateReconciliationData = Awaited<ReturnType<typeof runAdminBillingStateReconciliation>>;
 
@@ -146,6 +147,22 @@ type ShareDialogState = {
   successUrl?: string;
 };
 
+type VerifyPaymentDialogErrors = {
+  actorNote?: string;
+  extendDays?: string;
+  customerEmail?: string;
+  form?: string;
+};
+
+type VerifyPaymentDialogState = {
+  paymentId: string;
+  payment: AdminManualBillingPaymentItem | null;
+  actorNote: string;
+  extendDays: string;
+  customerEmail: string;
+  errors: VerifyPaymentDialogErrors;
+};
+
 const marketingInvoiceMetadataPrefix = "MARKETING_REQUEST:";
 const marketingPaymentSubmissionPrefix = "MARKETING_PAYMENT_SUBMISSION:";
 
@@ -179,6 +196,8 @@ const formatDate = (value: string) => {
   const parsed = parseDateInput(value);
   return parsed ? parsed.toLocaleDateString() : value;
 };
+
+const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
 const escapeCsvValue = (value: string | number | null | undefined) => {
   const text = String(value ?? "");
@@ -318,6 +337,8 @@ const ManagerReportsDrawer = ({
   const [promptState, setPromptState] = useState<PromptDialogState | null>(null);
   const [confirmState, setConfirmState] = useState<ConfirmDialogState | null>(null);
   const [shareState, setShareState] = useState<ShareDialogState | null>(null);
+  const [verifyPaymentDialog, setVerifyPaymentDialog] = useState<VerifyPaymentDialogState | null>(null);
+  const [isSubmittingVerifyPayment, setIsSubmittingVerifyPayment] = useState(false);
   const [aiVerifyReference, setAiVerifyReference] = useState("");
   const [isVerifyingAiPayment, setIsVerifyingAiPayment] = useState(false);
   const [verifyingAiPaymentId, setVerifyingAiPaymentId] = useState<string | null>(null);
@@ -1193,7 +1214,14 @@ const ManagerReportsDrawer = ({
     }
   }, [loadReports, openPromptDialog]);
 
-  const handleVerifyManualPayment = useCallback(async (prefillPaymentId?: string) => {
+  const closeVerifyPaymentDialog = useCallback(() => {
+    if (isSubmittingVerifyPayment) {
+      return;
+    }
+    setVerifyPaymentDialog(null);
+  }, [isSubmittingVerifyPayment]);
+
+  const handleVerifyManualPayment = useCallback(async (prefillPaymentId?: string, prefillPayment?: AdminManualBillingPaymentItem) => {
     const paymentId = prefillPaymentId?.trim() || await openPromptDialog({
       title: "Verify Payment",
       description: "Enter payment ID to verify.",
@@ -1204,57 +1232,94 @@ const ManagerReportsDrawer = ({
       return;
     }
 
-    const actorNote = await openPromptDialog({
-      title: "Verify Payment",
-      description: "Actor note is required for verification.",
-      label: "Actor note",
-      confirmLabel: "Continue",
+    const payment =
+      prefillPayment ||
+      (report.manualPayments?.items ?? []).find((item) => item.payment_id === paymentId) ||
+      null;
+
+    setVerifyPaymentDialog({
+      paymentId,
+      payment,
+      actorNote: "",
+      extendDays: "30",
+      customerEmail: "",
+      errors: {},
     });
+  }, [openPromptDialog, report.manualPayments?.items]);
+
+  const submitVerifyPaymentDialog = useCallback(async () => {
+    if (!verifyPaymentDialog || isSubmittingVerifyPayment) {
+      return;
+    }
+
+    const actorNote = verifyPaymentDialog.actorNote.trim();
+    const extendDaysInput = verifyPaymentDialog.extendDays.trim();
+    const customerEmail = verifyPaymentDialog.customerEmail.trim();
+    const nextErrors: VerifyPaymentDialogErrors = {};
+
     if (!actorNote) {
-      return;
-    }
-
-    const extendDaysInput = await openPromptDialog({
-      title: "Verify Payment",
-      description: "Extend subscription by days (1-365).",
-      label: "Extension days",
-      defaultValue: "30",
-      confirmLabel: "Continue",
-      validate: (value) => {
-        const parsed = Number(value);
-        if (!Number.isFinite(parsed) || parsed < 1 || parsed > 365) {
-          return "Extension days must be between 1 and 365.";
-        }
-
-        return null;
-      },
-    });
-    if (!extendDaysInput) {
-      return;
-    }
-
-    const customerEmail = await openPromptDialog({
-      title: "Verify Payment",
-      description: "Optional customer email for access delivery.",
-      label: "Customer email (optional)",
-      required: false,
-      confirmLabel: "Verify Payment",
-    });
-    if (customerEmail === null) {
-      return;
+      nextErrors.actorNote = "Audit note is required.";
+    } else if (actorNote.length < 8) {
+      nextErrors.actorNote = "Audit note must be at least 8 characters.";
     }
 
     const extendDays = Number(extendDaysInput);
+    if (!Number.isFinite(extendDays) || !Number.isInteger(extendDays) || extendDays < 1 || extendDays > 365) {
+      nextErrors.extendDays = "Extension days must be a whole number between 1 and 365.";
+    }
 
+    if (customerEmail && !isValidEmail(customerEmail)) {
+      nextErrors.customerEmail = "Enter a valid email address or leave it empty.";
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      setVerifyPaymentDialog((current) => (current ? { ...current, errors: nextErrors } : current));
+      return;
+    }
+
+    setIsSubmittingVerifyPayment(true);
+    setVerifyPaymentDialog((current) => (current ? { ...current, errors: {} } : current));
     try {
-      const verification = await verifyAdminManualBillingPayment(paymentId, {
+      const verification = await verifyAdminManualBillingPayment(verifyPaymentDialog.paymentId, {
         reason_code: "manual_payment_verified",
         actor_note: actorNote,
         reason: actorNote,
-        extend_days: Math.round(extendDays),
+        extend_days: extendDays,
         customer_email: customerEmail || undefined,
         actor: "billing-ui",
       });
+
+      setReport((current) => {
+        const manualPayments = current.manualPayments
+          ? {
+              ...current.manualPayments,
+              items: current.manualPayments.items.some((item) => item.payment_id === verification.payment.payment_id)
+                ? current.manualPayments.items.map((item) =>
+                    item.payment_id === verification.payment.payment_id ? verification.payment : item
+                  )
+                : [verification.payment, ...current.manualPayments.items],
+            }
+          : current.manualPayments;
+
+        const manualInvoices = current.manualInvoices
+          ? {
+              ...current.manualInvoices,
+              items: current.manualInvoices.items.some((item) => item.invoice_id === verification.invoice.invoice_id)
+                ? current.manualInvoices.items.map((item) =>
+                    item.invoice_id === verification.invoice.invoice_id ? verification.invoice : item
+                  )
+                : [verification.invoice, ...current.manualInvoices.items],
+            }
+          : current.manualInvoices;
+
+        return {
+          ...current,
+          manualPayments,
+          manualInvoices,
+        };
+      });
+
+      setVerifyPaymentDialog(null);
       const issuedActivationKey = verification.activation_entitlement?.activation_entitlement_key?.trim() || "";
       const accessSuccessUrl = verification.access_delivery?.success_page_url?.trim() || "";
       const accessEmail = verification.access_delivery?.email_delivery;
@@ -1291,12 +1356,25 @@ const ManagerReportsDrawer = ({
         toast.info("Access email skipped: no recipient email configured.");
       }
 
-      await loadReports();
+      void loadReports();
     } catch (error) {
       console.error(error);
-      toast.error(error instanceof Error ? error.message : "Failed to verify payment.");
+      const message = error instanceof Error ? error.message : "Failed to verify payment.";
+      setVerifyPaymentDialog((current) =>
+        current
+          ? {
+              ...current,
+              errors: {
+                ...current.errors,
+                form: message,
+              },
+            }
+          : current
+      );
+    } finally {
+      setIsSubmittingVerifyPayment(false);
     }
-  }, [copyTextToClipboard, loadReports, openPromptDialog]);
+  }, [copyTextToClipboard, isSubmittingVerifyPayment, loadReports, verifyPaymentDialog]);
 
   const handleRejectManualPayment = useCallback(async (prefillPaymentId?: string) => {
     const paymentId = prefillPaymentId?.trim() || await openPromptDialog({
@@ -2763,7 +2841,7 @@ const ManagerReportsDrawer = ({
                                                       variant="outline"
                                                       size="sm"
                                                       onClick={() => {
-                                                        void handleVerifyManualPayment(payment.payment_id);
+                                                        void handleVerifyManualPayment(payment.payment_id, payment);
                                                       }}
                                                     >
                                                       Verify
@@ -3127,6 +3205,191 @@ const ManagerReportsDrawer = ({
         </ScrollArea>
       </SheetContent>
     </Sheet>
+
+    <Dialog
+      open={Boolean(verifyPaymentDialog)}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          closeVerifyPaymentDialog();
+        }
+      }}
+    >
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Verify Payment</DialogTitle>
+          <DialogDescription>
+            Review payment details and provide an audit note before confirming verification.
+          </DialogDescription>
+        </DialogHeader>
+
+        {verifyPaymentDialog && (
+          <div className="space-y-4">
+            <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <p>
+                  <span className="text-muted-foreground">Payment ID:</span>{" "}
+                  <span className="font-mono text-xs">{verifyPaymentDialog.paymentId}</span>
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Invoice:</span>{" "}
+                  <span className="font-medium">{verifyPaymentDialog.payment?.invoice_number || "-"}</span>
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Shop:</span>{" "}
+                  <span className="font-medium">{verifyPaymentDialog.payment?.shop_code || "-"}</span>
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Amount:</span>{" "}
+                  <span className="font-medium">
+                    {verifyPaymentDialog.payment
+                      ? `${money(verifyPaymentDialog.payment.amount)} ${verifyPaymentDialog.payment.currency}`
+                      : "-"}
+                  </span>
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Method:</span>{" "}
+                  <span className="capitalize">
+                    {(verifyPaymentDialog.payment?.method || "-").replaceAll("_", " ")}
+                  </span>
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Reference:</span>{" "}
+                  <span className="font-medium">{verifyPaymentDialog.payment?.bank_reference || "-"}</span>
+                </p>
+                <p className="sm:col-span-2">
+                  <span className="text-muted-foreground">Submitted:</span>{" "}
+                  <span className="font-medium">
+                    {verifyPaymentDialog.payment?.received_at || verifyPaymentDialog.payment?.created_at
+                      ? new Date(
+                          verifyPaymentDialog.payment?.received_at || verifyPaymentDialog.payment?.created_at || "",
+                        ).toLocaleString()
+                      : "-"}
+                  </span>
+                </p>
+                {verifyPaymentDialog.payment?.deposit_slip_url && (
+                  <p className="sm:col-span-2">
+                    <a
+                      href={verifyPaymentDialog.payment.deposit_slip_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sm font-medium text-primary underline underline-offset-2"
+                    >
+                      View deposit slip
+                    </a>
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="verify-payment-actor-note">Audit note (required)</Label>
+              <textarea
+                id="verify-payment-actor-note"
+                value={verifyPaymentDialog.actorNote}
+                placeholder="Example: Confirmed bank deposit against slip and reference."
+                className="min-h-[92px] w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                autoFocus
+                onChange={(event) => {
+                  setVerifyPaymentDialog((current) =>
+                    current
+                      ? {
+                          ...current,
+                          actorNote: event.target.value,
+                          errors: {
+                            ...current.errors,
+                            actorNote: undefined,
+                            form: undefined,
+                          },
+                        }
+                      : current
+                  );
+                }}
+              />
+              <p className="text-xs text-muted-foreground">
+                This note is stored in audit logs for compliance and traceability.
+              </p>
+              {verifyPaymentDialog.errors.actorNote && (
+                <p className="text-xs text-destructive">{verifyPaymentDialog.errors.actorNote}</p>
+              )}
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="verify-payment-extend-days">Extension days</Label>
+                <Input
+                  id="verify-payment-extend-days"
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={verifyPaymentDialog.extendDays}
+                  onChange={(event) => {
+                    setVerifyPaymentDialog((current) =>
+                      current
+                        ? {
+                            ...current,
+                            extendDays: event.target.value,
+                            errors: {
+                              ...current.errors,
+                              extendDays: undefined,
+                              form: undefined,
+                            },
+                          }
+                        : current
+                    );
+                  }}
+                />
+                {verifyPaymentDialog.errors.extendDays && (
+                  <p className="text-xs text-destructive">{verifyPaymentDialog.errors.extendDays}</p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="verify-payment-email">Customer email (optional)</Label>
+                <Input
+                  id="verify-payment-email"
+                  type="email"
+                  placeholder="customer@example.com"
+                  value={verifyPaymentDialog.customerEmail}
+                  onChange={(event) => {
+                    setVerifyPaymentDialog((current) =>
+                      current
+                        ? {
+                            ...current,
+                            customerEmail: event.target.value,
+                            errors: {
+                              ...current.errors,
+                              customerEmail: undefined,
+                              form: undefined,
+                            },
+                          }
+                        : current
+                    );
+                  }}
+                />
+                {verifyPaymentDialog.errors.customerEmail && (
+                  <p className="text-xs text-destructive">{verifyPaymentDialog.errors.customerEmail}</p>
+                )}
+              </div>
+            </div>
+
+            {verifyPaymentDialog.errors.form && (
+              <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                {verifyPaymentDialog.errors.form}
+              </p>
+            )}
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={closeVerifyPaymentDialog} disabled={isSubmittingVerifyPayment}>
+            Cancel
+          </Button>
+          <Button onClick={submitVerifyPaymentDialog} disabled={isSubmittingVerifyPayment}>
+            {isSubmittingVerifyPayment ? "Verifying..." : "Confirm Verification"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <Dialog
       open={Boolean(promptState)}
