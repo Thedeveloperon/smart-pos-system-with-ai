@@ -469,6 +469,12 @@ public sealed class LicenseService(
                 licenseToken,
                 strictTokenValidation: !string.IsNullOrWhiteSpace(licenseToken),
                 cancellationToken);
+
+            snapshot = await RefreshStatusSnapshotTokenIfNeededAsync(
+                normalizedDeviceCode,
+                licenseToken,
+                snapshot,
+                cancellationToken);
         }
         catch (Exception ex) when (IsLicensingConfigurationException(ex))
         {
@@ -476,6 +482,109 @@ public sealed class LicenseService(
         }
 
         return CreateResponse(snapshot);
+    }
+
+    private async Task<LicenseStatusSnapshot> RefreshStatusSnapshotTokenIfNeededAsync(
+        string normalizedDeviceCode,
+        string? requestLicenseToken,
+        LicenseStatusSnapshot snapshot,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(requestLicenseToken) ||
+            (snapshot.State is not LicenseState.Active and not LicenseState.Grace))
+        {
+            return snapshot;
+        }
+
+        var provisionedDevice = await dbContext.ProvisionedDevices
+            .FirstOrDefaultAsync(x => x.DeviceCode == normalizedDeviceCode, cancellationToken);
+        if (provisionedDevice is null)
+        {
+            return snapshot;
+        }
+
+        var hasReusableSnapshotToken = await HasReusableStatusTokenAsync(
+            snapshot.LicenseToken,
+            provisionedDevice,
+            cancellationToken);
+        if (hasReusableSnapshotToken)
+        {
+            return snapshot;
+        }
+
+        var subscription = await GetLatestSubscriptionAsync(provisionedDevice.ShopId, cancellationToken);
+        if (subscription is null)
+        {
+            return snapshot;
+        }
+
+        var shop = await dbContext.Shops
+            .FirstOrDefaultAsync(x => x.Id == provisionedDevice.ShopId, cancellationToken);
+        if (shop is null)
+        {
+            return snapshot;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var refreshedLicense = await IssueLicenseAsync(
+            shop,
+            provisionedDevice,
+            subscription,
+            now,
+            TokenRotationMode.Overlap,
+            cancellationToken);
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = provisionedDevice.ShopId,
+            ProvisionedDeviceId = provisionedDevice.Id,
+            Action = "license_status_token_refreshed",
+            Actor = "system",
+            Reason = "status_refresh_stale_snapshot_token",
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                device_code = normalizedDeviceCode,
+                previous_state = snapshot.State.ToString().ToLowerInvariant(),
+                issued_license_id = refreshedLicense.Record.Id
+            })
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var refreshedSnapshot = await ResolveStatusSnapshotAsync(
+            normalizedDeviceCode,
+            refreshedLicense.PlainToken,
+            strictTokenValidation: true,
+            cancellationToken);
+
+        return refreshedSnapshot with { LicenseToken = refreshedLicense.PlainToken };
+    }
+
+    private async Task<bool> HasReusableStatusTokenAsync(
+        string? candidateToken,
+        ProvisionedDevice provisionedDevice,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(candidateToken))
+        {
+            return false;
+        }
+
+        try
+        {
+            var resolved = await ResolveLicenseRecordAsync(
+                provisionedDevice,
+                candidateToken,
+                strictTokenValidation: true,
+                tokenValidationPurpose: TokenValidationPurpose.General,
+                cancellationToken);
+
+            return resolved is not null;
+        }
+        catch (LicenseException)
+        {
+            return false;
+        }
     }
 
     public async Task<LicenseStatusResponse> HeartbeatAsync(

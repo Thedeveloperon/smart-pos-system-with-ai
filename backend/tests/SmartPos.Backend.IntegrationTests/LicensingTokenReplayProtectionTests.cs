@@ -55,6 +55,42 @@ public sealed class LicensingTokenReplayProtectionTests(CustomWebApplicationFact
         Assert.Equal("TOKEN_REPLAY_DETECTED", replayPayload["error"]?["code"]?.GetValue<string>());
     }
 
+    [Fact]
+    public async Task Status_WithoutToken_WhenStoredSessionIsExpired_ShouldReissueFreshToken()
+    {
+        var deviceCode = $"status-reissue-it-{Guid.NewGuid():N}";
+        var activation = await ActivateAsync(deviceCode);
+        var staleToken = TestJson.GetString(activation, "license_token");
+        Assert.False(string.IsNullOrWhiteSpace(staleToken));
+        var staleJti = ParseJti(staleToken);
+
+        await ForceTokenSessionExpiredAsync(staleJti);
+
+        var status = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/license/status?device_code={Uri.EscapeDataString(deviceCode)}"));
+        Assert.Equal("active", TestJson.GetString(status, "state"));
+        var refreshedToken = TestJson.GetString(status, "license_token");
+        Assert.False(string.IsNullOrWhiteSpace(refreshedToken));
+        Assert.NotEqual(staleToken, refreshedToken);
+
+        using var freshTokenRequest = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"/api/license/status?device_code={Uri.EscapeDataString(deviceCode)}");
+        freshTokenRequest.Headers.Add("X-License-Token", refreshedToken);
+        var freshTokenResponse = await client.SendAsync(freshTokenRequest);
+        Assert.Equal(HttpStatusCode.OK, freshTokenResponse.StatusCode);
+
+        using var staleTokenRequest = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"/api/license/status?device_code={Uri.EscapeDataString(deviceCode)}");
+        staleTokenRequest.Headers.Add("X-License-Token", staleToken);
+        var staleTokenResponse = await client.SendAsync(staleTokenRequest);
+        Assert.Equal(HttpStatusCode.Forbidden, staleTokenResponse.StatusCode);
+
+        var stalePayload = await ReadJsonAsync(staleTokenResponse);
+        Assert.Equal("TOKEN_REPLAY_DETECTED", stalePayload["error"]?["code"]?.GetValue<string>());
+    }
+
     private async Task<JsonObject> ActivateAsync(string deviceCode)
     {
         return await TestJson.ReadObjectAsync(
@@ -80,6 +116,20 @@ public sealed class LicensingTokenReplayProtectionTests(CustomWebApplicationFact
         session.RejectAfterUtc = forcedRejectAt;
         session.RevokedAtUtc = forcedRejectAt;
         license.RevokedAtUtc = forcedRejectAt;
+
+        await dbContext.SaveChangesAsync();
+    }
+
+    private async Task ForceTokenSessionExpiredAsync(string jti)
+    {
+        using var scope = appFactory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+        var session = await dbContext.LicenseTokenSessions
+            .FirstAsync(x => x.Jti == jti);
+
+        var forcedRejectAt = DateTimeOffset.UtcNow.AddSeconds(-5);
+        session.RejectAfterUtc = forcedRejectAt;
+        session.RevokedAtUtc = forcedRejectAt;
 
         await dbContext.SaveChangesAsync();
     }
