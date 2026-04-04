@@ -23,23 +23,16 @@ const HeroSection = () => {
     <section className="relative bg-hero pt-32 pb-20 md:pt-44 md:pb-32 overflow-hidden">
       <div className="absolute top-1/3 left-1/4 w-[500px] h-[500px] rounded-full bg-primary/8 blur-[150px] pointer-events-none" />
       <div className="absolute bottom-0 right-1/4 w-[400px] h-[400px] rounded-full bg-accent/6 blur-[120px] pointer-events-none" />
-      <motion.div
-        animate={{ opacity: [0.55, 0.9, 0.55] }}
-        transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
-        className="absolute inset-y-0 right-0 w-full lg:w-[56%] pointer-events-none overflow-hidden"
-      >
-        <video
-          className="h-full w-full object-cover object-right brightness-125 contrast-130 saturate-130"
-          autoPlay
-          muted
-          loop
-          playsInline
-          preload="metadata"
-        >
-          <source src="/videos/marketing/hero/hero_video.mp4" type="video/mp4" />
-        </video>
-        <div className="absolute inset-0 bg-gradient-to-l from-background/10 via-background/35 to-background/80" />
-      </motion.div>
+      <div className="absolute inset-y-0 left-0 hidden lg:block w-[52%] pointer-events-none overflow-hidden">
+        <div
+          className="absolute inset-0 bg-cover bg-left opacity-45"
+          style={{
+            backgroundImage: "url('/videos/marketing/hero/hero_image.png')",
+            filter: "brightness(1.25) contrast(1.15) saturate(1.1)",
+          }}
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-background/45 via-background/65 to-background/95" />
+      </div>
       <div
         className="absolute inset-0 opacity-[0.03]"
         style={{
@@ -83,7 +76,7 @@ const HeroSection = () => {
             transition={{ duration: 0.7, delay: 0.2 }}
             className="relative hidden lg:block"
           >
-            <div className="glass-card p-5 glow-primary-sm w-[320px] ml-56 mt-24 origin-top-left scale-[0.7]">
+            <div className="glass-card p-5 glow-primary-sm w-[320px] ml-8">
               <div className="flex items-center gap-2 mb-4">
                 <div className="w-2 h-2 rounded-full bg-primary" />
                 <span className="text-foreground text-sm font-semibold font-heading">{t("hero.dashboard.brand")}</span>
@@ -106,17 +99,13 @@ const HeroSection = () => {
                     <span className="text-amber-400 text-xs font-semibold">{t("hero.dashboard.lowStockCount")}</span>
                   </div>
                 </div>
-                <motion.div
-                  className="glass-card p-3"
-                  animate={{ opacity: [0.55, 1, 0.55] }}
-                  transition={{ duration: 4.5, repeat: Infinity, ease: "easeInOut" }}
-                >
+                <div className="glass-card p-3">
                   <div className="flex items-center gap-2 mb-1">
                     <BrainCircuit size={14} className="text-accent" />
                     <span className="text-muted-foreground text-xs">{t("hero.dashboard.aiInsightsLabel")}</span>
                   </div>
                   <p className="text-foreground text-xs leading-relaxed">{t("hero.dashboard.aiInsightMessage")}</p>
-                </motion.div>
+                </div>
                 <div className="glass-card p-3">
                   <div className="flex items-center gap-2">
                     <MessageSquare size={14} className="text-primary" />
@@ -146,8 +135,8 @@ const HeroSection = () => {
             </motion.div>
 
             <motion.div
-              animate={{ y: [0, -6, 0], opacity: [0.55, 1, 0.55] }}
-              transition={{ duration: 4.8, repeat: Infinity, ease: "easeInOut", delay: 1 }}
+              animate={{ y: [0, -6, 0] }}
+              transition={{ duration: 4, repeat: Infinity, ease: "easeInOut", delay: 1 }}
               className="absolute -bottom-6 right-[-20px] glass-card p-4 w-[220px] glow-primary-sm"
             >
               <div className="flex items-center gap-2 mb-3">
