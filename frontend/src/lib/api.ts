@@ -2537,6 +2537,22 @@ export type AiPaymentHistoryResponse = {
   items: AiPaymentHistoryItem[];
 };
 
+export type AiPendingManualPaymentItem = {
+  payment_id: string;
+  target_username: string;
+  payment_status: string;
+  payment_method: AiCheckoutPaymentMethod | string;
+  credits: number;
+  amount: number;
+  currency: string;
+  external_reference: string;
+  created_at: string;
+};
+
+export type AiPendingManualPaymentsResponse = {
+  items: AiPendingManualPaymentItem[];
+};
+
 export type AiManualPaymentVerifyRequest = {
   payment_id?: string;
   external_reference?: string;
@@ -2646,6 +2662,11 @@ export async function createAiCheckoutSession(requestBody: AiCheckoutSessionRequ
 export async function fetchAiPaymentHistory(take = 10) {
   const normalizedTake = Math.max(1, Math.min(100, Math.trunc(take || 10)));
   return request<AiPaymentHistoryResponse>(`/api/ai/payments?take=${normalizedTake}`);
+}
+
+export async function fetchAiPendingManualPayments(take = 40) {
+  const normalizedTake = Math.max(1, Math.min(200, Math.trunc(take || 40)));
+  return request<AiPendingManualPaymentsResponse>(`/api/ai/payments/pending-manual?take=${normalizedTake}`);
 }
 
 export async function verifyAiManualPayment(requestBody: AiManualPaymentVerifyRequest) {
