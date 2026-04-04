@@ -20,7 +20,7 @@ const HeroSection = () => {
   const paymentMethods = get<string[]>("hero.floatingBilling.paymentMethods");
 
   return (
-    <section className="relative bg-hero pt-32 pb-20 md:pt-44 md:pb-32 overflow-hidden">
+    <section className="hero-dark-theme relative bg-hero pt-32 pb-6 md:pt-44 md:pb-8 overflow-hidden">
       <div className="absolute top-1/3 left-1/4 w-[500px] h-[500px] rounded-full bg-primary/8 blur-[150px] pointer-events-none" />
       <div className="absolute bottom-0 right-1/4 w-[400px] h-[400px] rounded-full bg-accent/6 blur-[120px] pointer-events-none" />
       <div className="absolute inset-y-0 left-0 hidden lg:block w-[52%] pointer-events-none overflow-hidden">
