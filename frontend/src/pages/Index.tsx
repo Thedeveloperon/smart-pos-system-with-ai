@@ -979,6 +979,7 @@ const IndexInner = () => {
         open={showAiInsights}
         onOpenChange={setShowAiInsights}
         onBalanceChange={setAiCreditsBalance}
+        isSuperAdmin={isSuperAdmin}
       />
 
       <RemindersDialog

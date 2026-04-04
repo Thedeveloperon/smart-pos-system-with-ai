@@ -368,6 +368,59 @@ public sealed class AiInsightsCreditFlowTests(CustomWebApplicationFactory factor
     }
 
     [Fact]
+    public async Task VerifyManualPayment_WithBillingAdmin_ShouldCreditWallet_AndMarkSucceeded()
+    {
+        await TestAuth.SignInAsBillingAdminAsync(client);
+        await ResetWalletAsync("billing_admin");
+
+        var checkoutPayload = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/ai/payments/checkout", new
+            {
+                pack_code = "pack_100",
+                payment_method = "cash",
+                bank_reference = $"CASH-{Guid.NewGuid():N}"[..20],
+                idempotency_key = $"it-cash-verify-{Guid.NewGuid():N}"
+            }));
+
+        var paymentId = TestJson.GetString(checkoutPayload, "payment_id");
+        var externalReference = TestJson.GetString(checkoutPayload, "external_reference");
+        Assert.Equal("pending_verification", TestJson.GetString(checkoutPayload, "payment_status"));
+
+        var verifyPayload = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/ai/payments/verify", new
+            {
+                external_reference = externalReference
+            }));
+
+        Assert.Equal(paymentId, TestJson.GetString(verifyPayload, "payment_id"));
+        Assert.Equal("cash", TestJson.GetString(verifyPayload, "payment_method"));
+        Assert.Equal("succeeded", TestJson.GetString(verifyPayload, "payment_status"));
+
+        var walletPayload = await TestJson.ReadObjectAsync(await client.GetAsync("/api/ai/wallet"));
+        Assert.Equal(100m, TestJson.GetDecimal(walletPayload, "available_credits"));
+
+        var historyPayload = await TestJson.ReadObjectAsync(await client.GetAsync("/api/ai/payments?take=10"));
+        var items = historyPayload["items"]?.AsArray() ?? throw new InvalidOperationException("Payment history items not found.");
+        var verifiedPayment = items.FirstOrDefault(
+            item => string.Equals(item?["payment_id"]?.GetValue<string>(), paymentId, StringComparison.Ordinal));
+        Assert.NotNull(verifiedPayment);
+        Assert.Equal("succeeded", verifiedPayment?["payment_status"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task VerifyManualPayment_WithManagerRole_ShouldReturnForbidden()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var response = await client.PostAsJsonAsync("/api/ai/payments/verify", new
+        {
+            external_reference = "aicpay_dummy_reference"
+        });
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
     public async Task EstimateInsights_ShouldReturnReserveAndAffordability()
     {
         await TestAuth.SignInAsManagerAsync(client);

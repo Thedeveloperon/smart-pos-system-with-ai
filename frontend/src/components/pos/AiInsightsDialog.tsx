@@ -13,6 +13,7 @@ import {
   fetchAiWallet,
   generateAiInsights,
   postAiChatMessage,
+  verifyAiManualPayment,
   type AiCreditPack,
   type AiChatMessage,
   type AiChatSessionSummary,
@@ -38,6 +39,7 @@ interface AiInsightsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onBalanceChange?: (balance: number) => void;
+  isSuperAdmin?: boolean;
 }
 
 const USAGE_TYPE_OPTIONS: ReadonlyArray<{
@@ -110,7 +112,7 @@ function getPaymentMethodLabel(value: string | null | undefined): string {
   return normalizedValue.replace(/_/g, " ");
 }
 
-const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDialogProps) => {
+const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, isSuperAdmin = false }: AiInsightsDialogProps) => {
   const [prompt, setPrompt] = useState("");
   const [usageType, setUsageType] = useState<AiInsightsUsageType>("quick_insights");
   const [walletCredits, setWalletCredits] = useState<number | null>(null);
@@ -140,6 +142,9 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
   const [isLoadingChat, setIsLoadingChat] = useState(false);
   const [isSendingChatMessage, setIsSendingChatMessage] = useState(false);
   const [isCreatingChatSession, setIsCreatingChatSession] = useState(false);
+  const [verifyReferenceInput, setVerifyReferenceInput] = useState("");
+  const [isVerifyingByReference, setIsVerifyingByReference] = useState(false);
+  const [verifyingPaymentId, setVerifyingPaymentId] = useState<string | null>(null);
 
   const hasInsight = Boolean(insightResult?.insight?.trim());
   const selectedUsageTypeOption = useMemo(
@@ -420,6 +425,52 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
       toast.success("Wallet and payment status refreshed.");
     } finally {
       setIsRefreshingWalletAndPayments(false);
+    }
+  };
+
+  const handleVerifyManualPayment = async (payload: { paymentId?: string; externalReference?: string }) => {
+    const hasPaymentId = Boolean(payload.paymentId?.trim());
+    const hasReference = Boolean(payload.externalReference?.trim());
+    if (!hasPaymentId && !hasReference) {
+      toast.error("Payment ID or external reference is required.");
+      return;
+    }
+
+    const targetPaymentId = payload.paymentId?.trim() || null;
+    setVerifyingPaymentId(targetPaymentId);
+    try {
+      const result = await verifyAiManualPayment({
+        payment_id: targetPaymentId || undefined,
+        external_reference: payload.externalReference?.trim() || undefined,
+      });
+
+      await Promise.all([loadWallet(), loadPayments()]);
+      toast.success(
+        result.payment_status === "succeeded"
+          ? "Manual payment verified. Credits added to wallet."
+          : `Verification processed with status: ${result.payment_status.replace("_", " ")}.`,
+      );
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Failed to verify manual payment.");
+    } finally {
+      setVerifyingPaymentId(null);
+    }
+  };
+
+  const handleVerifyByReference = async () => {
+    const externalReference = verifyReferenceInput.trim();
+    if (!externalReference) {
+      toast.error("Enter an external reference first.");
+      return;
+    }
+
+    setIsVerifyingByReference(true);
+    try {
+      await handleVerifyManualPayment({ externalReference });
+      setVerifyReferenceInput("");
+    } finally {
+      setIsVerifyingByReference(false);
     }
   };
 
@@ -869,6 +920,34 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
               {isLoadingPayments && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
             </div>
 
+            {isSuperAdmin && (
+              <div className="rounded-md border border-border/70 bg-muted/20 p-2.5">
+                <p className="text-xs font-medium text-foreground">Super Admin Verify</p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  Verify a pending manual payment using external reference.
+                </p>
+                <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                  <input
+                    type="text"
+                    value={verifyReferenceInput}
+                    onChange={(event) => setVerifyReferenceInput(event.target.value)}
+                    placeholder="aicpay_... reference"
+                    className="h-9 w-full rounded-md border border-border bg-background px-2 text-xs sm:flex-1"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void handleVerifyByReference()}
+                    disabled={isVerifyingByReference}
+                  >
+                    {isVerifyingByReference ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    Verify
+                  </Button>
+                </div>
+              </div>
+            )}
+
             {paymentItems.length === 0 ? (
               <p className="text-xs text-muted-foreground">No credit purchases yet.</p>
             ) : (
@@ -886,6 +965,27 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
                       </span>
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">Reference: {item.external_reference}</p>
+                    {isSuperAdmin && item.payment_status === "pending_verification" && (
+                      <div className="mt-2 flex justify-end">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            void handleVerifyManualPayment({
+                              paymentId: item.payment_id,
+                              externalReference: item.external_reference,
+                            })
+                          }
+                          disabled={verifyingPaymentId === item.payment_id}
+                        >
+                          {verifyingPaymentId === item.payment_id ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : null}
+                          Verify
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
