@@ -896,22 +896,23 @@ public sealed class AiInsightService(
                 .Where(x => x.Sale.Status == SaleStatus.Completed && x.Sale.CreatedAtUtc >= recentWindowStart && x.Sale.CreatedAtUtc <= now),
             user.StoreId);
 
-        var topProducts = await recentSaleItemsQuery
+        var topProductsRaw = await recentSaleItemsQuery
             .GroupBy(x => x.ProductNameSnapshot)
-            .Select(g => new PosFactTopProduct(
-                g.Key,
-                g.Sum(x => x.LineTotal),
-                g.Sum(x => x.Quantity)))
+            .Select(g => new
+            {
+                ProductName = g.Key,
+                Revenue = g.Sum(x => x.LineTotal),
+                Quantity = g.Sum(x => x.Quantity)
+            })
             .OrderByDescending(x => x.Revenue)
             .Take(5)
             .ToListAsync(cancellationToken);
 
-        topProducts = topProducts
-            .Select(x => x with
-            {
-                Revenue = RoundMoney(x.Revenue),
-                Quantity = RoundQuantity(x.Quantity)
-            })
+        var topProducts = topProductsRaw
+            .Select(x => new PosFactTopProduct(
+                string.IsNullOrWhiteSpace(x.ProductName) ? "Unknown product" : x.ProductName,
+                RoundMoney(x.Revenue),
+                RoundQuantity(x.Quantity)))
             .ToList();
 
         var lowMarginRaw = (await ApplyStoreScope(
