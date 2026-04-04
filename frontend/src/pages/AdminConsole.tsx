@@ -15,7 +15,7 @@ const AdminConsole = () => {
   const { user, logout } = useAuth();
   const normalizedBackendRole = (user?.backendRole || "").trim().toLowerCase();
   const isBillingAdmin = normalizedBackendRole === "billing_admin";
-  const [showReports, setShowReports] = useState(false);
+  const [showReports, setShowReports] = useState(true);
   const [refreshToken, setRefreshToken] = useState(0);
   const [verifyReference, setVerifyReference] = useState("");
   const [isVerifyingAiPayment, setIsVerifyingAiPayment] = useState(false);

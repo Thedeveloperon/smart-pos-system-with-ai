@@ -323,6 +323,8 @@ const ManagerReportsDrawer = ({
   const [verifyingAiPaymentId, setVerifyingAiPaymentId] = useState<string | null>(null);
   const [pendingAiPayments, setPendingAiPayments] = useState<AiPendingManualPaymentItem[]>([]);
   const [loadingPendingAiPayments, setLoadingPendingAiPayments] = useState(false);
+  const [supportSection, setSupportSection] = useState("overview");
+  const [billingSection, setBillingSection] = useState("ledger");
   const promptResolveRef = useRef<((value: string | null) => void) | null>(null);
   const confirmResolveRef = useRef<((value: boolean) => void) | null>(null);
 
@@ -1722,11 +1724,11 @@ const ManagerReportsDrawer = ({
             <SheetHeader className="space-y-2 text-left">
               <SheetTitle className="flex items-center gap-2 text-xl font-semibold">
                 <ShieldCheck className="h-5 w-5 text-primary" />
-                {isSuperAdmin ? "Admin Support Console" : "Manager Reports"}
+                {isSuperAdmin ? "License Manager" : "Manager Reports"}
               </SheetTitle>
               <SheetDescription className="text-pos-header-foreground/70">
                 {isSuperAdmin
-                  ? "Support operations with licensing controls, payment verification, and audit workflows."
+                  ? "Admin license controls, support operations, payment verification, and audit workflows."
                   : "Simple operational reports with cashier names, sales totals, payment mix, and stock alerts."}
               </SheetDescription>
             </SheetHeader>
@@ -2098,975 +2100,1026 @@ const ManagerReportsDrawer = ({
 
               {isSuperAdmin && (
                 <TabsContent value="support" className="space-y-4">
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-                  <StatCard
-                    icon={<LifeBuoy className="h-5 w-5" />}
-                    label="Active Devices"
-                    value={String(report.support?.devices.active_devices ?? 0)}
-                    hint="Currently healthy devices"
-                  />
-                  <StatCard
-                    icon={<AlertTriangle className="h-5 w-5" />}
-                    label="Grace Devices"
-                    value={String(report.support?.devices.grace_devices ?? 0)}
-                    hint="Need billing attention soon"
-                  />
-                  <StatCard
-                    icon={<ShieldCheck className="h-5 w-5" />}
-                    label="Suspended Devices"
-                    value={String(report.support?.devices.suspended_devices ?? 0)}
-                    hint="Checkout/refund blocked"
-                  />
-                  <StatCard
-                    icon={<Activity className="h-5 w-5" />}
-                    label="Validation Failures"
-                    value={String(report.support?.alerts.validation_failures_in_window ?? 0)}
-                    hint={`Last ${report.support?.window_minutes ?? 30} minutes`}
-                  />
-                  <StatCard
-                    icon={<ShieldAlert className="h-5 w-5" />}
-                    label="Security Anomalies"
-                    value={String(report.support?.alerts.security_anomalies_in_window ?? 0)}
-                    hint="Cross-signal anomaly events"
-                  />
-                  <StatCard
-                    icon={<ShieldX className="h-5 w-5" />}
-                    label="Proof Failures"
-                    value={String(report.support?.alerts.sensitive_action_proof_failures_in_window ?? 0)}
-                    hint="Invalid device signatures"
-                  />
-                </div>
+                  <Tabs value={supportSection} onValueChange={setSupportSection} className="space-y-4">
+                    <div className="sticky top-0 z-20 -mx-6 border-y border-border bg-background/95 px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+                      <TabsList className="grid w-full grid-cols-2 gap-2 lg:grid-cols-5">
+                        <TabsTrigger value="overview">Overview</TabsTrigger>
+                        <TabsTrigger value="devices">Devices</TabsTrigger>
+                        <TabsTrigger value="aiPayments">AI Payments</TabsTrigger>
+                        <TabsTrigger value="billing">Billing</TabsTrigger>
+                        <TabsTrigger value="auditLogs">Audit Logs</TabsTrigger>
+                      </TabsList>
+                    </div>
 
-                <div className="grid gap-4 xl:grid-cols-2">
-                  <div className="rounded-2xl border border-border bg-card shadow-sm">
-                    <div className="border-b border-border px-4 py-3">
-                      <p className="text-sm font-semibold">License Activity</p>
-                    </div>
-                    <div className="space-y-3 p-4 text-sm">
-                      <div className="flex items-center justify-between rounded-xl bg-muted/40 px-4 py-3">
-                        <span>Activations</span>
-                        <span className="font-semibold">{report.support?.activity.activations_in_window ?? 0}</span>
+                    <TabsContent value="overview" className="mt-0 space-y-4">
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+                        <StatCard
+                          icon={<LifeBuoy className="h-5 w-5" />}
+                          label="Active Devices"
+                          value={String(report.support?.devices.active_devices ?? 0)}
+                          hint="Currently healthy devices"
+                        />
+                        <StatCard
+                          icon={<AlertTriangle className="h-5 w-5" />}
+                          label="Grace Devices"
+                          value={String(report.support?.devices.grace_devices ?? 0)}
+                          hint="Need billing attention soon"
+                        />
+                        <StatCard
+                          icon={<ShieldCheck className="h-5 w-5" />}
+                          label="Suspended Devices"
+                          value={String(report.support?.devices.suspended_devices ?? 0)}
+                          hint="Checkout/refund blocked"
+                        />
+                        <StatCard
+                          icon={<Activity className="h-5 w-5" />}
+                          label="Validation Failures"
+                          value={String(report.support?.alerts.validation_failures_in_window ?? 0)}
+                          hint={`Last ${report.support?.window_minutes ?? 30} minutes`}
+                        />
+                        <StatCard
+                          icon={<ShieldAlert className="h-5 w-5" />}
+                          label="Security Anomalies"
+                          value={String(report.support?.alerts.security_anomalies_in_window ?? 0)}
+                          hint="Cross-signal anomaly events"
+                        />
+                        <StatCard
+                          icon={<ShieldX className="h-5 w-5" />}
+                          label="Proof Failures"
+                          value={String(report.support?.alerts.sensitive_action_proof_failures_in_window ?? 0)}
+                          hint="Invalid device signatures"
+                        />
                       </div>
-                      <div className="flex items-center justify-between rounded-xl bg-muted/40 px-4 py-3">
-                        <span>Deactivations</span>
-                        <span className="font-semibold">{report.support?.activity.deactivations_in_window ?? 0}</span>
-                      </div>
-                      <div className="flex items-center justify-between rounded-xl bg-muted/40 px-4 py-3">
-                        <span>Heartbeats</span>
-                        <span className="font-semibold">{report.support?.activity.heartbeats_in_window ?? 0}</span>
-                      </div>
-                      <div className="flex items-center justify-between rounded-xl bg-muted/40 px-4 py-3">
-                        <span>Webhook failures</span>
-                        <span className="font-semibold">{report.support?.alerts.webhook_failures_in_window ?? 0}</span>
-                      </div>
-                      <div className="flex items-center justify-between rounded-xl bg-muted/40 px-4 py-3">
-                        <span>Impossible-travel signals</span>
-                        <span className="font-semibold">{report.support?.alerts.auth_impossible_travel_signals_in_window ?? 0}</span>
-                      </div>
-                      <div className="flex items-center justify-between rounded-xl bg-muted/40 px-4 py-3">
-                        <span>Concurrent-device signals</span>
-                        <span className="font-semibold">{report.support?.alerts.auth_concurrent_device_signals_in_window ?? 0}</span>
-                      </div>
-                    </div>
-                  </div>
 
-                  <div className="rounded-2xl border border-border bg-card shadow-sm">
-                    <div className="border-b border-border px-4 py-3">
-                      <p className="text-sm font-semibold">Top Alert Causes</p>
-                    </div>
-                    <div className="space-y-3 p-4">
-                      {(report.support?.alerts.top_validation_failures.length || 0) === 0 &&
-                      (report.support?.alerts.top_webhook_failures.length || 0) === 0 &&
-                      (report.support?.alerts.top_security_anomalies.length || 0) === 0 &&
-                      (report.support?.alerts.top_sensitive_action_failure_sources.length || 0) === 0 ? (
-                        <p className="text-sm text-muted-foreground">No alert spikes in the current window.</p>
-                      ) : (
-                        <>
-                          {(report.support?.alerts.top_validation_failures ?? []).map((item) => (
-                            <div key={`validation-${item.reason}`} className="rounded-xl border border-border bg-background px-4 py-3">
-                              <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Validation</p>
-                              <div className="mt-1 flex items-center justify-between gap-3">
-                                <p className="truncate text-sm font-medium">{item.reason}</p>
-                                <Badge variant="secondary">{item.count}</Badge>
-                              </div>
+                      <div className="grid gap-4 xl:grid-cols-2">
+                        <div className="rounded-2xl border border-border bg-card shadow-sm">
+                          <div className="border-b border-border px-4 py-3">
+                            <p className="text-sm font-semibold">License Activity</p>
+                          </div>
+                          <div className="space-y-3 p-4 text-sm">
+                            <div className="flex items-center justify-between rounded-xl bg-muted/40 px-4 py-3">
+                              <span>Activations</span>
+                              <span className="font-semibold">{report.support?.activity.activations_in_window ?? 0}</span>
                             </div>
-                          ))}
-
-                          {(report.support?.alerts.top_webhook_failures ?? []).map((item) => (
-                            <div key={`webhook-${item.reason}`} className="rounded-xl border border-border bg-background px-4 py-3">
-                              <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Webhook</p>
-                              <div className="mt-1 flex items-center justify-between gap-3">
-                                <p className="truncate text-sm font-medium">{item.reason}</p>
-                                <Badge variant="secondary">{item.count}</Badge>
-                              </div>
+                            <div className="flex items-center justify-between rounded-xl bg-muted/40 px-4 py-3">
+                              <span>Deactivations</span>
+                              <span className="font-semibold">{report.support?.activity.deactivations_in_window ?? 0}</span>
                             </div>
-                          ))}
-
-                          {(report.support?.alerts.top_security_anomalies ?? []).map((item) => (
-                            <div key={`security-${item.reason}`} className="rounded-xl border border-border bg-background px-4 py-3">
-                              <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Security</p>
-                              <div className="mt-1 flex items-center justify-between gap-3">
-                                <p className="truncate text-sm font-medium">{item.reason}</p>
-                                <Badge variant="secondary">{item.count}</Badge>
-                              </div>
+                            <div className="flex items-center justify-between rounded-xl bg-muted/40 px-4 py-3">
+                              <span>Heartbeats</span>
+                              <span className="font-semibold">{report.support?.activity.heartbeats_in_window ?? 0}</span>
                             </div>
-                          ))}
-
-                          {(report.support?.alerts.top_sensitive_action_failure_sources ?? []).map((item) => (
-                            <div key={`proof-source-${item.reason}`} className="rounded-xl border border-border bg-background px-4 py-3">
-                              <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Proof Source</p>
-                              <div className="mt-1 flex items-center justify-between gap-3">
-                                <p className="truncate text-sm font-medium">{item.reason}</p>
-                                <Badge variant="secondary">{item.count}</Badge>
-                              </div>
+                            <div className="flex items-center justify-between rounded-xl bg-muted/40 px-4 py-3">
+                              <span>Webhook failures</span>
+                              <span className="font-semibold">{report.support?.alerts.webhook_failures_in_window ?? 0}</span>
                             </div>
-                          ))}
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                            <div className="flex items-center justify-between rounded-xl bg-muted/40 px-4 py-3">
+                              <span>Impossible-travel signals</span>
+                              <span className="font-semibold">{report.support?.alerts.auth_impossible_travel_signals_in_window ?? 0}</span>
+                            </div>
+                            <div className="flex items-center justify-between rounded-xl bg-muted/40 px-4 py-3">
+                              <span>Concurrent-device signals</span>
+                              <span className="font-semibold">{report.support?.alerts.auth_concurrent_device_signals_in_window ?? 0}</span>
+                            </div>
+                          </div>
+                        </div>
 
-                <div className="rounded-2xl border border-border bg-card shadow-sm">
-                  <div className="border-b border-border px-4 py-3">
-                    <p className="text-sm font-semibold">Recent Licensing Audit Events</p>
-                  </div>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Time</TableHead>
-                        <TableHead>Action</TableHead>
-                        <TableHead>Actor</TableHead>
-                        <TableHead>Device</TableHead>
-                        <TableHead>Source</TableHead>
-                        <TableHead>Reason</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {(report.support?.recent_audit_events.length ?? 0) === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
-                            No recent audit events.
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        (report.support?.recent_audit_events ?? []).map((event, index) => (
-                          <TableRow key={`${event.timestamp}-${event.action}-${index}`}>
-                            <TableCell className="text-muted-foreground">
-                              {new Date(event.timestamp).toLocaleString()}
-                            </TableCell>
-                            <TableCell className="font-medium">{event.action}</TableCell>
-                            <TableCell>{event.actor}</TableCell>
-                            <TableCell>{event.device_code || "-"}</TableCell>
-                            <TableCell className="text-muted-foreground">
-                              {event.source_user_agent_family || "unknown"} | {event.source_ip_prefix || event.source_ip || "-"}
-                            </TableCell>
-                            <TableCell className="text-muted-foreground">{event.reason || "-"}</TableCell>
-                          </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
+                        <div className="rounded-2xl border border-border bg-card shadow-sm">
+                          <div className="border-b border-border px-4 py-3">
+                            <p className="text-sm font-semibold">Top Alert Causes</p>
+                          </div>
+                          <div className="space-y-3 p-4">
+                            {(report.support?.alerts.top_validation_failures.length || 0) === 0 &&
+                            (report.support?.alerts.top_webhook_failures.length || 0) === 0 &&
+                            (report.support?.alerts.top_security_anomalies.length || 0) === 0 &&
+                            (report.support?.alerts.top_sensitive_action_failure_sources.length || 0) === 0 ? (
+                              <p className="text-sm text-muted-foreground">No alert spikes in the current window.</p>
+                            ) : (
+                              <>
+                                {(report.support?.alerts.top_validation_failures ?? []).map((item) => (
+                                  <div key={`validation-${item.reason}`} className="rounded-xl border border-border bg-background px-4 py-3">
+                                    <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Validation</p>
+                                    <div className="mt-1 flex items-center justify-between gap-3">
+                                      <p className="truncate text-sm font-medium">{item.reason}</p>
+                                      <Badge variant="secondary">{item.count}</Badge>
+                                    </div>
+                                  </div>
+                                ))}
 
-                <div className="rounded-2xl border border-border bg-card shadow-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
-                    <p className="text-sm font-semibold">Super Admin Device Controls</p>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          void handleMassRevoke();
-                        }}
-                      >
-                        Mass Revoke
-                      </Button>
-                      {(report.adminShops?.items ?? []).slice(0, 4).map((shop) => (
-                        <Button
-                          key={shop.shop_id}
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            void handleResyncShop(shop.shop_code);
-                          }}
-                        >
-                          Resync {shop.shop_code}
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Shop</TableHead>
-                        <TableHead>Device</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>License</TableHead>
-                        <TableHead>Activation Key</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {(report.adminShops?.items ?? []).flatMap((shop) =>
-                        shop.devices.map((device) => ({
-                          shopCode: shop.shop_code,
-                          latestActivationEntitlement: shop.latest_activation_entitlement,
-                          device,
-                        }))
-                      ).length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
-                            No admin device seats found.
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        (report.adminShops?.items ?? [])
-                          .flatMap((shop) =>
-                            shop.devices.map((device) => ({
-                              shopCode: shop.shop_code,
-                              latestActivationEntitlement: shop.latest_activation_entitlement,
-                              device,
-                            }))
-                          )
-                          .slice(0, 24)
-                          .map((row) => (
-                            <TableRow key={`${row.shopCode}-${row.device.provisioned_device_id}`}>
-                              <TableCell className="font-medium">{row.shopCode}</TableCell>
-                              <TableCell>
-                                <div className="space-y-1">
-                                  <p className="font-medium">{row.device.device_name}</p>
-                                  <p className="text-xs text-muted-foreground">{row.device.device_code}</p>
+                                {(report.support?.alerts.top_webhook_failures ?? []).map((item) => (
+                                  <div key={`webhook-${item.reason}`} className="rounded-xl border border-border bg-background px-4 py-3">
+                                    <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Webhook</p>
+                                    <div className="mt-1 flex items-center justify-between gap-3">
+                                      <p className="truncate text-sm font-medium">{item.reason}</p>
+                                      <Badge variant="secondary">{item.count}</Badge>
+                                    </div>
+                                  </div>
+                                ))}
+
+                                {(report.support?.alerts.top_security_anomalies ?? []).map((item) => (
+                                  <div key={`security-${item.reason}`} className="rounded-xl border border-border bg-background px-4 py-3">
+                                    <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Security</p>
+                                    <div className="mt-1 flex items-center justify-between gap-3">
+                                      <p className="truncate text-sm font-medium">{item.reason}</p>
+                                      <Badge variant="secondary">{item.count}</Badge>
+                                    </div>
+                                  </div>
+                                ))}
+
+                                {(report.support?.alerts.top_sensitive_action_failure_sources ?? []).map((item) => (
+                                  <div key={`proof-source-${item.reason}`} className="rounded-xl border border-border bg-background px-4 py-3">
+                                    <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Proof Source</p>
+                                    <div className="mt-1 flex items-center justify-between gap-3">
+                                      <p className="truncate text-sm font-medium">{item.reason}</p>
+                                      <Badge variant="secondary">{item.count}</Badge>
+                                    </div>
+                                  </div>
+                                ))}
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-border bg-card shadow-sm">
+                        <div className="border-b border-border px-4 py-3">
+                          <p className="text-sm font-semibold">Recent Licensing Audit Events</p>
+                        </div>
+                        <div className="max-h-[56vh] overflow-auto">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Time</TableHead>
+                                <TableHead>Action</TableHead>
+                                <TableHead>Actor</TableHead>
+                                <TableHead>Device</TableHead>
+                                <TableHead>Source</TableHead>
+                                <TableHead>Reason</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {(report.support?.recent_audit_events.length ?? 0) === 0 ? (
+                                <TableRow>
+                                  <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                                    No recent audit events.
+                                  </TableCell>
+                                </TableRow>
+                              ) : (
+                                (report.support?.recent_audit_events ?? []).map((event, index) => (
+                                  <TableRow key={`${event.timestamp}-${event.action}-${index}`}>
+                                    <TableCell className="text-muted-foreground">
+                                      {new Date(event.timestamp).toLocaleString()}
+                                    </TableCell>
+                                    <TableCell className="font-medium">{event.action}</TableCell>
+                                    <TableCell>{event.actor}</TableCell>
+                                    <TableCell>{event.device_code || "-"}</TableCell>
+                                    <TableCell className="text-muted-foreground">
+                                      {event.source_user_agent_family || "unknown"} | {event.source_ip_prefix || event.source_ip || "-"}
+                                    </TableCell>
+                                    <TableCell className="text-muted-foreground">{event.reason || "-"}</TableCell>
+                                  </TableRow>
+                                ))
+                              )}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </div>
+                    </TabsContent>
+
+                    <TabsContent value="devices" className="mt-0 space-y-4">
+                      <div className="rounded-2xl border border-border bg-card shadow-sm">
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+                          <p className="text-sm font-semibold">Super Admin Device Controls</p>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                void handleMassRevoke();
+                              }}
+                            >
+                              Mass Revoke
+                            </Button>
+                            {(report.adminShops?.items ?? []).slice(0, 4).map((shop) => (
+                              <Button
+                                key={shop.shop_id}
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  void handleResyncShop(shop.shop_code);
+                                }}
+                              >
+                                Resync {shop.shop_code}
+                              </Button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="max-h-[62vh] overflow-auto">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Shop</TableHead>
+                                <TableHead>Device</TableHead>
+                                <TableHead>Status</TableHead>
+                                <TableHead>License</TableHead>
+                                <TableHead>Activation Key</TableHead>
+                                <TableHead className="text-right">Actions</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {(report.adminShops?.items ?? []).flatMap((shop) =>
+                                shop.devices.map((device) => ({
+                                  shopCode: shop.shop_code,
+                                  latestActivationEntitlement: shop.latest_activation_entitlement,
+                                  device,
+                                }))
+                              ).length === 0 ? (
+                                <TableRow>
+                                  <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                                    No admin device seats found.
+                                  </TableCell>
+                                </TableRow>
+                              ) : (
+                                (report.adminShops?.items ?? [])
+                                  .flatMap((shop) =>
+                                    shop.devices.map((device) => ({
+                                      shopCode: shop.shop_code,
+                                      latestActivationEntitlement: shop.latest_activation_entitlement,
+                                      device,
+                                    }))
+                                  )
+                                  .slice(0, 24)
+                                  .map((row) => (
+                                    <TableRow key={`${row.shopCode}-${row.device.provisioned_device_id}`}>
+                                      <TableCell className="font-medium">{row.shopCode}</TableCell>
+                                      <TableCell>
+                                        <div className="space-y-1">
+                                          <p className="font-medium">{row.device.device_name}</p>
+                                          <p className="text-xs text-muted-foreground">{row.device.device_code}</p>
+                                        </div>
+                                      </TableCell>
+                                      <TableCell className="capitalize">{row.device.device_status}</TableCell>
+                                      <TableCell className="capitalize">{row.device.license_state}</TableCell>
+                                      <TableCell>
+                                        {row.latestActivationEntitlement?.activation_entitlement_key ? (
+                                          <div className="space-y-1">
+                                            <p className="max-w-[20rem] break-all font-mono text-[11px]">
+                                              {row.latestActivationEntitlement.activation_entitlement_key}
+                                            </p>
+                                            <div className="flex items-center gap-2">
+                                              <Badge variant="outline" className="capitalize text-[10px]">
+                                                {row.latestActivationEntitlement.status}
+                                              </Badge>
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => {
+                                                  void copyTextToClipboard(
+                                                    row.latestActivationEntitlement?.activation_entitlement_key || "",
+                                                    "Activation key copied."
+                                                  );
+                                                }}
+                                              >
+                                                Copy
+                                              </Button>
+                                            </div>
+                                          </div>
+                                        ) : (
+                                          <span className="text-xs text-muted-foreground">Not issued</span>
+                                        )}
+                                      </TableCell>
+                                      <TableCell className="text-right">
+                                        <div className="flex justify-end gap-2">
+                                          {row.device.device_status.toLowerCase() === "active" ? (
+                                            <>
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => {
+                                                  void handleDeactivateDevice(row.device.device_code);
+                                                }}
+                                              >
+                                                Deactivate
+                                              </Button>
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => {
+                                                  void handleRevokeDevice(row.device.device_code);
+                                                }}
+                                              >
+                                                Revoke
+                                              </Button>
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => {
+                                                  void handleTransferSeat(row.device.device_code, row.shopCode);
+                                                }}
+                                              >
+                                                Transfer Seat
+                                              </Button>
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => {
+                                                  void handleExtendGrace(row.device.device_code);
+                                                }}
+                                              >
+                                                Extend Grace
+                                              </Button>
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => {
+                                                  void handleEmergencyAction(row.device.device_code, "lock_device", "Lock Device");
+                                                }}
+                                              >
+                                                Lock
+                                              </Button>
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => {
+                                                  void handleEmergencyAction(row.device.device_code, "revoke_token", "Revoke Token");
+                                                }}
+                                              >
+                                                Revoke Token
+                                              </Button>
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => {
+                                                  void handleEmergencyAction(row.device.device_code, "force_reauth", "Force Re-Auth");
+                                                }}
+                                              >
+                                                Force Re-Auth
+                                              </Button>
+                                            </>
+                                          ) : (
+                                            <>
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => {
+                                                  void handleActivateDevice(row.device.device_code);
+                                                }}
+                                              >
+                                                Activate
+                                              </Button>
+                                              <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => {
+                                                  void handleReactivateDevice(row.device.device_code);
+                                                }}
+                                              >
+                                                Reactivate
+                                              </Button>
+                                            </>
+                                          )}
+                                        </div>
+                                      </TableCell>
+                                    </TableRow>
+                                  ))
+                              )}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </div>
+                    </TabsContent>
+
+                    <TabsContent value="aiPayments" className="mt-0 space-y-4">
+                      <div className="rounded-2xl border border-border bg-card shadow-sm">
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+                          <div className="space-y-1">
+                            <p className="text-sm font-semibold">AI Credit Purchasing Requests</p>
+                            <p className="text-xs text-muted-foreground">
+                              Pending manual AI payments (`cash` / `bank_deposit`) with submitted reference details.
+                            </p>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              void loadPendingAiPayments();
+                            }}
+                            disabled={loadingPendingAiPayments}
+                          >
+                            Refresh Requests
+                          </Button>
+                        </div>
+
+                        <div className="space-y-3 p-4">
+                          <div className="flex flex-col gap-2 sm:flex-row">
+                            <Input
+                              value={aiVerifyReference}
+                              onChange={(event) => setAiVerifyReference(event.target.value)}
+                              placeholder="Submitted ref or aicpay_... external ref"
+                              className="sm:flex-1"
+                            />
+                            <Button
+                              onClick={() => {
+                                void handleVerifyAiPaymentByReference();
+                              }}
+                              disabled={isVerifyingAiPayment}
+                            >
+                              {isVerifyingAiPayment ? "Verifying..." : "Verify by Reference"}
+                            </Button>
+                          </div>
+
+                          {loadingPendingAiPayments ? (
+                            <p className="text-sm text-muted-foreground">Loading pending AI credit requests...</p>
+                          ) : pendingAiPayments.length === 0 ? (
+                            <p className="text-sm text-muted-foreground">No pending AI credit purchase requests.</p>
+                          ) : (
+                            <div className="max-h-[60vh] space-y-2 overflow-auto pr-1">
+                              {pendingAiPayments.slice(0, 20).map((item) => (
+                                <div key={item.payment_id} className="rounded-md border border-border/70 bg-muted/20 p-3">
+                                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                                    <span className="font-semibold text-foreground">{item.payment_status.replaceAll("_", " ")}</span>
+                                    <BadgeTone method={item.payment_method} />
+                                    <span className="text-muted-foreground">{new Date(item.created_at).toLocaleString()}</span>
+                                    <span className="ml-auto text-muted-foreground">
+                                      {item.credits.toFixed(0)} credits ({item.currency} {item.amount.toFixed(2)})
+                                    </span>
+                                  </div>
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    User: {item.target_full_name || item.target_username}
+                                    {item.target_full_name ? ` (${item.target_username})` : ""}
+                                    {item.shop_name ? ` • Shop: ${item.shop_name}` : ""}
+                                  </p>
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    Submitted Ref: {item.submitted_reference || "-"} • External Ref: {item.external_reference}
+                                  </p>
+                                  <div className="mt-2 flex justify-end">
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() =>
+                                        void handleVerifyAiPayment({
+                                          paymentId: item.payment_id,
+                                          externalReference: item.external_reference,
+                                        })
+                                      }
+                                      disabled={isVerifyingAiPayment && verifyingAiPaymentId === item.payment_id}
+                                    >
+                                      {isVerifyingAiPayment && verifyingAiPaymentId === item.payment_id ? "Verifying..." : "Verify"}
+                                    </Button>
+                                  </div>
                                 </div>
-                              </TableCell>
-                              <TableCell className="capitalize">{row.device.device_status}</TableCell>
-                              <TableCell className="capitalize">{row.device.license_state}</TableCell>
-                              <TableCell>
-                                {row.latestActivationEntitlement?.activation_entitlement_key ? (
-                                  <div className="space-y-1">
-                                    <p className="max-w-[20rem] break-all font-mono text-[11px]">
-                                      {row.latestActivationEntitlement.activation_entitlement_key}
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </TabsContent>
+
+                    <TabsContent value="billing" className="mt-0 space-y-4">
+                      <div className="rounded-2xl border border-border bg-card shadow-sm">
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+                          <p className="text-sm font-semibold">Manual Billing (Cash / Bank Deposit)</p>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                void handleCreateManualInvoice();
+                              }}
+                            >
+                              Create Invoice
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                void handleRecordManualPayment();
+                              }}
+                            >
+                              Record Payment
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                void loadReports();
+                              }}
+                            >
+                              Refresh Billing
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                void handleRunManualBillingReconciliation();
+                              }}
+                            >
+                              Run Reconciliation
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                void handleRunBillingStateReconciliation();
+                              }}
+                            >
+                              Run Drift Check
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="p-4">
+                          <Tabs value={billingSection} onValueChange={setBillingSection} className="space-y-4">
+                            <TabsList className="grid w-full grid-cols-2">
+                              <TabsTrigger value="ledger">Ledger</TabsTrigger>
+                              <TabsTrigger value="reconciliation">Reconciliation</TabsTrigger>
+                            </TabsList>
+
+                            <TabsContent value="ledger" className="mt-0 space-y-4">
+                              <div className="grid gap-4 xl:grid-cols-2">
+                                <div className="rounded-xl border border-border bg-background">
+                                  <div className="flex items-center justify-between border-b border-border px-3 py-2">
+                                    <p className="text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+                                      Recent Invoices
                                     </p>
                                     <div className="flex items-center gap-2">
-                                      <Badge variant="outline" className="capitalize text-[10px]">
-                                        {row.latestActivationEntitlement.status}
-                                      </Badge>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => {
-                                          void copyTextToClipboard(
-                                            row.latestActivationEntitlement?.activation_entitlement_key || "",
-                                            "Activation key copied."
-                                          );
-                                        }}
-                                      >
-                                        Copy
-                                      </Button>
+                                      <Badge variant="secondary">{report.manualInvoices?.count ?? 0}</Badge>
+                                      {((report.manualInvoices?.items ?? []).filter((invoice) => isMarketingBillingRecord(invoice.notes)).length > 0) && (
+                                        <Badge variant="outline">
+                                          Marketing {(report.manualInvoices?.items ?? []).filter((invoice) => isMarketingBillingRecord(invoice.notes)).length}
+                                        </Badge>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="max-h-[52vh] overflow-auto">
+                                    <Table>
+                                      <TableHeader>
+                                        <TableRow>
+                                          <TableHead>Invoice</TableHead>
+                                          <TableHead>Shop</TableHead>
+                                          <TableHead className="text-right">Due</TableHead>
+                                          <TableHead>Status</TableHead>
+                                          <TableHead className="text-right">Action</TableHead>
+                                        </TableRow>
+                                      </TableHeader>
+                                      <TableBody>
+                                        {(report.manualInvoices?.items.length ?? 0) === 0 ? (
+                                          <TableRow>
+                                            <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                                              No manual billing invoices yet.
+                                            </TableCell>
+                                          </TableRow>
+                                        ) : (
+                                          (report.manualInvoices?.items ?? []).slice(0, 12).map((invoice) => (
+                                            <TableRow key={invoice.invoice_id}>
+                                              <TableCell>
+                                                <div className="space-y-1">
+                                                  <p className="font-medium">{invoice.invoice_number}</p>
+                                                  <p className="text-xs text-muted-foreground">
+                                                    Due {new Date(invoice.due_at).toLocaleDateString()}
+                                                  </p>
+                                                  {isMarketingBillingRecord(invoice.notes) && (
+                                                    <Badge variant="outline" className="text-[10px]">
+                                                      Marketing
+                                                    </Badge>
+                                                  )}
+                                                </div>
+                                              </TableCell>
+                                              <TableCell>{invoice.shop_code}</TableCell>
+                                              <TableCell className="text-right font-semibold">
+                                                {money(invoice.amount_due)}
+                                              </TableCell>
+                                              <TableCell className="capitalize">{invoice.status.replaceAll("_", " ")}</TableCell>
+                                              <TableCell className="text-right">
+                                                <Button
+                                                  variant="outline"
+                                                  size="sm"
+                                                  onClick={() => {
+                                                    void handleRecordManualPayment(invoice.invoice_number);
+                                                  }}
+                                                >
+                                                  Record
+                                                </Button>
+                                              </TableCell>
+                                            </TableRow>
+                                          ))
+                                        )}
+                                      </TableBody>
+                                    </Table>
+                                  </div>
+                                </div>
+
+                                <div className="rounded-xl border border-border bg-background">
+                                  <div className="flex items-center justify-between border-b border-border px-3 py-2">
+                                    <p className="text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+                                      Recent Payments
+                                    </p>
+                                    <div className="flex items-center gap-2">
+                                      <Badge variant="secondary">{report.manualPayments?.count ?? 0}</Badge>
+                                      {pendingMarketingPaymentsCount > 0 && (
+                                        <Badge variant="outline">Pending Marketing {pendingMarketingPaymentsCount}</Badge>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="max-h-[52vh] overflow-auto">
+                                    <Table>
+                                      <TableHeader>
+                                        <TableRow>
+                                          <TableHead>Payment</TableHead>
+                                          <TableHead>Invoice</TableHead>
+                                          <TableHead className="text-right">Amount</TableHead>
+                                          <TableHead>Status</TableHead>
+                                          <TableHead className="text-right">Action</TableHead>
+                                        </TableRow>
+                                      </TableHeader>
+                                      <TableBody>
+                                        {(report.manualPayments?.items.length ?? 0) === 0 ? (
+                                          <TableRow>
+                                            <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                                              No manual payments recorded.
+                                            </TableCell>
+                                          </TableRow>
+                                        ) : (
+                                          (report.manualPayments?.items ?? []).slice(0, 12).map((payment) => (
+                                            <TableRow key={payment.payment_id}>
+                                              <TableCell className="font-medium">{payment.payment_id.slice(0, 8)}</TableCell>
+                                              <TableCell>
+                                                <div className="space-y-1">
+                                                  <p className="font-medium">{payment.invoice_number}</p>
+                                                  <p className="text-xs text-muted-foreground">{payment.method.replaceAll("_", " ")}</p>
+                                                  {isMarketingBillingRecord(payment.notes) && (
+                                                    <Badge variant="outline" className="text-[10px]">
+                                                      Marketing
+                                                    </Badge>
+                                                  )}
+                                                </div>
+                                              </TableCell>
+                                              <TableCell className="text-right font-semibold">{money(payment.amount)}</TableCell>
+                                              <TableCell className="capitalize">{payment.status.replaceAll("_", " ")}</TableCell>
+                                              <TableCell className="text-right">
+                                                {payment.status === "pending_verification" ? (
+                                                  <div className="flex justify-end gap-2">
+                                                    <Button
+                                                      variant="outline"
+                                                      size="sm"
+                                                      onClick={() => {
+                                                        void handleVerifyManualPayment(payment.payment_id);
+                                                      }}
+                                                    >
+                                                      Verify
+                                                    </Button>
+                                                    <Button
+                                                      variant="outline"
+                                                      size="sm"
+                                                      onClick={() => {
+                                                        void handleRejectManualPayment(payment.payment_id);
+                                                      }}
+                                                    >
+                                                      Reject
+                                                    </Button>
+                                                  </div>
+                                                ) : (
+                                                  <span className="text-xs text-muted-foreground">Processed</span>
+                                                )}
+                                              </TableCell>
+                                            </TableRow>
+                                          ))
+                                        )}
+                                      </TableBody>
+                                    </Table>
+                                  </div>
+                                </div>
+                              </div>
+                            </TabsContent>
+
+                            <TabsContent value="reconciliation" className="mt-0 space-y-4">
+                              <div className="rounded-xl border border-border bg-background">
+                                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-3 py-2">
+                                  <p className="text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+                                    Daily Bank Reconciliation
+                                  </p>
+                                  {report.manualReconciliation ? (
+                                    <Badge variant={report.manualReconciliation.has_mismatch ? "destructive" : "secondary"}>
+                                      {report.manualReconciliation.has_mismatch ? "Mismatch Detected" : "Balanced"}
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="outline">Not Run</Badge>
+                                  )}
+                                </div>
+
+                                {report.manualReconciliation ? (
+                                  <div className="space-y-4 p-3">
+                                    <div className="grid gap-3 md:grid-cols-4">
+                                      <div className="rounded-lg border border-border p-3">
+                                        <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Verified Total</p>
+                                        <p className="text-base font-semibold">{money(report.manualReconciliation.verified_bank_total)}</p>
+                                      </div>
+                                      <div className="rounded-lg border border-border p-3">
+                                        <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Pending Total</p>
+                                        <p className="text-base font-semibold">{money(report.manualReconciliation.pending_bank_total)}</p>
+                                      </div>
+                                      <div className="rounded-lg border border-border p-3">
+                                        <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Expected Total</p>
+                                        <p className="text-base font-semibold">
+                                          {typeof report.manualReconciliation.expected_bank_total === "number"
+                                            ? money(report.manualReconciliation.expected_bank_total)
+                                            : "Not provided"}
+                                        </p>
+                                      </div>
+                                      <div className="rounded-lg border border-border p-3">
+                                        <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Mismatch Amount</p>
+                                        <p className="text-base font-semibold">
+                                          {typeof report.manualReconciliation.mismatch_amount === "number"
+                                            ? money(report.manualReconciliation.mismatch_amount)
+                                            : "-"}
+                                        </p>
+                                      </div>
+                                    </div>
+
+                                    <div className="grid gap-3 xl:grid-cols-2">
+                                      <div className="rounded-lg border border-border">
+                                        <div className="border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                          Alert Causes ({report.manualReconciliation.alert_count})
+                                        </div>
+                                        <div className="max-h-[42vh] overflow-auto">
+                                          <Table>
+                                            <TableHeader>
+                                              <TableRow>
+                                                <TableHead>Code</TableHead>
+                                                <TableHead>Severity</TableHead>
+                                                <TableHead className="text-right">Count</TableHead>
+                                              </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                              {report.manualReconciliation.alerts.length === 0 ? (
+                                                <TableRow>
+                                                  <TableCell colSpan={3} className="py-6 text-center text-muted-foreground">
+                                                    No reconciliation alerts.
+                                                  </TableCell>
+                                                </TableRow>
+                                              ) : (
+                                                report.manualReconciliation.alerts.map((alert) => (
+                                                  <TableRow key={`${alert.code}-${alert.severity}`}>
+                                                    <TableCell className="font-medium">{alert.code}</TableCell>
+                                                    <TableCell className="capitalize">{alert.severity}</TableCell>
+                                                    <TableCell className="text-right">{alert.count}</TableCell>
+                                                  </TableRow>
+                                                ))
+                                              )}
+                                            </TableBody>
+                                          </Table>
+                                        </div>
+                                      </div>
+
+                                      <div className="rounded-lg border border-border">
+                                        <div className="border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                          Latest Bank Entries
+                                        </div>
+                                        <div className="max-h-[42vh] overflow-auto">
+                                          <Table>
+                                            <TableHeader>
+                                              <TableRow>
+                                                <TableHead>Invoice</TableHead>
+                                                <TableHead>Method</TableHead>
+                                                <TableHead className="text-right">Amount</TableHead>
+                                                <TableHead>Status</TableHead>
+                                              </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                              {report.manualReconciliation.items.length === 0 ? (
+                                                <TableRow>
+                                                  <TableCell colSpan={4} className="py-6 text-center text-muted-foreground">
+                                                    No bank entries for this date.
+                                                  </TableCell>
+                                                </TableRow>
+                                              ) : (
+                                                report.manualReconciliation.items.slice(0, 8).map((item) => (
+                                                  <TableRow key={item.payment_id}>
+                                                    <TableCell className="font-medium">{item.invoice_number}</TableCell>
+                                                    <TableCell className="capitalize">{item.method.replaceAll("_", " ")}</TableCell>
+                                                    <TableCell className="text-right">{money(item.amount)}</TableCell>
+                                                    <TableCell className="capitalize">{item.status.replaceAll("_", " ")}</TableCell>
+                                                  </TableRow>
+                                                ))
+                                              )}
+                                            </TableBody>
+                                          </Table>
+                                        </div>
+                                      </div>
                                     </div>
                                   </div>
                                 ) : (
-                                  <span className="text-xs text-muted-foreground">Not issued</span>
+                                  <div className="px-3 py-6 text-sm text-muted-foreground">
+                                    Run daily reconciliation to compare bank totals and detect duplicate/missing references.
+                                  </div>
                                 )}
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <div className="flex justify-end gap-2">
-                                  {row.device.device_status.toLowerCase() === "active" ? (
-                                    <>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => {
-                                          void handleDeactivateDevice(row.device.device_code);
-                                        }}
-                                      >
-                                        Deactivate
-                                      </Button>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => {
-                                          void handleRevokeDevice(row.device.device_code);
-                                        }}
-                                      >
-                                        Revoke
-                                      </Button>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => {
-                                          void handleTransferSeat(row.device.device_code, row.shopCode);
-                                        }}
-                                      >
-                                        Transfer Seat
-                                      </Button>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => {
-                                          void handleExtendGrace(row.device.device_code);
-                                        }}
-                                      >
-                                        Extend Grace
-                                      </Button>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => {
-                                          void handleEmergencyAction(row.device.device_code, "lock_device", "Lock Device");
-                                        }}
-                                      >
-                                        Lock
-                                      </Button>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => {
-                                          void handleEmergencyAction(row.device.device_code, "revoke_token", "Revoke Token");
-                                        }}
-                                      >
-                                        Revoke Token
-                                      </Button>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => {
-                                          void handleEmergencyAction(row.device.device_code, "force_reauth", "Force Re-Auth");
-                                        }}
-                                      >
-                                        Force Re-Auth
-                                      </Button>
-                                    </>
+                              </div>
+
+                              <div className="rounded-xl border border-border bg-background">
+                                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-3 py-2">
+                                  <p className="text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+                                    Webhook Drift Reconciliation
+                                  </p>
+                                  {report.billingStateReconciliation ? (
+                                    <Badge
+                                      variant={
+                                        report.billingStateReconciliation.drift_candidates > 0 ||
+                                        report.billingStateReconciliation.webhook_failures_detected > 0
+                                          ? "destructive"
+                                          : "secondary"
+                                      }
+                                    >
+                                      {report.billingStateReconciliation.dry_run ? "Preview" : "Applied"}
+                                    </Badge>
                                   ) : (
-                                    <>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => {
-                                          void handleActivateDevice(row.device.device_code);
-                                        }}
-                                      >
-                                        Activate
-                                      </Button>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => {
-                                          void handleReactivateDevice(row.device.device_code);
-                                        }}
-                                      >
-                                        Reactivate
-                                      </Button>
-                                    </>
+                                    <Badge variant="outline">Not Run</Badge>
                                   )}
                                 </div>
-                              </TableCell>
-                            </TableRow>
-                          ))
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
 
-                <div className="rounded-2xl border border-border bg-card shadow-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
-                    <div className="space-y-1">
-                      <p className="text-sm font-semibold">AI Credit Purchasing Requests</p>
-                      <p className="text-xs text-muted-foreground">
-                        Pending manual AI payments (`cash` / `bank_deposit`) with submitted reference details.
-                      </p>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        void loadPendingAiPayments();
-                      }}
-                      disabled={loadingPendingAiPayments}
-                    >
-                      Refresh Requests
-                    </Button>
-                  </div>
-
-                  <div className="space-y-3 p-4">
-                    <div className="flex flex-col gap-2 sm:flex-row">
-                      <Input
-                        value={aiVerifyReference}
-                        onChange={(event) => setAiVerifyReference(event.target.value)}
-                        placeholder="Submitted ref or aicpay_... external ref"
-                        className="sm:flex-1"
-                      />
-                      <Button
-                        onClick={() => {
-                          void handleVerifyAiPaymentByReference();
-                        }}
-                        disabled={isVerifyingAiPayment}
-                      >
-                        {isVerifyingAiPayment ? "Verifying..." : "Verify by Reference"}
-                      </Button>
-                    </div>
-
-                    {loadingPendingAiPayments ? (
-                      <p className="text-sm text-muted-foreground">Loading pending AI credit requests...</p>
-                    ) : pendingAiPayments.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">No pending AI credit purchase requests.</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {pendingAiPayments.slice(0, 20).map((item) => (
-                          <div key={item.payment_id} className="rounded-md border border-border/70 bg-muted/20 p-3">
-                            <div className="flex flex-wrap items-center gap-2 text-xs">
-                              <span className="font-semibold text-foreground">{item.payment_status.replaceAll("_", " ")}</span>
-                              <BadgeTone method={item.payment_method} />
-                              <span className="text-muted-foreground">{new Date(item.created_at).toLocaleString()}</span>
-                              <span className="ml-auto text-muted-foreground">
-                                {item.credits.toFixed(0)} credits ({item.currency} {item.amount.toFixed(2)})
-                              </span>
-                            </div>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              User: {item.target_full_name || item.target_username}
-                              {item.target_full_name ? ` (${item.target_username})` : ""}
-                              {item.shop_name ? ` • Shop: ${item.shop_name}` : ""}
-                            </p>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              Submitted Ref: {item.submitted_reference || "-"} • External Ref: {item.external_reference}
-                            </p>
-                            <div className="mt-2 flex justify-end">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() =>
-                                  void handleVerifyAiPayment({
-                                    paymentId: item.payment_id,
-                                    externalReference: item.external_reference,
-                                  })
-                                }
-                                disabled={isVerifyingAiPayment && verifyingAiPaymentId === item.payment_id}
-                              >
-                                {isVerifyingAiPayment && verifyingAiPaymentId === item.payment_id ? "Verifying..." : "Verify"}
-                              </Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-border bg-card shadow-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
-                    <p className="text-sm font-semibold">Manual Billing (Cash / Bank Deposit)</p>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          void handleCreateManualInvoice();
-                        }}
-                      >
-                        Create Invoice
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          void handleRecordManualPayment();
-                        }}
-                      >
-                        Record Payment
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          void loadReports();
-                        }}
-                      >
-                        Refresh Billing
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          void handleRunManualBillingReconciliation();
-                        }}
-                      >
-                        Run Reconciliation
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          void handleRunBillingStateReconciliation();
-                        }}
-                      >
-                        Run Drift Check
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-4 p-4 xl:grid-cols-2">
-                    <div className="rounded-xl border border-border bg-background">
-                      <div className="flex items-center justify-between border-b border-border px-3 py-2">
-                        <p className="text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">
-                          Recent Invoices
-                        </p>
-                        <div className="flex items-center gap-2">
-                          <Badge variant="secondary">{report.manualInvoices?.count ?? 0}</Badge>
-                          {((report.manualInvoices?.items ?? []).filter((invoice) => isMarketingBillingRecord(invoice.notes)).length > 0) && (
-                            <Badge variant="outline">
-                              Marketing {(report.manualInvoices?.items ?? []).filter((invoice) => isMarketingBillingRecord(invoice.notes)).length}
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Invoice</TableHead>
-                            <TableHead>Shop</TableHead>
-                            <TableHead className="text-right">Due</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead className="text-right">Action</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {(report.manualInvoices?.items.length ?? 0) === 0 ? (
-                            <TableRow>
-                              <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
-                                No manual billing invoices yet.
-                              </TableCell>
-                            </TableRow>
-                          ) : (
-                            (report.manualInvoices?.items ?? []).slice(0, 12).map((invoice) => (
-                              <TableRow key={invoice.invoice_id}>
-                                <TableCell>
-                                  <div className="space-y-1">
-                                    <p className="font-medium">{invoice.invoice_number}</p>
-                                    <p className="text-xs text-muted-foreground">
-                                      Due {new Date(invoice.due_at).toLocaleDateString()}
-                                    </p>
-                                    {isMarketingBillingRecord(invoice.notes) && (
-                                      <Badge variant="outline" className="text-[10px]">
-                                        Marketing
-                                      </Badge>
-                                    )}
-                                  </div>
-                                </TableCell>
-                                <TableCell>{invoice.shop_code}</TableCell>
-                                <TableCell className="text-right font-semibold">
-                                  {money(invoice.amount_due)}
-                                </TableCell>
-                                <TableCell className="capitalize">{invoice.status.replaceAll("_", " ")}</TableCell>
-                                <TableCell className="text-right">
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => {
-                                      void handleRecordManualPayment(invoice.invoice_number);
-                                    }}
-                                  >
-                                    Record
-                                  </Button>
-                                </TableCell>
-                              </TableRow>
-                            ))
-                          )}
-                        </TableBody>
-                      </Table>
-                    </div>
-
-                    <div className="rounded-xl border border-border bg-background">
-                      <div className="flex items-center justify-between border-b border-border px-3 py-2">
-                        <p className="text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">
-                          Recent Payments
-                        </p>
-                        <div className="flex items-center gap-2">
-                          <Badge variant="secondary">{report.manualPayments?.count ?? 0}</Badge>
-                          {pendingMarketingPaymentsCount > 0 && (
-                            <Badge variant="outline">Pending Marketing {pendingMarketingPaymentsCount}</Badge>
-                          )}
-                        </div>
-                      </div>
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Payment</TableHead>
-                            <TableHead>Invoice</TableHead>
-                            <TableHead className="text-right">Amount</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead className="text-right">Action</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {(report.manualPayments?.items.length ?? 0) === 0 ? (
-                            <TableRow>
-                              <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
-                                No manual payments recorded.
-                              </TableCell>
-                            </TableRow>
-                          ) : (
-                            (report.manualPayments?.items ?? []).slice(0, 12).map((payment) => (
-                              <TableRow key={payment.payment_id}>
-                                <TableCell className="font-medium">{payment.payment_id.slice(0, 8)}</TableCell>
-                                <TableCell>
-                                  <div className="space-y-1">
-                                    <p className="font-medium">{payment.invoice_number}</p>
-                                    <p className="text-xs text-muted-foreground">{payment.method.replaceAll("_", " ")}</p>
-                                    {isMarketingBillingRecord(payment.notes) && (
-                                      <Badge variant="outline" className="text-[10px]">
-                                        Marketing
-                                      </Badge>
-                                    )}
-                                  </div>
-                                </TableCell>
-                                <TableCell className="text-right font-semibold">{money(payment.amount)}</TableCell>
-                                <TableCell className="capitalize">{payment.status.replaceAll("_", " ")}</TableCell>
-                                <TableCell className="text-right">
-                                  {payment.status === "pending_verification" ? (
-                                    <div className="flex justify-end gap-2">
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => {
-                                          void handleVerifyManualPayment(payment.payment_id);
-                                        }}
-                                      >
-                                        Verify
-                                      </Button>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => {
-                                          void handleRejectManualPayment(payment.payment_id);
-                                        }}
-                                      >
-                                        Reject
-                                      </Button>
+                                {report.billingStateReconciliation ? (
+                                  <div className="space-y-4 p-3">
+                                    <div className="grid gap-3 md:grid-cols-4">
+                                      <div className="rounded-lg border border-border p-3">
+                                        <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Subscriptions Scanned</p>
+                                        <p className="text-base font-semibold">{report.billingStateReconciliation.billing_subscriptions_scanned}</p>
+                                      </div>
+                                      <div className="rounded-lg border border-border p-3">
+                                        <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Drift Candidates</p>
+                                        <p className="text-base font-semibold">{report.billingStateReconciliation.drift_candidates}</p>
+                                      </div>
+                                      <div className="rounded-lg border border-border p-3">
+                                        <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Reconciled</p>
+                                        <p className="text-base font-semibold">{report.billingStateReconciliation.subscriptions_reconciled}</p>
+                                      </div>
+                                      <div className="rounded-lg border border-border p-3">
+                                        <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Webhook Failures</p>
+                                        <p className="text-base font-semibold">{report.billingStateReconciliation.webhook_failures_detected}</p>
+                                      </div>
                                     </div>
-                                  ) : (
-                                    <span className="text-xs text-muted-foreground">Processed</span>
-                                  )}
-                                </TableCell>
+
+                                    <div className="grid gap-3 xl:grid-cols-2">
+                                      <div className="rounded-lg border border-border">
+                                        <div className="border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                          Subscription Updates
+                                        </div>
+                                        <div className="max-h-[42vh] overflow-auto">
+                                          <Table>
+                                            <TableHeader>
+                                              <TableRow>
+                                                <TableHead>Shop</TableHead>
+                                                <TableHead>Previous</TableHead>
+                                                <TableHead>Current</TableHead>
+                                                <TableHead>Applied</TableHead>
+                                              </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                              {report.billingStateReconciliation.subscription_updates.length === 0 ? (
+                                                <TableRow>
+                                                  <TableCell colSpan={4} className="py-6 text-center text-muted-foreground">
+                                                    No drift candidates.
+                                                  </TableCell>
+                                                </TableRow>
+                                              ) : (
+                                                report.billingStateReconciliation.subscription_updates.slice(0, 8).map((item) => (
+                                                  <TableRow key={`${item.shop_id}-${item.subscription_id || item.customer_id || item.period_end}`}>
+                                                    <TableCell className="font-medium">{item.shop_code}</TableCell>
+                                                    <TableCell className="capitalize">{item.previous_status.replaceAll("_", " ")}</TableCell>
+                                                    <TableCell className="capitalize">{item.reconciled_status.replaceAll("_", " ")}</TableCell>
+                                                    <TableCell>{item.applied ? "Yes" : "No"}</TableCell>
+                                                  </TableRow>
+                                                ))
+                                              )}
+                                            </TableBody>
+                                          </Table>
+                                        </div>
+                                      </div>
+
+                                      <div className="rounded-lg border border-border">
+                                        <div className="border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                          Failed Webhook Events
+                                        </div>
+                                        <div className="max-h-[42vh] overflow-auto">
+                                          <Table>
+                                            <TableHeader>
+                                              <TableRow>
+                                                <TableHead>Event</TableHead>
+                                                <TableHead>Type</TableHead>
+                                                <TableHead>Shop</TableHead>
+                                                <TableHead>Error</TableHead>
+                                              </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                              {report.billingStateReconciliation.failed_webhook_events.length === 0 ? (
+                                                <TableRow>
+                                                  <TableCell colSpan={4} className="py-6 text-center text-muted-foreground">
+                                                    No failed webhook events in lookback window.
+                                                  </TableCell>
+                                                </TableRow>
+                                              ) : (
+                                                report.billingStateReconciliation.failed_webhook_events.slice(0, 8).map((item) => (
+                                                  <TableRow key={item.event_id}>
+                                                    <TableCell className="font-medium">{item.event_id.slice(0, 12)}</TableCell>
+                                                    <TableCell>{item.event_type}</TableCell>
+                                                    <TableCell>{item.shop_code || "-"}</TableCell>
+                                                    <TableCell className="text-muted-foreground">{item.last_error_code || "-"}</TableCell>
+                                                  </TableRow>
+                                                ))
+                                              )}
+                                            </TableBody>
+                                          </Table>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="px-3 py-6 text-sm text-muted-foreground">
+                                    Run drift check to reconcile expired billing periods when webhook events are missed.
+                                  </div>
+                                )}
+                              </div>
+                            </TabsContent>
+                          </Tabs>
+                        </div>
+                      </div>
+                    </TabsContent>
+
+                    <TabsContent value="auditLogs" className="mt-0 space-y-4">
+                      <div className="rounded-2xl border border-border bg-card shadow-sm">
+                        <div className="flex flex-col gap-3 border-b border-border px-4 py-3 md:flex-row md:items-center md:justify-between">
+                          <p className="text-sm font-semibold">Searchable Audit Logs</p>
+                          <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
+                            <Input
+                              value={auditSearch}
+                              onChange={(event) => setAuditSearch(event.target.value)}
+                              placeholder="Search action, actor, reason, metadata"
+                              className="md:w-80"
+                            />
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                void handleExportAuditLogs("csv");
+                              }}
+                            >
+                              Export CSV
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                void handleExportAuditLogs("json");
+                              }}
+                            >
+                              Export JSON
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                void handleSearchAuditLogs();
+                              }}
+                            >
+                              Search
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="max-h-[62vh] overflow-auto">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Time</TableHead>
+                                <TableHead>Action</TableHead>
+                                <TableHead>Actor</TableHead>
+                                <TableHead>Manual</TableHead>
+                                <TableHead>Reason</TableHead>
                               </TableRow>
-                            ))
-                          )}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  </div>
-
-                  <div className="border-t border-border p-4">
-                    <div className="rounded-xl border border-border bg-background">
-                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-3 py-2">
-                        <p className="text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">
-                          Daily Bank Reconciliation
-                        </p>
-                        {report.manualReconciliation ? (
-                          <Badge variant={report.manualReconciliation.has_mismatch ? "destructive" : "secondary"}>
-                            {report.manualReconciliation.has_mismatch ? "Mismatch Detected" : "Balanced"}
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline">Not Run</Badge>
-                        )}
+                            </TableHeader>
+                            <TableBody>
+                              {(report.adminAudit?.items.length ?? 0) === 0 ? (
+                                <TableRow>
+                                  <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
+                                    No audit logs matched this search.
+                                  </TableCell>
+                                </TableRow>
+                              ) : (
+                                (report.adminAudit?.items ?? []).map((event) => (
+                                  <TableRow key={event.id}>
+                                    <TableCell className="text-muted-foreground">
+                                      {new Date(event.timestamp).toLocaleString()}
+                                    </TableCell>
+                                    <TableCell className="font-medium">{event.action}</TableCell>
+                                    <TableCell>{event.actor}</TableCell>
+                                    <TableCell>{event.is_manual_override ? "Yes" : "No"}</TableCell>
+                                    <TableCell className="text-muted-foreground">{event.reason || "-"}</TableCell>
+                                  </TableRow>
+                                ))
+                              )}
+                            </TableBody>
+                          </Table>
+                        </div>
                       </div>
-
-                      {report.manualReconciliation ? (
-                        <div className="space-y-4 p-3">
-                          <div className="grid gap-3 md:grid-cols-4">
-                            <div className="rounded-lg border border-border p-3">
-                              <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Verified Total</p>
-                              <p className="text-base font-semibold">{money(report.manualReconciliation.verified_bank_total)}</p>
-                            </div>
-                            <div className="rounded-lg border border-border p-3">
-                              <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Pending Total</p>
-                              <p className="text-base font-semibold">{money(report.manualReconciliation.pending_bank_total)}</p>
-                            </div>
-                            <div className="rounded-lg border border-border p-3">
-                              <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Expected Total</p>
-                              <p className="text-base font-semibold">
-                                {typeof report.manualReconciliation.expected_bank_total === "number"
-                                  ? money(report.manualReconciliation.expected_bank_total)
-                                  : "Not provided"}
-                              </p>
-                            </div>
-                            <div className="rounded-lg border border-border p-3">
-                              <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Mismatch Amount</p>
-                              <p className="text-base font-semibold">
-                                {typeof report.manualReconciliation.mismatch_amount === "number"
-                                  ? money(report.manualReconciliation.mismatch_amount)
-                                  : "-"}
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="grid gap-3 xl:grid-cols-2">
-                            <div className="rounded-lg border border-border">
-                              <div className="border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                Alert Causes ({report.manualReconciliation.alert_count})
-                              </div>
-                              <Table>
-                                <TableHeader>
-                                  <TableRow>
-                                    <TableHead>Code</TableHead>
-                                    <TableHead>Severity</TableHead>
-                                    <TableHead className="text-right">Count</TableHead>
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {report.manualReconciliation.alerts.length === 0 ? (
-                                    <TableRow>
-                                      <TableCell colSpan={3} className="py-6 text-center text-muted-foreground">
-                                        No reconciliation alerts.
-                                      </TableCell>
-                                    </TableRow>
-                                  ) : (
-                                    report.manualReconciliation.alerts.map((alert) => (
-                                      <TableRow key={`${alert.code}-${alert.severity}`}>
-                                        <TableCell className="font-medium">{alert.code}</TableCell>
-                                        <TableCell className="capitalize">{alert.severity}</TableCell>
-                                        <TableCell className="text-right">{alert.count}</TableCell>
-                                      </TableRow>
-                                    ))
-                                  )}
-                                </TableBody>
-                              </Table>
-                            </div>
-
-                            <div className="rounded-lg border border-border">
-                              <div className="border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                Latest Bank Entries
-                              </div>
-                              <Table>
-                                <TableHeader>
-                                  <TableRow>
-                                    <TableHead>Invoice</TableHead>
-                                    <TableHead>Method</TableHead>
-                                    <TableHead className="text-right">Amount</TableHead>
-                                    <TableHead>Status</TableHead>
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {report.manualReconciliation.items.length === 0 ? (
-                                    <TableRow>
-                                      <TableCell colSpan={4} className="py-6 text-center text-muted-foreground">
-                                        No bank entries for this date.
-                                      </TableCell>
-                                    </TableRow>
-                                  ) : (
-                                    report.manualReconciliation.items.slice(0, 8).map((item) => (
-                                      <TableRow key={item.payment_id}>
-                                        <TableCell className="font-medium">{item.invoice_number}</TableCell>
-                                        <TableCell className="capitalize">{item.method.replaceAll("_", " ")}</TableCell>
-                                        <TableCell className="text-right">{money(item.amount)}</TableCell>
-                                        <TableCell className="capitalize">{item.status.replaceAll("_", " ")}</TableCell>
-                                      </TableRow>
-                                    ))
-                                  )}
-                                </TableBody>
-                              </Table>
-                            </div>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="px-3 py-6 text-sm text-muted-foreground">
-                          Run daily reconciliation to compare bank totals and detect duplicate/missing references.
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="mt-4 rounded-xl border border-border bg-background">
-                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-3 py-2">
-                        <p className="text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">
-                          Webhook Drift Reconciliation
-                        </p>
-                        {report.billingStateReconciliation ? (
-                          <Badge
-                            variant={
-                              report.billingStateReconciliation.drift_candidates > 0 ||
-                              report.billingStateReconciliation.webhook_failures_detected > 0
-                                ? "destructive"
-                                : "secondary"
-                            }
-                          >
-                            {report.billingStateReconciliation.dry_run ? "Preview" : "Applied"}
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline">Not Run</Badge>
-                        )}
-                      </div>
-
-                      {report.billingStateReconciliation ? (
-                        <div className="space-y-4 p-3">
-                          <div className="grid gap-3 md:grid-cols-4">
-                            <div className="rounded-lg border border-border p-3">
-                              <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Subscriptions Scanned</p>
-                              <p className="text-base font-semibold">{report.billingStateReconciliation.billing_subscriptions_scanned}</p>
-                            </div>
-                            <div className="rounded-lg border border-border p-3">
-                              <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Drift Candidates</p>
-                              <p className="text-base font-semibold">{report.billingStateReconciliation.drift_candidates}</p>
-                            </div>
-                            <div className="rounded-lg border border-border p-3">
-                              <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Reconciled</p>
-                              <p className="text-base font-semibold">{report.billingStateReconciliation.subscriptions_reconciled}</p>
-                            </div>
-                            <div className="rounded-lg border border-border p-3">
-                              <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Webhook Failures</p>
-                              <p className="text-base font-semibold">{report.billingStateReconciliation.webhook_failures_detected}</p>
-                            </div>
-                          </div>
-
-                          <div className="grid gap-3 xl:grid-cols-2">
-                            <div className="rounded-lg border border-border">
-                              <div className="border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                Subscription Updates
-                              </div>
-                              <Table>
-                                <TableHeader>
-                                  <TableRow>
-                                    <TableHead>Shop</TableHead>
-                                    <TableHead>Previous</TableHead>
-                                    <TableHead>Current</TableHead>
-                                    <TableHead>Applied</TableHead>
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {report.billingStateReconciliation.subscription_updates.length === 0 ? (
-                                    <TableRow>
-                                      <TableCell colSpan={4} className="py-6 text-center text-muted-foreground">
-                                        No drift candidates.
-                                      </TableCell>
-                                    </TableRow>
-                                  ) : (
-                                    report.billingStateReconciliation.subscription_updates.slice(0, 8).map((item) => (
-                                      <TableRow key={`${item.shop_id}-${item.subscription_id || item.customer_id || item.period_end}`}>
-                                        <TableCell className="font-medium">{item.shop_code}</TableCell>
-                                        <TableCell className="capitalize">{item.previous_status.replaceAll("_", " ")}</TableCell>
-                                        <TableCell className="capitalize">{item.reconciled_status.replaceAll("_", " ")}</TableCell>
-                                        <TableCell>{item.applied ? "Yes" : "No"}</TableCell>
-                                      </TableRow>
-                                    ))
-                                  )}
-                                </TableBody>
-                              </Table>
-                            </div>
-
-                            <div className="rounded-lg border border-border">
-                              <div className="border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                Failed Webhook Events
-                              </div>
-                              <Table>
-                                <TableHeader>
-                                  <TableRow>
-                                    <TableHead>Event</TableHead>
-                                    <TableHead>Type</TableHead>
-                                    <TableHead>Shop</TableHead>
-                                    <TableHead>Error</TableHead>
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {report.billingStateReconciliation.failed_webhook_events.length === 0 ? (
-                                    <TableRow>
-                                      <TableCell colSpan={4} className="py-6 text-center text-muted-foreground">
-                                        No failed webhook events in lookback window.
-                                      </TableCell>
-                                    </TableRow>
-                                  ) : (
-                                    report.billingStateReconciliation.failed_webhook_events.slice(0, 8).map((item) => (
-                                      <TableRow key={item.event_id}>
-                                        <TableCell className="font-medium">{item.event_id.slice(0, 12)}</TableCell>
-                                        <TableCell>{item.event_type}</TableCell>
-                                        <TableCell>{item.shop_code || "-"}</TableCell>
-                                        <TableCell className="text-muted-foreground">{item.last_error_code || "-"}</TableCell>
-                                      </TableRow>
-                                    ))
-                                  )}
-                                </TableBody>
-                              </Table>
-                            </div>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="px-3 py-6 text-sm text-muted-foreground">
-                          Run drift check to reconcile expired billing periods when webhook events are missed.
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-border bg-card shadow-sm">
-                  <div className="flex flex-col gap-3 border-b border-border px-4 py-3 md:flex-row md:items-center md:justify-between">
-                    <p className="text-sm font-semibold">Searchable Audit Logs</p>
-                    <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
-                      <Input
-                        value={auditSearch}
-                        onChange={(event) => setAuditSearch(event.target.value)}
-                        placeholder="Search action, actor, reason, metadata"
-                        className="md:w-80"
-                      />
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          void handleExportAuditLogs("csv");
-                        }}
-                      >
-                        Export CSV
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          void handleExportAuditLogs("json");
-                        }}
-                      >
-                        Export JSON
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          void handleSearchAuditLogs();
-                        }}
-                      >
-                        Search
-                      </Button>
-                    </div>
-                  </div>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Time</TableHead>
-                        <TableHead>Action</TableHead>
-                        <TableHead>Actor</TableHead>
-                        <TableHead>Manual</TableHead>
-                        <TableHead>Reason</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {(report.adminAudit?.items.length ?? 0) === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
-                            No audit logs matched this search.
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        (report.adminAudit?.items ?? []).map((event) => (
-                          <TableRow key={event.id}>
-                            <TableCell className="text-muted-foreground">
-                              {new Date(event.timestamp).toLocaleString()}
-                            </TableCell>
-                            <TableCell className="font-medium">{event.action}</TableCell>
-                            <TableCell>{event.actor}</TableCell>
-                            <TableCell>{event.is_manual_override ? "Yes" : "No"}</TableCell>
-                            <TableCell className="text-muted-foreground">{event.reason || "-"}</TableCell>
-                          </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
+                    </TabsContent>
+                  </Tabs>
                 </TabsContent>
               )}
             </Tabs>
