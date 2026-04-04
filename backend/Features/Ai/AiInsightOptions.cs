@@ -34,6 +34,7 @@ public sealed class AiInsightOptions
     public int MaxRequestsPerMinute { get; set; } = 10;
     public bool EnableSafetyChecks { get; set; } = true;
     public bool EnableOpenAiModeration { get; set; } = false;
+    public bool FailClosedOnModerationError { get; set; } = true;
     public string ModerationModel { get; set; } = "omni-moderation-latest";
     public string[] BlockedPromptTerms { get; set; } = [];
     public string[] BlockedOutputTerms { get; set; } = [];

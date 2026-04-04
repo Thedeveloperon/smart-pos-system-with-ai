@@ -768,60 +768,94 @@ public sealed class AiInsightService(
         AiInsightOptions aiOptions,
         CancellationToken cancellationToken)
     {
-        var apiBaseUrl = (aiOptions.ApiBaseUrl ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(apiBaseUrl))
+        try
         {
-            throw new InvalidOperationException("AiInsights:ApiBaseUrl is not configured for moderation checks.");
+            var apiBaseUrl = (aiOptions.ApiBaseUrl ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(apiBaseUrl))
+            {
+                throw new InvalidOperationException("AiInsights:ApiBaseUrl is not configured for moderation checks.");
+            }
+
+            var (apiKey, apiKeyEnvironmentVariable) = ResolveOpenAiApiKey(configuration, aiOptions);
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                throw new InvalidOperationException(
+                    $"OpenAI API key is not configured for moderation checks. Set environment variable '{apiKeyEnvironmentVariable}'.");
+            }
+
+            using var message = new HttpRequestMessage(HttpMethod.Post, $"{apiBaseUrl.TrimEnd('/')}/moderations")
+            {
+                Content = new StringContent(
+                    JsonSerializer.Serialize(new
+                    {
+                        model = string.IsNullOrWhiteSpace(aiOptions.ModerationModel)
+                            ? "omni-moderation-latest"
+                            : aiOptions.ModerationModel.Trim(),
+                        input = text
+                    }, JsonOptions),
+                    Encoding.UTF8,
+                    "application/json")
+            };
+            message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromMilliseconds(Math.Clamp(aiOptions.RequestTimeoutMs, 1000, 60000)));
+
+            using var response = await httpClient.SendAsync(message, timeoutCts.Token);
+            var raw = await response.Content.ReadAsStringAsync(timeoutCts.Token);
+            if (!response.IsSuccessStatusCode)
+            {
+                logger.LogWarning(
+                    "OpenAI moderation request failed with status {StatusCode}. Body preview: {BodyPreview}",
+                    (int)response.StatusCode,
+                    raw.Length <= 320 ? raw : raw[..320]);
+                return HandleModerationFailure(aiOptions);
+            }
+
+            using var document = JsonDocument.Parse(raw);
+            var root = document.RootElement;
+
+            if (!root.TryGetProperty("results", out var resultsElement) ||
+                resultsElement.ValueKind != JsonValueKind.Array ||
+                resultsElement.GetArrayLength() == 0)
+            {
+                logger.LogWarning(
+                    "OpenAI moderation response was missing results array. Body preview: {BodyPreview}",
+                    raw.Length <= 320 ? raw : raw[..320]);
+                return HandleModerationFailure(aiOptions);
+            }
+
+            var firstResult = resultsElement[0];
+            return firstResult.TryGetProperty("flagged", out var flaggedElement) &&
+                   flaggedElement.ValueKind == JsonValueKind.True;
         }
-
-        var (apiKey, apiKeyEnvironmentVariable) = ResolveOpenAiApiKey(configuration, aiOptions);
-        if (string.IsNullOrWhiteSpace(apiKey))
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new InvalidOperationException(
-                $"OpenAI API key is not configured for moderation checks. Set environment variable '{apiKeyEnvironmentVariable}'.");
+            logger.LogWarning(exception, "OpenAI moderation request timed out.");
+            return HandleModerationFailure(aiOptions);
         }
-
-        using var message = new HttpRequestMessage(HttpMethod.Post, $"{apiBaseUrl.TrimEnd('/')}/moderations")
+        catch (HttpRequestException exception)
         {
-            Content = new StringContent(
-                JsonSerializer.Serialize(new
-                {
-                    model = string.IsNullOrWhiteSpace(aiOptions.ModerationModel)
-                        ? "omni-moderation-latest"
-                        : aiOptions.ModerationModel.Trim(),
-                    input = text
-                }, JsonOptions),
-                Encoding.UTF8,
-                "application/json")
-        };
-        message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(TimeSpan.FromMilliseconds(Math.Clamp(aiOptions.RequestTimeoutMs, 1000, 60000)));
-
-        using var response = await httpClient.SendAsync(message, timeoutCts.Token);
-        if (!response.IsSuccessStatusCode)
+            logger.LogWarning(exception, "OpenAI moderation request failed.");
+            return HandleModerationFailure(aiOptions);
+        }
+        catch (JsonException exception)
         {
-            logger.LogWarning(
-                "OpenAI moderation request failed with status {StatusCode}.",
-                (int)response.StatusCode);
+            logger.LogWarning(exception, "OpenAI moderation response could not be parsed.");
+            return HandleModerationFailure(aiOptions);
+        }
+    }
+
+    private bool HandleModerationFailure(AiInsightOptions aiOptions)
+    {
+        if (aiOptions.FailClosedOnModerationError)
+        {
             throw new InvalidOperationException("AI safety check failed.");
         }
 
-        var raw = await response.Content.ReadAsStringAsync(timeoutCts.Token);
-        using var document = JsonDocument.Parse(raw);
-        var root = document.RootElement;
-
-        if (!root.TryGetProperty("results", out var resultsElement) ||
-            resultsElement.ValueKind != JsonValueKind.Array ||
-            resultsElement.GetArrayLength() == 0)
-        {
-            throw new InvalidOperationException("AI safety check failed.");
-        }
-
-        var firstResult = resultsElement[0];
-        return firstResult.TryGetProperty("flagged", out var flaggedElement) &&
-               flaggedElement.ValueKind == JsonValueKind.True;
+        logger.LogWarning(
+            "OpenAI moderation failed and request continues because AiInsights:FailClosedOnModerationError is disabled.");
+        return false;
     }
 
     private async Task<PosInsightFacts> BuildPosInsightFactsAsync(AppUser user, CancellationToken cancellationToken)
