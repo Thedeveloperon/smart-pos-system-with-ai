@@ -24,6 +24,9 @@ public sealed class AiInsightService(
     private const string UsageTypeQuickInsights = "quick_insights";
     private const string UsageTypeAdvancedAnalysis = "advanced_analysis";
     private const string UsageTypeSmartReports = "smart_reports";
+    private const string OutputLanguageEnglish = "english";
+    private const string OutputLanguageSinhala = "sinhala";
+    private const string OutputLanguageTamil = "tamil";
     private const int GroundingContextReserveTokenBuffer = 300;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly JsonSerializerOptions CaseInsensitiveJsonOptions = new(JsonSerializerDefaults.Web)
@@ -228,7 +231,12 @@ public sealed class AiInsightService(
             await dbContext.SaveChangesAsync(cancellationToken);
 
             var posFacts = await BuildPosInsightFactsAsync(requestRecord.User, cancellationToken);
-            var groundedPrompt = BuildGroundedPrompt(normalizedPrompt, posFacts);
+            var preferredOutputLanguage = await ResolvePreferredOutputLanguageAsync(cancellationToken);
+            var preferredOutputLanguageLabel = MapOutputLanguageLabel(preferredOutputLanguage);
+            var groundedPrompt = BuildGroundedPrompt(
+                normalizedPrompt,
+                posFacts,
+                preferredOutputLanguageLabel);
             var providerStopwatch = Stopwatch.StartNew();
 
             AiProviderResult providerResult;
@@ -251,6 +259,7 @@ public sealed class AiInsightService(
                     posFacts,
                     aiOptions,
                     usagePolicy.MaxOutputTokens,
+                    preferredOutputLanguageLabel,
                     cancellationToken);
             }
 
@@ -423,11 +432,18 @@ public sealed class AiInsightService(
         PosInsightFacts posFacts,
         AiInsightOptions aiOptions,
         int maxOutputTokens,
+        string outputLanguageLabel,
         CancellationToken cancellationToken)
     {
         return provider switch
         {
-            ProviderOpenAi => await GenerateWithOpenAiAsync(model, groundedPrompt, aiOptions, maxOutputTokens, cancellationToken),
+            ProviderOpenAi => await GenerateWithOpenAiAsync(
+                model,
+                groundedPrompt,
+                aiOptions,
+                maxOutputTokens,
+                outputLanguageLabel,
+                cancellationToken),
             ProviderLocal => GenerateWithLocalProvider(model, originalPrompt, posFacts),
             _ => throw new InvalidOperationException("Unsupported AI provider.")
         };
@@ -438,6 +454,7 @@ public sealed class AiInsightService(
         string groundedPrompt,
         AiInsightOptions aiOptions,
         int maxOutputTokens,
+        string outputLanguageLabel,
         CancellationToken cancellationToken)
     {
         var apiBaseUrl = (aiOptions.ApiBaseUrl ?? string.Empty).Trim();
@@ -469,7 +486,7 @@ public sealed class AiInsightService(
                                 new
                                 {
                                     type = "input_text",
-                                    text = "You are a retail POS analyst. Use only verified facts provided by the system. Return strictly valid JSON with fields: summary, recommended_actions, risks, missing_data, insufficient_data, confidence."
+                                    text = $"You are a retail POS analyst. Use only verified facts provided by the system. Return strictly valid JSON with fields: summary, recommended_actions, risks, missing_data, insufficient_data, confidence. Write all text fields in {outputLanguageLabel}."
                                 }
                             }
                         },
@@ -1193,6 +1210,28 @@ public sealed class AiInsightService(
             missingData);
     }
 
+    private async Task<string> ResolvePreferredOutputLanguageAsync(CancellationToken cancellationToken)
+    {
+        string? value;
+        if (dbContext.Database.IsSqlite())
+        {
+            value = (await dbContext.ShopProfiles
+                    .AsNoTracking()
+                    .Select(x => x.Language)
+                    .ToListAsync(cancellationToken))
+                .FirstOrDefault();
+        }
+        else
+        {
+            value = await dbContext.ShopProfiles
+                .AsNoTracking()
+                .Select(x => x.Language)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        return NormalizeOutputLanguage(value);
+    }
+
     private static IQueryable<Sale> ApplyStoreScope(IQueryable<Sale> query, Guid? storeId)
     {
         if (storeId.HasValue)
@@ -1201,6 +1240,27 @@ public sealed class AiInsightService(
         }
 
         return query.Where(x => x.StoreId == null);
+    }
+
+    private static string NormalizeOutputLanguage(string? value)
+    {
+        var normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            OutputLanguageSinhala => OutputLanguageSinhala,
+            OutputLanguageTamil => OutputLanguageTamil,
+            _ => OutputLanguageEnglish
+        };
+    }
+
+    private static string MapOutputLanguageLabel(string normalizedLanguage)
+    {
+        return normalizedLanguage switch
+        {
+            OutputLanguageSinhala => "Sinhala",
+            OutputLanguageTamil => "Tamil",
+            _ => "English"
+        };
     }
 
     private static IQueryable<SaleItem> ApplyStoreScope(IQueryable<SaleItem> query, Guid? storeId)
@@ -1233,7 +1293,10 @@ public sealed class AiInsightService(
         return query.Where(x => x.StoreId == null);
     }
 
-    private static string BuildGroundedPrompt(string prompt, PosInsightFacts posFacts)
+    private static string BuildGroundedPrompt(
+        string prompt,
+        PosInsightFacts posFacts,
+        string outputLanguageLabel)
     {
         var builder = new StringBuilder();
         builder.AppendLine("Customer question:");
@@ -1247,6 +1310,7 @@ public sealed class AiInsightService(
         builder.AppendLine("2. Do not invent numbers, products, trends, or stock values.");
         builder.AppendLine("3. If data is insufficient, set insufficient_data=true and list missing_data.");
         builder.AppendLine("4. Return strictly valid JSON with this schema:");
+        builder.AppendLine($"5. Write all text fields in {outputLanguageLabel}.");
         builder.AppendLine("   {");
         builder.AppendLine("     \"summary\": string,");
         builder.AppendLine("     \"recommended_actions\": string[],");

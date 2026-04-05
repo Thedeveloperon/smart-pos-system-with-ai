@@ -6,6 +6,10 @@ namespace SmartPos.Backend.Features.Settings;
 
 public sealed class ShopProfileService(SmartPosDbContext dbContext)
 {
+    private const string LanguageEnglish = "english";
+    private const string LanguageSinhala = "sinhala";
+    private const string LanguageTamil = "tamil";
+
     public async Task<ShopProfileResponse> GetAsync(CancellationToken cancellationToken)
     {
         var profile = await GetOrCreateAsync(cancellationToken);
@@ -18,6 +22,7 @@ public sealed class ShopProfileService(SmartPosDbContext dbContext)
     {
         var profile = await GetOrCreateAsync(cancellationToken);
         profile.ShopName = NormalizeRequired(request.ShopName, "Shop name is required.");
+        profile.Language = NormalizeLanguage(request.Language);
         profile.AddressLine1 = NormalizeOptional(request.AddressLine1);
         profile.AddressLine2 = NormalizeOptional(request.AddressLine2);
         profile.Phone = NormalizeOptional(request.Phone);
@@ -37,6 +42,7 @@ public sealed class ShopProfileService(SmartPosDbContext dbContext)
         {
             Id = profile.Id,
             ShopName = profile.ShopName,
+            Language = NormalizeLanguage(profile.Language),
             AddressLine1 = profile.AddressLine1,
             AddressLine2 = profile.AddressLine2,
             Phone = profile.Phone,
@@ -77,5 +83,17 @@ public sealed class ShopProfileService(SmartPosDbContext dbContext)
     private static string? NormalizeOptional(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static string NormalizeLanguage(string? value)
+    {
+        var normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            LanguageEnglish => LanguageEnglish,
+            LanguageSinhala => LanguageSinhala,
+            LanguageTamil => LanguageTamil,
+            _ => LanguageEnglish
+        };
     }
 }

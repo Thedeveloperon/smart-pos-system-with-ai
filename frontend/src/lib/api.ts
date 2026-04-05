@@ -365,6 +365,7 @@ type BackendCategoryListResponse = {
 type BackendShopProfileResponse = {
   id: string;
   shop_name: string;
+  language?: string | null;
   address_line1?: string | null;
   address_line2?: string | null;
   phone?: string | null;
@@ -587,6 +588,7 @@ export type PurchaseImportConfirmResponse = {
 export type ShopProfile = {
   id: string;
   shopName: string;
+  language: ShopProfileLanguage;
   addressLine1: string;
   addressLine2: string;
   phone: string;
@@ -597,6 +599,8 @@ export type ShopProfile = {
   createdAt: string;
   updatedAt?: string | null;
 };
+
+export type ShopProfileLanguage = "english" | "sinhala" | "tamil";
 
 type HeldSalesResponse = {
   items: {
@@ -1977,6 +1981,7 @@ function mapShopProfile(profile: BackendShopProfileResponse): ShopProfile {
   return {
     id: profile.id,
     shopName: profile.shop_name,
+    language: normalizeShopProfileLanguage(profile.language),
     addressLine1: profile.address_line1 || "",
     addressLine2: profile.address_line2 || "",
     phone: profile.phone || "",
@@ -1987,6 +1992,15 @@ function mapShopProfile(profile: BackendShopProfileResponse): ShopProfile {
     createdAt: profile.created_at,
     updatedAt: profile.updated_at,
   };
+}
+
+function normalizeShopProfileLanguage(value?: string | null): ShopProfileLanguage {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === "sinhala" || normalized === "tamil") {
+    return normalized;
+  }
+
+  return "english";
 }
 
 export async function bootstrapSession() {
@@ -3502,6 +3516,7 @@ export async function updateShopProfile(profile: ShopProfile) {
     method: "PUT",
     body: JSON.stringify({
       shop_name: profile.shopName,
+      language: profile.language,
       address_line1: profile.addressLine1 || null,
       address_line2: profile.addressLine2 || null,
       phone: profile.phone || null,

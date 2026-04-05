@@ -9,7 +9,7 @@ import {
 } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search, ScanBarcode, Keyboard, Package, Plus } from "lucide-react";
+import { Camera, Keyboard, Package, Plus, ScanBarcode, Search } from "lucide-react";
 import ProductCard from "./ProductCard";
 import type { Product } from "./types";
 import { POS_SHORTCUT_INLINE_HINT, POS_SHORTCUT_LABELS } from "./shortcuts";
@@ -17,8 +17,32 @@ import { POS_SHORTCUT_INLINE_HINT, POS_SHORTCUT_LABELS } from "./shortcuts";
 const SCANNER_BURST_INTERVAL_MS = 45;
 const SCANNER_ENTER_GRACE_MS = 120;
 const SCANNER_BURST_MIN_CHARS = 6;
+const CAMERA_SCAN_INTERVAL_MS = 140;
+const CAMERA_SCAN_DUPLICATE_COOLDOWN_MS = 1300;
 const normalizeBarcode = (value: string) => value.trim().toLowerCase();
 const isBarcodeFeatureEnabled = import.meta.env.VITE_BARCODE_FEATURE_ENABLED !== "false";
+const CAMERA_SCAN_FORMATS = ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "itf", "codabar"];
+
+type BarcodeDetectionResultLike = {
+  rawValue?: string | null;
+};
+
+interface BarcodeDetectorLike {
+  detect: (source: ImageBitmapSource) => Promise<BarcodeDetectionResultLike[]>;
+}
+
+interface BarcodeDetectorConstructorLike {
+  new (options?: { formats?: string[] }): BarcodeDetectorLike;
+  getSupportedFormats?: () => Promise<string[]>;
+}
+
+function getBarcodeDetectorConstructor(): BarcodeDetectorConstructorLike | null {
+  const maybeGlobal = globalThis as typeof globalThis & {
+    BarcodeDetector?: BarcodeDetectorConstructorLike;
+  };
+
+  return maybeGlobal.BarcodeDetector ?? null;
+}
 
 interface ProductSearchPanelProps {
   products: Product[];
@@ -36,7 +60,16 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
     const [searchQuery, setSearchQuery] = useState("");
     const [searchMode, setSearchMode] = useState<"manual" | "barcode">("manual");
     const [barcodeFeedback, setBarcodeFeedback] = useState<string | null>(null);
+    const [cameraOpen, setCameraOpen] = useState(false);
+    const [cameraStarting, setCameraStarting] = useState(false);
+    const [cameraFeedback, setCameraFeedback] = useState<string | null>(null);
     const searchInputRef = useRef<HTMLInputElement>(null);
+    const cameraVideoRef = useRef<HTMLVideoElement>(null);
+    const cameraDetectorRef = useRef<BarcodeDetectorLike | null>(null);
+    const cameraStreamRef = useRef<MediaStream | null>(null);
+    const cameraLoopTimerRef = useRef<number | null>(null);
+    const cameraLoopBusyRef = useRef(false);
+    const lastCameraScanRef = useRef({ value: "", at: 0 });
     const scannerBurstRef = useRef({ charCount: 0, lastKeyAt: 0 });
     const lastAutoAddKeyRef = useRef<string | null>(null);
 
@@ -53,6 +86,72 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
     const resetScannerBurst = useCallback(() => {
       scannerBurstRef.current = { charCount: 0, lastKeyAt: 0 };
     }, []);
+
+    const stopCameraStream = useCallback(() => {
+      if (cameraLoopTimerRef.current !== null) {
+        window.clearTimeout(cameraLoopTimerRef.current);
+        cameraLoopTimerRef.current = null;
+      }
+
+      cameraLoopBusyRef.current = false;
+
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+        cameraStreamRef.current = null;
+      }
+
+      if (cameraVideoRef.current) {
+        cameraVideoRef.current.srcObject = null;
+      }
+
+      cameraDetectorRef.current = null;
+      lastCameraScanRef.current = { value: "", at: 0 };
+    }, []);
+
+    const canUseCameraScanner = useCallback(() => {
+      if (typeof navigator === "undefined") {
+        return false;
+      }
+
+      return Boolean(navigator.mediaDevices?.getUserMedia) && getBarcodeDetectorConstructor() !== null;
+    }, []);
+
+    const processBarcodeValue = useCallback(
+      (rawValue: string, scannerLike: boolean, keepSearchFocused: boolean) => {
+        const trimmedValue = rawValue.trim();
+        if (!trimmedValue) {
+          return;
+        }
+
+        const normalizedBarcodeQuery = normalizeBarcode(trimmedValue);
+        const matchedProduct = products.find((product) => {
+          if (!product.barcode) {
+            return false;
+          }
+
+          return normalizeBarcode(product.barcode) === normalizedBarcodeQuery;
+        });
+
+        if (matchedProduct) {
+          onAddToCart(matchedProduct, 1);
+          setSearchQuery("");
+          setBarcodeFeedback(null);
+        } else {
+          setSearchQuery(trimmedValue);
+          setBarcodeFeedback(
+            scannerLike
+              ? `No product matched scanned barcode "${trimmedValue}".`
+              : `No product matched barcode "${trimmedValue}".`,
+          );
+        }
+
+        resetScannerBurst();
+        if (keepSearchFocused) {
+          focusAndSelectSearch();
+        }
+      },
+      [focusAndSelectSearch, onAddToCart, products, resetScannerBurst],
+    );
 
     useImperativeHandle(
       ref,
@@ -74,36 +173,9 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
 
     const submitBarcodeQuery = useCallback(
       (scannerLike: boolean) => {
-        const rawQuery = searchQuery.trim();
-        if (!rawQuery) {
-          return;
-        }
-
-        const normalizedBarcodeQuery = normalizeBarcode(rawQuery);
-        const matchedProduct = products.find((product) => {
-          if (!product.barcode) {
-            return false;
-          }
-
-          return normalizeBarcode(product.barcode) === normalizedBarcodeQuery;
-        });
-
-        if (matchedProduct) {
-          onAddToCart(matchedProduct, 1);
-          setSearchQuery("");
-          setBarcodeFeedback(null);
-        } else {
-          setBarcodeFeedback(
-            scannerLike
-              ? `No product matched scanned barcode "${rawQuery}".`
-              : `No product matched barcode "${rawQuery}".`,
-          );
-        }
-
-        resetScannerBurst();
-        focusAndSelectSearch();
+        processBarcodeValue(searchQuery, scannerLike, true);
       },
-      [focusAndSelectSearch, onAddToCart, products, resetScannerBurst, searchQuery],
+      [processBarcodeValue, searchQuery],
     );
 
     const handleBarcodeInputKeyDown = useCallback(
@@ -190,6 +262,10 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
       }
 
       if (searchMode === "barcode") {
+        stopCameraStream();
+        setCameraOpen(false);
+        setCameraFeedback(null);
+        setCameraStarting(false);
         setSearchMode("manual");
         setBarcodeFeedback(null);
         return;
@@ -198,7 +274,28 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
       setSearchQuery("");
       setSearchMode("barcode");
       setBarcodeFeedback(null);
-    }, [searchMode]);
+      setCameraFeedback(null);
+    }, [searchMode, stopCameraStream]);
+
+    const toggleCameraScanner = useCallback(() => {
+      if (cameraOpen) {
+        stopCameraStream();
+        setCameraOpen(false);
+        setCameraStarting(false);
+        setCameraFeedback("Camera scanner stopped.");
+        return;
+      }
+
+      if (!canUseCameraScanner()) {
+        setCameraFeedback("Camera barcode scan is unavailable in this browser. Use scanner input and Enter.");
+        return;
+      }
+
+      setCameraFeedback(null);
+      setBarcodeFeedback(null);
+      setSearchQuery("");
+      setCameraOpen(true);
+    }, [cameraOpen, canUseCameraScanner, stopCameraStream]);
 
     useEffect(() => {
       if (searchMode !== "barcode") {
@@ -209,6 +306,150 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
       resetScannerBurst();
       setBarcodeFeedback(null);
     }, [focusAndSelectSearch, resetScannerBurst, searchMode]);
+
+    useEffect(() => {
+      if (searchMode === "barcode") {
+        return;
+      }
+
+      if (!cameraOpen) {
+        return;
+      }
+
+      stopCameraStream();
+      setCameraOpen(false);
+      setCameraStarting(false);
+    }, [cameraOpen, searchMode, stopCameraStream]);
+
+    useEffect(() => {
+      if (searchMode !== "barcode" || !cameraOpen || !isBarcodeFeatureEnabled) {
+        return;
+      }
+
+      let disposed = false;
+
+      const setupCamera = async () => {
+        setCameraStarting(true);
+
+        try {
+          const barcodeDetectorCtor = getBarcodeDetectorConstructor();
+          if (!barcodeDetectorCtor) {
+            throw new Error("BarcodeDetector API is not available.");
+          }
+
+          const supportedFormats = typeof barcodeDetectorCtor.getSupportedFormats === "function"
+            ? await barcodeDetectorCtor.getSupportedFormats()
+            : [];
+          const enabledFormats = supportedFormats.length
+            ? CAMERA_SCAN_FORMATS.filter((format) => supportedFormats.includes(format))
+            : CAMERA_SCAN_FORMATS;
+          const detector = enabledFormats.length
+            ? new barcodeDetectorCtor({ formats: enabledFormats })
+            : new barcodeDetectorCtor();
+
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: {
+              facingMode: { ideal: "environment" },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+          });
+
+          if (disposed) {
+            stream.getTracks().forEach((track) => track.stop());
+            return;
+          }
+
+          cameraStreamRef.current = stream;
+          cameraDetectorRef.current = detector;
+
+          const video = cameraVideoRef.current;
+          if (!video) {
+            throw new Error("Could not open camera preview.");
+          }
+
+          video.srcObject = stream;
+          await video.play();
+          setCameraFeedback("Camera is active. Hold barcode in frame.");
+
+          const scanFrame = async () => {
+            if (disposed || !cameraOpen || !cameraDetectorRef.current) {
+              return;
+            }
+
+            if (cameraLoopBusyRef.current) {
+              cameraLoopTimerRef.current = window.setTimeout(scanFrame, CAMERA_SCAN_INTERVAL_MS);
+              return;
+            }
+
+            const currentVideo = cameraVideoRef.current;
+            if (!currentVideo || currentVideo.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+              cameraLoopTimerRef.current = window.setTimeout(scanFrame, CAMERA_SCAN_INTERVAL_MS);
+              return;
+            }
+
+            try {
+              cameraLoopBusyRef.current = true;
+              const results = await cameraDetectorRef.current.detect(currentVideo);
+              const detectedValue = results.find((item) => item.rawValue?.trim())?.rawValue?.trim();
+              if (detectedValue) {
+                const now = Date.now();
+                const last = lastCameraScanRef.current;
+                if (
+                  last.value === detectedValue &&
+                  now - last.at < CAMERA_SCAN_DUPLICATE_COOLDOWN_MS
+                ) {
+                  return;
+                }
+
+                lastCameraScanRef.current = { value: detectedValue, at: now };
+                setCameraFeedback(`Detected barcode ${detectedValue}.`);
+                processBarcodeValue(detectedValue, true, false);
+              }
+            } catch {
+              if (!disposed) {
+                setCameraFeedback("Camera scan is running, but barcode detection is unstable. Try better lighting.");
+              }
+            } finally {
+              cameraLoopBusyRef.current = false;
+              if (!disposed && cameraOpen) {
+                cameraLoopTimerRef.current = window.setTimeout(scanFrame, CAMERA_SCAN_INTERVAL_MS);
+              }
+            }
+          };
+
+          cameraLoopTimerRef.current = window.setTimeout(scanFrame, CAMERA_SCAN_INTERVAL_MS);
+        } catch (error) {
+          const errorName = error instanceof DOMException ? error.name : "";
+          if (errorName === "NotAllowedError") {
+            setCameraFeedback("Camera permission was denied. Allow camera access and try again.");
+          } else if (errorName === "NotFoundError") {
+            setCameraFeedback("No camera device was found on this system.");
+          } else if (errorName === "NotReadableError") {
+            setCameraFeedback("Camera is currently in use by another app.");
+          } else if (errorName === "SecurityError") {
+            setCameraFeedback("Camera access requires a secure context (HTTPS).");
+          } else {
+            setCameraFeedback("Unable to start camera barcode scanning right now.");
+          }
+
+          setCameraOpen(false);
+          stopCameraStream();
+        } finally {
+          if (!disposed) {
+            setCameraStarting(false);
+          }
+        }
+      };
+
+      void setupCamera();
+
+      return () => {
+        disposed = true;
+        stopCameraStream();
+      };
+    }, [cameraOpen, processBarcodeValue, searchMode, stopCameraStream]);
 
     useEffect(() => {
       if (!expertMode || searchMode !== "manual" || normalizedQuery.length === 0) {
@@ -296,6 +537,42 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
             >
               {barcodeFeedback || "Barcode mode active: scan and press Enter to add item to cart."}
             </p>
+          )}
+          {isBarcodeFeatureEnabled && searchMode === "barcode" && (
+            <div className="mt-2 space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant={cameraOpen ? "default" : "outline"}
+                  size="sm"
+                  className="h-8 rounded-lg"
+                  onClick={toggleCameraScanner}
+                  disabled={cameraStarting}
+                  aria-label={cameraOpen ? "Stop camera barcode scan" : "Start camera barcode scan"}
+                  title="Use inbuilt camera for barcode scanning"
+                >
+                  <Camera className="mr-1.5 h-3.5 w-3.5" />
+                  {cameraOpen ? "Stop camera" : "Scan with camera"}
+                </Button>
+                {cameraStarting && <span className="text-[11px] text-muted-foreground">Opening camera...</span>}
+                {cameraFeedback && (
+                  <span className="text-[11px] text-muted-foreground" role="status" aria-live="polite">
+                    {cameraFeedback}
+                  </span>
+                )}
+              </div>
+              {cameraOpen && (
+                <div className="overflow-hidden rounded-xl border border-border bg-black/90">
+                  <video
+                    ref={cameraVideoRef}
+                    className="h-44 w-full object-cover sm:h-52"
+                    muted
+                    autoPlay
+                    playsInline
+                  />
+                </div>
+              )}
+            </div>
           )}
           {expertMode && searchMode === "manual" && (
             <p className="mt-2 text-[11px] text-muted-foreground">

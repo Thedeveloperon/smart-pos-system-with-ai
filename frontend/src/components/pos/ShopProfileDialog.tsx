@@ -4,9 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { fetchShopProfile, updateShopProfile, type ShopProfile } from "@/lib/api";
+import { fetchShopProfile, updateShopProfile, type ShopProfile, type ShopProfileLanguage } from "@/lib/api";
 import {
   isExpertModeEnabled,
   isQuickSaleEnabled,
@@ -26,6 +27,7 @@ interface ShopProfileDialogProps {
 const emptyProfile = (): ShopProfile => ({
   id: "",
   shopName: "SmartPOS Lanka",
+  language: "english",
   addressLine1: "",
   addressLine2: "",
   phone: "",
@@ -44,6 +46,11 @@ const ShopProfileDialog = ({
   expertModeEnabled,
   onExpertModeEnabledChange,
 }: ShopProfileDialogProps) => {
+  const languageOptions: Array<{ value: ShopProfileLanguage; label: string }> = [
+    { value: "english", label: "English" },
+    { value: "sinhala", label: "Sinhala" },
+    { value: "tamil", label: "Tamil" },
+  ];
   const [profile, setProfile] = useState<ShopProfile>(emptyProfile);
   const [confirmationSoundEnabled, setConfirmationSoundEnabledState] = useState(true);
   const [quickSaleEnabled, setQuickSaleEnabledState] = useState(false);
@@ -194,6 +201,25 @@ const ShopProfileDialog = ({
                   placeholder="shop@example.com"
                 />
               </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="language">AI response language</Label>
+              <Select
+                value={profile.language}
+                onValueChange={(value) => updateField("language", value as ShopProfileLanguage)}
+              >
+                <SelectTrigger id="language">
+                  <SelectValue placeholder="Select language" />
+                </SelectTrigger>
+                <SelectContent>
+                  {languageOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="grid gap-2">

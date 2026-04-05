@@ -117,6 +117,7 @@ public static class DbSeeder
             dbContext.ShopProfiles.Add(new ShopProfile
             {
                 ShopName = "SmartPOS Lanka",
+                Language = "english",
                 AddressLine1 = "Your shop address",
                 AddressLine2 = "Add your branch or city",
                 Phone = string.Empty,

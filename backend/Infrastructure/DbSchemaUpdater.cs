@@ -88,6 +88,7 @@ public static class DbSchemaUpdater
                 CREATE TABLE IF NOT EXISTS "shop_profiles" (
                   "Id" TEXT NOT NULL CONSTRAINT "PK_shop_profiles" PRIMARY KEY,
                   "ShopName" TEXT NOT NULL,
+                  "Language" TEXT NOT NULL DEFAULT 'english',
                   "AddressLine1" TEXT NULL,
                   "AddressLine2" TEXT NULL,
                   "Phone" TEXT NULL,
@@ -101,6 +102,13 @@ public static class DbSchemaUpdater
                 """;
 
             await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+
+            if (!await ColumnExistsAsync(dbContext, "shop_profiles", "Language", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "shop_profiles" ADD COLUMN "Language" TEXT NOT NULL DEFAULT 'english';""",
+                    cancellationToken);
+            }
             return;
         }
 
@@ -110,6 +118,7 @@ public static class DbSchemaUpdater
                 CREATE TABLE IF NOT EXISTS shop_profiles (
                   "Id" uuid NOT NULL PRIMARY KEY,
                   "ShopName" varchar(160) NOT NULL,
+                  "Language" varchar(24) NOT NULL DEFAULT 'english',
                   "AddressLine1" varchar(180) NULL,
                   "AddressLine2" varchar(180) NULL,
                   "Phone" varchar(32) NULL,
@@ -123,6 +132,9 @@ public static class DbSchemaUpdater
                 """;
 
             await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE shop_profiles ADD COLUMN IF NOT EXISTS "Language" varchar(24) NOT NULL DEFAULT 'english';""",
+                cancellationToken);
         }
     }
 
