@@ -76,4 +76,17 @@ describe("ProductSearchPanel barcode mode", () => {
 
     expect(input).toHaveFocus();
   });
+
+  it("shows clear fallback when camera scan is unavailable", () => {
+    const onAddToCart = vi.fn();
+
+    render(<ProductSearchPanel products={sampleProducts} onAddToCart={onAddToCart} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Switch to barcode mode" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start camera barcode scan" }));
+
+    expect(
+      screen.getByText("Camera barcode scan is unavailable in this browser. Use scanner input and Enter."),
+    ).toBeInTheDocument();
+  });
 });

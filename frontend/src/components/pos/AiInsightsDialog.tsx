@@ -24,14 +24,22 @@ import {
   type AiInsightsUsageType,
   type AiPaymentHistoryItem,
 } from "@/lib/api";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+} from "@/components/ui/drawer";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
@@ -90,6 +98,25 @@ const PAYMENT_METHOD_OPTIONS: ReadonlyArray<{
   },
 ];
 
+const CHAT_STARTER_PROMPTS: ReadonlyArray<{ label: string; prompt: string }> = [
+  {
+    label: "Low Stock",
+    prompt: "Which items are low stock right now, and what should I reorder first this week?",
+  },
+  {
+    label: "Price Check",
+    prompt: "Which products had margin drop today, and suggest better selling prices.",
+  },
+  {
+    label: "Weekly Summary",
+    prompt: "Summarize this week's best sellers, slow movers, and top revenue categories.",
+  },
+  {
+    label: "Restock Plan",
+    prompt: "Create a simple restock plan for next 7 days using current stock and sales velocity.",
+  },
+];
+
 function getUsageTypeLabel(value: AiInsightsUsageType): string {
   return USAGE_TYPE_OPTIONS.find((option) => option.value === value)?.label ?? "Quick Insights";
 }
@@ -145,6 +172,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, isSuperAdmin = 
   const [verifyReferenceInput, setVerifyReferenceInput] = useState("");
   const [isVerifyingByReference, setIsVerifyingByReference] = useState(false);
   const [verifyingPaymentId, setVerifyingPaymentId] = useState<string | null>(null);
+  const isMobile = useIsMobile();
 
   const hasInsight = Boolean(insightResult?.insight?.trim());
   const selectedUsageTypeOption = useMemo(
@@ -523,20 +551,8 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, isSuperAdmin = 
     }
   };
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[88vh] max-w-3xl overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-primary" />
-            AI Insights
-          </DialogTitle>
-          <DialogDescription>
-            Ask for sales and operations insights. Credits are deducted per request.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4">
+  const panelBody = (
+    <div className="space-y-4 p-4 sm:p-6">
           <div className="rounded-lg border border-border bg-muted/30 p-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
@@ -843,6 +859,18 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, isSuperAdmin = 
             </div>
 
             <div className="space-y-2">
+              <div className="flex flex-wrap gap-2">
+                {CHAT_STARTER_PROMPTS.map((starter) => (
+                  <button
+                    key={starter.label}
+                    type="button"
+                    className="rounded-full border border-border/80 bg-background px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
+                    onClick={() => setChatInput(starter.prompt)}
+                  >
+                    {starter.label}
+                  </button>
+                ))}
+              </div>
               <Textarea
                 value={chatInput}
                 onChange={(event) => setChatInput(event.target.value)}
@@ -991,9 +1019,49 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, isSuperAdmin = 
               </div>
             )}
           </div>
+    </div>
+  );
+
+  if (isMobile) {
+    return (
+      <Drawer open={open} onOpenChange={onOpenChange}>
+        <DrawerContent className="max-h-[94vh]">
+          <DrawerHeader className="border-b border-border px-4 pb-3 pt-4 text-left">
+            <DrawerTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-primary" />
+              AI Insights
+            </DrawerTitle>
+            <DrawerDescription>
+              Ask for sales and operations insights. Credits are deducted per request.
+            </DrawerDescription>
+          </DrawerHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {panelBody}
+          </div>
+        </DrawerContent>
+      </Drawer>
+    );
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent className="!w-full border-l border-border p-0 sm:!w-[860px] sm:!max-w-none">
+        <div className="flex h-full min-h-0 flex-col">
+          <SheetHeader className="border-b border-border px-6 py-4">
+            <SheetTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-primary" />
+              AI Insights
+            </SheetTitle>
+            <SheetDescription>
+              Ask for sales and operations insights. Credits are deducted per request.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {panelBody}
+          </div>
         </div>
-      </DialogContent>
-    </Dialog>
+      </SheetContent>
+    </Sheet>
   );
 };
 

@@ -55,6 +55,7 @@ public sealed class ShopProfile
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public string ShopName { get; set; } = "SmartPOS Lanka";
+    public string Language { get; set; } = "english";
     public string? AddressLine1 { get; set; }
     public string? AddressLine2 { get; set; }
     public string? Phone { get; set; }

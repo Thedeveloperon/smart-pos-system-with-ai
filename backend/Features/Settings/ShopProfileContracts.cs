@@ -10,6 +10,9 @@ public sealed class ShopProfileResponse
     [JsonPropertyName("shop_name")]
     public string ShopName { get; set; } = string.Empty;
 
+    [JsonPropertyName("language")]
+    public string Language { get; set; } = "english";
+
     [JsonPropertyName("address_line1")]
     public string? AddressLine1 { get; set; }
 
@@ -81,6 +84,9 @@ public sealed class UpdateShopProfileRequest
 {
     [JsonPropertyName("shop_name")]
     public string ShopName { get; set; } = string.Empty;
+
+    [JsonPropertyName("language")]
+    public string Language { get; set; } = "english";
 
     [JsonPropertyName("address_line1")]
     public string? AddressLine1 { get; set; }

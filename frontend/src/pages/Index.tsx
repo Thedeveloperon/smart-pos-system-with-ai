@@ -5,6 +5,7 @@ import { useLicensing } from "@/components/licensing/LicensingContext";
 import { LicenseGraceBanner, LicenseOfflineBanner } from "@/components/licensing/LicenseScreens";
 import HeaderBar from "@/components/pos/HeaderBar";
 import AiInsightsDialog from "@/components/pos/AiInsightsDialog";
+import AiInsightsFab from "@/components/pos/AiInsightsFab";
 import RemindersDialog from "@/components/pos/RemindersDialog";
 import LicenseAccountDialog from "@/components/pos/LicenseAccountDialog";
 import NewItemDialog from "@/components/pos/NewItemDialog";
@@ -782,6 +783,35 @@ const IndexInner = () => {
   });
 
   useEffect(() => {
+    if (!isAdmin) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) {
+        return;
+      }
+
+      if (event.altKey && event.key.toLowerCase() === "a") {
+        if (isShortcutActionBlocked) {
+          return;
+        }
+        event.preventDefault();
+        setShowAiInsights((previous) => !previous);
+      }
+
+      if (event.key === "Escape") {
+        setShowAiInsights(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isAdmin, isShortcutActionBlocked]);
+
+  useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
@@ -1098,6 +1128,13 @@ const IndexInner = () => {
 
           <MobileTabBar activeTab={mobileTab} onTabChange={setMobileTab} cartCount={cartCount} />
         </>
+      )}
+
+      {isAdmin && !showAiInsights && !isShortcutActionBlocked && (
+        <AiInsightsFab
+          onClick={() => setShowAiInsights(true)}
+          credits={aiCreditsBalance}
+        />
       )}
 
       <ClosingCashDialog

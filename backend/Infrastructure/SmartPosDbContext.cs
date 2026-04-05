@@ -104,6 +104,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
         {
             entity.ToTable("shop_profiles");
             entity.Property(x => x.ShopName).HasMaxLength(160);
+            entity.Property(x => x.Language).HasMaxLength(24);
             entity.Property(x => x.AddressLine1).HasMaxLength(180);
             entity.Property(x => x.AddressLine2).HasMaxLength(180);
             entity.Property(x => x.Phone).HasMaxLength(32);
