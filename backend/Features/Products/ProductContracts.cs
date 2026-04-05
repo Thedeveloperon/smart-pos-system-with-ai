@@ -15,8 +15,212 @@ public sealed class ProductSearchItem
     public string? Barcode { get; set; }
     [JsonPropertyName("image_url")]
     public string? ImageUrl { get; set; }
+    [JsonPropertyName("brand_id")]
+    public Guid? BrandId { get; set; }
+
+    [JsonPropertyName("brand_name")]
+    public string? BrandName { get; set; }
+
     public decimal UnitPrice { get; set; }
     public decimal StockQuantity { get; set; }
+}
+
+public sealed class BrandListResponse
+{
+    [JsonPropertyName("items")]
+    public List<BrandItemResponse> Items { get; set; } = [];
+}
+
+public sealed class BrandItemResponse
+{
+    [JsonPropertyName("brand_id")]
+    public Guid BrandId { get; set; }
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("code")]
+    public string? Code { get; set; }
+
+    [JsonPropertyName("description")]
+    public string? Description { get; set; }
+
+    [JsonPropertyName("is_active")]
+    public bool IsActive { get; set; }
+
+    [JsonPropertyName("product_count")]
+    public int ProductCount { get; set; }
+
+    [JsonPropertyName("created_at")]
+    public DateTimeOffset CreatedAt { get; set; }
+
+    [JsonPropertyName("updated_at")]
+    public DateTimeOffset? UpdatedAt { get; set; }
+}
+
+public sealed class UpsertBrandRequest
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("code")]
+    public string? Code { get; set; }
+
+    [JsonPropertyName("description")]
+    public string? Description { get; set; }
+
+    [JsonPropertyName("is_active")]
+    public bool IsActive { get; set; } = true;
+}
+
+public sealed class SupplierListResponse
+{
+    [JsonPropertyName("items")]
+    public List<SupplierItemResponse> Items { get; set; } = [];
+}
+
+public sealed class SupplierItemResponse
+{
+    [JsonPropertyName("supplier_id")]
+    public Guid SupplierId { get; set; }
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("code")]
+    public string? Code { get; set; }
+
+    [JsonPropertyName("contact_name")]
+    public string? ContactName { get; set; }
+
+    [JsonPropertyName("phone")]
+    public string? Phone { get; set; }
+
+    [JsonPropertyName("email")]
+    public string? Email { get; set; }
+
+    [JsonPropertyName("address")]
+    public string? Address { get; set; }
+
+    [JsonPropertyName("is_active")]
+    public bool IsActive { get; set; }
+
+    [JsonPropertyName("linked_product_count")]
+    public int LinkedProductCount { get; set; }
+
+    [JsonPropertyName("created_at")]
+    public DateTimeOffset CreatedAt { get; set; }
+
+    [JsonPropertyName("updated_at")]
+    public DateTimeOffset? UpdatedAt { get; set; }
+}
+
+public sealed class UpsertSupplierRequest
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("code")]
+    public string? Code { get; set; }
+
+    [JsonPropertyName("contact_name")]
+    public string? ContactName { get; set; }
+
+    [JsonPropertyName("phone")]
+    public string? Phone { get; set; }
+
+    [JsonPropertyName("email")]
+    public string? Email { get; set; }
+
+    [JsonPropertyName("address")]
+    public string? Address { get; set; }
+
+    [JsonPropertyName("is_active")]
+    public bool IsActive { get; set; } = true;
+}
+
+public sealed class ProductSupplierListResponse
+{
+    [JsonPropertyName("items")]
+    public List<ProductSupplierItemResponse> Items { get; set; } = [];
+}
+
+public sealed class ProductSupplierItemResponse
+{
+    [JsonPropertyName("product_supplier_id")]
+    public Guid ProductSupplierId { get; set; }
+
+    [JsonPropertyName("supplier_id")]
+    public Guid SupplierId { get; set; }
+
+    [JsonPropertyName("supplier_name")]
+    public string SupplierName { get; set; } = string.Empty;
+
+    [JsonPropertyName("supplier_sku")]
+    public string? SupplierSku { get; set; }
+
+    [JsonPropertyName("supplier_item_name")]
+    public string? SupplierItemName { get; set; }
+
+    [JsonPropertyName("is_preferred")]
+    public bool IsPreferred { get; set; }
+
+    [JsonPropertyName("lead_time_days")]
+    public int? LeadTimeDays { get; set; }
+
+    [JsonPropertyName("min_order_qty")]
+    public decimal? MinOrderQty { get; set; }
+
+    [JsonPropertyName("pack_size")]
+    public decimal? PackSize { get; set; }
+
+    [JsonPropertyName("last_purchase_price")]
+    public decimal? LastPurchasePrice { get; set; }
+
+    [JsonPropertyName("is_active")]
+    public bool IsActive { get; set; }
+
+    [JsonPropertyName("created_at")]
+    public DateTimeOffset CreatedAt { get; set; }
+
+    [JsonPropertyName("updated_at")]
+    public DateTimeOffset? UpdatedAt { get; set; }
+}
+
+public sealed class UpsertProductSupplierRequest
+{
+    [JsonPropertyName("supplier_id")]
+    public Guid SupplierId { get; set; }
+
+    [JsonPropertyName("supplier_sku")]
+    public string? SupplierSku { get; set; }
+
+    [JsonPropertyName("supplier_item_name")]
+    public string? SupplierItemName { get; set; }
+
+    [JsonPropertyName("is_preferred")]
+    public bool IsPreferred { get; set; }
+
+    [JsonPropertyName("lead_time_days")]
+    public int? LeadTimeDays { get; set; }
+
+    [JsonPropertyName("min_order_qty")]
+    public decimal? MinOrderQty { get; set; }
+
+    [JsonPropertyName("pack_size")]
+    public decimal? PackSize { get; set; }
+
+    [JsonPropertyName("last_purchase_price")]
+    public decimal? LastPurchasePrice { get; set; }
+
+    [JsonPropertyName("is_active")]
+    public bool IsActive { get; set; } = true;
+}
+
+public sealed class SetPreferredProductSupplierRequest
+{
+    [JsonPropertyName("supplier_id")]
+    public Guid SupplierId { get; set; }
 }
 
 public sealed class CategoryListResponse
@@ -90,6 +294,12 @@ public sealed class ProductCatalogItemResponse
     [JsonPropertyName("category_name")]
     public string? CategoryName { get; set; }
 
+    [JsonPropertyName("brand_id")]
+    public Guid? BrandId { get; set; }
+
+    [JsonPropertyName("brand_name")]
+    public string? BrandName { get; set; }
+
     [JsonPropertyName("unit_price")]
     public decimal UnitPrice { get; set; }
 
@@ -105,6 +315,12 @@ public sealed class ProductCatalogItemResponse
     [JsonPropertyName("alert_level")]
     public decimal AlertLevel { get; set; }
 
+    [JsonPropertyName("safety_stock")]
+    public decimal SafetyStock { get; set; }
+
+    [JsonPropertyName("target_stock_level")]
+    public decimal TargetStockLevel { get; set; }
+
     [JsonPropertyName("allow_negative_stock")]
     public bool AllowNegativeStock { get; set; }
 
@@ -113,6 +329,9 @@ public sealed class ProductCatalogItemResponse
 
     [JsonPropertyName("is_low_stock")]
     public bool IsLowStock { get; set; }
+
+    [JsonPropertyName("product_suppliers")]
+    public List<ProductSupplierItemResponse> ProductSuppliers { get; set; } = [];
 
     [JsonPropertyName("created_at")]
     public DateTimeOffset CreatedAt { get; set; }
@@ -138,6 +357,9 @@ public sealed class CreateProductRequest
     [JsonPropertyName("category_id")]
     public Guid? CategoryId { get; set; }
 
+    [JsonPropertyName("brand_id")]
+    public Guid? BrandId { get; set; }
+
     [JsonPropertyName("unit_price")]
     public decimal UnitPrice { get; set; }
 
@@ -149,6 +371,12 @@ public sealed class CreateProductRequest
 
     [JsonPropertyName("reorder_level")]
     public decimal ReorderLevel { get; set; }
+
+    [JsonPropertyName("safety_stock")]
+    public decimal SafetyStock { get; set; }
+
+    [JsonPropertyName("target_stock_level")]
+    public decimal TargetStockLevel { get; set; }
 
     [JsonPropertyName("allow_negative_stock")]
     public bool AllowNegativeStock { get; set; } = true;
@@ -174,6 +402,9 @@ public sealed class UpdateProductRequest
     [JsonPropertyName("category_id")]
     public Guid? CategoryId { get; set; }
 
+    [JsonPropertyName("brand_id")]
+    public Guid? BrandId { get; set; }
+
     [JsonPropertyName("unit_price")]
     public decimal UnitPrice { get; set; }
 
@@ -182,6 +413,12 @@ public sealed class UpdateProductRequest
 
     [JsonPropertyName("reorder_level")]
     public decimal ReorderLevel { get; set; }
+
+    [JsonPropertyName("safety_stock")]
+    public decimal SafetyStock { get; set; }
+
+    [JsonPropertyName("target_stock_level")]
+    public decimal TargetStockLevel { get; set; }
 
     [JsonPropertyName("allow_negative_stock")]
     public bool AllowNegativeStock { get; set; } = true;
@@ -344,6 +581,12 @@ public sealed class StockAdjustmentResponse
 
     [JsonPropertyName("alert_level")]
     public decimal AlertLevel { get; set; }
+
+    [JsonPropertyName("safety_stock")]
+    public decimal SafetyStock { get; set; }
+
+    [JsonPropertyName("target_stock_level")]
+    public decimal TargetStockLevel { get; set; }
 
     [JsonPropertyName("updated_at")]
     public DateTimeOffset UpdatedAt { get; set; }

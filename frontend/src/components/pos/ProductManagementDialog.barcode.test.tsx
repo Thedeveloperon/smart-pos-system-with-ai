@@ -73,7 +73,7 @@ function renderDialog() {
 async function openEditorForFirstProduct() {
   expect(await screen.findByText("Milk 1L")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-  expect(await screen.findByText("Manage Product")).toBeInTheDocument();
+  expect(await screen.findByText("POS Manager")).toBeInTheDocument();
 }
 
 describe("ProductManagementDialog barcode flow", () => {

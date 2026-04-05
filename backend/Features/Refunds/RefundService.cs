@@ -210,13 +210,17 @@ public sealed class RefundService(
                 inventoryRecord = new InventoryRecord
                 {
                     ProductId = refundItem.ProductId,
+                    StoreId = sale.StoreId,
                     QuantityOnHand = 0m,
                     ReorderLevel = 0m,
+                    SafetyStock = 0m,
+                    TargetStockLevel = 0m,
                     AllowNegativeStock = true,
                     Product = null!
                 };
                 dbContext.Inventory.Add(inventoryRecord);
             }
+            inventoryRecord.StoreId = sale.StoreId;
 
             inventoryRecord.QuantityOnHand += refundItem.Quantity;
             inventoryRecord.UpdatedAtUtc = now;

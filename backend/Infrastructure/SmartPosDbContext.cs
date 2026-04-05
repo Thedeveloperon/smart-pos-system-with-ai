@@ -6,9 +6,12 @@ namespace SmartPos.Backend.Infrastructure;
 public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> options) : DbContext(options)
 {
     public DbSet<Category> Categories => Set<Category>();
+    public DbSet<Brand> Brands => Set<Brand>();
     public DbSet<Product> Products => Set<Product>();
     public DbSet<InventoryRecord> Inventory => Set<InventoryRecord>();
     public DbSet<Supplier> Suppliers => Set<Supplier>();
+    public DbSet<ProductSupplier> ProductSuppliers => Set<ProductSupplier>();
+    public DbSet<ShopStockSettings> ShopStockSettings => Set<ShopStockSettings>();
     public DbSet<ShopProfile> ShopProfiles => Set<ShopProfile>();
     public DbSet<PurchaseBill> PurchaseBills => Set<PurchaseBill>();
     public DbSet<PurchaseBillItem> PurchaseBillItems => Set<PurchaseBillItem>();
@@ -59,6 +62,16 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.HasIndex(x => new { x.StoreId, x.Name }).IsUnique();
         });
 
+        modelBuilder.Entity<Brand>(entity =>
+        {
+            entity.ToTable("brands");
+            entity.Property(x => x.Name).HasMaxLength(120);
+            entity.Property(x => x.Code).HasMaxLength(64);
+            entity.Property(x => x.Description).HasMaxLength(500);
+            entity.HasIndex(x => new { x.StoreId, x.Name }).IsUnique();
+            entity.HasIndex(x => new { x.StoreId, x.Code }).IsUnique();
+        });
+
         modelBuilder.Entity<Product>(entity =>
         {
             entity.ToTable("products");
@@ -73,6 +86,10 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
                 .WithMany(x => x.Products)
                 .HasForeignKey(x => x.CategoryId)
                 .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(x => x.Brand)
+                .WithMany(x => x.Products)
+                .HasForeignKey(x => x.BrandId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<InventoryRecord>(entity =>
@@ -80,7 +97,10 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.ToTable("inventory");
             entity.Property(x => x.QuantityOnHand).HasPrecision(18, 3);
             entity.Property(x => x.ReorderLevel).HasPrecision(18, 3);
+            entity.Property(x => x.SafetyStock).HasPrecision(18, 3);
+            entity.Property(x => x.TargetStockLevel).HasPrecision(18, 3);
             entity.HasIndex(x => x.ProductId).IsUnique();
+            entity.HasIndex(x => x.StoreId);
             entity.HasOne(x => x.Product)
                 .WithOne(x => x.Inventory)
                 .HasForeignKey<InventoryRecord>(x => x.ProductId)
@@ -98,6 +118,37 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.Address).HasMaxLength(500);
             entity.HasIndex(x => new { x.StoreId, x.Name }).IsUnique();
             entity.HasIndex(x => new { x.StoreId, x.Code }).IsUnique();
+        });
+
+        modelBuilder.Entity<ProductSupplier>(entity =>
+        {
+            entity.ToTable("product_suppliers");
+            entity.Property(x => x.SupplierSku).HasMaxLength(64);
+            entity.Property(x => x.SupplierItemName).HasMaxLength(200);
+            entity.Property(x => x.MinOrderQty).HasPrecision(18, 3);
+            entity.Property(x => x.PackSize).HasPrecision(18, 3);
+            entity.Property(x => x.LastPurchasePrice).HasPrecision(18, 2);
+            entity.HasIndex(x => new { x.StoreId, x.ProductId, x.SupplierId }).IsUnique();
+            entity.HasIndex(x => new { x.StoreId, x.ProductId }).HasFilter("\"IsPreferred\" = TRUE").IsUnique();
+            entity.HasIndex(x => new { x.StoreId, x.SupplierId });
+            entity.HasOne(x => x.Product)
+                .WithMany(x => x.ProductSuppliers)
+                .HasForeignKey(x => x.ProductId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Supplier)
+                .WithMany(x => x.ProductSuppliers)
+                .HasForeignKey(x => x.SupplierId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ShopStockSettings>(entity =>
+        {
+            entity.ToTable("shop_stock_settings");
+            entity.Property(x => x.DefaultLowStockThreshold).HasPrecision(18, 3);
+            entity.Property(x => x.ThresholdMultiplier).HasPrecision(18, 3);
+            entity.Property(x => x.DefaultSafetyStock).HasPrecision(18, 3);
+            entity.Property(x => x.DefaultTargetDaysOfCover).HasPrecision(18, 3);
+            entity.HasIndex(x => x.StoreId).IsUnique();
         });
 
         modelBuilder.Entity<ShopProfile>(entity =>

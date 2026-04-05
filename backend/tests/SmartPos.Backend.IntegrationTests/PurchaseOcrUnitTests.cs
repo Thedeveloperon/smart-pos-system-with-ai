@@ -392,6 +392,8 @@ public sealed class PurchaseOcrUnitTests
                 ProductId = product.Id,
                 QuantityOnHand = 10m,
                 ReorderLevel = 2m,
+                SafetyStock = 0m,
+                TargetStockLevel = 0m,
                 AllowNegativeStock = false,
                 UpdatedAtUtc = now
             };

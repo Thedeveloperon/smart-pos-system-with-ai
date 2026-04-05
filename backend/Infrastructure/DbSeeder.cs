@@ -105,8 +105,11 @@ public static class DbSeeder
                 dbContext.Inventory.Add(new InventoryRecord
                 {
                     Product = product,
+                    StoreId = product.StoreId,
                     QuantityOnHand = 50m,
                     ReorderLevel = 10m,
+                    SafetyStock = 0m,
+                    TargetStockLevel = 0m,
                     AllowNegativeStock = true,
                 });
             }

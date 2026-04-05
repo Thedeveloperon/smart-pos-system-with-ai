@@ -76,6 +76,24 @@ public static class DbSchemaUpdater
         }
     }
 
+    public static async Task EnsureStockPlanningSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken = default)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+
+        if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            await EnsureSqliteStockPlanningSchemaAsync(dbContext, cancellationToken);
+            return;
+        }
+
+        if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            await EnsurePostgresStockPlanningSchemaAsync(dbContext, cancellationToken);
+        }
+    }
+
     public static async Task EnsureShopProfileSchemaAsync(
         SmartPosDbContext dbContext,
         CancellationToken cancellationToken = default)
@@ -198,6 +216,164 @@ public static class DbSchemaUpdater
         }
 
         await dbContext.Database.ExecuteSqlRawAsync(alterSql, cancellationToken);
+    }
+
+    private static async Task EnsureSqliteStockPlanningSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var sql = """
+            CREATE TABLE IF NOT EXISTS "brands" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_brands" PRIMARY KEY,
+              "StoreId" TEXT NULL,
+              "Name" TEXT NOT NULL,
+              "Code" TEXT NULL,
+              "Description" TEXT NULL,
+              "IsActive" INTEGER NOT NULL DEFAULT 1,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "UpdatedAtUtc" TEXT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS "product_suppliers" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_product_suppliers" PRIMARY KEY,
+              "StoreId" TEXT NULL,
+              "ProductId" TEXT NOT NULL,
+              "SupplierId" TEXT NOT NULL,
+              "SupplierSku" TEXT NULL,
+              "SupplierItemName" TEXT NULL,
+              "IsPreferred" INTEGER NOT NULL DEFAULT 0,
+              "LeadTimeDays" INTEGER NULL,
+              "MinOrderQty" TEXT NULL,
+              "PackSize" TEXT NULL,
+              "LastPurchasePrice" TEXT NULL,
+              "IsActive" INTEGER NOT NULL DEFAULT 1,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "UpdatedAtUtc" TEXT NULL,
+              CONSTRAINT "FK_product_suppliers_products_ProductId" FOREIGN KEY ("ProductId") REFERENCES "products" ("Id") ON DELETE CASCADE,
+              CONSTRAINT "FK_product_suppliers_suppliers_SupplierId" FOREIGN KEY ("SupplierId") REFERENCES "suppliers" ("Id") ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS "shop_stock_settings" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_shop_stock_settings" PRIMARY KEY,
+              "StoreId" TEXT NULL,
+              "DefaultLowStockThreshold" TEXT NOT NULL DEFAULT '5',
+              "ThresholdMultiplier" TEXT NOT NULL DEFAULT '1',
+              "DefaultSafetyStock" TEXT NOT NULL DEFAULT '0',
+              "DefaultLeadTimeDays" INTEGER NOT NULL DEFAULT 7,
+              "DefaultTargetDaysOfCover" TEXT NOT NULL DEFAULT '14',
+              "CreatedAtUtc" TEXT NOT NULL,
+              "UpdatedAtUtc" TEXT NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_brands_StoreId_Name" ON "brands" ("StoreId", "Name");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_brands_StoreId_Code" ON "brands" ("StoreId", "Code");
+            CREATE INDEX IF NOT EXISTS "IX_products_BrandId" ON "products" ("BrandId");
+            CREATE INDEX IF NOT EXISTS "IX_inventory_StoreId" ON "inventory" ("StoreId");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_product_suppliers_StoreId_ProductId_SupplierId" ON "product_suppliers" ("StoreId", "ProductId", "SupplierId");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_product_suppliers_StoreId_ProductId_Preferred" ON "product_suppliers" ("StoreId", "ProductId") WHERE "IsPreferred" = 1;
+            CREATE INDEX IF NOT EXISTS "IX_product_suppliers_StoreId_SupplierId" ON "product_suppliers" ("StoreId", "SupplierId");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_shop_stock_settings_StoreId" ON "shop_stock_settings" ("StoreId");
+            """;
+
+        await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+
+        await EnsureSqliteColumnAsync(dbContext, "products", "BrandId", """ALTER TABLE "products" ADD COLUMN "BrandId" TEXT NULL;""", cancellationToken);
+        await EnsureSqliteColumnAsync(dbContext, "inventory", "SafetyStock", """ALTER TABLE "inventory" ADD COLUMN "SafetyStock" TEXT NOT NULL DEFAULT '0';""", cancellationToken);
+        await EnsureSqliteColumnAsync(dbContext, "inventory", "TargetStockLevel", """ALTER TABLE "inventory" ADD COLUMN "TargetStockLevel" TEXT NOT NULL DEFAULT '0';""", cancellationToken);
+        await EnsureSqliteColumnAsync(dbContext, "shop_stock_settings", "ThresholdMultiplier", """ALTER TABLE "shop_stock_settings" ADD COLUMN "ThresholdMultiplier" TEXT NOT NULL DEFAULT '1';""", cancellationToken);
+
+        if (!await TableHasAnyRowsAsync(dbContext, "shop_stock_settings", cancellationToken))
+        {
+            var id = Guid.NewGuid().ToString("D");
+            await dbContext.Database.ExecuteSqlRawAsync(
+                $"""
+                INSERT INTO "shop_stock_settings" ("Id", "StoreId", "DefaultLowStockThreshold", "ThresholdMultiplier", "DefaultSafetyStock", "DefaultLeadTimeDays", "DefaultTargetDaysOfCover", "CreatedAtUtc")
+                VALUES ('{id}', NULL, '5', '1', '0', 7, '14', datetime('now'));
+                """,
+                cancellationToken);
+        }
+    }
+
+    private static async Task EnsurePostgresStockPlanningSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var sql = """
+            CREATE TABLE IF NOT EXISTS brands (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "StoreId" uuid NULL,
+              "Name" varchar(120) NOT NULL,
+              "Code" varchar(64) NULL,
+              "Description" varchar(500) NULL,
+              "IsActive" boolean NOT NULL DEFAULT true,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "UpdatedAtUtc" timestamptz NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS product_suppliers (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "StoreId" uuid NULL,
+              "ProductId" uuid NOT NULL REFERENCES products("Id") ON DELETE CASCADE,
+              "SupplierId" uuid NOT NULL REFERENCES suppliers("Id") ON DELETE CASCADE,
+              "SupplierSku" varchar(64) NULL,
+              "SupplierItemName" varchar(200) NULL,
+              "IsPreferred" boolean NOT NULL DEFAULT false,
+              "LeadTimeDays" integer NULL,
+              "MinOrderQty" numeric(18,3) NULL,
+              "PackSize" numeric(18,3) NULL,
+              "LastPurchasePrice" numeric(18,2) NULL,
+              "IsActive" boolean NOT NULL DEFAULT true,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "UpdatedAtUtc" timestamptz NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS shop_stock_settings (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "StoreId" uuid NULL,
+              "DefaultLowStockThreshold" numeric(18,3) NOT NULL DEFAULT 5,
+              "ThresholdMultiplier" numeric(18,3) NOT NULL DEFAULT 1,
+              "DefaultSafetyStock" numeric(18,3) NOT NULL DEFAULT 0,
+              "DefaultLeadTimeDays" integer NOT NULL DEFAULT 7,
+              "DefaultTargetDaysOfCover" numeric(18,3) NOT NULL DEFAULT 14,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "UpdatedAtUtc" timestamptz NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_brands_StoreId_Name" ON brands("StoreId", "Name");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_brands_StoreId_Code" ON brands("StoreId", "Code");
+            CREATE INDEX IF NOT EXISTS "IX_products_BrandId" ON products("BrandId");
+            CREATE INDEX IF NOT EXISTS "IX_inventory_StoreId" ON inventory("StoreId");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_product_suppliers_StoreId_ProductId_SupplierId" ON product_suppliers("StoreId", "ProductId", "SupplierId");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_product_suppliers_StoreId_ProductId_Preferred" ON product_suppliers("StoreId", "ProductId") WHERE "IsPreferred" = true;
+            CREATE INDEX IF NOT EXISTS "IX_product_suppliers_StoreId_SupplierId" ON product_suppliers("StoreId", "SupplierId");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_shop_stock_settings_StoreId" ON shop_stock_settings("StoreId");
+            """;
+
+        await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE products ADD COLUMN IF NOT EXISTS "BrandId" uuid NULL;""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE inventory ADD COLUMN IF NOT EXISTS "SafetyStock" numeric(18,3) NOT NULL DEFAULT 0;""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE inventory ADD COLUMN IF NOT EXISTS "TargetStockLevel" numeric(18,3) NOT NULL DEFAULT 0;""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE shop_stock_settings ADD COLUMN IF NOT EXISTS "ThresholdMultiplier" numeric(18,3) NOT NULL DEFAULT 1;""",
+            cancellationToken);
+
+        if (!await TableHasAnyRowsAsync(dbContext, "shop_stock_settings", cancellationToken))
+        {
+            var id = Guid.NewGuid().ToString("D");
+            await dbContext.Database.ExecuteSqlRawAsync(
+                $"""
+                INSERT INTO shop_stock_settings ("Id", "StoreId", "DefaultLowStockThreshold", "ThresholdMultiplier", "DefaultSafetyStock", "DefaultLeadTimeDays", "DefaultTargetDaysOfCover", "CreatedAtUtc")
+                VALUES ('{id}', NULL, 5, 1, 0, 7, 14, now());
+                """,
+                cancellationToken);
+        }
     }
 
     public static async Task EnsureRefundSchemaAsync(
@@ -575,6 +751,24 @@ public static class DbSchemaUpdater
 
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is not null && result is not DBNull;
+    }
+
+    private static async Task<bool> TableHasAnyRowsAsync(
+        SmartPosDbContext dbContext,
+        string tableName,
+        CancellationToken cancellationToken)
+    {
+        var connection = dbContext.Database.GetDbConnection();
+
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync(cancellationToken);
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""SELECT 1 FROM "{tableName}" LIMIT 1;""";
         var result = await command.ExecuteScalarAsync(cancellationToken);
         return result is not null && result is not DBNull;
     }

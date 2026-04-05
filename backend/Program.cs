@@ -284,6 +284,7 @@ builder.Services.AddScoped<ReceiptService>();
 builder.Services.AddScoped<RefundService>();
 builder.Services.AddScoped<ReportService>();
 builder.Services.AddScoped<ShopProfileService>();
+builder.Services.AddScoped<ShopStockSettingsService>();
 builder.Services.AddScoped<SyncEventsProcessor>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<AuditLogService>();
@@ -447,6 +448,7 @@ using (var scope = app.Services.CreateScope())
     dbContext.Database.EnsureCreated();
     await DbSchemaUpdater.EnsureProductImageSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureProductBarcodeSchemaAsync(dbContext);
+    await DbSchemaUpdater.EnsureStockPlanningSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureShopProfileSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureRefundSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureSaleSchemaAsync(dbContext);
