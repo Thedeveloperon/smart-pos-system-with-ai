@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -12,15 +12,23 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Shield, CheckCircle2, AlertTriangle } from "lucide-react";
 import DenominationCounter from "./DenominationCounter";
-import type { DenominationCount } from "./types";
+import type { CashSession, DenominationCount } from "./types";
 
 interface OpeningCashDialogProps {
   open: boolean;
   cashierName: string;
+  initialCounts?: DenominationCount[];
+  previousSession?: CashSession | null;
   onConfirm: (counts: DenominationCount[], total: number, cashierName: string) => Promise<void> | void;
 }
 
-const OpeningCashDialog = ({ open, cashierName, onConfirm }: OpeningCashDialogProps) => {
+const OpeningCashDialog = ({
+  open,
+  cashierName,
+  initialCounts,
+  previousSession,
+  onConfirm,
+}: OpeningCashDialogProps) => {
   const [counts, setCounts] = useState<DenominationCount[]>([]);
   const [total, setTotal] = useState(0);
   const [enteredCashierName, setEnteredCashierName] = useState("");
@@ -28,15 +36,43 @@ const OpeningCashDialog = ({ open, cashierName, onConfirm }: OpeningCashDialogPr
   const [isConfirming, setIsConfirming] = useState(false);
   const [cashierNameError, setCashierNameError] = useState<string | null>(null);
 
+  const previousClosingDifference = previousSession?.difference ?? null;
+  const previousClosingTotal = previousSession?.closing?.total ?? previousSession?.opening.total ?? null;
+  const previousExpectedCash = previousSession?.expectedCash ?? null;
+  const derivedDifference =
+    previousClosingDifference ??
+    (previousClosingTotal !== null && previousExpectedCash !== null
+      ? previousClosingTotal - previousExpectedCash
+      : null);
+  const hasPreviousShortage = derivedDifference !== null && derivedDifference < 0;
+  const shortageAmount = hasPreviousShortage && derivedDifference !== null ? Math.abs(derivedDifference) : 0;
+
+  const prefillingMessage = useMemo(() => {
+    if (!previousSession) {
+      return null;
+    }
+
+    if (hasPreviousShortage) {
+      return `Prefilled from the previous closing cash count. That shift closed short by Rs. ${shortageAmount.toLocaleString()} against expected cash.`;
+    }
+
+    return "Prefilled from the previous closing cash count. You can edit the notes and coins before starting the new shift.";
+  }, [hasPreviousShortage, previousSession, shortageAmount]);
+
   useEffect(() => {
     if (open) {
       setEnteredCashierName("");
-      setCounts([]);
-      setTotal(0);
+      const startingCounts = initialCounts ?? [];
+      const startingTotal = startingCounts.reduce(
+        (sum, count) => sum + count.denomination * count.quantity,
+        0,
+      );
+      setCounts(startingCounts);
+      setTotal(startingTotal);
       setShowConfirm(false);
       setCashierNameError(null);
     }
-  }, [open]);
+  }, [open, initialCounts]);
 
   const handleCountChange = (newCounts: DenominationCount[], newTotal: number) => {
     setCounts(newCounts);
@@ -94,6 +130,38 @@ const OpeningCashDialog = ({ open, cashierName, onConfirm }: OpeningCashDialogPr
                 <span className="text-muted-foreground">Cashier</span>
                 <span className="font-medium">{cashierName}</span>
               </div>
+              {previousSession ? (
+                <>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Previous closing</span>
+                    <span className="font-medium tabular-nums">
+                      Rs. {previousClosingTotal?.toLocaleString() ?? "0"}
+                    </span>
+                  </div>
+                  {previousExpectedCash !== null ? (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Expected cash</span>
+                      <span className="font-medium tabular-nums">
+                        Rs. {previousExpectedCash.toLocaleString()}
+                      </span>
+                    </div>
+                  ) : null}
+                  {derivedDifference !== null ? (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Variance</span>
+                      <span
+                        className={`font-medium tabular-nums ${
+                          derivedDifference < 0 ? "text-destructive" : derivedDifference > 0 ? "text-warning" : "text-success"
+                        }`}
+                      >
+                        {derivedDifference === 0
+                          ? "Rs. 0"
+                          : `${derivedDifference < 0 ? "-" : "+"}Rs. ${Math.abs(derivedDifference).toLocaleString()}`}
+                      </span>
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
               <div className="flex flex-col gap-2 pt-2">
                 <Label htmlFor="shift-cashier-name" className="text-muted-foreground text-sm">
                   Cashier name for this shift <span className="text-destructive">*</span>
@@ -121,6 +189,25 @@ const OpeningCashDialog = ({ open, cashierName, onConfirm }: OpeningCashDialogPr
                 <span className="font-medium">{new Date().toLocaleTimeString()}</span>
               </div>
             </div>
+
+            {prefillingMessage ? (
+              <div
+                className={`flex items-start gap-2 rounded-xl border p-3 ${
+                  hasPreviousShortage
+                    ? "border-amber-300 bg-amber-50"
+                    : "border-primary/20 bg-primary/5"
+                }`}
+              >
+                <AlertTriangle
+                  className={`mt-0.5 h-4 w-4 shrink-0 ${
+                    hasPreviousShortage ? "text-amber-600" : "text-primary"
+                  }`}
+                />
+                <p className={`text-xs ${hasPreviousShortage ? "text-amber-900" : "text-slate-700"}`}>
+                  {prefillingMessage}
+                </p>
+              </div>
+            ) : null}
 
             <div className="flex items-start gap-2 rounded-xl border border-warning/30 bg-warning/5 p-3">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
@@ -177,7 +264,30 @@ const OpeningCashDialog = ({ open, cashierName, onConfirm }: OpeningCashDialogPr
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto px-6 py-4">
-          <DenominationCounter onChange={handleCountChange} />
+          {prefillingMessage ? (
+            <div
+              className={`mb-4 flex items-start gap-2 rounded-xl border p-3 ${
+                hasPreviousShortage
+                  ? "border-amber-300 bg-amber-50"
+                  : "border-primary/20 bg-primary/5"
+              }`}
+            >
+              <AlertTriangle
+                className={`mt-0.5 h-4 w-4 shrink-0 ${
+                  hasPreviousShortage ? "text-amber-600" : "text-primary"
+                }`}
+              />
+              <div className="min-w-0">
+                <p className={`text-xs font-semibold uppercase tracking-wide ${hasPreviousShortage ? "text-amber-800" : "text-primary"}`}>
+                  {hasPreviousShortage ? "Previous shift shortage" : "Prefilled from previous shift"}
+                </p>
+                <p className={`text-xs ${hasPreviousShortage ? "text-amber-900" : "text-slate-700"}`}>
+                  {prefillingMessage}
+                </p>
+              </div>
+            </div>
+          ) : null}
+          <DenominationCounter initialCounts={initialCounts} onChange={handleCountChange} />
         </div>
 
         <DialogFooter className="justify-start border-t border-slate-300 bg-slate-100 px-6 py-3 sm:justify-start sm:space-x-0">
