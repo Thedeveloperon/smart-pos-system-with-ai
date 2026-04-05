@@ -18,7 +18,7 @@ import { isConfirmationSoundEnabled, setConfirmationSoundEnabled } from "@/lib/s
 interface ShopProfileDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSaved?: () => void;
+  onSaved?: (profile: ShopProfile) => void;
   expertModeEnabled: boolean;
   onExpertModeEnabledChange: (enabled: boolean) => void;
 }
@@ -33,6 +33,19 @@ const emptyProfile = (): ShopProfile => ({
   website: "",
   logoUrl: "",
   receiptFooter: "Thank you for shopping with us.",
+  showNewItemForCashier: true,
+  showManageForCashier: true,
+  showReportsForCashier: true,
+  showAiInsightsForCashier: true,
+  showHeldBillsForCashier: true,
+  showRemindersForCashier: true,
+  showAuditTrailForCashier: true,
+  showEndShiftForCashier: true,
+  showTodaySalesForCashier: true,
+  showImportBillForCashier: true,
+  showShopSettingsForCashier: true,
+  showMyLicensesForCashier: true,
+  showOfflineSyncForCashier: true,
   createdAt: "",
   updatedAt: null,
 });
@@ -119,7 +132,7 @@ const ShopProfileDialog = ({
       });
       setProfile(saved);
       toast.success("Shop details saved.");
-      onSaved?.();
+      onSaved?.(saved);
       onOpenChange(false);
     } catch (error) {
       console.error(error);
@@ -281,6 +294,102 @@ const ShopProfileDialog = ({
                   </p>
                 </div>
                 <Switch checked={expertModeEnabledState} onCheckedChange={handleExpertModeToggle} />
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-border bg-muted/10 p-4">
+              <div className="space-y-1.5">
+                <p className="text-sm font-semibold">Cashier toolbar visibility</p>
+                <p className="text-xs text-muted-foreground">
+                  Hide or show top-bar sections for cashier accounts. Managers and owners still see all controls.
+                </p>
+              </div>
+
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                {[
+                  {
+                    key: "showNewItemForCashier",
+                    title: "New item",
+                    description: "Show the quick add-item entry in the header.",
+                  },
+                  {
+                    key: "showManageForCashier",
+                    title: "Manage",
+                    description: "Show the product management entry in the header.",
+                  },
+                  {
+                    key: "showReportsForCashier",
+                    title: "Reports",
+                    description: "Show the reports entry in the header.",
+                  },
+                  {
+                    key: "showAiInsightsForCashier",
+                    title: "AI insights",
+                    description: "Show the AI insights entry in the header.",
+                  },
+                  {
+                    key: "showHeldBillsForCashier",
+                    title: "Held bills",
+                    description: "Show the held sales drawer to cashiers.",
+                  },
+                  {
+                    key: "showRemindersForCashier",
+                    title: "Reminders",
+                    description: "Show reminder notifications in the header.",
+                  },
+                  {
+                    key: "showAuditTrailForCashier",
+                    title: "Audit trail",
+                    description: "Let cashiers open the audit log from the header.",
+                  },
+                  {
+                    key: "showEndShiftForCashier",
+                    title: "End shift",
+                    description: "Show the shift closing action for cashiers.",
+                  },
+                  {
+                    key: "showTodaySalesForCashier",
+                    title: "Today sales",
+                    description: "Show the today's sales summary section.",
+                  },
+                  {
+                    key: "showImportBillForCashier",
+                    title: "Import bill",
+                    description: "Show the supplier bill import entry.",
+                  },
+                  {
+                    key: "showShopSettingsForCashier",
+                    title: "Shop settings",
+                    description: "Show the shop settings entry.",
+                  },
+                  {
+                    key: "showMyLicensesForCashier",
+                    title: "My licenses",
+                    description: "Show the license section in the header.",
+                  },
+                  {
+                    key: "showOfflineSyncForCashier",
+                    title: "Sync",
+                    description: "Show the offline sync button for cashiers.",
+                  },
+                ].map((item) => {
+                  const field = item.key as keyof ShopProfile;
+                  const checked = Boolean(profile[field]);
+                  return (
+                    <div key={item.key} className="flex items-center justify-between gap-4 rounded-xl border border-border bg-background px-3 py-2.5">
+                      <div className="space-y-0.5">
+                        <p className="text-sm font-medium">{item.title}</p>
+                        <p className="text-xs text-muted-foreground">{item.description}</p>
+                      </div>
+                      <Switch
+                        checked={checked}
+                        onCheckedChange={(enabled) => {
+                          setProfile((current) => ({ ...current, [field]: enabled } as ShopProfile));
+                        }}
+                      />
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
