@@ -40,6 +40,7 @@ import {
   fetchAdminManualBillingPayments,
   runAdminBillingStateReconciliation,
   fetchDailySalesReport,
+  fetchCashSessionHistory,
   fetchLowStockReport,
   fetchPaymentBreakdownReport,
   fetchSupportTriageReport,
@@ -77,6 +78,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { filterShiftTransactions, getDisplayCashShortAmount, openShiftReportPrintWindow, signedMoney } from "@/lib/shiftReport";
 
 type ManagerReportsDrawerProps = {
   open: boolean;
@@ -87,6 +89,7 @@ type ManagerReportsDrawerProps = {
 };
 
 type TransactionsItem = Awaited<ReturnType<typeof fetchTransactionsReport>>["items"][number];
+type CashSessionHistoryItem = Awaited<ReturnType<typeof fetchCashSessionHistory>>["items"][number];
 type PaymentBreakdownItem = Awaited<ReturnType<typeof fetchPaymentBreakdownReport>>["items"][number];
 type TopItem = Awaited<ReturnType<typeof fetchTopItemsReport>>["items"][number];
 type LowStockItem = Awaited<ReturnType<typeof fetchLowStockReport>>["items"][number];
@@ -102,6 +105,7 @@ type AdminBillingStateReconciliationData = Awaited<ReturnType<typeof runAdminBil
 type ReportData = {
   summary: Awaited<ReturnType<typeof fetchDailySalesReport>> | null;
   transactions: TransactionsItem[];
+  shiftSessions: CashSessionHistoryItem[];
   payments: PaymentBreakdownItem[];
   topItems: TopItem[];
   lowStock: LowStockItem[];
@@ -323,6 +327,7 @@ const ManagerReportsDrawer = ({
   const [report, setReport] = useState<ReportData>({
     summary: null,
     transactions: [],
+    shiftSessions: [],
     payments: [],
     topItems: [],
     lowStock: [],
@@ -462,18 +467,20 @@ const ManagerReportsDrawer = ({
     try {
       let summary: Awaited<ReturnType<typeof fetchDailySalesReport>> | null = null;
       let transactions: TransactionsItem[] = [];
+      let shiftSessions: CashSessionHistoryItem[] = [];
       let payments: PaymentBreakdownItem[] = [];
       let topItems: TopItem[] = [];
       let lowStock: LowStockItem[] = [];
 
       if (!isSuperAdmin) {
-        const [summaryResponse, transactionsResponse, paymentsResponse, topItemsResponse, lowStockResponse] =
+        const [summaryResponse, transactionsResponse, paymentsResponse, topItemsResponse, lowStockResponse, shiftResponse] =
           await Promise.all([
             fetchDailySalesReport(fromDate, toDate),
-            fetchTransactionsReport(fromDate, toDate, 50),
+            fetchTransactionsReport(fromDate, toDate, 200),
             fetchPaymentBreakdownReport(fromDate, toDate),
             fetchTopItemsReport(fromDate, toDate, 8),
             fetchLowStockReport(12, 5),
+            fetchCashSessionHistory(fromDate, toDate),
           ]);
 
         summary = summaryResponse;
@@ -481,6 +488,7 @@ const ManagerReportsDrawer = ({
         payments = paymentsResponse.items;
         topItems = topItemsResponse.items;
         lowStock = lowStockResponse.items;
+        shiftSessions = shiftResponse.items;
       }
 
       let support: SupportTriageData | null = null;
@@ -504,6 +512,7 @@ const ManagerReportsDrawer = ({
       setReport((current) => ({
         summary,
         transactions,
+        shiftSessions,
         payments,
         topItems,
         lowStock,
@@ -1686,6 +1695,71 @@ const ManagerReportsDrawer = ({
     );
   };
 
+  const handleExportShiftPdf = (session: CashSessionHistoryItem) => {
+    const shiftTransactions = filterShiftTransactions(report.transactions, session.openedAt, session.closedAt ?? null);
+    if (shiftTransactions.length === 0) {
+      toast.info("No sales found for this shift.");
+      return;
+    }
+
+    const hasClosingCash = session.closingTotal != null;
+    const expectedCash = session.expectedCash ?? session.openingTotal + session.cashSalesTotal;
+    const balanceDifference =
+      session.difference ?? (hasClosingCash ? (session.closingTotal as number) - expectedCash : null);
+    const cashShortSalesCount = shiftTransactions.filter((sale) => getDisplayCashShortAmount(sale) !== 0).length;
+    const cashShortTotal = shiftTransactions.reduce((total, sale) => total + getDisplayCashShortAmount(sale), 0);
+    const paymentTotals = Array.from(
+      shiftTransactions.reduce((map, sale) => {
+        for (const payment of sale.payment_breakdown) {
+          map.set(payment.method, (map.get(payment.method) || 0) + payment.net_amount);
+        }
+        return map;
+      }, new Map<string, number>())
+    )
+      .map(([method, total]) => ({ method, total }))
+      .sort((left, right) => right.total - left.total);
+
+    openShiftReportPrintWindow({
+      title: "Shift Report",
+      shiftNumber: session.shiftNumber,
+      cashierName: session.cashierName,
+      generatedAt: new Date(),
+      reportDateLabel: new Date(session.openedAt).toLocaleDateString(),
+      openedAt: session.openedAt,
+      closedAt: session.closedAt ?? null,
+      openingCash: session.openingTotal,
+      closingCash: session.closingTotal ?? null,
+      expectedCash,
+      cashInDrawer: session.closingTotal ?? session.openingTotal,
+      totalSales: shiftTransactions.length,
+      grossSales: shiftTransactions.reduce((total, sale) => total + sale.grand_total, 0),
+      cashSales: session.cashSalesTotal,
+      cashShortSalesCount,
+      cashShortTotal,
+      balanceStatus: !hasClosingCash
+        ? "Closing cash has not been recorded yet."
+        : balanceDifference != null && Math.abs(balanceDifference) > 0.01
+          ? `Balance differs by ${money(Math.abs(balanceDifference))}`
+          : "Balanced",
+      balanceIsHealthy: hasClosingCash && (balanceDifference == null || Math.abs(balanceDifference) <= 0.01),
+      paymentTotals,
+      transactions: shiftTransactions.map((sale) => ({
+        sale_id: sale.sale_id,
+        sale_number: sale.sale_number,
+        status: sale.status,
+        timestamp: sale.timestamp,
+        cashier_username: sale.cashier_username,
+        cashier_full_name: sale.cashier_full_name,
+        items_count: sale.items_count,
+        grand_total: sale.grand_total,
+        paid_total: sale.paid_total,
+        custom_payout_used: sale.custom_payout_used,
+        cash_short_amount: getDisplayCashShortAmount(sale),
+        payment_breakdown: sale.payment_breakdown,
+      })),
+    });
+  };
+
   const handleExportItemsPdf = () => {
     if (report.topItems.length === 0) {
       toast.info("No item data to export.");
@@ -1939,6 +2013,76 @@ const ManagerReportsDrawer = ({
               </TabsContent>
 
               <TabsContent value="sales" className="space-y-4">
+                <div className="rounded-2xl border border-border bg-card shadow-sm">
+                  <div className="flex flex-col gap-3 border-b border-border px-4 py-3 md:flex-row md:items-center md:justify-between">
+                    <div className="flex items-center gap-2 text-sm font-semibold">
+                      <CalendarDays className="h-4 w-4 text-primary" />
+                      Shift Reports
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="secondary">{report.shiftSessions.length}</Badge>
+                    </div>
+                  </div>
+
+                  <div className="divide-y divide-border">
+                    {report.shiftSessions.length === 0 ? (
+                      <div className="p-6 text-center text-muted-foreground">
+                        No shift sessions found for this date range.
+                      </div>
+                    ) : (
+                      report.shiftSessions.map((session) => {
+                        const sessionTransactions = filterShiftTransactions(report.transactions, session.openedAt, session.closedAt ?? null);
+                        const cashShortCount = sessionTransactions.filter((sale) => getDisplayCashShortAmount(sale) !== 0).length;
+                        const shiftDate = session.openedAt.toLocaleDateString();
+                        const openedTime = session.openedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+                        const closedTime = session.closedAt
+                          ? session.closedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+                          : "Open";
+
+                        return (
+                          <div key={session.id} className="flex flex-col gap-3 px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
+                            <div className="space-y-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge variant="outline" className="text-[10px]">
+                                  Shift {session.shiftNumber}
+                                </Badge>
+                                <p className="font-semibold">Shift report</p>
+                                <Badge variant={session.status === "closed" ? "default" : "secondary"} className="text-[10px] capitalize">
+                                  {session.status}
+                                </Badge>
+                              </div>
+                              <p className="text-sm text-muted-foreground">
+                                {shiftDate} · {openedTime} to {closedTime} · {sessionTransactions.length} sales · {cashShortCount} cash short
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                Opening {money(session.openingTotal)} · Cash sales {money(session.cashSalesTotal)} · Closing{" "}
+                                {session.closingTotal == null ? "Not closed yet" : money(session.closingTotal)}
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="rounded-xl border border-border bg-background px-4 py-2 text-right">
+                                <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Cash short</p>
+                                <p className="font-semibold text-destructive">
+                                  {signedMoney(sessionTransactions.reduce((total, sale) => total + getDisplayCashShortAmount(sale), 0))}
+                                </p>
+                              </div>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleExportShiftPdf(session)}
+                                className="border-border bg-background text-foreground hover:bg-muted"
+                              >
+                                <FileText className="h-4 w-4" />
+                                Export PDF
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
                 <div className="rounded-2xl border border-border bg-card shadow-sm">
                   <div className="flex flex-col gap-3 border-b border-border px-4 py-3 md:flex-row md:items-center md:justify-between">
                     <div className="flex items-center gap-2 text-sm font-semibold">

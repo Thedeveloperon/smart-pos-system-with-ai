@@ -20,7 +20,7 @@ interface CashChangeDialogProps {
   availableCounts?: DenominationCount[];
   allowCustomPayout?: boolean;
   onClose: () => void;
-  onConfirm: (counts: DenominationCount[]) => void;
+  onConfirm: (counts: DenominationCount[], customPayoutUsed: boolean, cashShortAmount: number) => void;
 }
 
 const CashChangeDialog = ({
@@ -215,7 +215,11 @@ const CashChangeDialog = ({
               </Button>
               <Button
                 variant="pos-primary"
-                onClick={() => onConfirm(selectedCounts)}
+                onClick={() => onConfirm(
+                  selectedCounts,
+                  isCustomMode,
+                  isCustomMode ? (normalizedChange - selectedTotal) : 0,
+                )}
                 disabled={!canProceed}
                 className="h-10 rounded-xl border border-primary bg-primary px-4 text-[0.95rem] font-bold text-white sm:w-[18rem]"
               >

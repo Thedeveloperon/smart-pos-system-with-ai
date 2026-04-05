@@ -36,6 +36,7 @@ import {
   fetchHeldBill,
   fetchHeldBills,
   fetchProducts,
+  fetchTransactionsReport,
   holdSale,
   fetchReceiptHtmlUrl,
   runRemindersNow,
@@ -44,9 +45,11 @@ import {
   type ReminderItem,
   voidSale,
 } from "@/lib/api";
+import { openShiftReportPrintWindow } from "@/lib/shiftReport";
 import { isSuperAdminBackendRole } from "@/lib/auth";
 import { flushOfflineSyncQueue, getOfflineSyncQueueSummary } from "@/lib/offlineSyncQueue";
 import { playCartAddSound } from "@/lib/sound";
+import { filterShiftTransactions } from "@/lib/shiftReport";
 import { isExpertModeEnabled, setExpertModeEnabled } from "@/lib/posPreferences";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { usePosShortcuts } from "@/hooks/usePosShortcuts";
@@ -104,6 +107,7 @@ const IndexInner = () => {
   const [salesRefreshToken, setSalesRefreshToken] = useState(0);
   const [mobileTab, setMobileTab] = useState<"products" | "cart" | "checkout">("products");
   const [offlinePendingCount, setOfflinePendingCount] = useState(0);
+  const [todayIssueCount, setTodayIssueCount] = useState(0);
   const [isOfflineSyncing, setIsOfflineSyncing] = useState(false);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const [showShortcutOnboarding, setShowShortcutOnboarding] = useState(false);
@@ -173,6 +177,20 @@ const IndexInner = () => {
     }
   }, [isAdmin]);
 
+  const loadTodayIssueCount = useCallback(async () => {
+    try {
+      const report = await fetchTransactionsReport(new Date(), new Date(), 500);
+      const customPayoutCount = report.items.reduce(
+        (count, item) => count + (item.custom_payout_used ? 1 : 0),
+        0,
+      );
+      setTodayIssueCount(customPayoutCount);
+    } catch (error) {
+      console.error(error);
+      setTodayIssueCount(0);
+    }
+  }, []);
+
   useEffect(() => {
     void Promise.all([loadProducts(), loadHeldBills()]);
   }, [loadHeldBills, loadProducts]);
@@ -180,6 +198,10 @@ const IndexInner = () => {
   useEffect(() => {
     void loadAiWallet();
   }, [loadAiWallet]);
+
+  useEffect(() => {
+    void loadTodayIssueCount();
+  }, [loadTodayIssueCount, salesRefreshToken]);
 
   const loadReminders = useCallback(async (options?: { includeAcknowledged?: boolean; announceNew?: boolean; quiet?: boolean }) => {
     const includeAcknowledged = options?.includeAcknowledged ?? true;
@@ -411,7 +433,9 @@ const IndexInner = () => {
       cashReceived: number,
       customerMobile: string,
       cashReceivedCounts?: DenominationCount[],
-      cashChangeCounts?: DenominationCount[]
+      cashChangeCounts?: DenominationCount[],
+      customPayoutUsed?: boolean,
+      cashShortAmount?: number
     ) => {
       const total = cartItems.reduce((a, i) => a + i.product.price * i.quantity, 0);
       const paidAmount = paymentMethod === "cash" ? cashReceived || total : total;
@@ -427,12 +451,15 @@ const IndexInner = () => {
           activeHeldSaleId || undefined,
           referenceNumber,
           cashReceivedCounts,
-          cashChangeCounts
+          cashChangeCounts,
+          customPayoutUsed,
+          cashShortAmount
         );
 
         setCartItems([]);
         setActiveHeldSaleId(null);
         toast.success("Sale completed!", { duration: 2000 });
+        setSalesRefreshToken((current) => current + 1);
 
         if (receiptWindow) {
           receiptWindow.location.href = await fetchReceiptHtmlUrl(result.sale_id);
@@ -466,9 +493,75 @@ const IndexInner = () => {
   }, []);
 
   const handleCloseSession = async (counts: DenominationCount[], total: number, reason?: string) => {
-    const didClose = await completeClosing(counts, total, reason);
-    if (didClose) {
-      setShowClosing(false);
+    const reportWindow = window.open("", "_blank", "width=1100,height=900");
+    const closedSession = await completeClosing(counts, total, reason);
+
+    if (!closedSession) {
+      reportWindow?.close();
+      return;
+    }
+
+    setShowClosing(false);
+    setSalesRefreshToken((current) => current + 1);
+    void Promise.all([loadProducts(), loadHeldBills(), refreshSession(), loadTodayIssueCount()]);
+
+    try {
+      const transactionsReport = await fetchTransactionsReport(new Date(), new Date(), 500);
+      const shiftTransactions = filterShiftTransactions(
+        transactionsReport.items,
+        closedSession.openedAt,
+        closedSession.closedAt ?? new Date(),
+      );
+      const paymentTotals = new Map<string, number>();
+      for (const sale of shiftTransactions) {
+        for (const payment of sale.payment_breakdown) {
+          paymentTotals.set(payment.method, (paymentTotals.get(payment.method) || 0) + payment.net_amount);
+        }
+      }
+
+      const difference = closedSession.difference ?? null;
+      const balanceStatus =
+        difference === null
+          ? "Closing cash has not been recorded yet."
+          : difference === 0
+            ? "Closing cash balances with the expected amount."
+            : `Closing cash differs by ${difference > 0 ? "+" : "-"}Rs. ${Math.abs(difference).toLocaleString()}.`;
+
+      openShiftReportPrintWindow(
+        {
+          title: "Today's Sales Shift Report",
+          shiftNumber: closedSession.shiftNumber,
+          cashierName: closedSession.cashierName,
+          generatedAt: new Date(),
+          reportDateLabel: (closedSession.closedAt ?? new Date()).toLocaleDateString(),
+          openedAt: closedSession.openedAt,
+          closedAt: closedSession.closedAt ?? null,
+          openingCash: closedSession.opening.total,
+          closingCash: closedSession.closing?.total ?? null,
+          expectedCash: closedSession.expectedCash ?? closedSession.opening.total + closedSession.cashSalesTotal,
+          cashInDrawer: closedSession.drawer.total,
+          totalSales: shiftTransactions.length,
+          grossSales: shiftTransactions.reduce((sum, sale) => sum + sale.grand_total, 0),
+          cashSales: closedSession.cashSalesTotal,
+          cashShortSalesCount: shiftTransactions.filter((item) => item.custom_payout_used).length,
+          cashShortTotal: shiftTransactions.reduce(
+            (sum, item) => sum + (item.custom_payout_used ? item.cash_short_amount ?? 0 : 0),
+            0,
+          ),
+          balanceStatus,
+          balanceIsHealthy: difference === 0,
+          paymentTotals: Array.from(paymentTotals.entries()).map(([method, totalAmount]) => ({
+            method,
+            total: totalAmount,
+          })),
+          transactions: shiftTransactions,
+        },
+        reportWindow,
+      );
+    } catch (error) {
+      reportWindow?.close();
+      console.error(error);
+      toast.error("Cash session closed, but the shift report could not be generated.");
     }
   };
 
@@ -671,6 +764,7 @@ const IndexInner = () => {
       <HeaderBar
         cashierName={cashierName}
         heldBillsCount={heldBills.length}
+        todayIssueCount={todayIssueCount}
         onHeldBills={() => setShowHeldBills(true)}
         onTodaySales={() => setShowTodaySales(true)}
         onNewItem={() => setShowNewItem(true)}
@@ -785,7 +879,7 @@ const IndexInner = () => {
         <OpeningCashDialog
           open={true}
           cashierName={cashierName}
-          onConfirm={(counts, total) => startSession(counts, total, cashierName)}
+          onConfirm={(counts, total, enteredCashierName) => startSession(counts, total, enteredCashierName)}
         />
       )}
 

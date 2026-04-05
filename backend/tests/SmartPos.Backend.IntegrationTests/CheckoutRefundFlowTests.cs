@@ -103,6 +103,93 @@ public sealed class CheckoutRefundFlowTests(CustomWebApplicationFactory factory)
         Assert.Equal(saleGrandTotal, reversedAmount);
     }
 
+    [Fact]
+    public async Task CompleteSale_WithCustomPayoutShouldPersistCashChangeDifference()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var productSearch = await TestJson.ReadObjectAsync(
+            await client.GetAsync("/api/products/search"));
+
+        var firstProduct = FirstObjectFromArray(productSearch, "items");
+        var productId = Guid.Parse(TestJson.GetString(firstProduct, "id"));
+        var unitPrice = TestJson.GetDecimal(firstProduct, "unitPrice");
+
+        var saleResponse = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/checkout/complete", new
+            {
+                sale_id = (Guid?)null,
+                items = new[]
+                {
+                    new
+                    {
+                        product_id = productId,
+                        quantity = 1m
+                    }
+                },
+                discount_percent = 0m,
+                role = "cashier",
+                payments = new[]
+                {
+                    new
+                    {
+                        method = "cash",
+                        amount = unitPrice + 820m,
+                        reference_number = (string?)null
+                    }
+                },
+                cash_received_counts = BuildCounts(unitPrice + 820m),
+                cash_change_counts = BuildCounts(780m),
+                custom_payout_used = true,
+                cash_short_amount = 0m
+            }));
+
+        Assert.Equal("completed", TestJson.GetString(saleResponse, "status"));
+        Assert.Equal(40m, TestJson.GetDecimal(saleResponse, "cash_short_amount"));
+        Assert.True(saleResponse["custom_payout_used"]?.GetValue<bool>());
+
+        var saleId = Guid.Parse(TestJson.GetString(saleResponse, "sale_id"));
+        var transactions = await TestJson.ReadObjectAsync(
+            await client.GetAsync("/api/reports/transactions"));
+
+        var matchedSale = transactions["items"]!
+            .AsArray()
+            .OfType<JsonObject>()
+            .FirstOrDefault(item => Guid.Parse(TestJson.GetString(item, "sale_id")) == saleId)
+            ?? throw new InvalidOperationException("Completed sale was not found in the transactions report.");
+
+        Assert.Equal(40m, TestJson.GetDecimal(matchedSale, "cash_short_amount"));
+    }
+
+    private static object[] BuildCounts(decimal total)
+    {
+        if (total != decimal.Truncate(total))
+        {
+            throw new InvalidOperationException("Test amount must be a whole number.");
+        }
+
+        var remaining = (int)total;
+        var denominations = new[] { 5000, 2000, 1000, 500, 100, 50, 20, 10, 5, 2, 1 };
+        var counts = new List<object>();
+
+        foreach (var denomination in denominations)
+        {
+            var quantity = remaining / denomination;
+            if (quantity > 0)
+            {
+                counts.Add(new { denomination = (decimal)denomination, quantity = (decimal)quantity });
+                remaining -= quantity * denomination;
+            }
+        }
+
+        if (remaining != 0)
+        {
+            throw new InvalidOperationException("Unable to build exact cash counts for the requested total.");
+        }
+
+        return counts.ToArray();
+    }
+
     private static JsonObject FirstObjectFromArray(JsonNode root, string propertyName)
     {
         var array = root[propertyName]?.AsArray()

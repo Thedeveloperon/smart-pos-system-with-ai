@@ -10,6 +10,19 @@ public static class CashSessionEndpoints
             .WithTags("Cash Sessions")
             .RequireAuthorization();
 
+        group.MapGet("", async (
+            DateOnly? from,
+            DateOnly? to,
+            CashSessionService cashSessionService,
+            CancellationToken cancellationToken) =>
+        {
+            var result = await cashSessionService.GetHistoryAsync(from, to, cancellationToken);
+            return Results.Ok(result);
+        })
+        .RequireAuthorization(SmartPosPolicies.ManagerOrOwner)
+        .WithName("GetCashSessionHistory")
+        .WithOpenApi();
+
         group.MapGet("/current", async (
             CashSessionService cashSessionService,
             CancellationToken cancellationToken) =>

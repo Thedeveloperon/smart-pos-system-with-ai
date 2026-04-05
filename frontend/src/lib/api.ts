@@ -216,6 +216,8 @@ export type SaleReceiptResponse = {
   change: number;
   created_at: string;
   completed_at?: string | null;
+  custom_payout_used?: boolean;
+  cash_short_amount?: number;
   items: BackendSaleItem[];
   payments: BackendSalePayment[];
 };
@@ -314,6 +316,7 @@ type BackendCashSessionResponse = {
   device_id?: string | null;
   device_code: string;
   cashier_name: string;
+  shift_number: number;
   status: string;
   opened_at: string;
   closed_at?: string | null;
@@ -325,6 +328,24 @@ type BackendCashSessionResponse = {
   difference_reason?: string | null;
   cash_sales_total: number;
   audit_log: BackendCashSessionAuditEntry[];
+};
+
+type BackendCashSessionHistoryItem = {
+  cash_session_id: string;
+  shift_number: number;
+  cashier_name: string;
+  status: string;
+  opened_at: string;
+  closed_at?: string | null;
+  opening_total: number;
+  closing_total?: number | null;
+  expected_cash?: number | null;
+  difference?: number | null;
+  cash_sales_total: number;
+};
+
+type BackendCashSessionHistoryResponse = {
+  items: BackendCashSessionHistoryItem[];
 };
 
 type BackendCategoryItem = {
@@ -595,6 +616,8 @@ type RecentSalesResponse = {
     grand_total: number;
     created_at: string;
     completed_at?: string | null;
+    custom_payout_used?: boolean;
+    cash_short_amount?: number;
   }[];
 };
 
@@ -637,6 +660,8 @@ type TransactionsReportResponse = {
     paid_total: number;
     reversed_total: number;
     net_collected: number;
+    custom_payout_used: boolean;
+    cash_short_amount: number;
     payment_breakdown: {
       method: string;
       paid_amount: number;
@@ -1225,6 +1250,8 @@ type CreateSaleRequest = {
   payments: { method: string; amount: number; reference_number?: string | null }[];
   cash_received_counts?: { denomination: number; quantity: number }[];
   cash_change_counts?: { denomination: number; quantity: number }[];
+  custom_payout_used?: boolean;
+  cash_short_amount?: number;
 };
 
 type HoldSaleRequest = {
@@ -1869,6 +1896,7 @@ function mapCashSessionResponse(session: BackendCashSessionResponse): CashSessio
   return {
     id: session.cash_session_id,
     cashierName: session.cashier_name,
+    shiftNumber: Number(session.shift_number),
     openedAt: new Date(session.opened_at),
     closedAt: session.closed_at ? new Date(session.closed_at) : undefined,
     opening: mapCashSessionEntry(session.opening),
@@ -1887,6 +1915,36 @@ function mapCashSessionResponse(session: BackendCashSessionResponse): CashSessio
       amount: entry.amount ?? undefined,
     })),
     cashSalesTotal: Number(session.cash_sales_total),
+  };
+}
+
+export type CashSessionHistoryItem = {
+  id: string;
+  shiftNumber: number;
+  cashierName: string;
+  status: string;
+  openedAt: Date;
+  closedAt?: Date;
+  openingTotal: number;
+  closingTotal?: number;
+  expectedCash?: number;
+  difference?: number;
+  cashSalesTotal: number;
+};
+
+function mapCashSessionHistoryItem(item: BackendCashSessionHistoryItem): CashSessionHistoryItem {
+  return {
+    id: item.cash_session_id,
+    shiftNumber: Number(item.shift_number),
+    cashierName: item.cashier_name,
+    status: item.status,
+    openedAt: new Date(item.opened_at),
+    closedAt: item.closed_at ? new Date(item.closed_at) : undefined,
+    openingTotal: Number(item.opening_total),
+    closingTotal: item.closing_total ?? undefined,
+    expectedCash: item.expected_cash ?? undefined,
+    difference: item.difference ?? undefined,
+    cashSalesTotal: Number(item.cash_sales_total),
   };
 }
 
@@ -2739,13 +2797,31 @@ export async function fetchCurrentCashSession() {
   return response ? mapCashSessionResponse(response) : null;
 }
 
-export async function openCashSession(counts: DenominationCount[], total: number) {
+export async function fetchCashSessionHistory(from?: string, to?: string) {
+  const query = new URLSearchParams();
+  if (from) {
+    query.set("from", from);
+  }
+  if (to) {
+    query.set("to", to);
+  }
+
+  const response = await request<BackendCashSessionHistoryResponse>(
+    `/api/cash-sessions${query.toString() ? `?${query.toString()}` : ""}`
+  );
+  return {
+    items: response.items.map(mapCashSessionHistoryItem),
+  };
+}
+
+export async function openCashSession(counts: DenominationCount[], total: number, cashierName?: string) {
   const payload = {
     counts: counts.map((item) => ({
       denomination: item.denomination,
       quantity: item.quantity,
     })),
     total,
+    cashier_name: cashierName?.trim() || undefined,
   };
 
   const response = await request<BackendCashSessionResponse>("/api/cash-sessions/open", {
@@ -2820,7 +2896,9 @@ export async function completeSale(
   saleId?: string,
   referenceNumber?: string,
   cashReceivedCounts?: DenominationCount[],
-  cashChangeCounts?: DenominationCount[]
+  cashChangeCounts?: DenominationCount[],
+  customPayoutUsed?: boolean,
+  cashShortAmount?: number
 ) {
   const payload: CreateSaleRequest = {
     sale_id: saleId,
@@ -2847,6 +2925,8 @@ export async function completeSale(
       denomination: item.denomination,
       quantity: item.quantity,
     })),
+    custom_payout_used: customPayoutUsed ?? false,
+    cash_short_amount: cashShortAmount ?? 0,
   };
 
   return request<BackendSaleResponse>("/api/checkout/complete", {

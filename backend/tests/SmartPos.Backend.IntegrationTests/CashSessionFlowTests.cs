@@ -12,6 +12,7 @@ public sealed class CashSessionFlowTests(CustomWebApplicationFactory factory)
     public async Task CashSession_ShouldPersist_OnOpenSaleRefundAndClose()
     {
         await TestAuth.SignInAsManagerAsync(client);
+        await CloseActiveSessionIfPresentAsync();
 
         var productSearch = await TestJson.ReadObjectAsync(
             await client.GetAsync("/api/products/search"));
@@ -26,10 +27,13 @@ public sealed class CashSessionFlowTests(CustomWebApplicationFactory factory)
                 {
                     new { denomination = 1000m, quantity = 1m }
                 },
-                total = 1000m
+                total = 1000m,
+                cashier_name = "Night Cashier"
             }));
 
         Assert.Equal("active", TestJson.GetString(openedSession, "status"));
+        Assert.Equal(1, TestJson.GetInt32(openedSession, "shift_number"));
+        Assert.Equal("Night Cashier", TestJson.GetString(openedSession, "cashier_name"));
         Assert.Equal(1000m, TestJson.GetDecimal(openedSession["opening"]!, "total"));
         Assert.Equal(1000m, TestJson.GetDecimal(openedSession["drawer"]!, "total"));
 
@@ -131,14 +135,47 @@ public sealed class CashSessionFlowTests(CustomWebApplicationFactory factory)
             }));
 
         Assert.Equal("closed", TestJson.GetString(closedSession, "status"));
+        Assert.Equal(1, TestJson.GetInt32(closedSession, "shift_number"));
         Assert.Equal(1000m, TestJson.GetDecimal(closedSession, "expected_cash"));
         Assert.Equal(0m, TestJson.GetDecimal(closedSession, "difference"));
+
+        var history = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/cash-sessions?from={DateOnly.FromDateTime(DateTime.UtcNow):yyyy-MM-dd}&to={DateOnly.FromDateTime(DateTime.UtcNow):yyyy-MM-dd}"));
+        Assert.NotEmpty(history["items"]!.AsArray());
+        Assert.Equal(1, TestJson.GetInt32(FirstObjectFromArray(history, "items"), "shift_number"));
+
+        var reopenedSession = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/cash-sessions/open", new
+            {
+                counts = new[]
+                {
+                    new { denomination = 1000m, quantity = 1m }
+                },
+                total = 1000m,
+                cashier_name = "Night Cashier"
+            }));
+
+        Assert.Equal(2, TestJson.GetInt32(reopenedSession, "shift_number"));
+
+        var reopenedSessionId = Guid.Parse(TestJson.GetString(reopenedSession, "cash_session_id"));
+        var reopenedClosedSession = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync($"/api/cash-sessions/{reopenedSessionId}/close", new
+            {
+                counts = new[]
+                {
+                    new { denomination = 1000m, quantity = 1m }
+                },
+                total = 1000m
+            }));
+
+        Assert.Equal("closed", TestJson.GetString(reopenedClosedSession, "status"));
     }
 
     [Fact]
     public async Task CashSale_WithDenominationCounts_ShouldUpdateDrawerTotal()
     {
         await TestAuth.SignInAsManagerAsync(client);
+        await CloseActiveSessionIfPresentAsync();
 
         var productSearch = await TestJson.ReadObjectAsync(
             await client.GetAsync("/api/products/search"));
@@ -153,7 +190,8 @@ public sealed class CashSessionFlowTests(CustomWebApplicationFactory factory)
                 {
                     new { denomination = 1000m, quantity = 1m }
                 },
-                total = 1000m
+                total = 1000m,
+                cashier_name = "Day Cashier"
             }));
 
         var saleResponse = await TestJson.ReadObjectAsync(
@@ -240,5 +278,37 @@ public sealed class CashSessionFlowTests(CustomWebApplicationFactory factory)
         }
 
         return counts.ToArray();
+    }
+
+    private async Task CloseActiveSessionIfPresentAsync()
+    {
+        var currentResponse = await client.GetAsync("/api/cash-sessions/current");
+        if (!currentResponse.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        var currentBody = await currentResponse.Content.ReadAsStringAsync();
+        if (string.IsNullOrWhiteSpace(currentBody))
+        {
+            return;
+        }
+
+        var current = JsonNode.Parse(currentBody)?.AsObject()
+                     ?? throw new InvalidOperationException("Current cash session response was empty.");
+        var status = TestJson.GetString(current, "status");
+        if (status is not ("active" or "closing"))
+        {
+            return;
+        }
+
+        var sessionId = Guid.Parse(TestJson.GetString(current, "cash_session_id"));
+        var drawer = current["drawer"]!.AsObject();
+        await client.PostAsJsonAsync($"/api/cash-sessions/{sessionId}/close", new
+        {
+            counts = drawer["counts"]?.AsArray() ?? [],
+            total = TestJson.GetDecimal(drawer, "total"),
+            reason = "test cleanup"
+        });
     }
 }

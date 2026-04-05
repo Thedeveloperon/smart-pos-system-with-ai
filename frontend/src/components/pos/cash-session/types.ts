@@ -40,6 +40,7 @@ export interface CashDrawerState {
 export interface CashSession {
   id: string;
   cashierName: string;
+  shiftNumber: number;
   openedAt: Date;
   closedAt?: Date;
   opening: CashSessionEntry;

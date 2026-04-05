@@ -84,7 +84,7 @@ describe("license token replay recovery", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const { openCashSession } = await import("@/lib/api");
-    const session = await openCashSession([{ denomination: 100, quantity: 1 }], 100);
+    const session = await openCashSession([{ denomination: 100, quantity: 1 }], 100, "Cashier One");
     expect(session.id).toBe("cs-1");
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });

@@ -144,6 +144,42 @@ public static class DbSchemaUpdater
         }
     }
 
+    public static async Task EnsureSaleSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken = default)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+
+        if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!await ColumnExistsAsync(dbContext, "sales", "CustomPayoutUsed", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "sales" ADD COLUMN "CustomPayoutUsed" INTEGER NOT NULL DEFAULT 0;""",
+                    cancellationToken);
+            }
+
+            if (!await ColumnExistsAsync(dbContext, "sales", "CashShortAmount", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "sales" ADD COLUMN "CashShortAmount" TEXT NOT NULL DEFAULT '0';""",
+                    cancellationToken);
+            }
+
+            return;
+        }
+
+        if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE sales ADD COLUMN IF NOT EXISTS "CustomPayoutUsed" boolean NOT NULL DEFAULT false;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE sales ADD COLUMN IF NOT EXISTS "CashShortAmount" numeric(18,2) NOT NULL DEFAULT 0;""",
+                cancellationToken);
+        }
+    }
+
     public static async Task EnsureCashSessionSchemaAsync(
         SmartPosDbContext dbContext,
         CancellationToken cancellationToken = default)

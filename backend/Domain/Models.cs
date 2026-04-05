@@ -150,6 +150,8 @@ public sealed class Sale
     public decimal DiscountTotal { get; set; }
     public decimal TaxTotal { get; set; }
     public decimal GrandTotal { get; set; }
+    public bool CustomPayoutUsed { get; set; }
+    public decimal CashShortAmount { get; set; }
     public Guid? CreatedByUserId { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? CompletedAtUtc { get; set; }

@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ProductManagementDialog from "./ProductManagementDialog";
 import {
+  deleteProduct,
   fetchCategories,
   fetchProductCatalogItems,
   generateAndAssignProductBarcode,
@@ -148,5 +149,29 @@ describe("ProductManagementDialog barcode flow", () => {
       check_existing: true,
     });
     confirmSpy.mockRestore();
+  });
+
+  it("bulk deletes selected products from the catalog", async () => {
+    const product: CatalogProduct = { ...baseProduct, barcode: undefined };
+
+    vi.mocked(fetchProductCatalogItems).mockResolvedValue([product]);
+    vi.mocked(deleteProduct).mockResolvedValue(undefined);
+
+    renderDialog();
+
+    expect(await screen.findByText("Milk 1L")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Select Milk 1L"));
+    fireEvent.click(screen.getByRole("button", { name: "Delete Selected" }));
+
+    await screen.findByText("Delete selected products?");
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Delete" }));
+
+    await waitFor(() => {
+      expect(deleteProduct).toHaveBeenCalledWith("prod-1");
+    });
+    expect(toast.success).toHaveBeenCalledWith("Deleted 1 product.");
+    await waitFor(() => {
+      expect(screen.queryByText("Milk 1L")).not.toBeInTheDocument();
+    });
   });
 });

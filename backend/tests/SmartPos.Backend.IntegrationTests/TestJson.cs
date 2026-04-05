@@ -29,4 +29,10 @@ internal static class TestJson
         return node[propertyName]?.GetValue<decimal>()
                ?? throw new InvalidOperationException($"Missing decimal property '{propertyName}'.");
     }
+
+    public static int GetInt32(JsonNode node, string propertyName)
+    {
+        return node[propertyName]?.GetValue<int>()
+               ?? throw new InvalidOperationException($"Missing int property '{propertyName}'.");
+    }
 }
