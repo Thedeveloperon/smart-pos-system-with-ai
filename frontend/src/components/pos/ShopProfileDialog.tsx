@@ -33,6 +33,10 @@ const emptyProfile = (): ShopProfile => ({
   website: "",
   logoUrl: "",
   receiptFooter: "Thank you for shopping with us.",
+  showNewItemForCashier: true,
+  showManageForCashier: true,
+  showReportsForCashier: true,
+  showAiInsightsForCashier: true,
   showHeldBillsForCashier: true,
   showRemindersForCashier: true,
   showAuditTrailForCashier: true,
@@ -303,6 +307,26 @@ const ShopProfileDialog = ({
 
               <div className="mt-4 grid gap-3 md:grid-cols-2">
                 {[
+                  {
+                    key: "showNewItemForCashier",
+                    title: "New item",
+                    description: "Show the quick add-item entry in the header.",
+                  },
+                  {
+                    key: "showManageForCashier",
+                    title: "Manage",
+                    description: "Show the product management entry in the header.",
+                  },
+                  {
+                    key: "showReportsForCashier",
+                    title: "Reports",
+                    description: "Show the reports entry in the header.",
+                  },
+                  {
+                    key: "showAiInsightsForCashier",
+                    title: "AI insights",
+                    description: "Show the AI insights entry in the header.",
+                  },
                   {
                     key: "showHeldBillsForCashier",
                     title: "Held bills",

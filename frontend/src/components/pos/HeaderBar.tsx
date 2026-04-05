@@ -52,6 +52,10 @@ interface HeaderBarProps {
   isAdmin?: boolean;
   hasActiveSession?: boolean;
   cashierToolbarVisibility?: {
+    newItem?: boolean;
+    manage?: boolean;
+    reports?: boolean;
+    aiInsights?: boolean;
     heldBills?: boolean;
     reminders?: boolean;
     auditTrail?: boolean;
@@ -117,7 +121,7 @@ const HeaderBar = ({
           </Button>
         )}
 
-        {isAdmin && (
+        {isAdmin && allowCashier(cashierToolbarVisibility?.newItem) && (
           <Button
             variant="ghost"
             size="sm"
@@ -129,7 +133,7 @@ const HeaderBar = ({
           </Button>
         )}
 
-        {isAdmin && onManageProducts && (
+        {isAdmin && onManageProducts && allowCashier(cashierToolbarVisibility?.manage) && (
           <Button
             variant="ghost"
             size="sm"
@@ -141,7 +145,7 @@ const HeaderBar = ({
           </Button>
         )}
 
-        {isAdmin && onReports && (
+        {isAdmin && onReports && allowCashier(cashierToolbarVisibility?.reports) && (
           <Button
             variant="ghost"
             size="sm"
@@ -153,7 +157,7 @@ const HeaderBar = ({
           </Button>
         )}
 
-        {isAdmin && onAiInsights && (
+        {isAdmin && onAiInsights && allowCashier(cashierToolbarVisibility?.aiInsights) && (
           <Button
             variant="ghost"
             size="sm"
@@ -327,28 +331,28 @@ const HeaderBar = ({
               </DropdownMenuItem>
             )}
 
-            {isAdmin && (
+            {isAdmin && allowCashier(cashierToolbarVisibility?.newItem) && (
               <DropdownMenuItem onSelect={() => onNewItem()} className="min-h-11 px-3 py-2 text-base">
                 <PlusCircle className="mr-3 h-5 w-5" />
                 New Item
               </DropdownMenuItem>
             )}
 
-            {isAdmin && onManageProducts && (
+            {isAdmin && onManageProducts && allowCashier(cashierToolbarVisibility?.manage) && (
               <DropdownMenuItem onSelect={() => onManageProducts()} className="min-h-11 px-3 py-2 text-base">
                 <PencilLine className="mr-3 h-5 w-5" />
                 Manage
               </DropdownMenuItem>
             )}
 
-            {isAdmin && onReports && (
+            {isAdmin && onReports && allowCashier(cashierToolbarVisibility?.reports) && (
               <DropdownMenuItem onSelect={() => onReports()} className="min-h-11 px-3 py-2 text-base">
                 <BarChart3 className="mr-3 h-5 w-5" />
                 Reports
               </DropdownMenuItem>
             )}
 
-            {isAdmin && onAiInsights && (
+            {isAdmin && onAiInsights && allowCashier(cashierToolbarVisibility?.aiInsights) && (
               <DropdownMenuItem onSelect={() => onAiInsights()} className="min-h-11 px-3 py-2 text-base">
                 <Sparkles className="mr-3 h-5 w-5" />
                 AI Insights

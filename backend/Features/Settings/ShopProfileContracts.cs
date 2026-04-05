@@ -31,6 +31,18 @@ public sealed class ShopProfileResponse
     [JsonPropertyName("receipt_footer")]
     public string? ReceiptFooter { get; set; }
 
+    [JsonPropertyName("show_new_item_for_cashier")]
+    public bool ShowNewItemForCashier { get; set; }
+
+    [JsonPropertyName("show_manage_for_cashier")]
+    public bool ShowManageForCashier { get; set; }
+
+    [JsonPropertyName("show_reports_for_cashier")]
+    public bool ShowReportsForCashier { get; set; }
+
+    [JsonPropertyName("show_ai_insights_for_cashier")]
+    public bool ShowAiInsightsForCashier { get; set; }
+
     [JsonPropertyName("show_held_bills_for_cashier")]
     public bool ShowHeldBillsForCashier { get; set; }
 
@@ -90,6 +102,18 @@ public sealed class UpdateShopProfileRequest
 
     [JsonPropertyName("receipt_footer")]
     public string? ReceiptFooter { get; set; }
+
+    [JsonPropertyName("show_new_item_for_cashier")]
+    public bool ShowNewItemForCashier { get; set; }
+
+    [JsonPropertyName("show_manage_for_cashier")]
+    public bool ShowManageForCashier { get; set; }
+
+    [JsonPropertyName("show_reports_for_cashier")]
+    public bool ShowReportsForCashier { get; set; }
+
+    [JsonPropertyName("show_ai_insights_for_cashier")]
+    public bool ShowAiInsightsForCashier { get; set; }
 
     [JsonPropertyName("show_held_bills_for_cashier")]
     public bool ShowHeldBillsForCashier { get; set; }

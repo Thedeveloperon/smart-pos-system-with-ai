@@ -95,6 +95,10 @@ public static class DbSchemaUpdater
                   "Website" TEXT NULL,
                   "LogoUrl" TEXT NULL,
                   "ReceiptFooter" TEXT NULL,
+                  "ShowNewItemForCashier" INTEGER NOT NULL DEFAULT 1,
+                  "ShowManageForCashier" INTEGER NOT NULL DEFAULT 1,
+                  "ShowReportsForCashier" INTEGER NOT NULL DEFAULT 1,
+                  "ShowAiInsightsForCashier" INTEGER NOT NULL DEFAULT 1,
                   "ShowHeldBillsForCashier" INTEGER NOT NULL DEFAULT 1,
                   "ShowRemindersForCashier" INTEGER NOT NULL DEFAULT 1,
                   "ShowAuditTrailForCashier" INTEGER NOT NULL DEFAULT 1,
@@ -111,6 +115,10 @@ public static class DbSchemaUpdater
 
             await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
 
+            await EnsureSqliteColumnAsync(dbContext, "shop_profiles", "ShowNewItemForCashier", """ALTER TABLE "shop_profiles" ADD COLUMN "ShowNewItemForCashier" INTEGER NOT NULL DEFAULT 1;""", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "shop_profiles", "ShowManageForCashier", """ALTER TABLE "shop_profiles" ADD COLUMN "ShowManageForCashier" INTEGER NOT NULL DEFAULT 1;""", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "shop_profiles", "ShowReportsForCashier", """ALTER TABLE "shop_profiles" ADD COLUMN "ShowReportsForCashier" INTEGER NOT NULL DEFAULT 1;""", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "shop_profiles", "ShowAiInsightsForCashier", """ALTER TABLE "shop_profiles" ADD COLUMN "ShowAiInsightsForCashier" INTEGER NOT NULL DEFAULT 1;""", cancellationToken);
             await EnsureSqliteColumnAsync(dbContext, "shop_profiles", "ShowHeldBillsForCashier", """ALTER TABLE "shop_profiles" ADD COLUMN "ShowHeldBillsForCashier" INTEGER NOT NULL DEFAULT 1;""", cancellationToken);
             await EnsureSqliteColumnAsync(dbContext, "shop_profiles", "ShowRemindersForCashier", """ALTER TABLE "shop_profiles" ADD COLUMN "ShowRemindersForCashier" INTEGER NOT NULL DEFAULT 1;""", cancellationToken);
             await EnsureSqliteColumnAsync(dbContext, "shop_profiles", "ShowAuditTrailForCashier", """ALTER TABLE "shop_profiles" ADD COLUMN "ShowAuditTrailForCashier" INTEGER NOT NULL DEFAULT 1;""", cancellationToken);
@@ -136,6 +144,10 @@ public static class DbSchemaUpdater
                   "Website" varchar(120) NULL,
                   "LogoUrl" varchar(500) NULL,
                   "ReceiptFooter" varchar(500) NULL,
+                  "ShowNewItemForCashier" boolean NOT NULL DEFAULT true,
+                  "ShowManageForCashier" boolean NOT NULL DEFAULT true,
+                  "ShowReportsForCashier" boolean NOT NULL DEFAULT true,
+                  "ShowAiInsightsForCashier" boolean NOT NULL DEFAULT true,
                   "ShowHeldBillsForCashier" boolean NOT NULL DEFAULT true,
                   "ShowRemindersForCashier" boolean NOT NULL DEFAULT true,
                   "ShowAuditTrailForCashier" boolean NOT NULL DEFAULT true,
@@ -152,6 +164,10 @@ public static class DbSchemaUpdater
 
             await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
 
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE shop_profiles ADD COLUMN IF NOT EXISTS "ShowNewItemForCashier" boolean NOT NULL DEFAULT true;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE shop_profiles ADD COLUMN IF NOT EXISTS "ShowManageForCashier" boolean NOT NULL DEFAULT true;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE shop_profiles ADD COLUMN IF NOT EXISTS "ShowReportsForCashier" boolean NOT NULL DEFAULT true;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE shop_profiles ADD COLUMN IF NOT EXISTS "ShowAiInsightsForCashier" boolean NOT NULL DEFAULT true;""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE shop_profiles ADD COLUMN IF NOT EXISTS "ShowHeldBillsForCashier" boolean NOT NULL DEFAULT true;""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE shop_profiles ADD COLUMN IF NOT EXISTS "ShowRemindersForCashier" boolean NOT NULL DEFAULT true;""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE shop_profiles ADD COLUMN IF NOT EXISTS "ShowAuditTrailForCashier" boolean NOT NULL DEFAULT true;""", cancellationToken);

@@ -25,6 +25,10 @@ public sealed class ShopProfileService(SmartPosDbContext dbContext)
         profile.Website = NormalizeOptional(request.Website);
         profile.LogoUrl = NormalizeOptional(request.LogoUrl);
         profile.ReceiptFooter = NormalizeOptional(request.ReceiptFooter);
+        profile.ShowNewItemForCashier = request.ShowNewItemForCashier;
+        profile.ShowManageForCashier = request.ShowManageForCashier;
+        profile.ShowReportsForCashier = request.ShowReportsForCashier;
+        profile.ShowAiInsightsForCashier = request.ShowAiInsightsForCashier;
         profile.ShowHeldBillsForCashier = request.ShowHeldBillsForCashier;
         profile.ShowRemindersForCashier = request.ShowRemindersForCashier;
         profile.ShowAuditTrailForCashier = request.ShowAuditTrailForCashier;
@@ -53,6 +57,10 @@ public sealed class ShopProfileService(SmartPosDbContext dbContext)
             Website = profile.Website,
             LogoUrl = profile.LogoUrl,
             ReceiptFooter = profile.ReceiptFooter,
+            ShowNewItemForCashier = profile.ShowNewItemForCashier,
+            ShowManageForCashier = profile.ShowManageForCashier,
+            ShowReportsForCashier = profile.ShowReportsForCashier,
+            ShowAiInsightsForCashier = profile.ShowAiInsightsForCashier,
             ShowHeldBillsForCashier = profile.ShowHeldBillsForCashier,
             ShowRemindersForCashier = profile.ShowRemindersForCashier,
             ShowAuditTrailForCashier = profile.ShowAuditTrailForCashier,

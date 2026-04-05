@@ -62,6 +62,10 @@ public sealed class ShopProfile
     public string? Website { get; set; }
     public string? LogoUrl { get; set; }
     public string? ReceiptFooter { get; set; }
+    public bool ShowNewItemForCashier { get; set; } = true;
+    public bool ShowManageForCashier { get; set; } = true;
+    public bool ShowReportsForCashier { get; set; } = true;
+    public bool ShowAiInsightsForCashier { get; set; } = true;
     public bool ShowHeldBillsForCashier { get; set; } = true;
     public bool ShowRemindersForCashier { get; set; } = true;
     public bool ShowAuditTrailForCashier { get; set; } = true;

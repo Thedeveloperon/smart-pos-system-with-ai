@@ -372,6 +372,10 @@ type BackendShopProfileResponse = {
   website?: string | null;
   logo_url?: string | null;
   receipt_footer?: string | null;
+  show_new_item_for_cashier?: boolean;
+  show_manage_for_cashier?: boolean;
+  show_reports_for_cashier?: boolean;
+  show_ai_insights_for_cashier?: boolean;
   show_held_bills_for_cashier?: boolean;
   show_reminders_for_cashier?: boolean;
   show_audit_trail_for_cashier?: boolean;
@@ -603,6 +607,10 @@ export type ShopProfile = {
   website: string;
   logoUrl: string;
   receiptFooter: string;
+  showNewItemForCashier: boolean;
+  showManageForCashier: boolean;
+  showReportsForCashier: boolean;
+  showAiInsightsForCashier: boolean;
   showHeldBillsForCashier: boolean;
   showRemindersForCashier: boolean;
   showAuditTrailForCashier: boolean;
@@ -2002,6 +2010,10 @@ function mapShopProfile(profile: BackendShopProfileResponse): ShopProfile {
     website: profile.website || "",
     logoUrl: profile.logo_url || "",
     receiptFooter: profile.receipt_footer || "",
+    showNewItemForCashier: profile.show_new_item_for_cashier ?? true,
+    showManageForCashier: profile.show_manage_for_cashier ?? true,
+    showReportsForCashier: profile.show_reports_for_cashier ?? true,
+    showAiInsightsForCashier: profile.show_ai_insights_for_cashier ?? true,
     showHeldBillsForCashier: profile.show_held_bills_for_cashier ?? true,
     showRemindersForCashier: profile.show_reminders_for_cashier ?? true,
     showAuditTrailForCashier: profile.show_audit_trail_for_cashier ?? true,
@@ -3536,6 +3548,10 @@ export async function updateShopProfile(profile: ShopProfile) {
       website: profile.website || null,
       logo_url: profile.logoUrl || null,
       receipt_footer: profile.receiptFooter || null,
+      show_new_item_for_cashier: profile.showNewItemForCashier,
+      show_manage_for_cashier: profile.showManageForCashier,
+      show_reports_for_cashier: profile.showReportsForCashier,
+      show_ai_insights_for_cashier: profile.showAiInsightsForCashier,
       show_held_bills_for_cashier: profile.showHeldBillsForCashier,
       show_reminders_for_cashier: profile.showRemindersForCashier,
       show_audit_trail_for_cashier: profile.showAuditTrailForCashier,

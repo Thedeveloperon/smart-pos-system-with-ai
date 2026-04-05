@@ -838,6 +838,10 @@ const IndexInner = () => {
         isAdmin={isAdmin}
         hasActiveSession={canSell}
         cashierToolbarVisibility={{
+          newItem: shopProfile?.showNewItemForCashier ?? true,
+          manage: shopProfile?.showManageForCashier ?? true,
+          reports: shopProfile?.showReportsForCashier ?? true,
+          aiInsights: shopProfile?.showAiInsightsForCashier ?? true,
           heldBills: shopProfile?.showHeldBillsForCashier ?? true,
           reminders: shopProfile?.showRemindersForCashier ?? true,
           auditTrail: shopProfile?.showAuditTrailForCashier ?? true,
