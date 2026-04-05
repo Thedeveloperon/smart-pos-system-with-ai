@@ -48,10 +48,10 @@ const DenominationCounter = ({ onChange, initialCounts, compact = false }: Denom
   const renderItem = (d: (typeof SRI_LANKAN_DENOMINATIONS)[number], icon: "note" | "coin") => {
     const qty = quantities[d.value] || 0;
     const controlButtonClass = compact
-      ? "h-8 w-8 rounded-lg border border-slate-300 bg-slate-50 text-slate-500 shadow-none hover:bg-slate-100 hover:text-slate-700 disabled:opacity-60"
+      ? "h-10 w-10 rounded-lg border border-slate-300 bg-slate-50 text-slate-500 shadow-none hover:bg-slate-100 hover:text-slate-700 disabled:opacity-60"
       : "h-9 w-9 rounded-lg border border-slate-300 bg-slate-50 text-slate-500 shadow-none hover:bg-slate-100 hover:text-slate-700 disabled:opacity-60";
     const incrementButtonClass = compact
-      ? "h-8 w-8 rounded-lg border border-primary bg-primary text-primary-foreground shadow-none hover:bg-primary/90"
+      ? "h-10 w-10 rounded-lg border border-primary bg-primary text-primary-foreground shadow-none hover:bg-primary/90"
       : "h-9 w-9 rounded-lg border border-primary bg-primary text-primary-foreground shadow-none hover:bg-primary/90";
     const quantityInputClass = compact
       ? "h-8 w-[3.25rem] rounded-md border border-slate-300 bg-white px-2 text-center text-[0.9rem] font-medium tabular-nums text-slate-700 outline-none transition-colors focus:border-primary/60 focus:ring-2 focus:ring-primary/20"
@@ -126,8 +126,8 @@ const DenominationCounter = ({ onChange, initialCounts, compact = false }: Denom
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-300 bg-[#f7f8fa]">
-      <div className="grid min-h-0 flex-1 grid-cols-1 divide-y divide-slate-300 md:grid-cols-2 md:divide-x md:divide-y-0">
+    <div className={compact ? "flex min-h-0 flex-col rounded-2xl border border-slate-300 bg-[#f7f8fa]" : "flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-300 bg-[#f7f8fa]"}>
+      <div className={compact ? "grid grid-cols-1 divide-y divide-slate-300 md:grid-cols-2 md:divide-x md:divide-y-0" : "grid min-h-0 flex-1 grid-cols-1 divide-y divide-slate-300 md:grid-cols-2 md:divide-x md:divide-y-0"}>
         <section className={`flex min-h-0 h-full flex-col ${compact ? "p-2" : "p-3"}`}>
           <div className={`flex items-center justify-between ${compact ? "mb-1.5" : "mb-2.5"}`}>
             <div className="flex items-center gap-2">
@@ -139,7 +139,7 @@ const DenominationCounter = ({ onChange, initialCounts, compact = false }: Denom
             </span>
           </div>
 
-          <div className={`grid flex-1 min-h-0 auto-rows-min content-start grid-cols-1 ${compact ? "gap-0 overflow-hidden pr-0.5" : "gap-0.5 overflow-y-auto pr-1"}`}>
+          <div className={`grid auto-rows-min content-start grid-cols-1 ${compact ? "gap-0.5 pr-0.5" : "flex-1 min-h-0 gap-0.5 overflow-y-auto pr-1"}`}>
             {notes.map((d) => renderItem(d, "note"))}
           </div>
         </section>
@@ -155,7 +155,7 @@ const DenominationCounter = ({ onChange, initialCounts, compact = false }: Denom
             </span>
           </div>
 
-          <div className={`grid flex-1 min-h-0 auto-rows-min content-start grid-cols-1 ${compact ? "gap-0 overflow-hidden pr-0.5" : "gap-0.5 overflow-y-auto pr-1"}`}>
+          <div className={`grid auto-rows-min content-start grid-cols-1 ${compact ? "gap-0.5 pr-0.5" : "flex-1 min-h-0 gap-0.5 overflow-y-auto pr-1"}`}>
             {coins.map((d) => renderItem(d, "coin"))}
           </div>
         </section>

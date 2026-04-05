@@ -75,49 +75,34 @@ const ManageDrawerDialog = ({ open, session, onClose, onSave }: ManageDrawerDial
             </span>
             Check Drawer
           </DialogTitle>
-          <DialogDescription>
-            Review the current drawer balance, then update the note and coin counts if needed.
+          <DialogDescription className="text-sm text-slate-600">
+            Notes: {noteCount} items · Coins: {coinCount} items · Variance vs expected: Rs.{" "}
+            {cashBalance.toLocaleString()}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-6 py-3">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <div className="rounded-2xl border border-slate-300 bg-white px-4 py-2.5">
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-6 py-3">
+          <div className="grid gap-2.5 md:grid-cols-2">
+            <div className="rounded-2xl border border-slate-300 bg-white px-3 py-2">
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                 Cash balance
               </p>
-              <p className="mt-0.5 text-[1.9rem] font-bold tabular-nums text-primary">
-                Rs. {total.toLocaleString()}
+              <p className="mt-0.5 text-[1.55rem] font-bold tabular-nums leading-none text-primary">
+              Rs. {total.toLocaleString()}
               </p>
             </div>
-            <div className="rounded-2xl border border-slate-300 bg-white px-4 py-2.5">
+            <div className="rounded-2xl border border-slate-300 bg-white px-3 py-2">
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                 Expected cash
               </p>
-              <p className="mt-0.5 text-[1.9rem] font-bold tabular-nums text-slate-800">
+              <p className="mt-0.5 text-[1.55rem] font-bold tabular-nums leading-none text-slate-800">
                 Rs. {expectedCash.toLocaleString()}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-slate-300 bg-white px-4 py-2.5">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                Notes available
-              </p>
-              <p className="mt-0.5 text-[1.9rem] font-bold tabular-nums text-slate-800">
-                {noteCount.toLocaleString()}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-slate-300 bg-white px-4 py-2.5">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                Coins available
-              </p>
-              <p className="mt-0.5 text-[1.9rem] font-bold tabular-nums text-slate-800">
-                {coinCount.toLocaleString()}
               </p>
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-300 bg-white px-4 py-2.5">
-            <p className="truncate text-sm font-medium text-slate-700">
+          <div className="rounded-2xl border border-slate-300 bg-white px-3 py-2">
+            <p className="truncate text-xs font-medium text-slate-700 sm:text-sm">
               Last updated <span className="font-semibold">{lastUpdatedAtLabel}</span> by{" "}
               <span className="font-semibold">{lastUpdatedBy}</span>{" "}
               <span className={`${cashBalance >= 0 ? "text-emerald-600" : "text-destructive"}`}>
@@ -126,7 +111,7 @@ const ManageDrawerDialog = ({ open, session, onClose, onSave }: ManageDrawerDial
             </p>
           </div>
 
-          <div className="flex-1 min-h-0 overflow-hidden rounded-2xl border border-slate-300 bg-white p-3">
+          <div className="rounded-2xl border border-slate-300 bg-white p-3">
             <DenominationCounter
               key={resetKey}
               initialCounts={counts.length > 0 ? counts : openingCounts}
