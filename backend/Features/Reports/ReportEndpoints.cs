@@ -134,11 +134,41 @@ public static class ReportEndpoints
         {
             var result = await reportService.GetLowStockReportAsync(
                 take ?? 20,
-                threshold ?? 5m,
+                threshold ?? 0m,
                 cancellationToken);
             return Results.Ok(result);
         })
         .WithName("GetLowStockReport")
+        .WithOpenApi();
+
+        group.MapGet("/low-stock/by-brand", async (
+            int? take,
+            decimal? threshold,
+            ReportService reportService,
+            CancellationToken cancellationToken) =>
+        {
+            var result = await reportService.GetLowStockByBrandReportAsync(
+                take ?? 20,
+                threshold ?? 0m,
+                cancellationToken);
+            return Results.Ok(result);
+        })
+        .WithName("GetLowStockByBrandReport")
+        .WithOpenApi();
+
+        group.MapGet("/low-stock/by-supplier", async (
+            int? take,
+            decimal? threshold,
+            ReportService reportService,
+            CancellationToken cancellationToken) =>
+        {
+            var result = await reportService.GetLowStockBySupplierReportAsync(
+                take ?? 20,
+                threshold ?? 0m,
+                cancellationToken);
+            return Results.Ok(result);
+        })
+        .WithName("GetLowStockBySupplierReport")
         .WithOpenApi();
 
         group.MapGet("/support-triage", async (

@@ -419,39 +419,9 @@ public sealed class ReportService(
         CancellationToken cancellationToken)
     {
         var normalizedTake = Math.Clamp(take, 1, 200);
-        var normalizedThreshold = Math.Max(0m, threshold);
+        var normalizedThreshold = Math.Max(0m, await ResolveLowStockThresholdAsync(threshold, cancellationToken));
 
-        var products = await dbContext.Products
-            .AsNoTracking()
-            .Include(x => x.Inventory)
-            .Where(x => x.IsActive)
-            .ToListAsync(cancellationToken);
-
-        var items = products
-            .Select(x =>
-            {
-                var quantityOnHand = RoundQuantity(x.Inventory?.QuantityOnHand ?? 0m);
-                var reorderLevel = RoundQuantity(x.Inventory?.ReorderLevel ?? 0m);
-                var alertLevel = RoundQuantity(Math.Max(reorderLevel, normalizedThreshold));
-                var deficit = RoundQuantity(Math.Max(0m, alertLevel - quantityOnHand));
-
-                return new LowStockReportRow
-                {
-                    ProductId = x.Id,
-                    ProductName = x.Name,
-                    Sku = x.Sku,
-                    Barcode = x.Barcode,
-                    QuantityOnHand = quantityOnHand,
-                    ReorderLevel = reorderLevel,
-                    AlertLevel = alertLevel,
-                    Deficit = deficit
-                };
-            })
-            .Where(x => x.QuantityOnHand <= x.AlertLevel)
-            .OrderBy(x => x.QuantityOnHand)
-            .ThenByDescending(x => x.Deficit)
-            .Take(normalizedTake)
-            .ToList();
+        var items = await BuildLowStockItemsAsync(normalizedThreshold, cancellationToken);
 
         return new LowStockReportResponse
         {
@@ -459,6 +429,76 @@ public sealed class ReportService(
             Threshold = normalizedThreshold,
             Take = normalizedTake,
             Items = items
+                .Where(x => x.Row.QuantityOnHand <= x.Row.AlertLevel)
+                .OrderBy(x => x.Row.QuantityOnHand)
+                .ThenByDescending(x => x.Row.Deficit)
+                .Take(normalizedTake)
+                .Select(x => x.Row)
+                .ToList()
+        };
+    }
+
+    public async Task<LowStockByBrandReportResponse> GetLowStockByBrandReportAsync(
+        int take,
+        decimal threshold,
+        CancellationToken cancellationToken)
+    {
+        var normalizedTake = Math.Clamp(take, 1, 200);
+        var normalizedThreshold = Math.Max(0m, await ResolveLowStockThresholdAsync(threshold, cancellationToken));
+        var items = await BuildLowStockItemsAsync(normalizedThreshold, cancellationToken);
+
+        return new LowStockByBrandReportResponse
+        {
+            GeneratedAt = DateTimeOffset.UtcNow,
+            Threshold = normalizedThreshold,
+            Take = normalizedTake,
+            Items = items
+                .Where(x => x.Row.QuantityOnHand <= x.Row.AlertLevel)
+                .GroupBy(x => new { x.Row.BrandId, x.Row.BrandName })
+                .Select(group => new LowStockByBrandReportRow
+                {
+                    BrandId = group.Key.BrandId,
+                    BrandName = group.Key.BrandName,
+                    LowStockCount = group.Count(),
+                    TotalDeficit = RoundQuantity(group.Sum(x => x.Row.Deficit)),
+                    EstimatedReorderValue = RoundMoney(group.Sum(x => x.Row.Deficit * x.CostPrice))
+                })
+                .OrderByDescending(x => x.LowStockCount)
+                .ThenByDescending(x => x.TotalDeficit)
+                .Take(normalizedTake)
+                .ToList()
+        };
+    }
+
+    public async Task<LowStockBySupplierReportResponse> GetLowStockBySupplierReportAsync(
+        int take,
+        decimal threshold,
+        CancellationToken cancellationToken)
+    {
+        var normalizedTake = Math.Clamp(take, 1, 200);
+        var normalizedThreshold = Math.Max(0m, await ResolveLowStockThresholdAsync(threshold, cancellationToken));
+        var items = await BuildLowStockItemsAsync(normalizedThreshold, cancellationToken);
+
+        return new LowStockBySupplierReportResponse
+        {
+            GeneratedAt = DateTimeOffset.UtcNow,
+            Threshold = normalizedThreshold,
+            Take = normalizedTake,
+            Items = items
+                .Where(x => x.Row.QuantityOnHand <= x.Row.AlertLevel)
+                .GroupBy(x => new { x.Row.PreferredSupplierId, x.Row.PreferredSupplierName })
+                .Select(group => new LowStockBySupplierReportRow
+                {
+                    SupplierId = group.Key.PreferredSupplierId,
+                    SupplierName = group.Key.PreferredSupplierName,
+                    LowStockCount = group.Count(),
+                    TotalDeficit = RoundQuantity(group.Sum(x => x.Row.Deficit)),
+                    EstimatedReorderValue = RoundMoney(group.Sum(x => x.Row.Deficit * x.CostPrice))
+                })
+                .OrderByDescending(x => x.LowStockCount)
+                .ThenByDescending(x => x.TotalDeficit)
+                .Take(normalizedTake)
+                .ToList()
         };
     }
 
@@ -724,6 +764,74 @@ public sealed class ReportService(
         return decimal.Round(value, 3, MidpointRounding.AwayFromZero);
     }
 
+    private async Task<decimal> ResolveLowStockThresholdAsync(
+        decimal threshold,
+        CancellationToken cancellationToken)
+    {
+        if (threshold > 0m)
+        {
+            return threshold;
+        }
+
+        var settings = await dbContext.ShopStockSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return settings?.DefaultLowStockThreshold ?? 5m;
+    }
+
+    private async Task<List<LowStockItemSnapshot>> BuildLowStockItemsAsync(
+        decimal threshold,
+        CancellationToken cancellationToken)
+    {
+        var products = await dbContext.Products
+            .AsNoTracking()
+            .Include(x => x.Brand)
+            .Include(x => x.Inventory)
+            .Include(x => x.ProductSuppliers)
+                .ThenInclude(x => x.Supplier)
+            .Where(x => x.IsActive)
+            .ToListAsync(cancellationToken);
+
+        return products
+            .Select(x =>
+            {
+                var quantityOnHand = RoundQuantity(x.Inventory?.QuantityOnHand ?? 0m);
+                var reorderLevel = RoundQuantity(x.Inventory?.ReorderLevel ?? 0m);
+                var safetyStock = RoundQuantity(x.Inventory?.SafetyStock ?? 0m);
+                var targetStockLevel = RoundQuantity(x.Inventory?.TargetStockLevel ?? 0m);
+                var alertLevel = RoundQuantity(Math.Max(reorderLevel, threshold));
+                var deficit = RoundQuantity(Math.Max(0m, alertLevel - quantityOnHand));
+                var preferredSupplier = x.ProductSuppliers
+                    .Where(mapping => mapping.IsActive)
+                    .OrderByDescending(mapping => mapping.IsPreferred)
+                    .ThenBy(mapping => mapping.Supplier.Name)
+                    .FirstOrDefault();
+
+                var row = new LowStockReportRow
+                {
+                    ProductId = x.Id,
+                    ProductName = x.Name,
+                    StoreId = x.StoreId,
+                    Sku = x.Sku,
+                    Barcode = x.Barcode,
+                    BrandId = x.BrandId,
+                    BrandName = x.Brand?.Name,
+                    PreferredSupplierId = preferredSupplier?.SupplierId,
+                    PreferredSupplierName = preferredSupplier?.Supplier?.Name,
+                    QuantityOnHand = quantityOnHand,
+                    ReorderLevel = reorderLevel,
+                    SafetyStock = safetyStock,
+                    TargetStockLevel = targetStockLevel,
+                    AlertLevel = alertLevel,
+                    Deficit = deficit
+                };
+
+                return new LowStockItemSnapshot(row, RoundMoney(x.CostPrice));
+            })
+            .ToList();
+    }
+
     private static string ResolveForecastConfidence(
         IReadOnlyCollection<MonthlySalesForecastRow> rows,
         int months)
@@ -940,6 +1048,10 @@ public sealed class ReportService(
         PaymentMethod Method,
         decimal Amount,
         bool IsReversal);
+
+    private sealed record LowStockItemSnapshot(
+        LowStockReportRow Row,
+        decimal CostPrice);
 
     private sealed record ItemAgg(
         string ProductName,

@@ -2231,6 +2231,17 @@ export async function createCategory(requestBody: CreateCategoryRequest) {
   });
 }
 
+export async function updateCategory(categoryId: string, requestBody: CreateCategoryRequest) {
+  return request<BackendCategoryItem>(`/api/categories/${encodeURIComponent(categoryId)}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      description: requestBody.description ?? null,
+      is_active: requestBody.is_active ?? true,
+      name: requestBody.name,
+    }),
+  });
+}
+
 export async function createProduct(requestBody: CreateProductRequest) {
   const response = await request<BackendProductCatalogItem>("/api/products", {
     method: "POST",

@@ -17,6 +17,7 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
     {
         var productQuery = dbContext.Products
             .AsNoTracking()
+            .Include(x => x.Brand)
             .Where(x => x.IsActive);
 
         if (!string.IsNullOrWhiteSpace(query))
@@ -38,6 +39,8 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
                 Sku = x.Sku,
                 Barcode = x.Barcode,
                 ImageUrl = x.ImageUrl,
+                BrandId = x.BrandId,
+                BrandName = x.Brand != null ? x.Brand.Name : null,
                 UnitPrice = x.UnitPrice,
                 StockQuantity = x.Inventory != null ? x.Inventory.QuantityOnHand : 0m
             })
@@ -59,7 +62,10 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
         var productQuery = dbContext.Products
             .AsNoTracking()
             .Include(x => x.Category)
+            .Include(x => x.Brand)
             .Include(x => x.Inventory)
+            .Include(x => x.ProductSuppliers)
+                .ThenInclude(x => x.Supplier)
             .AsQueryable();
 
         if (!includeInactive)
@@ -373,10 +379,21 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
         ValidateMoneyValue(request.CostPrice, "Cost price cannot be negative.");
         ValidateQuantityValue(request.InitialStockQuantity, "Initial stock cannot be negative.");
         ValidateQuantityValue(request.ReorderLevel, "Reorder level cannot be negative.");
+        ValidateQuantityValue(request.SafetyStock, "Safety stock cannot be negative.");
+        ValidateQuantityValue(request.TargetStockLevel, "Target stock level cannot be negative.");
+
+        var normalizedTargetStockLevel = request.TargetStockLevel > 0m
+            ? request.TargetStockLevel
+            : request.ReorderLevel;
+        if (normalizedTargetStockLevel < request.ReorderLevel)
+        {
+            throw new InvalidOperationException("Target stock level must be greater than or equal to reorder level.");
+        }
 
         await EnsureUniqueBarcodeAsync(normalizedBarcode, null, cancellationToken);
         await EnsureUniqueSkuAsync(normalizedSku, null, cancellationToken);
         await EnsureCategoryExistsIfProvidedAsync(request.CategoryId, cancellationToken);
+        await EnsureBrandExistsIfProvidedAsync(request.BrandId, cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
         var product = new Product
@@ -386,6 +403,7 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
             Barcode = normalizedBarcode,
             ImageUrl = normalizedImageUrl,
             CategoryId = request.CategoryId,
+            BrandId = request.BrandId,
             UnitPrice = RoundMoney(request.UnitPrice),
             CostPrice = RoundMoney(request.CostPrice),
             IsActive = request.IsActive,
@@ -396,8 +414,11 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
         var inventory = new InventoryRecord
         {
             Product = product,
+            StoreId = product.StoreId,
             QuantityOnHand = RoundQuantity(request.InitialStockQuantity),
             ReorderLevel = RoundQuantity(request.ReorderLevel),
+            SafetyStock = RoundQuantity(request.SafetyStock),
+            TargetStockLevel = RoundQuantity(normalizedTargetStockLevel),
             AllowNegativeStock = request.AllowNegativeStock,
             UpdatedAtUtc = now
         };
@@ -414,10 +435,13 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
                 product.Sku,
                 product.Barcode,
                 product.ImageUrl,
+                product.BrandId,
                 product.UnitPrice,
                 product.CostPrice,
                 inventory.QuantityOnHand,
                 inventory.ReorderLevel,
+                inventory.SafetyStock,
+                inventory.TargetStockLevel,
                 inventory.AllowNegativeStock,
                 product.IsActive
             });
@@ -444,10 +468,21 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
         ValidateMoneyValue(request.UnitPrice, "Unit price cannot be negative.");
         ValidateMoneyValue(request.CostPrice, "Cost price cannot be negative.");
         ValidateQuantityValue(request.ReorderLevel, "Reorder level cannot be negative.");
+        ValidateQuantityValue(request.SafetyStock, "Safety stock cannot be negative.");
+        ValidateQuantityValue(request.TargetStockLevel, "Target stock level cannot be negative.");
+
+        var normalizedTargetStockLevel = request.TargetStockLevel > 0m
+            ? request.TargetStockLevel
+            : request.ReorderLevel;
+        if (normalizedTargetStockLevel < request.ReorderLevel)
+        {
+            throw new InvalidOperationException("Target stock level must be greater than or equal to reorder level.");
+        }
 
         await EnsureUniqueBarcodeAsync(normalizedBarcode, productId, cancellationToken);
         await EnsureUniqueSkuAsync(normalizedSku, productId, cancellationToken);
         await EnsureCategoryExistsIfProvidedAsync(request.CategoryId, cancellationToken);
+        await EnsureBrandExistsIfProvidedAsync(request.BrandId, cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
         var before = new
@@ -456,9 +491,12 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
             product.Sku,
             product.Barcode,
             product.ImageUrl,
+            product.BrandId,
             product.UnitPrice,
             product.CostPrice,
             ReorderLevel = product.Inventory?.ReorderLevel ?? 0m,
+            SafetyStock = product.Inventory?.SafetyStock ?? 0m,
+            TargetStockLevel = product.Inventory?.TargetStockLevel ?? 0m,
             AllowNegativeStock = product.Inventory?.AllowNegativeStock ?? true,
             product.IsActive
         };
@@ -467,6 +505,7 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
         product.Barcode = normalizedBarcode;
         product.ImageUrl = normalizedImageUrl;
         product.CategoryId = request.CategoryId;
+        product.BrandId = request.BrandId;
         product.UnitPrice = RoundMoney(request.UnitPrice);
         product.CostPrice = RoundMoney(request.CostPrice);
         product.IsActive = request.IsActive;
@@ -477,15 +516,24 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
             product.Inventory = new InventoryRecord
             {
                 ProductId = product.Id,
+                StoreId = product.StoreId,
                 QuantityOnHand = 0m,
                 ReorderLevel = 0m,
+                SafetyStock = 0m,
+                TargetStockLevel = 0m,
                 AllowNegativeStock = request.AllowNegativeStock,
                 UpdatedAtUtc = now,
                 Product = product
             };
         }
+        else
+        {
+            product.Inventory.StoreId = product.StoreId;
+        }
 
         product.Inventory.ReorderLevel = RoundQuantity(request.ReorderLevel);
+        product.Inventory.SafetyStock = RoundQuantity(request.SafetyStock);
+        product.Inventory.TargetStockLevel = RoundQuantity(normalizedTargetStockLevel);
         product.Inventory.AllowNegativeStock = request.AllowNegativeStock;
         product.Inventory.UpdatedAtUtc = now;
 
@@ -500,9 +548,12 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
                 product.Sku,
                 product.Barcode,
                 product.ImageUrl,
+                product.BrandId,
                 product.UnitPrice,
                 product.CostPrice,
                 ReorderLevel = product.Inventory.ReorderLevel,
+                product.Inventory.SafetyStock,
+                product.Inventory.TargetStockLevel,
                 product.Inventory.AllowNegativeStock,
                 product.IsActive
             });
@@ -621,12 +672,19 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
             {
                 Product = product,
                 ProductId = product.Id,
+                StoreId = product.StoreId,
                 QuantityOnHand = 0m,
                 ReorderLevel = 0m,
+                SafetyStock = 0m,
+                TargetStockLevel = 0m,
                 AllowNegativeStock = true,
                 UpdatedAtUtc = now
             };
             dbContext.Inventory.Add(inventory);
+        }
+        else
+        {
+            inventory.StoreId = product.StoreId;
         }
 
         var roundedDelta = RoundQuantity(request.DeltaQuantity);
@@ -670,6 +728,8 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
         await dbContext.SaveChangesAsync(cancellationToken);
 
         var reorderLevel = RoundQuantity(inventory.ReorderLevel);
+        var safetyStock = RoundQuantity(inventory.SafetyStock);
+        var targetStockLevel = RoundQuantity(inventory.TargetStockLevel);
         var alertLevel = RoundQuantity(Math.Max(reorderLevel, DefaultLowStockThreshold));
         return new StockAdjustmentResponse
         {
@@ -680,6 +740,8 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
             Reason = reason,
             IsLowStock = next <= alertLevel,
             AlertLevel = alertLevel,
+            SafetyStock = safetyStock,
+            TargetStockLevel = targetStockLevel,
             UpdatedAt = now
         };
     }
@@ -783,6 +845,278 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
         return ToCategoryItemResponse(category, productCount);
     }
 
+    public async Task<BrandListResponse> GetBrandsAsync(
+        bool includeInactive,
+        CancellationToken cancellationToken)
+    {
+        var brands = await dbContext.Brands
+            .AsNoTracking()
+            .Where(x => includeInactive || x.IsActive)
+            .OrderBy(x => x.Name)
+            .Select(x => new BrandItemResponse
+            {
+                BrandId = x.Id,
+                Name = x.Name,
+                Code = x.Code,
+                Description = x.Description,
+                IsActive = x.IsActive,
+                ProductCount = x.Products.Count(y => y.IsActive),
+                CreatedAt = x.CreatedAtUtc,
+                UpdatedAt = x.UpdatedAtUtc
+            })
+            .ToListAsync(cancellationToken);
+
+        return new BrandListResponse { Items = brands };
+    }
+
+    public async Task<BrandItemResponse> CreateBrandAsync(
+        UpsertBrandRequest request,
+        CancellationToken cancellationToken)
+    {
+        var normalizedName = NormalizeRequired(request.Name, "Brand name is required.");
+        var normalizedCode = NormalizeOptional(request.Code);
+        await EnsureUniqueBrandNameAsync(normalizedName, null, cancellationToken);
+        await EnsureUniqueBrandCodeAsync(normalizedCode, null, cancellationToken);
+
+        var now = DateTimeOffset.UtcNow;
+        var brand = new Brand
+        {
+            Name = normalizedName,
+            Code = normalizedCode,
+            Description = NormalizeOptional(request.Description),
+            IsActive = request.IsActive,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+
+        dbContext.Brands.Add(brand);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return ToBrandItemResponse(brand, productCount: 0);
+    }
+
+    public async Task<BrandItemResponse> UpdateBrandAsync(
+        Guid brandId,
+        UpsertBrandRequest request,
+        CancellationToken cancellationToken)
+    {
+        var brand = await dbContext.Brands.FirstOrDefaultAsync(x => x.Id == brandId, cancellationToken)
+            ?? throw new KeyNotFoundException("Brand not found.");
+
+        var normalizedName = NormalizeRequired(request.Name, "Brand name is required.");
+        var normalizedCode = NormalizeOptional(request.Code);
+        await EnsureUniqueBrandNameAsync(normalizedName, brandId, cancellationToken);
+        await EnsureUniqueBrandCodeAsync(normalizedCode, brandId, cancellationToken);
+
+        brand.Name = normalizedName;
+        brand.Code = normalizedCode;
+        brand.Description = NormalizeOptional(request.Description);
+        brand.IsActive = request.IsActive;
+        brand.UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var productCount = await dbContext.Products
+            .AsNoTracking()
+            .CountAsync(x => x.BrandId == brandId && x.IsActive, cancellationToken);
+
+        return ToBrandItemResponse(brand, productCount);
+    }
+
+    public async Task<SupplierListResponse> GetSuppliersAsync(
+        bool includeInactive,
+        CancellationToken cancellationToken)
+    {
+        var suppliers = await dbContext.Suppliers
+            .AsNoTracking()
+            .Where(x => includeInactive || x.IsActive)
+            .OrderBy(x => x.Name)
+            .Select(x => new SupplierItemResponse
+            {
+                SupplierId = x.Id,
+                Name = x.Name,
+                Code = x.Code,
+                ContactName = x.ContactName,
+                Phone = x.Phone,
+                Email = x.Email,
+                Address = x.Address,
+                IsActive = x.IsActive,
+                LinkedProductCount = x.ProductSuppliers.Count(y => y.IsActive),
+                CreatedAt = x.CreatedAtUtc,
+                UpdatedAt = x.UpdatedAtUtc
+            })
+            .ToListAsync(cancellationToken);
+
+        return new SupplierListResponse { Items = suppliers };
+    }
+
+    public async Task<SupplierItemResponse> CreateSupplierAsync(
+        UpsertSupplierRequest request,
+        CancellationToken cancellationToken)
+    {
+        var normalizedName = NormalizeRequired(request.Name, "Supplier name is required.");
+        var normalizedCode = NormalizeOptional(request.Code);
+        await EnsureUniqueSupplierNameAsync(normalizedName, null, cancellationToken);
+        await EnsureUniqueSupplierCodeAsync(normalizedCode, null, cancellationToken);
+
+        var now = DateTimeOffset.UtcNow;
+        var supplier = new Supplier
+        {
+            Name = normalizedName,
+            Code = normalizedCode,
+            ContactName = NormalizeOptional(request.ContactName),
+            Phone = NormalizeOptional(request.Phone),
+            Email = NormalizeOptional(request.Email),
+            Address = NormalizeOptional(request.Address),
+            IsActive = request.IsActive,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+
+        dbContext.Suppliers.Add(supplier);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return ToSupplierItemResponse(supplier, linkedProductCount: 0);
+    }
+
+    public async Task<SupplierItemResponse> UpdateSupplierAsync(
+        Guid supplierId,
+        UpsertSupplierRequest request,
+        CancellationToken cancellationToken)
+    {
+        var supplier = await dbContext.Suppliers.FirstOrDefaultAsync(x => x.Id == supplierId, cancellationToken)
+            ?? throw new KeyNotFoundException("Supplier not found.");
+
+        var normalizedName = NormalizeRequired(request.Name, "Supplier name is required.");
+        var normalizedCode = NormalizeOptional(request.Code);
+        await EnsureUniqueSupplierNameAsync(normalizedName, supplierId, cancellationToken);
+        await EnsureUniqueSupplierCodeAsync(normalizedCode, supplierId, cancellationToken);
+
+        supplier.Name = normalizedName;
+        supplier.Code = normalizedCode;
+        supplier.ContactName = NormalizeOptional(request.ContactName);
+        supplier.Phone = NormalizeOptional(request.Phone);
+        supplier.Email = NormalizeOptional(request.Email);
+        supplier.Address = NormalizeOptional(request.Address);
+        supplier.IsActive = request.IsActive;
+        supplier.UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var linkedProductCount = await dbContext.ProductSuppliers
+            .AsNoTracking()
+            .CountAsync(x => x.SupplierId == supplierId && x.IsActive, cancellationToken);
+
+        return ToSupplierItemResponse(supplier, linkedProductCount);
+    }
+
+    public async Task<ProductSupplierListResponse> GetProductSuppliersAsync(
+        Guid productId,
+        CancellationToken cancellationToken)
+    {
+        await EnsureProductExistsAsync(productId, cancellationToken);
+
+        var items = await dbContext.ProductSuppliers
+            .AsNoTracking()
+            .Include(x => x.Supplier)
+            .Where(x => x.ProductId == productId)
+            .OrderByDescending(x => x.IsPreferred)
+            .ThenBy(x => x.Supplier.Name)
+            .Select(x => new ProductSupplierItemResponse
+            {
+                ProductSupplierId = x.Id,
+                SupplierId = x.SupplierId,
+                SupplierName = x.Supplier.Name,
+                SupplierSku = x.SupplierSku,
+                SupplierItemName = x.SupplierItemName,
+                IsPreferred = x.IsPreferred,
+                LeadTimeDays = x.LeadTimeDays,
+                MinOrderQty = x.MinOrderQty,
+                PackSize = x.PackSize,
+                LastPurchasePrice = x.LastPurchasePrice,
+                IsActive = x.IsActive,
+                CreatedAt = x.CreatedAtUtc,
+                UpdatedAt = x.UpdatedAtUtc
+            })
+            .ToListAsync(cancellationToken);
+
+        return new ProductSupplierListResponse { Items = items };
+    }
+
+    public async Task<ProductSupplierItemResponse> UpsertProductSupplierAsync(
+        Guid productId,
+        UpsertProductSupplierRequest request,
+        CancellationToken cancellationToken)
+    {
+        var product = await dbContext.Products.FirstOrDefaultAsync(x => x.Id == productId, cancellationToken)
+            ?? throw new KeyNotFoundException("Product not found.");
+        var supplier = await dbContext.Suppliers.FirstOrDefaultAsync(x => x.Id == request.SupplierId, cancellationToken)
+            ?? throw new KeyNotFoundException("Supplier not found.");
+
+        ValidateOptionalQuantityValue(request.MinOrderQty, "Minimum order quantity cannot be negative.");
+        ValidateOptionalQuantityValue(request.PackSize, "Pack size cannot be negative.");
+        ValidateOptionalMoneyValue(request.LastPurchasePrice, "Last purchase price cannot be negative.");
+        ValidateOptionalLeadTimeValue(request.LeadTimeDays, "Lead time must be positive.");
+
+        var now = DateTimeOffset.UtcNow;
+        var mapping = await dbContext.ProductSuppliers
+            .FirstOrDefaultAsync(x => x.ProductId == productId && x.SupplierId == request.SupplierId, cancellationToken);
+
+        if (mapping is null)
+        {
+            mapping = new ProductSupplier
+            {
+                Product = product,
+                Supplier = supplier,
+                ProductId = productId,
+                SupplierId = request.SupplierId,
+                StoreId = product.StoreId,
+                CreatedAtUtc = now
+            };
+            dbContext.ProductSuppliers.Add(mapping);
+        }
+        else
+        {
+            mapping.Product = product;
+            mapping.Supplier = supplier;
+        }
+
+        mapping.SupplierSku = NormalizeOptional(request.SupplierSku);
+        mapping.SupplierItemName = NormalizeOptional(request.SupplierItemName);
+        mapping.IsPreferred = request.IsPreferred;
+        mapping.LeadTimeDays = request.LeadTimeDays;
+        mapping.MinOrderQty = request.MinOrderQty.HasValue ? RoundQuantity(request.MinOrderQty.Value) : null;
+        mapping.PackSize = request.PackSize.HasValue ? RoundQuantity(request.PackSize.Value) : null;
+        mapping.LastPurchasePrice = request.LastPurchasePrice.HasValue ? RoundMoney(request.LastPurchasePrice.Value) : null;
+        mapping.IsActive = request.IsActive;
+        mapping.UpdatedAtUtc = now;
+
+        if (request.IsPreferred)
+        {
+            await ClearOtherPreferredSuppliersAsync(productId, mapping.Id, cancellationToken);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return ToProductSupplierItemResponse(mapping);
+    }
+
+    public async Task<ProductSupplierItemResponse> SetPreferredSupplierAsync(
+        Guid productId,
+        SetPreferredProductSupplierRequest request,
+        CancellationToken cancellationToken)
+    {
+        var mapping = await dbContext.ProductSuppliers
+            .Include(x => x.Supplier)
+            .FirstOrDefaultAsync(x => x.ProductId == productId && x.SupplierId == request.SupplierId, cancellationToken)
+            ?? throw new KeyNotFoundException("Product supplier mapping not found.");
+
+        mapping.IsPreferred = true;
+        mapping.IsActive = true;
+        mapping.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        await ClearOtherPreferredSuppliersAsync(productId, mapping.Id, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return ToProductSupplierItemResponse(mapping);
+    }
+
     private async Task<ProductCatalogItemResponse> GetSingleCatalogItemAsync(
         Guid productId,
         decimal threshold,
@@ -791,7 +1125,10 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
         var product = await dbContext.Products
             .AsNoTracking()
             .Include(x => x.Category)
+            .Include(x => x.Brand)
             .Include(x => x.Inventory)
+            .Include(x => x.ProductSuppliers)
+                .ThenInclude(x => x.Supplier)
             .FirstOrDefaultAsync(x => x.Id == productId, cancellationToken)
             ?? throw new KeyNotFoundException("Product not found.");
 
@@ -814,6 +1151,55 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
         if (!exists)
         {
             throw new InvalidOperationException("Selected category does not exist or is inactive.");
+        }
+    }
+
+    private async Task EnsureBrandExistsIfProvidedAsync(
+        Guid? brandId,
+        CancellationToken cancellationToken)
+    {
+        if (!brandId.HasValue)
+        {
+            return;
+        }
+
+        var exists = await dbContext.Brands
+            .AsNoTracking()
+            .AnyAsync(x => x.Id == brandId.Value && x.IsActive, cancellationToken);
+
+        if (!exists)
+        {
+            throw new InvalidOperationException("Selected brand does not exist or is inactive.");
+        }
+    }
+
+    private async Task EnsureProductExistsAsync(
+        Guid productId,
+        CancellationToken cancellationToken)
+    {
+        var exists = await dbContext.Products
+            .AsNoTracking()
+            .AnyAsync(x => x.Id == productId, cancellationToken);
+
+        if (!exists)
+        {
+            throw new KeyNotFoundException("Product not found.");
+        }
+    }
+
+    private async Task ClearOtherPreferredSuppliersAsync(
+        Guid productId,
+        Guid preferredMappingId,
+        CancellationToken cancellationToken)
+    {
+        var others = await dbContext.ProductSuppliers
+            .Where(x => x.ProductId == productId && x.Id != preferredMappingId && x.IsPreferred)
+            .ToListAsync(cancellationToken);
+
+        foreach (var other in others)
+        {
+            other.IsPreferred = false;
+            other.UpdatedAtUtc = DateTimeOffset.UtcNow;
         }
     }
 
@@ -1002,6 +1388,118 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
         }
     }
 
+    private async Task EnsureUniqueBrandNameAsync(
+        string name,
+        Guid? brandId,
+        CancellationToken cancellationToken)
+    {
+        var normalized = name.Trim().ToLowerInvariant();
+        var exists = await dbContext.Brands
+            .AsNoTracking()
+            .AnyAsync(
+                x => x.Name.ToLower() == normalized &&
+                     (!brandId.HasValue || x.Id != brandId.Value),
+                cancellationToken);
+
+        if (exists)
+        {
+            throw new InvalidOperationException("Brand name already exists.");
+        }
+    }
+
+    private async Task EnsureUniqueBrandCodeAsync(
+        string? code,
+        Guid? brandId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            return;
+        }
+
+        var normalized = code.Trim().ToLowerInvariant();
+        var exists = await dbContext.Brands
+            .AsNoTracking()
+            .AnyAsync(
+                x => x.Code != null &&
+                     x.Code.ToLower() == normalized &&
+                     (!brandId.HasValue || x.Id != brandId.Value),
+                cancellationToken);
+
+        if (exists)
+        {
+            throw new InvalidOperationException("Brand code already exists.");
+        }
+    }
+
+    private async Task EnsureUniqueSupplierNameAsync(
+        string name,
+        Guid? supplierId,
+        CancellationToken cancellationToken)
+    {
+        var normalized = name.Trim().ToLowerInvariant();
+        var exists = await dbContext.Suppliers
+            .AsNoTracking()
+            .AnyAsync(
+                x => x.Name.ToLower() == normalized &&
+                     (!supplierId.HasValue || x.Id != supplierId.Value),
+                cancellationToken);
+
+        if (exists)
+        {
+            throw new InvalidOperationException("Supplier name already exists.");
+        }
+    }
+
+    private async Task EnsureUniqueSupplierCodeAsync(
+        string? code,
+        Guid? supplierId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            return;
+        }
+
+        var normalized = code.Trim().ToLowerInvariant();
+        var exists = await dbContext.Suppliers
+            .AsNoTracking()
+            .AnyAsync(
+                x => x.Code != null &&
+                     x.Code.ToLower() == normalized &&
+                     (!supplierId.HasValue || x.Id != supplierId.Value),
+                cancellationToken);
+
+        if (exists)
+        {
+            throw new InvalidOperationException("Supplier code already exists.");
+        }
+    }
+
+    private static void ValidateOptionalQuantityValue(decimal? value, string errorMessage)
+    {
+        if (value.HasValue && value.Value < 0m)
+        {
+            throw new InvalidOperationException(errorMessage);
+        }
+    }
+
+    private static void ValidateOptionalMoneyValue(decimal? value, string errorMessage)
+    {
+        if (value.HasValue && value.Value < 0m)
+        {
+            throw new InvalidOperationException(errorMessage);
+        }
+    }
+
+    private static void ValidateOptionalLeadTimeValue(int? value, string errorMessage)
+    {
+        if (value.HasValue && value.Value <= 0)
+        {
+            throw new InvalidOperationException(errorMessage);
+        }
+    }
+
     private static ProductCatalogItemResponse ToCatalogItemResponse(Product product, decimal threshold)
     {
         var stockQuantity = RoundQuantity(product.Inventory?.QuantityOnHand ?? 0m);
@@ -1017,14 +1515,23 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
             ImageUrl = product.ImageUrl,
             CategoryId = product.CategoryId,
             CategoryName = product.Category?.Name,
+            BrandId = product.BrandId,
+            BrandName = product.Brand?.Name,
             UnitPrice = RoundMoney(product.UnitPrice),
             CostPrice = RoundMoney(product.CostPrice),
             StockQuantity = stockQuantity,
             ReorderLevel = reorderLevel,
             AlertLevel = alertLevel,
+            SafetyStock = RoundQuantity(product.Inventory?.SafetyStock ?? 0m),
+            TargetStockLevel = RoundQuantity(product.Inventory?.TargetStockLevel ?? 0m),
             AllowNegativeStock = product.Inventory?.AllowNegativeStock ?? true,
             IsActive = product.IsActive,
             IsLowStock = stockQuantity <= alertLevel,
+            ProductSuppliers = product.ProductSuppliers
+                .Select(ToProductSupplierItemResponse)
+                .OrderByDescending(x => x.IsPreferred)
+                .ThenBy(x => x.SupplierName)
+                .ToList(),
             CreatedAt = product.CreatedAtUtc,
             UpdatedAt = product.UpdatedAtUtc
         };
@@ -1041,6 +1548,59 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
             ProductCount = productCount,
             CreatedAt = category.CreatedAtUtc,
             UpdatedAt = category.UpdatedAtUtc
+        };
+    }
+
+    private static BrandItemResponse ToBrandItemResponse(Brand brand, int productCount)
+    {
+        return new BrandItemResponse
+        {
+            BrandId = brand.Id,
+            Name = brand.Name,
+            Code = brand.Code,
+            Description = brand.Description,
+            IsActive = brand.IsActive,
+            ProductCount = productCount,
+            CreatedAt = brand.CreatedAtUtc,
+            UpdatedAt = brand.UpdatedAtUtc
+        };
+    }
+
+    private static SupplierItemResponse ToSupplierItemResponse(Supplier supplier, int linkedProductCount)
+    {
+        return new SupplierItemResponse
+        {
+            SupplierId = supplier.Id,
+            Name = supplier.Name,
+            Code = supplier.Code,
+            ContactName = supplier.ContactName,
+            Phone = supplier.Phone,
+            Email = supplier.Email,
+            Address = supplier.Address,
+            IsActive = supplier.IsActive,
+            LinkedProductCount = linkedProductCount,
+            CreatedAt = supplier.CreatedAtUtc,
+            UpdatedAt = supplier.UpdatedAtUtc
+        };
+    }
+
+    private static ProductSupplierItemResponse ToProductSupplierItemResponse(ProductSupplier mapping)
+    {
+        return new ProductSupplierItemResponse
+        {
+            ProductSupplierId = mapping.Id,
+            SupplierId = mapping.SupplierId,
+            SupplierName = mapping.Supplier?.Name ?? string.Empty,
+            SupplierSku = mapping.SupplierSku,
+            SupplierItemName = mapping.SupplierItemName,
+            IsPreferred = mapping.IsPreferred,
+            LeadTimeDays = mapping.LeadTimeDays,
+            MinOrderQty = mapping.MinOrderQty,
+            PackSize = mapping.PackSize,
+            LastPurchasePrice = mapping.LastPurchasePrice,
+            IsActive = mapping.IsActive,
+            CreatedAt = mapping.CreatedAtUtc,
+            UpdatedAt = mapping.UpdatedAtUtc
         };
     }
 

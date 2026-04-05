@@ -39,6 +39,34 @@ public static class SettingsEndpoints
         .WithName("UpdateShopProfile")
         .WithOpenApi();
 
+        group.MapGet("/stock-settings", async (
+            ShopStockSettingsService shopStockSettingsService,
+            CancellationToken cancellationToken) =>
+        {
+            var settings = await shopStockSettingsService.GetAsync(cancellationToken);
+            return Results.Ok(settings);
+        })
+        .WithName("GetShopStockSettings")
+        .WithOpenApi();
+
+        group.MapPut("/stock-settings", [Authorize(Roles = $"{SmartPosRoles.Owner},{SmartPosRoles.Manager}")] async (
+            UpdateShopStockSettingsRequest request,
+            ShopStockSettingsService shopStockSettingsService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var settings = await shopStockSettingsService.UpdateAsync(request, cancellationToken);
+                return Results.Ok(settings);
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .WithName("UpdateShopStockSettings")
+        .WithOpenApi();
+
         return app;
     }
 }

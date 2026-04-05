@@ -9,6 +9,8 @@ public static class ProductEndpoints
     {
         var productGroup = app.MapGroup("/api/products").WithTags("Products");
         var categoryGroup = app.MapGroup("/api/categories").WithTags("Categories");
+        var brandGroup = app.MapGroup("/api/brands").WithTags("Brands");
+        var supplierGroup = app.MapGroup("/api/suppliers").WithTags("Suppliers");
 
         productGroup.MapGet("/search", async (
             string? q,
@@ -220,6 +222,73 @@ public static class ProductEndpoints
         .WithName("AdjustProductStock")
         .WithOpenApi();
 
+        productGroup.MapGet("/{productId:guid}/suppliers", async (
+            Guid productId,
+            ProductService productService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var result = await productService.GetProductSuppliersAsync(productId, cancellationToken);
+                return Results.Ok(result);
+            }
+            catch (KeyNotFoundException exception)
+            {
+                return Results.NotFound(new { message = exception.Message });
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.ManagerOrOwner)
+        .WithName("GetProductSuppliers")
+        .WithOpenApi();
+
+        productGroup.MapPut("/{productId:guid}/suppliers", async (
+            Guid productId,
+            UpsertProductSupplierRequest request,
+            ProductService productService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var result = await productService.UpsertProductSupplierAsync(productId, request, cancellationToken);
+                return Results.Ok(result);
+            }
+            catch (KeyNotFoundException exception)
+            {
+                return Results.NotFound(new { message = exception.Message });
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.ManagerOrOwner)
+        .WithName("UpsertProductSupplier")
+        .WithOpenApi();
+
+        productGroup.MapPut("/{productId:guid}/preferred-supplier", async (
+            Guid productId,
+            SetPreferredProductSupplierRequest request,
+            ProductService productService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var result = await productService.SetPreferredSupplierAsync(productId, request, cancellationToken);
+                return Results.Ok(result);
+            }
+            catch (KeyNotFoundException exception)
+            {
+                return Results.NotFound(new { message = exception.Message });
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.ManagerOrOwner)
+        .WithName("SetPreferredProductSupplier")
+        .WithOpenApi();
+
         productGroup.MapDelete("/{productId:guid}", async (
             Guid productId,
             ProductService productService,
@@ -317,6 +386,116 @@ public static class ProductEndpoints
         })
         .RequireAuthorization(SmartPosPolicies.ManagerOrOwner)
         .WithName("UpdateCategory")
+        .WithOpenApi();
+
+        brandGroup.MapGet("", async (
+            bool? include_inactive,
+            ProductService productService,
+            CancellationToken cancellationToken) =>
+        {
+            var result = await productService.GetBrandsAsync(include_inactive ?? false, cancellationToken);
+            return Results.Ok(result);
+        })
+        .RequireAuthorization(SmartPosPolicies.ManagerOrOwner)
+        .WithName("ListBrands")
+        .WithOpenApi();
+
+        brandGroup.MapPost("", async (
+            UpsertBrandRequest request,
+            ProductService productService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var result = await productService.CreateBrandAsync(request, cancellationToken);
+                return Results.Ok(result);
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.ManagerOrOwner)
+        .WithName("CreateBrand")
+        .WithOpenApi();
+
+        brandGroup.MapPut("/{brandId:guid}", async (
+            Guid brandId,
+            UpsertBrandRequest request,
+            ProductService productService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var result = await productService.UpdateBrandAsync(brandId, request, cancellationToken);
+                return Results.Ok(result);
+            }
+            catch (KeyNotFoundException exception)
+            {
+                return Results.NotFound(new { message = exception.Message });
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.ManagerOrOwner)
+        .WithName("UpdateBrand")
+        .WithOpenApi();
+
+        supplierGroup.MapGet("", async (
+            bool? include_inactive,
+            ProductService productService,
+            CancellationToken cancellationToken) =>
+        {
+            var result = await productService.GetSuppliersAsync(include_inactive ?? false, cancellationToken);
+            return Results.Ok(result);
+        })
+        .RequireAuthorization(SmartPosPolicies.ManagerOrOwner)
+        .WithName("ListSuppliers")
+        .WithOpenApi();
+
+        supplierGroup.MapPost("", async (
+            UpsertSupplierRequest request,
+            ProductService productService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var result = await productService.CreateSupplierAsync(request, cancellationToken);
+                return Results.Ok(result);
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.ManagerOrOwner)
+        .WithName("CreateSupplier")
+        .WithOpenApi();
+
+        supplierGroup.MapPut("/{supplierId:guid}", async (
+            Guid supplierId,
+            UpsertSupplierRequest request,
+            ProductService productService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var result = await productService.UpdateSupplierAsync(supplierId, request, cancellationToken);
+                return Results.Ok(result);
+            }
+            catch (KeyNotFoundException exception)
+            {
+                return Results.NotFound(new { message = exception.Message });
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.ManagerOrOwner)
+        .WithName("UpdateSupplier")
         .WithOpenApi();
 
         return app;

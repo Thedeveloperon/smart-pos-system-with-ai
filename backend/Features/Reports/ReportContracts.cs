@@ -295,11 +295,26 @@ public sealed class LowStockReportRow
     [JsonPropertyName("product_name")]
     public string ProductName { get; set; } = string.Empty;
 
+    [JsonPropertyName("store_id")]
+    public Guid? StoreId { get; set; }
+
     [JsonPropertyName("sku")]
     public string? Sku { get; set; }
 
     [JsonPropertyName("barcode")]
     public string? Barcode { get; set; }
+
+    [JsonPropertyName("brand_id")]
+    public Guid? BrandId { get; set; }
+
+    [JsonPropertyName("brand_name")]
+    public string? BrandName { get; set; }
+
+    [JsonPropertyName("preferred_supplier_id")]
+    public Guid? PreferredSupplierId { get; set; }
+
+    [JsonPropertyName("preferred_supplier_name")]
+    public string? PreferredSupplierName { get; set; }
 
     [JsonPropertyName("quantity_on_hand")]
     public decimal QuantityOnHand { get; set; }
@@ -307,11 +322,83 @@ public sealed class LowStockReportRow
     [JsonPropertyName("reorder_level")]
     public decimal ReorderLevel { get; set; }
 
+    [JsonPropertyName("safety_stock")]
+    public decimal SafetyStock { get; set; }
+
+    [JsonPropertyName("target_stock_level")]
+    public decimal TargetStockLevel { get; set; }
+
     [JsonPropertyName("alert_level")]
     public decimal AlertLevel { get; set; }
 
     [JsonPropertyName("deficit")]
     public decimal Deficit { get; set; }
+}
+
+public sealed class LowStockByBrandReportResponse
+{
+    [JsonPropertyName("generated_at")]
+    public DateTimeOffset GeneratedAt { get; set; }
+
+    [JsonPropertyName("threshold")]
+    public decimal Threshold { get; set; }
+
+    [JsonPropertyName("take")]
+    public int Take { get; set; }
+
+    [JsonPropertyName("items")]
+    public List<LowStockByBrandReportRow> Items { get; set; } = [];
+}
+
+public sealed class LowStockByBrandReportRow
+{
+    [JsonPropertyName("brand_id")]
+    public Guid? BrandId { get; set; }
+
+    [JsonPropertyName("brand_name")]
+    public string? BrandName { get; set; }
+
+    [JsonPropertyName("low_stock_count")]
+    public int LowStockCount { get; set; }
+
+    [JsonPropertyName("total_deficit")]
+    public decimal TotalDeficit { get; set; }
+
+    [JsonPropertyName("estimated_reorder_value")]
+    public decimal EstimatedReorderValue { get; set; }
+}
+
+public sealed class LowStockBySupplierReportResponse
+{
+    [JsonPropertyName("generated_at")]
+    public DateTimeOffset GeneratedAt { get; set; }
+
+    [JsonPropertyName("threshold")]
+    public decimal Threshold { get; set; }
+
+    [JsonPropertyName("take")]
+    public int Take { get; set; }
+
+    [JsonPropertyName("items")]
+    public List<LowStockBySupplierReportRow> Items { get; set; } = [];
+}
+
+public sealed class LowStockBySupplierReportRow
+{
+    [JsonPropertyName("supplier_id")]
+    public Guid? SupplierId { get; set; }
+
+    [JsonPropertyName("supplier_name")]
+    public string? SupplierName { get; set; }
+
+    [JsonPropertyName("low_stock_count")]
+    public int LowStockCount { get; set; }
+
+    [JsonPropertyName("total_deficit")]
+    public decimal TotalDeficit { get; set; }
+
+    [JsonPropertyName("estimated_reorder_value")]
+    public decimal EstimatedReorderValue { get; set; }
 }
 
 public sealed class SupportTriageReportResponse

@@ -141,7 +141,7 @@ const HeaderBar = ({
             className="text-pos-header-foreground hover:bg-pos-header-foreground/10"
           >
             <PencilLine className="h-4 w-4" />
-            <span className="hidden md:inline ml-1">Manage</span>
+            <span className="hidden md:inline ml-1">POS Manager</span>
           </Button>
         )}
 
@@ -341,7 +341,7 @@ const HeaderBar = ({
             {onManageProducts && allowCashier(cashierToolbarVisibility?.manage) && (
               <DropdownMenuItem onSelect={() => onManageProducts()} className="min-h-11 px-3 py-2 text-base">
                 <PencilLine className="mr-3 h-5 w-5" />
-                Manage
+                POS Manager
               </DropdownMenuItem>
             )}
 

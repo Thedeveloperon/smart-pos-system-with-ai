@@ -453,14 +453,18 @@ public sealed class PurchaseService(
                     {
                         Product = product,
                         ProductId = product.Id,
+                        StoreId = purchaseBill.StoreId,
                         QuantityOnHand = 0m,
                         ReorderLevel = 0m,
+                        SafetyStock = 0m,
+                        TargetStockLevel = 0m,
                         AllowNegativeStock = true,
                         UpdatedAtUtc = now
                     };
                     dbContext.Inventory.Add(inventory);
                     product.Inventory = inventory;
                 }
+                inventory.StoreId = purchaseBill.StoreId;
 
                 var previousQty = RoundQuantity(inventory.QuantityOnHand);
                 var deltaQty = RoundQuantity(line.Quantity);
@@ -479,6 +483,7 @@ public sealed class PurchaseService(
                 }
 
                 product.UpdatedAtUtc = now;
+                await UpsertProductSupplierFromPurchaseAsync(product, supplier, line, now, cancellationToken);
 
                 var purchaseItem = new PurchaseBillItem
                 {
@@ -1042,6 +1047,62 @@ public sealed class PurchaseService(
         };
         dbContext.Suppliers.Add(created);
         return created;
+    }
+
+    private async Task UpsertProductSupplierFromPurchaseAsync(
+        Product product,
+        Supplier supplier,
+        ConfirmLine line,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var mapping = await dbContext.ProductSuppliers
+            .FirstOrDefaultAsync(x => x.ProductId == product.Id && x.SupplierId == supplier.Id, cancellationToken);
+
+        if (mapping is null)
+        {
+            mapping = new ProductSupplier
+            {
+                Product = product,
+                Supplier = supplier,
+                ProductId = product.Id,
+                SupplierId = supplier.Id,
+                StoreId = product.StoreId,
+                CreatedAtUtc = now
+            };
+            dbContext.ProductSuppliers.Add(mapping);
+        }
+
+        mapping.SupplierItemName = NormalizeOptional(line.SupplierItemName);
+        mapping.LastPurchasePrice = RoundMoney(line.UnitCost);
+        mapping.IsActive = true;
+        mapping.UpdatedAtUtc = now;
+
+        var hasPreferred = await dbContext.ProductSuppliers
+            .AsNoTracking()
+            .AnyAsync(x => x.ProductId == product.Id && x.IsPreferred, cancellationToken);
+
+        if (!hasPreferred)
+        {
+            mapping.IsPreferred = true;
+            await ClearOtherPreferredProductSuppliersAsync(product.Id, mapping.Id, cancellationToken);
+        }
+    }
+
+    private async Task ClearOtherPreferredProductSuppliersAsync(
+        Guid productId,
+        Guid preferredProductSupplierId,
+        CancellationToken cancellationToken)
+    {
+        var others = await dbContext.ProductSuppliers
+            .Where(x => x.ProductId == productId && x.Id != preferredProductSupplierId && x.IsPreferred)
+            .ToListAsync(cancellationToken);
+
+        foreach (var other in others)
+        {
+            other.IsPreferred = false;
+            other.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        }
     }
 
     private DraftPayloadMetadata ParseDraftMetadata(string? payloadJson)

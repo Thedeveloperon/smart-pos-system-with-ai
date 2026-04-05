@@ -13,11 +13,26 @@ public sealed class Category
     public ICollection<Product> Products { get; set; } = [];
 }
 
+public sealed class Brand
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? StoreId { get; set; }
+    public required string Name { get; set; }
+    public string? Code { get; set; }
+    public string? Description { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public ICollection<Product> Products { get; set; } = [];
+}
+
 public sealed class Product
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid? StoreId { get; set; }
     public Guid? CategoryId { get; set; }
+    public Guid? BrandId { get; set; }
     public required string Name { get; set; }
     public string? Sku { get; set; }
     public string? Barcode { get; set; }
@@ -29,9 +44,11 @@ public sealed class Product
     public DateTimeOffset? UpdatedAtUtc { get; set; }
 
     public Category? Category { get; set; }
+    public Brand? Brand { get; set; }
     public InventoryRecord? Inventory { get; set; }
     public ICollection<SaleItem> SaleItems { get; set; } = [];
     public ICollection<PurchaseBillItem> PurchaseBillItems { get; set; } = [];
+    public ICollection<ProductSupplier> ProductSuppliers { get; set; } = [];
 }
 
 public sealed class Supplier
@@ -49,6 +66,28 @@ public sealed class Supplier
     public DateTimeOffset? UpdatedAtUtc { get; set; }
 
     public ICollection<PurchaseBill> PurchaseBills { get; set; } = [];
+    public ICollection<ProductSupplier> ProductSuppliers { get; set; } = [];
+}
+
+public sealed class ProductSupplier
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? StoreId { get; set; }
+    public Guid ProductId { get; set; }
+    public Guid SupplierId { get; set; }
+    public string? SupplierSku { get; set; }
+    public string? SupplierItemName { get; set; }
+    public bool IsPreferred { get; set; }
+    public int? LeadTimeDays { get; set; }
+    public decimal? MinOrderQty { get; set; }
+    public decimal? PackSize { get; set; }
+    public decimal? LastPurchasePrice { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public required Product Product { get; set; }
+    public required Supplier Supplier { get; set; }
 }
 
 public sealed class ShopProfile
@@ -147,10 +186,25 @@ public sealed class InventoryRecord
     public Guid ProductId { get; set; }
     public decimal QuantityOnHand { get; set; }
     public decimal ReorderLevel { get; set; }
+    public decimal SafetyStock { get; set; }
+    public decimal TargetStockLevel { get; set; }
     public bool AllowNegativeStock { get; set; } = true;
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 
     public required Product Product { get; set; }
+}
+
+public sealed class ShopStockSettings
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? StoreId { get; set; }
+    public decimal DefaultLowStockThreshold { get; set; } = 5m;
+    public decimal ThresholdMultiplier { get; set; } = 1m;
+    public decimal DefaultSafetyStock { get; set; }
+    public int DefaultLeadTimeDays { get; set; } = 7;
+    public decimal DefaultTargetDaysOfCover { get; set; } = 14m;
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
 }
 
 public sealed class Sale
