@@ -319,13 +319,13 @@ public sealed class AiInsightService(
                 CompletedAt = requestRecord.CompletedAtUtc ?? DateTimeOffset.UtcNow
             };
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException exception)
         {
             await FailAndRefundAsync(
                 requestRecord,
                 userId,
                 "invalid_operation",
-                "AI insight request failed.",
+                NormalizeErrorMessageForPersistence(exception.Message),
                 cancellationToken);
             throw;
         }
@@ -486,7 +486,6 @@ public sealed class AiInsightService(
                             }
                         }
                     },
-                    temperature = 0.1,
                     max_output_tokens = Math.Clamp(maxOutputTokens, 128, 2000)
                 }, JsonOptions),
                 Encoding.UTF8,
@@ -503,11 +502,13 @@ public sealed class AiInsightService(
 
         if (!response.IsSuccessStatusCode)
         {
+            var statusCode = (int)response.StatusCode;
+            var errorMessage = BuildOpenAiFailureMessage(statusCode, raw);
             logger.LogWarning(
                 "OpenAI insight request failed with status {StatusCode}. Body preview: {BodyPreview}",
-                (int)response.StatusCode,
+                statusCode,
                 raw.Length <= 320 ? raw : raw[..320]);
-            throw new InvalidOperationException("AI insight request failed.");
+            throw new InvalidOperationException(errorMessage);
         }
 
         using var document = JsonDocument.Parse(raw);
@@ -1583,6 +1584,69 @@ public sealed class AiInsightService(
         }
 
         return singleLine[..maxChars].TrimEnd() + "...";
+    }
+
+    private static string NormalizeErrorMessageForPersistence(string? message)
+    {
+        var normalized = (message ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return "AI insight request failed.";
+        }
+
+        return normalized.Length <= 500
+            ? normalized
+            : normalized[..500].TrimEnd();
+    }
+
+    private static string BuildOpenAiFailureMessage(int statusCode, string raw)
+    {
+        var details = ExtractOpenAiFailureDetail(raw);
+        if (string.IsNullOrWhiteSpace(details))
+        {
+            return $"OpenAI insight request failed (HTTP {statusCode}).";
+        }
+
+        return $"OpenAI insight request failed (HTTP {statusCode}): {details}";
+    }
+
+    private static string? ExtractOpenAiFailureDetail(string raw)
+    {
+        var normalized = (raw ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(normalized);
+            var root = document.RootElement;
+            if (root.TryGetProperty("error", out var errorElement) &&
+                errorElement.ValueKind == JsonValueKind.Object &&
+                errorElement.TryGetProperty("message", out var messageElement) &&
+                messageElement.ValueKind == JsonValueKind.String)
+            {
+                var message = messageElement.GetString();
+                var summary = SummarizeText(message, 320);
+                return string.IsNullOrWhiteSpace(summary) ? null : summary;
+            }
+
+            if (root.TryGetProperty("message", out var topMessageElement) &&
+                topMessageElement.ValueKind == JsonValueKind.String)
+            {
+                var message = topMessageElement.GetString();
+                var summary = SummarizeText(message, 320);
+                return string.IsNullOrWhiteSpace(summary) ? null : summary;
+            }
+        }
+        catch (JsonException)
+        {
+            // Fall back to plain-text preview when provider body is not JSON.
+        }
+
+        var fallback = SummarizeText(normalized, 320);
+        return string.IsNullOrWhiteSpace(fallback) ? null : fallback;
     }
 
     private static string MapRequestStatus(AiInsightRequestStatus status)
