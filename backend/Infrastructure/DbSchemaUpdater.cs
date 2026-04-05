@@ -95,12 +95,31 @@ public static class DbSchemaUpdater
                   "Website" TEXT NULL,
                   "LogoUrl" TEXT NULL,
                   "ReceiptFooter" TEXT NULL,
+                  "ShowHeldBillsForCashier" INTEGER NOT NULL DEFAULT 1,
+                  "ShowRemindersForCashier" INTEGER NOT NULL DEFAULT 1,
+                  "ShowAuditTrailForCashier" INTEGER NOT NULL DEFAULT 1,
+                  "ShowEndShiftForCashier" INTEGER NOT NULL DEFAULT 1,
+                  "ShowTodaySalesForCashier" INTEGER NOT NULL DEFAULT 1,
+                  "ShowImportBillForCashier" INTEGER NOT NULL DEFAULT 1,
+                  "ShowShopSettingsForCashier" INTEGER NOT NULL DEFAULT 1,
+                  "ShowMyLicensesForCashier" INTEGER NOT NULL DEFAULT 1,
+                  "ShowOfflineSyncForCashier" INTEGER NOT NULL DEFAULT 1,
                   "CreatedAtUtc" TEXT NOT NULL,
                   "UpdatedAtUtc" TEXT NULL
                 );
                 """;
 
             await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+
+            await EnsureSqliteColumnAsync(dbContext, "shop_profiles", "ShowHeldBillsForCashier", """ALTER TABLE "shop_profiles" ADD COLUMN "ShowHeldBillsForCashier" INTEGER NOT NULL DEFAULT 1;""", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "shop_profiles", "ShowRemindersForCashier", """ALTER TABLE "shop_profiles" ADD COLUMN "ShowRemindersForCashier" INTEGER NOT NULL DEFAULT 1;""", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "shop_profiles", "ShowAuditTrailForCashier", """ALTER TABLE "shop_profiles" ADD COLUMN "ShowAuditTrailForCashier" INTEGER NOT NULL DEFAULT 1;""", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "shop_profiles", "ShowEndShiftForCashier", """ALTER TABLE "shop_profiles" ADD COLUMN "ShowEndShiftForCashier" INTEGER NOT NULL DEFAULT 1;""", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "shop_profiles", "ShowTodaySalesForCashier", """ALTER TABLE "shop_profiles" ADD COLUMN "ShowTodaySalesForCashier" INTEGER NOT NULL DEFAULT 1;""", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "shop_profiles", "ShowImportBillForCashier", """ALTER TABLE "shop_profiles" ADD COLUMN "ShowImportBillForCashier" INTEGER NOT NULL DEFAULT 1;""", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "shop_profiles", "ShowShopSettingsForCashier", """ALTER TABLE "shop_profiles" ADD COLUMN "ShowShopSettingsForCashier" INTEGER NOT NULL DEFAULT 1;""", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "shop_profiles", "ShowMyLicensesForCashier", """ALTER TABLE "shop_profiles" ADD COLUMN "ShowMyLicensesForCashier" INTEGER NOT NULL DEFAULT 1;""", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "shop_profiles", "ShowOfflineSyncForCashier", """ALTER TABLE "shop_profiles" ADD COLUMN "ShowOfflineSyncForCashier" INTEGER NOT NULL DEFAULT 1;""", cancellationToken);
             return;
         }
 
@@ -117,13 +136,47 @@ public static class DbSchemaUpdater
                   "Website" varchar(120) NULL,
                   "LogoUrl" varchar(500) NULL,
                   "ReceiptFooter" varchar(500) NULL,
+                  "ShowHeldBillsForCashier" boolean NOT NULL DEFAULT true,
+                  "ShowRemindersForCashier" boolean NOT NULL DEFAULT true,
+                  "ShowAuditTrailForCashier" boolean NOT NULL DEFAULT true,
+                  "ShowEndShiftForCashier" boolean NOT NULL DEFAULT true,
+                  "ShowTodaySalesForCashier" boolean NOT NULL DEFAULT true,
+                  "ShowImportBillForCashier" boolean NOT NULL DEFAULT true,
+                  "ShowShopSettingsForCashier" boolean NOT NULL DEFAULT true,
+                  "ShowMyLicensesForCashier" boolean NOT NULL DEFAULT true,
+                  "ShowOfflineSyncForCashier" boolean NOT NULL DEFAULT true,
                   "CreatedAtUtc" timestamptz NOT NULL,
                   "UpdatedAtUtc" timestamptz NULL
                 );
                 """;
 
             await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE shop_profiles ADD COLUMN IF NOT EXISTS "ShowHeldBillsForCashier" boolean NOT NULL DEFAULT true;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE shop_profiles ADD COLUMN IF NOT EXISTS "ShowRemindersForCashier" boolean NOT NULL DEFAULT true;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE shop_profiles ADD COLUMN IF NOT EXISTS "ShowAuditTrailForCashier" boolean NOT NULL DEFAULT true;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE shop_profiles ADD COLUMN IF NOT EXISTS "ShowEndShiftForCashier" boolean NOT NULL DEFAULT true;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE shop_profiles ADD COLUMN IF NOT EXISTS "ShowTodaySalesForCashier" boolean NOT NULL DEFAULT true;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE shop_profiles ADD COLUMN IF NOT EXISTS "ShowImportBillForCashier" boolean NOT NULL DEFAULT true;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE shop_profiles ADD COLUMN IF NOT EXISTS "ShowShopSettingsForCashier" boolean NOT NULL DEFAULT true;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE shop_profiles ADD COLUMN IF NOT EXISTS "ShowMyLicensesForCashier" boolean NOT NULL DEFAULT true;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE shop_profiles ADD COLUMN IF NOT EXISTS "ShowOfflineSyncForCashier" boolean NOT NULL DEFAULT true;""", cancellationToken);
         }
+    }
+
+    private static async Task EnsureSqliteColumnAsync(
+        SmartPosDbContext dbContext,
+        string tableName,
+        string columnName,
+        string alterSql,
+        CancellationToken cancellationToken)
+    {
+        if (await ColumnExistsAsync(dbContext, tableName, columnName, cancellationToken))
+        {
+            return;
+        }
+
+        await dbContext.Database.ExecuteSqlRawAsync(alterSql, cancellationToken);
     }
 
     public static async Task EnsureRefundSchemaAsync(

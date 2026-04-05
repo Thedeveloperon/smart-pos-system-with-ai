@@ -372,6 +372,15 @@ type BackendShopProfileResponse = {
   website?: string | null;
   logo_url?: string | null;
   receipt_footer?: string | null;
+  show_held_bills_for_cashier?: boolean;
+  show_reminders_for_cashier?: boolean;
+  show_audit_trail_for_cashier?: boolean;
+  show_end_shift_for_cashier?: boolean;
+  show_today_sales_for_cashier?: boolean;
+  show_import_bill_for_cashier?: boolean;
+  show_shop_settings_for_cashier?: boolean;
+  show_my_licenses_for_cashier?: boolean;
+  show_offline_sync_for_cashier?: boolean;
   created_at: string;
   updated_at?: string | null;
 };
@@ -594,6 +603,15 @@ export type ShopProfile = {
   website: string;
   logoUrl: string;
   receiptFooter: string;
+  showHeldBillsForCashier: boolean;
+  showRemindersForCashier: boolean;
+  showAuditTrailForCashier: boolean;
+  showEndShiftForCashier: boolean;
+  showTodaySalesForCashier: boolean;
+  showImportBillForCashier: boolean;
+  showShopSettingsForCashier: boolean;
+  showMyLicensesForCashier: boolean;
+  showOfflineSyncForCashier: boolean;
   createdAt: string;
   updatedAt?: string | null;
 };
@@ -1984,6 +2002,15 @@ function mapShopProfile(profile: BackendShopProfileResponse): ShopProfile {
     website: profile.website || "",
     logoUrl: profile.logo_url || "",
     receiptFooter: profile.receipt_footer || "",
+    showHeldBillsForCashier: profile.show_held_bills_for_cashier ?? true,
+    showRemindersForCashier: profile.show_reminders_for_cashier ?? true,
+    showAuditTrailForCashier: profile.show_audit_trail_for_cashier ?? true,
+    showEndShiftForCashier: profile.show_end_shift_for_cashier ?? true,
+    showTodaySalesForCashier: profile.show_today_sales_for_cashier ?? true,
+    showImportBillForCashier: profile.show_import_bill_for_cashier ?? true,
+    showShopSettingsForCashier: profile.show_shop_settings_for_cashier ?? true,
+    showMyLicensesForCashier: profile.show_my_licenses_for_cashier ?? true,
+    showOfflineSyncForCashier: profile.show_offline_sync_for_cashier ?? true,
     createdAt: profile.created_at,
     updatedAt: profile.updated_at,
   };
@@ -3509,6 +3536,15 @@ export async function updateShopProfile(profile: ShopProfile) {
       website: profile.website || null,
       logo_url: profile.logoUrl || null,
       receipt_footer: profile.receiptFooter || null,
+      show_held_bills_for_cashier: profile.showHeldBillsForCashier,
+      show_reminders_for_cashier: profile.showRemindersForCashier,
+      show_audit_trail_for_cashier: profile.showAuditTrailForCashier,
+      show_end_shift_for_cashier: profile.showEndShiftForCashier,
+      show_today_sales_for_cashier: profile.showTodaySalesForCashier,
+      show_import_bill_for_cashier: profile.showImportBillForCashier,
+      show_shop_settings_for_cashier: profile.showShopSettingsForCashier,
+      show_my_licenses_for_cashier: profile.showMyLicensesForCashier,
+      show_offline_sync_for_cashier: profile.showOfflineSyncForCashier,
     }),
   });
 

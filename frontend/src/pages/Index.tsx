@@ -32,6 +32,7 @@ import {
   acknowledgeReminder,
   completeSale,
   fetchAiWallet,
+  fetchShopProfile,
   fetchReminders,
   fetchHeldBill,
   fetchHeldBills,
@@ -43,6 +44,7 @@ import {
   updateCurrentCashDrawer,
   type PurchaseImportConfirmResponse,
   type ReminderItem,
+  type ShopProfile,
   voidSale,
 } from "@/lib/api";
 import { openShiftReportPrintWindow } from "@/lib/shiftReport";
@@ -99,6 +101,7 @@ const IndexInner = () => {
   const [showLicenseAccount, setShowLicenseAccount] = useState(false);
   const [expertModeEnabled, setExpertModeEnabledState] = useState(() => isExpertModeEnabled());
   const [aiCreditsBalance, setAiCreditsBalance] = useState<number | null>(null);
+  const [shopProfile, setShopProfile] = useState<ShopProfile | null>(null);
   const [reminders, setReminders] = useState<ReminderItem[]>([]);
   const [openReminderCount, setOpenReminderCount] = useState(0);
   const [isLoadingReminders, setIsLoadingReminders] = useState(false);
@@ -218,6 +221,16 @@ const IndexInner = () => {
     }
   }, []);
 
+  const loadShopProfile = useCallback(async () => {
+    try {
+      const profile = await fetchShopProfile();
+      setShopProfile(profile);
+    } catch (error) {
+      console.error(error);
+      setShopProfile(null);
+    }
+  }, []);
+
   useEffect(() => {
     void Promise.all([loadProducts(), loadHeldBills()]);
   }, [loadHeldBills, loadProducts]);
@@ -290,6 +303,10 @@ const IndexInner = () => {
       window.clearInterval(intervalId);
     };
   }, [loadReminders]);
+
+  useEffect(() => {
+    void loadShopProfile();
+  }, [loadShopProfile]);
 
   const refreshOfflineQueueSummary = useCallback(async () => {
     try {
@@ -820,6 +837,17 @@ const IndexInner = () => {
         onEndShift={handleEndShift}
         isAdmin={isAdmin}
         hasActiveSession={canSell}
+        cashierToolbarVisibility={{
+          heldBills: shopProfile?.showHeldBillsForCashier ?? true,
+          reminders: shopProfile?.showRemindersForCashier ?? true,
+          auditTrail: shopProfile?.showAuditTrailForCashier ?? true,
+          endShift: shopProfile?.showEndShiftForCashier ?? true,
+          todaySales: shopProfile?.showTodaySalesForCashier ?? true,
+          importBill: shopProfile?.showImportBillForCashier ?? true,
+          shopSettings: shopProfile?.showShopSettingsForCashier ?? true,
+          myLicenses: shopProfile?.showMyLicensesForCashier ?? true,
+          sync: shopProfile?.showOfflineSyncForCashier ?? true,
+        }}
       />
 
       {licenseStatus?.state === "grace" && (
@@ -1091,6 +1119,9 @@ const IndexInner = () => {
         onExpertModeEnabledChange={(enabled) => {
           setExpertModeEnabledState(enabled);
           setExpertModeEnabled(enabled);
+        }}
+        onSaved={(savedProfile) => {
+          setShopProfile(savedProfile);
         }}
       />
 

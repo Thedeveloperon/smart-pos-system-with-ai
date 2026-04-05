@@ -123,7 +123,16 @@ public static class DbSeeder
                 Email = string.Empty,
                 Website = string.Empty,
                 LogoUrl = string.Empty,
-                ReceiptFooter = "Thank you for shopping with us."
+                ReceiptFooter = "Thank you for shopping with us.",
+                ShowHeldBillsForCashier = true,
+                ShowRemindersForCashier = true,
+                ShowAuditTrailForCashier = true,
+                ShowEndShiftForCashier = true,
+                ShowTodaySalesForCashier = true,
+                ShowImportBillForCashier = true,
+                ShowShopSettingsForCashier = true,
+                ShowMyLicensesForCashier = true,
+                ShowOfflineSyncForCashier = true
             });
         }
 

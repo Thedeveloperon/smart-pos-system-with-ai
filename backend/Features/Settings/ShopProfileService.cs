@@ -25,6 +25,15 @@ public sealed class ShopProfileService(SmartPosDbContext dbContext)
         profile.Website = NormalizeOptional(request.Website);
         profile.LogoUrl = NormalizeOptional(request.LogoUrl);
         profile.ReceiptFooter = NormalizeOptional(request.ReceiptFooter);
+        profile.ShowHeldBillsForCashier = request.ShowHeldBillsForCashier;
+        profile.ShowRemindersForCashier = request.ShowRemindersForCashier;
+        profile.ShowAuditTrailForCashier = request.ShowAuditTrailForCashier;
+        profile.ShowEndShiftForCashier = request.ShowEndShiftForCashier;
+        profile.ShowTodaySalesForCashier = request.ShowTodaySalesForCashier;
+        profile.ShowImportBillForCashier = request.ShowImportBillForCashier;
+        profile.ShowShopSettingsForCashier = request.ShowShopSettingsForCashier;
+        profile.ShowMyLicensesForCashier = request.ShowMyLicensesForCashier;
+        profile.ShowOfflineSyncForCashier = request.ShowOfflineSyncForCashier;
         profile.UpdatedAtUtc = DateTimeOffset.UtcNow;
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -44,6 +53,15 @@ public sealed class ShopProfileService(SmartPosDbContext dbContext)
             Website = profile.Website,
             LogoUrl = profile.LogoUrl,
             ReceiptFooter = profile.ReceiptFooter,
+            ShowHeldBillsForCashier = profile.ShowHeldBillsForCashier,
+            ShowRemindersForCashier = profile.ShowRemindersForCashier,
+            ShowAuditTrailForCashier = profile.ShowAuditTrailForCashier,
+            ShowEndShiftForCashier = profile.ShowEndShiftForCashier,
+            ShowTodaySalesForCashier = profile.ShowTodaySalesForCashier,
+            ShowImportBillForCashier = profile.ShowImportBillForCashier,
+            ShowShopSettingsForCashier = profile.ShowShopSettingsForCashier,
+            ShowMyLicensesForCashier = profile.ShowMyLicensesForCashier,
+            ShowOfflineSyncForCashier = profile.ShowOfflineSyncForCashier,
             CreatedAt = profile.CreatedAtUtc,
             UpdatedAt = profile.UpdatedAtUtc
         };

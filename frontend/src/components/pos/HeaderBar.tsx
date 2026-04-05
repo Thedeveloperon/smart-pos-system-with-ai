@@ -51,6 +51,17 @@ interface HeaderBarProps {
   onEndShift?: () => void;
   isAdmin?: boolean;
   hasActiveSession?: boolean;
+  cashierToolbarVisibility?: {
+    heldBills?: boolean;
+    reminders?: boolean;
+    auditTrail?: boolean;
+    endShift?: boolean;
+    todaySales?: boolean;
+    importBill?: boolean;
+    shopSettings?: boolean;
+    myLicenses?: boolean;
+    sync?: boolean;
+  };
 }
 
 const HeaderBar = ({
@@ -77,7 +88,11 @@ const HeaderBar = ({
   onEndShift,
   isAdmin = false,
   hasActiveSession = false,
+  cashierToolbarVisibility,
 }: HeaderBarProps) => {
+  const isCashier = !isAdmin;
+  const allowCashier = (visible?: boolean) => !isCashier || visible !== false;
+
   return (
     <header className="bg-pos-header text-pos-header-foreground h-14 flex items-center justify-between px-4 gap-3 shrink-0">
       <div className="flex items-center">
@@ -85,7 +100,8 @@ const HeaderBar = ({
       </div>
 
       <div className="hidden xl:flex items-center gap-2">
-        <Button
+        {allowCashier(cashierToolbarVisibility?.heldBills) && (
+          <Button
           variant="ghost"
           size="sm"
           onClick={onHeldBills}
@@ -98,7 +114,8 @@ const HeaderBar = ({
               {heldBillsCount}
             </Badge>
           )}
-        </Button>
+          </Button>
+        )}
 
         {isAdmin && (
           <Button
@@ -153,7 +170,7 @@ const HeaderBar = ({
           </Button>
         )}
 
-        {onReminders && (
+        {onReminders && allowCashier(cashierToolbarVisibility?.reminders) && (
           <Button
             variant="ghost"
             size="sm"
@@ -187,7 +204,7 @@ const HeaderBar = ({
           </Button>
         )}
 
-        {onAuditLog && (
+        {onAuditLog && allowCashier(cashierToolbarVisibility?.auditTrail) && (
           <Button
             variant="ghost"
             size="sm"
@@ -199,7 +216,7 @@ const HeaderBar = ({
           </Button>
         )}
 
-        {hasActiveSession && onEndShift && (
+        {hasActiveSession && onEndShift && allowCashier(cashierToolbarVisibility?.endShift) && (
           <Button
             variant="ghost"
             size="sm"
@@ -247,7 +264,7 @@ const HeaderBar = ({
           </Button>
         )}
 
-        {onSyncOffline && (
+        {onSyncOffline && allowCashier(cashierToolbarVisibility?.sync) && (
           <Button
             variant="ghost"
             size="sm"
@@ -341,7 +358,7 @@ const HeaderBar = ({
               </DropdownMenuItem>
             )}
 
-            {onReminders && (
+            {onReminders && allowCashier(cashierToolbarVisibility?.reminders) && (
               <DropdownMenuItem onSelect={() => onReminders()} className="min-h-11 px-3 py-2 text-base">
                 <Bell className="mr-3 h-5 w-5" />
                 Reminders
@@ -365,14 +382,14 @@ const HeaderBar = ({
               </DropdownMenuItem>
             )}
 
-            {onAuditLog && (
+            {onAuditLog && allowCashier(cashierToolbarVisibility?.auditTrail) && (
               <DropdownMenuItem onSelect={() => onAuditLog()} className="min-h-11 px-3 py-2 text-base">
                 <FileText className="mr-3 h-5 w-5" />
                 Audit
               </DropdownMenuItem>
             )}
 
-            {hasActiveSession && onEndShift && (
+            {hasActiveSession && onEndShift && allowCashier(cashierToolbarVisibility?.endShift) && (
               <DropdownMenuItem onSelect={() => onEndShift()} className="min-h-11 px-3 py-2 text-base">
                 <Lock className="mr-3 h-5 w-5" />
                 End Shift
@@ -390,6 +407,20 @@ const HeaderBar = ({
               <DropdownMenuItem onSelect={() => onShopSettings()} className="min-h-11 px-3 py-2 text-base">
                 <Settings2 className="mr-3 h-5 w-5" />
                 Shop
+              </DropdownMenuItem>
+            )}
+
+            {isAdmin && onMyAccountLicenses && (
+              <DropdownMenuItem onSelect={() => onMyAccountLicenses()} className="min-h-11 px-3 py-2 text-base">
+                <KeyRound className="mr-3 h-5 w-5" />
+                My Licenses
+              </DropdownMenuItem>
+            )}
+
+            {onSyncOffline && allowCashier(cashierToolbarVisibility?.sync) && (
+              <DropdownMenuItem onSelect={() => onSyncOffline()} className="min-h-11 px-3 py-2 text-base">
+                <CloudUpload className="mr-3 h-5 w-5" />
+                Sync
               </DropdownMenuItem>
             )}
 
