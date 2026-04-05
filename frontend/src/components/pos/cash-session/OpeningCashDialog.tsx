@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -8,6 +8,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Shield, CheckCircle2, AlertTriangle } from "lucide-react";
 import DenominationCounter from "./DenominationCounter";
 import type { DenominationCount } from "./types";
@@ -15,14 +17,26 @@ import type { DenominationCount } from "./types";
 interface OpeningCashDialogProps {
   open: boolean;
   cashierName: string;
-  onConfirm: (counts: DenominationCount[], total: number) => Promise<void> | void;
+  onConfirm: (counts: DenominationCount[], total: number, cashierName: string) => Promise<void> | void;
 }
 
 const OpeningCashDialog = ({ open, cashierName, onConfirm }: OpeningCashDialogProps) => {
   const [counts, setCounts] = useState<DenominationCount[]>([]);
   const [total, setTotal] = useState(0);
+  const [enteredCashierName, setEnteredCashierName] = useState("");
   const [showConfirm, setShowConfirm] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
+  const [cashierNameError, setCashierNameError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setEnteredCashierName("");
+      setCounts([]);
+      setTotal(0);
+      setShowConfirm(false);
+      setCashierNameError(null);
+    }
+  }, [open]);
 
   const handleCountChange = (newCounts: DenominationCount[], newTotal: number) => {
     setCounts(newCounts);
@@ -34,9 +48,15 @@ const OpeningCashDialog = ({ open, cashierName, onConfirm }: OpeningCashDialogPr
   };
 
   const handleConfirm = async () => {
+    const normalizedCashierName = enteredCashierName.trim();
+    if (!normalizedCashierName) {
+      setCashierNameError("Cashier name is required.");
+      return;
+    }
+
     try {
       setIsConfirming(true);
-      await onConfirm(counts, total);
+      await onConfirm(counts, total, normalizedCashierName);
     } finally {
       setIsConfirming(false);
     }
@@ -74,6 +94,24 @@ const OpeningCashDialog = ({ open, cashierName, onConfirm }: OpeningCashDialogPr
                 <span className="text-muted-foreground">Cashier</span>
                 <span className="font-medium">{cashierName}</span>
               </div>
+              <div className="flex flex-col gap-2 pt-2">
+                <Label htmlFor="shift-cashier-name" className="text-muted-foreground text-sm">
+                  Cashier name for this shift <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="shift-cashier-name"
+                  value={enteredCashierName}
+                  onChange={(event) => {
+                    setEnteredCashierName(event.target.value);
+                    if (cashierNameError) {
+                      setCashierNameError(null);
+                    }
+                  }}
+                  placeholder="Enter cashier name"
+                  className="rounded-xl"
+                />
+                {cashierNameError ? <p className="text-xs text-destructive">{cashierNameError}</p> : null}
+              </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Date</span>
                 <span className="font-medium">{new Date().toLocaleDateString()}</span>
@@ -107,7 +145,7 @@ const OpeningCashDialog = ({ open, cashierName, onConfirm }: OpeningCashDialogPr
                 void handleConfirm();
               }}
               className="rounded-xl"
-              disabled={isConfirming}
+              disabled={isConfirming || !enteredCashierName.trim()}
             >
               <CheckCircle2 className="h-4 w-4" />
               {isConfirming ? "Starting Shift..." : "Confirm & Start Shift"}
@@ -143,11 +181,11 @@ const OpeningCashDialog = ({ open, cashierName, onConfirm }: OpeningCashDialogPr
         </div>
 
         <DialogFooter className="justify-start border-t border-slate-300 bg-slate-100 px-6 py-3 sm:justify-start sm:space-x-0">
-          <Button
-            variant="pos-primary"
-            size="lg"
-            className="w-full rounded-xl sm:w-[17rem]"
-            onClick={handleProceed}
+            <Button
+              variant="pos-primary"
+              size="lg"
+              className="w-full rounded-xl sm:w-[17rem]"
+              onClick={handleProceed}
             disabled={isConfirming}
           >
             <CheckCircle2 className="h-5 w-5" />

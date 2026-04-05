@@ -73,6 +73,7 @@ public sealed class CheckoutService(
             }
 
             sale.CreatedByUserId ??= createdByUserId;
+            sale.CashShortAmount = request.CustomPayoutUsed ? request.CashShortAmount : 0m;
         }
         else
         {
@@ -85,6 +86,8 @@ public sealed class CheckoutService(
                 DiscountTotal = cart.DiscountTotal,
                 TaxTotal = 0m,
                 GrandTotal = cart.GrandTotal,
+                CustomPayoutUsed = request.CustomPayoutUsed,
+                CashShortAmount = request.CashShortAmount,
                 CreatedByUserId = createdByUserId,
                 CreatedAtUtc = DateTimeOffset.UtcNow,
                 Items = cart.Items.Select(x => new SaleItem
@@ -159,6 +162,10 @@ public sealed class CheckoutService(
 
         sale.Status = SaleStatus.Completed;
         sale.CompletedAtUtc = DateTimeOffset.UtcNow;
+        sale.CustomPayoutUsed = request.CustomPayoutUsed;
+        sale.CashShortAmount = request.CustomPayoutUsed
+            ? DetermineCashShortAmount(sale.GrandTotal, paidTotal, request.CashChangeCounts, request.CashShortAmount)
+            : 0m;
 
         auditLogService.Queue(
             action: "sale_completed",
@@ -238,7 +245,9 @@ public sealed class CheckoutService(
                 Status = x.Status.ToString().ToLowerInvariant(),
                 GrandTotal = x.GrandTotal,
                 CreatedAt = x.CreatedAtUtc,
-                CompletedAt = x.CompletedAtUtc
+                CompletedAt = x.CompletedAtUtc,
+                CustomPayoutUsed = x.CustomPayoutUsed,
+                CashShortAmount = x.CashShortAmount
             })
             .ToListAsync(cancellationToken);
 
@@ -506,6 +515,8 @@ public sealed class CheckoutService(
             Change = change,
             CreatedAt = sale.CreatedAtUtc,
             CompletedAt = sale.CompletedAtUtc,
+            CustomPayoutUsed = sale.CustomPayoutUsed,
+            CashShortAmount = sale.CashShortAmount,
             Items = sale.Items.Select(x => new SaleItemResponse
             {
                 SaleItemId = x.Id,
@@ -551,6 +562,22 @@ public sealed class CheckoutService(
             })
             .OrderBy(x => x.Method)
             .ToList();
+    }
+
+    private static decimal DetermineCashShortAmount(
+        decimal grandTotal,
+        decimal paidTotal,
+        IReadOnlyCollection<CashCountItem> cashChangeCounts,
+        decimal requestedAmount)
+    {
+        var expectedChange = RoundMoney(Math.Max(0m, paidTotal - grandTotal));
+        if (cashChangeCounts.Count == 0)
+        {
+            return RoundMoney(requestedAmount);
+        }
+
+        var actualChange = RoundMoney(cashChangeCounts.Sum(x => x.Denomination * x.Quantity));
+        return RoundMoney(expectedChange - actualChange);
     }
 
     private static decimal RoundMoney(decimal value)

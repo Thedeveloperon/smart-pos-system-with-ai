@@ -18,6 +18,9 @@ public sealed class OpenCashSessionRequest
 
     [JsonPropertyName("total")]
     public decimal Total { get; set; }
+
+    [JsonPropertyName("cashier_name")]
+    public string? CashierName { get; set; }
 }
 
 public sealed class CloseCashSessionRequest
@@ -109,6 +112,9 @@ public sealed class CashSessionResponse
     [JsonPropertyName("cashier_name")]
     public string CashierName { get; set; } = string.Empty;
 
+    [JsonPropertyName("shift_number")]
+    public int ShiftNumber { get; set; }
+
     [JsonPropertyName("status")]
     public string Status { get; set; } = string.Empty;
 
@@ -141,4 +147,46 @@ public sealed class CashSessionResponse
 
     [JsonPropertyName("audit_log")]
     public List<CashSessionAuditEntryResponse> AuditLog { get; set; } = [];
+}
+
+public sealed class CashSessionHistoryItemResponse
+{
+    [JsonPropertyName("cash_session_id")]
+    public Guid CashSessionId { get; set; }
+
+    [JsonPropertyName("shift_number")]
+    public int ShiftNumber { get; set; }
+
+    [JsonPropertyName("cashier_name")]
+    public string CashierName { get; set; } = string.Empty;
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = string.Empty;
+
+    [JsonPropertyName("opened_at")]
+    public DateTimeOffset OpenedAt { get; set; }
+
+    [JsonPropertyName("closed_at")]
+    public DateTimeOffset? ClosedAt { get; set; }
+
+    [JsonPropertyName("opening_total")]
+    public decimal OpeningTotal { get; set; }
+
+    [JsonPropertyName("closing_total")]
+    public decimal? ClosingTotal { get; set; }
+
+    [JsonPropertyName("expected_cash")]
+    public decimal? ExpectedCash { get; set; }
+
+    [JsonPropertyName("difference")]
+    public decimal? Difference { get; set; }
+
+    [JsonPropertyName("cash_sales_total")]
+    public decimal CashSalesTotal { get; set; }
+}
+
+public sealed class CashSessionHistoryResponse
+{
+    [JsonPropertyName("items")]
+    public List<CashSessionHistoryItemResponse> Items { get; set; } = [];
 }

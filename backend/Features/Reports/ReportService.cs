@@ -121,6 +121,8 @@ public sealed class ReportService(
                     PaidTotal = paidTotal,
                     ReversedTotal = reversedTotal,
                     NetCollected = RoundMoney(paidTotal - reversedTotal),
+                    CustomPayoutUsed = x.CustomPayoutUsed,
+                    CashShortAmount = x.CashShortAmount,
                     PaymentBreakdown = BuildPaymentBreakdown(x.Payments
                         .Select(y => new PaymentSnapshot(y.Method, y.Amount, y.IsReversal)))
                 };

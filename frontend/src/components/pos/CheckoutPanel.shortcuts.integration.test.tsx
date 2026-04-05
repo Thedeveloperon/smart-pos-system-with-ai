@@ -95,7 +95,7 @@ describe("CheckoutPanel shortcut integration", () => {
       result = panelRef.current?.tryCompleteSale();
     });
     expect(result).toEqual({ ok: true });
-    expect(onCompleteSale).toHaveBeenCalledWith("card", 0, "", [], []);
+    expect(onCompleteSale).toHaveBeenCalledWith("card", 0, "", [], [], false, 0);
   });
 
   it("quick sale cash button pre-fills the exact grand total", () => {
@@ -122,7 +122,7 @@ describe("CheckoutPanel shortcut integration", () => {
     });
 
     expect(result).toEqual({ ok: true });
-    expect(onCompleteSale).toHaveBeenCalledWith("cash", 100, "", [], []);
+    expect(onCompleteSale).toHaveBeenCalledWith("cash", 100, "", [], [], false, 0);
   });
 
   it("opens a change breakdown dialog before completing a cash sale", async () => {
@@ -148,7 +148,33 @@ describe("CheckoutPanel shortcut integration", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Proceed - Rs. 50" }));
 
-    expect(onCompleteSale).toHaveBeenCalledWith("cash", 150, "", [], expect.any(Array));
+    expect(onCompleteSale).toHaveBeenCalledWith("cash", 150, "", [], expect.any(Array), false, 50);
+  });
+
+  it("marks custom payout sales when the override is enabled", async () => {
+    const panelRef = createRef<CheckoutPanelHandle>();
+    const onCompleteSale = vi.fn();
+
+    render(
+      <CheckoutPanel
+        ref={panelRef}
+        items={sampleItems}
+        onCompleteSale={onCompleteSale}
+        onHoldBill={vi.fn()}
+        onCancelSale={vi.fn()}
+        showShortcutHints
+        allowCustomPayout
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "150" } });
+    fireEvent.click(screen.getByRole("button", { name: /Complete Sale \(F9\)/ }));
+    expect(await screen.findByText("Change breakdown")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("Enable custom payout"));
+    fireEvent.click(screen.getByRole("button", { name: "Proceed - Rs. 50" }));
+
+    expect(onCompleteSale).toHaveBeenCalledWith("cash", 150, "", [], expect.any(Array), true, 50);
   });
 
   it("opens cash workflow dialog through imperative shortcut action", async () => {

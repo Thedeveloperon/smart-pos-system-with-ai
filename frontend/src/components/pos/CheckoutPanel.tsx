@@ -22,13 +22,15 @@ interface CheckoutPanelProps {
   items: CartItem[];
   cashDrawer?: CashDrawerState | null;
   allowCustomPayout?: boolean;
-  onCompleteSale: (
-    paymentMethod: PaymentMethod,
-    cashReceived: number,
-    customerMobile: string,
-    cashReceivedCounts?: DenominationCount[],
-    cashChangeCounts?: DenominationCount[]
-  ) => void;
+    onCompleteSale: (
+      paymentMethod: PaymentMethod,
+      cashReceived: number,
+      customerMobile: string,
+      cashReceivedCounts?: DenominationCount[],
+      cashChangeCounts?: DenominationCount[],
+      customPayoutUsed?: boolean,
+      cashShortAmount?: number
+    ) => void;
   onHoldBill: () => void;
   onCancelSale: () => void;
   showShortcutHints?: boolean;
@@ -83,13 +85,15 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
           : null;
     const canComplete = completeBlockReason === null;
 
-    const handleComplete = useCallback((nextCashChangeCounts = cashChangeCounts) => {
+    const handleComplete = useCallback((nextCashChangeCounts = cashChangeCounts, customPayoutUsed = false, cashShortAmount = 0) => {
       onCompleteSale(
         paymentMethod,
         cashNum,
         customerMobile,
         cashReceivedCounts,
-        nextCashChangeCounts
+        nextCashChangeCounts,
+        customPayoutUsed,
+        cashShortAmount
       );
       setCashReceived("");
       setCustomerMobile("");
@@ -109,9 +113,9 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
       }, 0);
     }, []);
 
-    const runCompleteSale = useCallback((nextCashChangeCounts?: DenominationCount[]) => {
+    const runCompleteSale = useCallback((nextCashChangeCounts?: DenominationCount[], customPayoutUsed = false, cashShortAmount = 0) => {
       void playSaleCompleteSound();
-      handleComplete(nextCashChangeCounts);
+      handleComplete(nextCashChangeCounts, customPayoutUsed, cashShortAmount);
     }, [handleComplete]);
 
     const requestCompleteSale = useCallback(() => {
@@ -302,10 +306,10 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
           availableCounts={availableChangeCounts}
           allowCustomPayout={allowCustomPayout}
           onClose={() => setShowCashChangeDialog(false)}
-          onConfirm={(counts) => {
+          onConfirm={(counts, customPayoutUsed, cashShortAmount) => {
             setCashChangeCounts(counts);
             setShowCashChangeDialog(false);
-            runCompleteSale(counts);
+            runCompleteSale(counts, customPayoutUsed, cashShortAmount);
           }}
         />
       </div>

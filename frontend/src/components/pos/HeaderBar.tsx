@@ -40,6 +40,7 @@ interface HeaderBarProps {
   aiCredits?: number | null;
   onReminders?: () => void;
   openReminderCount?: number;
+  todayIssueCount?: number;
   onShopSettings?: () => void;
   onMyAccountLicenses?: () => void;
   onSyncOffline?: () => void;
@@ -65,6 +66,7 @@ const HeaderBar = ({
   aiCredits = null,
   onReminders,
   openReminderCount = 0,
+  todayIssueCount = 0,
   onShopSettings,
   onMyAccountLicenses,
   onSyncOffline,
@@ -173,10 +175,15 @@ const HeaderBar = ({
             variant="ghost"
             size="sm"
             onClick={onTodaySales}
-            className="text-pos-header-foreground hover:bg-pos-header-foreground/10"
+            className="text-pos-header-foreground hover:bg-pos-header-foreground/10 relative"
           >
             <Clock className="h-4 w-4" />
             <span className="hidden md:inline ml-1">Today</span>
+            {todayIssueCount > 0 && (
+              <Badge className="absolute -top-1 -right-1 h-5 min-w-5 px-1.5 flex items-center justify-center rounded-full border border-destructive/30 bg-destructive text-[10px] text-destructive-foreground shadow-sm">
+                {todayIssueCount > 99 ? "99+" : todayIssueCount}
+              </Badge>
+            )}
           </Button>
         )}
 
@@ -350,6 +357,11 @@ const HeaderBar = ({
               <DropdownMenuItem onSelect={() => onTodaySales()} className="min-h-11 px-3 py-2 text-base">
                 <Clock className="mr-3 h-5 w-5" />
                 Today
+                {todayIssueCount > 0 && (
+                  <Badge className="ml-auto h-5 min-w-5 rounded-full border border-destructive/30 bg-destructive px-1.5 text-[10px] text-destructive-foreground shadow-sm">
+                    {todayIssueCount > 99 ? "99+" : todayIssueCount}
+                  </Badge>
+                )}
               </DropdownMenuItem>
             )}
 

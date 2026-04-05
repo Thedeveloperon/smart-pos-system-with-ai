@@ -58,6 +58,12 @@ public sealed class CompleteSaleRequest
 
     [JsonPropertyName("cash_change_counts")]
     public List<CashCountItem> CashChangeCounts { get; set; } = [];
+
+    [JsonPropertyName("custom_payout_used")]
+    public bool CustomPayoutUsed { get; set; }
+
+    [JsonPropertyName("cash_short_amount")]
+    public decimal CashShortAmount { get; set; }
 }
 
 public sealed class HeldSaleListItem
@@ -100,6 +106,12 @@ public sealed class SaleHistoryListItem
 
     [JsonPropertyName("payment_breakdown")]
     public List<SalePaymentBreakdownResponse> PaymentBreakdown { get; set; } = [];
+
+    [JsonPropertyName("custom_payout_used")]
+    public bool CustomPayoutUsed { get; set; }
+
+    [JsonPropertyName("cash_short_amount")]
+    public decimal CashShortAmount { get; set; }
 }
 
 public sealed class SaleResponse
@@ -139,6 +151,12 @@ public sealed class SaleResponse
 
     [JsonPropertyName("completed_at")]
     public DateTimeOffset? CompletedAt { get; set; }
+
+    [JsonPropertyName("custom_payout_used")]
+    public bool CustomPayoutUsed { get; set; }
+
+    [JsonPropertyName("cash_short_amount")]
+    public decimal CashShortAmount { get; set; }
 
     [JsonPropertyName("items")]
     public List<SaleItemResponse> Items { get; set; } = [];

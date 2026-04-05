@@ -187,6 +187,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.DiscountTotal).HasPrecision(18, 2);
             entity.Property(x => x.TaxTotal).HasPrecision(18, 2);
             entity.Property(x => x.GrandTotal).HasPrecision(18, 2);
+            entity.Property(x => x.CashShortAmount).HasPrecision(18, 2);
             entity.HasIndex(x => new { x.StoreId, x.SaleNumber }).IsUnique();
         });
 

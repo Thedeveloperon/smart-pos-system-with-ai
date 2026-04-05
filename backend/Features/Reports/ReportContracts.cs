@@ -115,6 +115,12 @@ public sealed class TransactionReportRow
     [JsonPropertyName("net_collected")]
     public decimal NetCollected { get; set; }
 
+    [JsonPropertyName("custom_payout_used")]
+    public bool CustomPayoutUsed { get; set; }
+
+    [JsonPropertyName("cash_short_amount")]
+    public decimal CashShortAmount { get; set; }
+
     [JsonPropertyName("payment_breakdown")]
     public List<ReportPaymentBreakdownRow> PaymentBreakdown { get; set; } = [];
 }

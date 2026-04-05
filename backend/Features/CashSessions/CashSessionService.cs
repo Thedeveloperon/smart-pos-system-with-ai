@@ -19,12 +19,49 @@ public sealed class CashSessionService(
         return session is null ? null : await BuildResponseAsync(session, cancellationToken);
     }
 
+    public async Task<CashSessionHistoryResponse> GetHistoryAsync(
+        DateOnly? fromDate,
+        DateOnly? toDate,
+        CancellationToken cancellationToken)
+    {
+        var actor = RequireActor();
+        var range = NormalizeDateRange(fromDate, toDate);
+
+        var query = dbContext.CashSessions.AsNoTracking();
+
+        if (actor.DeviceId.HasValue)
+        {
+            query = query.Where(x => x.DeviceId == actor.DeviceId);
+        }
+        else if (actor.UserId.HasValue)
+        {
+            query = query.Where(x => x.AppUserId == actor.UserId);
+        }
+
+        var sessions = await query.ToListAsync(cancellationToken);
+        var filteredSessions = sessions
+            .Where(x => x.OpenedAtUtc >= range.Start && x.OpenedAtUtc < range.End)
+            .OrderByDescending(x => x.OpenedAtUtc)
+            .ThenByDescending(x => x.UpdatedAtUtc)
+            .ToList();
+
+        return new CashSessionHistoryResponse
+        {
+            Items = filteredSessions.Select(session => BuildHistoryItem(session, filteredSessions)).ToList()
+        };
+    }
+
     public async Task<CashSessionResponse> OpenAsync(
         OpenCashSessionRequest request,
         CancellationToken cancellationToken)
     {
         var actor = RequireActor();
         ValidateCounts(request.Counts, request.Total);
+        var cashierName = request.CashierName?.Trim();
+        if (string.IsNullOrWhiteSpace(cashierName))
+        {
+            throw new InvalidOperationException("Cashier name is required.");
+        }
 
         var existingActive = await GetLatestSessionAsync(cancellationToken, includeClosed: false);
         if (existingActive is not null)
@@ -37,7 +74,7 @@ public sealed class CashSessionService(
         {
             AppUserId = actor.UserId,
             DeviceId = actor.DeviceId,
-            CashierName = actor.CashierName,
+            CashierName = cashierName,
             Status = CashSessionStatus.Active,
             OpeningCountsJson = JsonSerializer.Serialize(request.Counts),
             OpeningTotal = request.Total,
@@ -62,7 +99,7 @@ public sealed class CashSessionService(
                 details = $"Opening cash: Rs. {request.Total:N0}",
                 amount = request.Total,
                 opening_total = request.Total,
-                cashier_name = actor.CashierName
+                cashier_name = session.CashierName
             });
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -366,6 +403,7 @@ public sealed class CashSessionService(
             DeviceId = session.DeviceId,
             DeviceCode = actor.DeviceCode,
             CashierName = session.CashierName,
+            ShiftNumber = await GetShiftNumberAsync(session, cancellationToken),
             Status = session.Status.ToString().ToLowerInvariant(),
             OpenedAt = session.OpenedAtUtc,
             ClosedAt = session.ClosedAtUtc,
@@ -406,6 +444,47 @@ public sealed class CashSessionService(
                 .Select(MapAuditLog)
                 .ToList()
         };
+    }
+
+    private static CashSessionHistoryItemResponse BuildHistoryItem(CashSession session, IReadOnlyCollection<CashSession> sessions)
+    {
+        return new CashSessionHistoryItemResponse
+        {
+            CashSessionId = session.Id,
+            ShiftNumber = CalculateShiftNumber(session, sessions),
+            CashierName = session.CashierName,
+            Status = session.Status.ToString().ToLowerInvariant(),
+            OpenedAt = session.OpenedAtUtc,
+            ClosedAt = session.ClosedAtUtc,
+            OpeningTotal = session.OpeningTotal,
+            ClosingTotal = session.ClosingTotal,
+            ExpectedCash = session.ExpectedCash,
+            Difference = session.Difference,
+            CashSalesTotal = session.CashSalesTotal
+        };
+    }
+
+    private async Task<int> GetShiftNumberAsync(CashSession session, CancellationToken cancellationToken)
+    {
+        var query = dbContext.CashSessions.AsNoTracking();
+
+        if (session.DeviceId.HasValue)
+        {
+            query = query.Where(x => x.DeviceId == session.DeviceId);
+        }
+        else if (session.AppUserId.HasValue)
+        {
+            query = query.Where(x => x.AppUserId == session.AppUserId);
+        }
+
+        var openedDate = session.OpenedAtUtc.UtcDateTime.Date;
+        var dayStart = new DateTimeOffset(openedDate, TimeSpan.Zero);
+        var dayEnd = dayStart.AddDays(1);
+        var sessions = await query.ToListAsync(cancellationToken);
+        return sessions.Count(x =>
+            x.OpenedAtUtc >= dayStart &&
+            x.OpenedAtUtc < dayEnd &&
+            x.OpenedAtUtc <= session.OpenedAtUtc);
     }
 
     private static CashSessionAuditEntryResponse MapAuditLog(AuditLog auditLog)
@@ -533,6 +612,48 @@ public sealed class CashSessionService(
     private static decimal RoundMoney(decimal value)
     {
         return decimal.Round(value, 2, MidpointRounding.AwayFromZero);
+    }
+
+    private static int CalculateShiftNumber(CashSession session, IReadOnlyCollection<CashSession> sessions)
+    {
+        var openedDate = session.OpenedAtUtc.UtcDateTime.Date;
+        var dayStart = new DateTimeOffset(openedDate, TimeSpan.Zero);
+        var dayEnd = dayStart.AddDays(1);
+
+        return sessions.Count(x =>
+            x.OpenedAtUtc >= dayStart &&
+            x.OpenedAtUtc < dayEnd &&
+            x.OpenedAtUtc <= session.OpenedAtUtc &&
+            AreSameScope(session, x));
+    }
+
+    private static bool AreSameScope(CashSession left, CashSession right)
+    {
+        if (left.DeviceId.HasValue || right.DeviceId.HasValue)
+        {
+            return left.DeviceId == right.DeviceId;
+        }
+
+        if (left.AppUserId.HasValue || right.AppUserId.HasValue)
+        {
+            return left.AppUserId == right.AppUserId;
+        }
+
+        return true;
+    }
+
+    private static (DateTimeOffset Start, DateTimeOffset End) NormalizeDateRange(DateOnly? fromDate, DateOnly? toDate)
+    {
+        var from = fromDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var to = toDate ?? from;
+        if (to < from)
+        {
+            (from, to) = (to, from);
+        }
+
+        var start = from.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+        var end = to.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+        return (new DateTimeOffset(start, TimeSpan.Zero), new DateTimeOffset(end, TimeSpan.Zero));
     }
 
     private static JsonElement? TryParseJson(string? json)

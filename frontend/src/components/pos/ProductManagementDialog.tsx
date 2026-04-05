@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AlertTriangle, Loader2, Package, PencilLine, Printer, RefreshCw, Search, Trash2 } from "lucide-react";
 import type {
@@ -9,7 +9,6 @@ import type {
 import {
   bulkGenerateMissingProductBarcodes,
   deleteProduct,
-  hardDeleteProduct,
   fetchCategories,
   fetchProductCatalogItems,
   generateAndAssignProductBarcode,
@@ -722,10 +721,24 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
   const [deleteTarget, setDeleteTarget] = useState<CatalogProduct | null>(null);
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [labelDialogOpen, setLabelDialogOpen] = useState(false);
   const [labelDialogProducts, setLabelDialogProducts] = useState<CatalogProduct[]>([]);
   const [bulkGeneratingBarcodes, setBulkGeneratingBarcodes] = useState(false);
   const [lastBulkBarcodeResult, setLastBulkBarcodeResult] = useState<BulkGenerateMissingProductBarcodesResponse | null>(null);
+
+  const refreshProducts = useCallback(
+    async (excludedIds: Set<string> = new Set()) => {
+      const items = await fetchProductCatalogItems(200, true);
+      const nextItems = excludedIds.size > 0 ? items.filter((product) => !excludedIds.has(product.id)) : items;
+
+      setProducts(nextItems.sort((left, right) => left.name.localeCompare(right.name)));
+      setSelectedProductIds(new Set());
+      await onChanged?.();
+    },
+    [onChanged]
+  );
 
   useEffect(() => {
     if (!open) {
@@ -784,10 +797,7 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
   };
 
   const handleSaved = async () => {
-    const items = await fetchProductCatalogItems(200, true);
-    setProducts(items.sort((left, right) => left.name.localeCompare(right.name)));
-    setSelectedProductIds(new Set());
-    await onChanged?.();
+    await refreshProducts();
   };
 
   const handleDeleteRequest = (product: CatalogProduct) => {
@@ -809,6 +819,11 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
     setLabelDialogProducts(selected);
     setLabelDialogOpen(true);
   };
+
+  const selectedProducts = useMemo(
+    () => products.filter((product) => selectedProductIds.has(product.id)),
+    [products, selectedProductIds]
+  );
 
   const selectedCountInFiltered = filtered.reduce(
     (count, product) => (selectedProductIds.has(product.id) ? count + 1 : count),
@@ -931,14 +946,65 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
     setDeletingProductId(deleteTarget.id);
     try {
       await deleteProduct(deleteTarget.id);
-      toast.success(`"${deleteTarget.name}" deactivated.`);
-      await handleSaved();
+      toast.success(`"${deleteTarget.name}" deleted.`);
+      await refreshProducts(new Set([deleteTarget.id]));
       setDeleteTarget(null);
     } catch (error) {
       console.error(error);
-      toast.error(error instanceof Error ? error.message : "Failed to deactivate product.");
+      toast.error(error instanceof Error ? error.message : "Failed to delete product.");
     } finally {
       setDeletingProductId(null);
+    }
+  };
+
+  const handleBulkDeleteRequest = () => {
+    if (selectedProducts.length === 0) {
+      toast.error("Select at least one product to delete.");
+      return;
+    }
+
+    setBulkDeleteOpen(true);
+  };
+
+  const handleConfirmBulkDelete = async () => {
+    if (selectedProducts.length === 0) {
+      setBulkDeleteOpen(false);
+      return;
+    }
+
+    setBulkDeleting(true);
+    const failures: string[] = [];
+    let deletedCount = 0;
+    const deletedIds = new Set<string>();
+
+    try {
+      for (const product of selectedProducts) {
+        try {
+          await deleteProduct(product.id);
+          deletedCount += 1;
+          deletedIds.add(product.id);
+        } catch (error) {
+          console.error(error);
+          failures.push(product.name);
+        }
+      }
+
+      if (deletedIds.size > 0) {
+        await refreshProducts(deletedIds);
+      }
+      setBulkDeleteOpen(false);
+
+      if (deletedCount > 0 && failures.length === 0) {
+        toast.success(`Deleted ${deletedCount} product${deletedCount === 1 ? "" : "s"}.`);
+      } else if (deletedCount > 0) {
+        toast.warning(
+          `Deleted ${deletedCount} product${deletedCount === 1 ? "" : "s"}, but ${failures.length} failed.`
+        );
+      } else {
+        toast.error("Failed to delete the selected products.");
+      }
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -951,7 +1017,7 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
               <DialogHeader className="space-y-2 text-left">
                 <DialogTitle className="text-xl font-semibold">Product Management</DialogTitle>
                 <DialogDescription className="text-pos-header-foreground/70">
-                  Edit prices, deactivate products, and keep the catalog aligned with the POS.
+                  Edit prices, delete products, and keep the catalog aligned with the POS.
                 </DialogDescription>
               </DialogHeader>
 
@@ -1006,12 +1072,23 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
                         onClick={handleBulkPrint}
                         disabled={selectedProductIds.size === 0}
                         title={selectedProductIds.size === 0 ? "Select products first." : "Preview and print selected labels"}
-                      >
-                        <Printer className="h-4 w-4" />
-                        Print Selected
-                      </Button>
-                    </>
-                  ) : null}
+                        >
+                          <Printer className="h-4 w-4" />
+                          Print Selected
+                        </Button>
+                      </>
+                    ) : null}
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    className="h-9"
+                    onClick={handleBulkDeleteRequest}
+                    disabled={selectedProducts.length === 0}
+                    title={selectedProducts.length === 0 ? "Select products first." : "Delete selected products"}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Delete Selected
+                  </Button>
                 </div>
               </div>
 
@@ -1122,7 +1199,7 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
                                 ) : (
                                   <Trash2 className="h-4 w-4" />
                                 )}
-                                Deactivate
+                                Delete
                               </Button>
                             </div>
                           </TableCell>
@@ -1163,11 +1240,11 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Deactivate product?</AlertDialogTitle>
+            <AlertDialogTitle>Delete product?</AlertDialogTitle>
             <AlertDialogDescription>
               {deleteTarget
-                ? `Deactivate "${deleteTarget.name}"? It will be hidden from active sales.`
-                : "This will hide the product from active sales."}
+                ? `Delete "${deleteTarget.name}"? It will be hidden from active sales and can be reactivated later from Edit.`
+                : "This will hide the product from active sales and can be reactivated later from Edit."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1179,7 +1256,34 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
               disabled={Boolean(deletingProductId)}
             >
               {deletingProductId ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-              Deactivate
+              Delete
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={bulkDeleteOpen}
+        onOpenChange={(openState) => {
+          if (!openState && !bulkDeleting) {
+            setBulkDeleteOpen(false);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete selected products?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {selectedProducts.length > 0
+                ? `Delete ${selectedProducts.length} selected product${selectedProducts.length === 1 ? "" : "s"} from the catalog? They will be hidden from active sales and can be reactivated later from Edit.`
+                : "This will hide the selected products from active sales and can be reactivated later from Edit."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkDeleting}>Cancel</AlertDialogCancel>
+            <Button type="button" variant="destructive" onClick={handleConfirmBulkDelete} disabled={bulkDeleting}>
+              {bulkDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              Confirm Delete
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
