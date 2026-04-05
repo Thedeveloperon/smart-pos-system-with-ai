@@ -64,8 +64,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { X } from "lucide-react";
 
 const SHORTCUTS_ONBOARDING_STORAGE_KEY_PREFIX = "smartpos.shortcuts.onboarding.v1";
+const REMINDER_BANNER_DISMISSAL_STORAGE_KEY_PREFIX = "smartpos.reminders.banner.dismissed.v1";
 const isPosShortcutsFeatureEnabled = import.meta.env.VITE_POS_SHORTCUTS_ENABLED !== "false";
 
 const IndexInner = () => {
@@ -117,6 +119,7 @@ const IndexInner = () => {
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const [showShortcutOnboarding, setShowShortcutOnboarding] = useState(false);
   const [dismissedOfflineGrantToken, setDismissedOfflineGrantToken] = useState<string | null>(null);
+  const [dismissedReminderId, setDismissedReminderId] = useState<string | null>(null);
   const isOfflineFlushInProgressRef = useRef(false);
   const desktopSearchRef = useRef<ProductSearchPanelHandle | null>(null);
   const mobileSearchRef = useRef<ProductSearchPanelHandle | null>(null);
@@ -128,6 +131,14 @@ const IndexInner = () => {
   const shortcutsOnboardingStorageKey = useMemo(
     () =>
       `${SHORTCUTS_ONBOARDING_STORAGE_KEY_PREFIX}:${
+        user?.username?.trim().toLowerCase() || "anonymous"
+      }`,
+    [user?.username],
+  );
+
+  const reminderBannerDismissalStorageKey = useMemo(
+    () =>
+      `${REMINDER_BANNER_DISMISSAL_STORAGE_KEY_PREFIX}:${
         user?.username?.trim().toLowerCase() || "anonymous"
       }`,
     [user?.username],
@@ -160,6 +171,27 @@ const IndexInner = () => {
     () => openingSeedSession ?? lastClosedSession ?? (session?.status === "closed" ? session : null),
     [lastClosedSession, openingSeedSession, session],
   );
+
+  const firstOpenReminder = useMemo(
+    () => reminders.find((item) => item.status === "open") ?? null,
+    [reminders],
+  );
+
+  const shouldShowReminderBanner =
+    openReminderCount > 0 && firstOpenReminder?.reminder_id !== dismissedReminderId;
+
+  const dismissReminderBanner = useCallback(() => {
+    if (!firstOpenReminder?.reminder_id) {
+      return;
+    }
+
+    setDismissedReminderId(firstOpenReminder.reminder_id);
+    try {
+      window.localStorage.setItem(reminderBannerDismissalStorageKey, firstOpenReminder.reminder_id);
+    } catch (error) {
+      console.error(error);
+    }
+  }, [firstOpenReminder?.reminder_id, reminderBannerDismissalStorageKey]);
 
   useEffect(() => {
     if (session?.status === "closed") {
@@ -802,10 +834,31 @@ const IndexInner = () => {
     }
   }, [dismissedOfflineGrantToken, licenseStatus?.offlineGrantToken]);
 
-  const firstOpenReminder = useMemo(
-    () => reminders.find((item) => item.status === "open") ?? null,
-    [reminders],
-  );
+  useEffect(() => {
+    try {
+      const storedDismissedReminderId = window.localStorage.getItem(reminderBannerDismissalStorageKey);
+      setDismissedReminderId(storedDismissedReminderId);
+    } catch (error) {
+      console.error(error);
+      setDismissedReminderId(null);
+    }
+  }, [reminderBannerDismissalStorageKey]);
+
+  useEffect(() => {
+    if (!firstOpenReminder?.reminder_id) {
+      setDismissedReminderId(null);
+      return;
+    }
+
+    if (dismissedReminderId && dismissedReminderId !== firstOpenReminder.reminder_id) {
+      setDismissedReminderId(null);
+      try {
+        window.localStorage.removeItem(reminderBannerDismissalStorageKey);
+      } catch (error) {
+        console.error(error);
+      }
+    }
+  }, [dismissedReminderId, firstOpenReminder?.reminder_id, reminderBannerDismissalStorageKey]);
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
@@ -884,7 +937,7 @@ const IndexInner = () => {
 
       {canSell && <CashSessionBanner onEndShift={handleEndShift} onManageDrawer={handleManageDrawer} />}
 
-      {openReminderCount > 0 && (
+      {shouldShowReminderBanner && (
         <div className="mx-3 mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="space-y-0.5">
@@ -895,14 +948,25 @@ const IndexInner = () => {
                 </p>
               )}
             </div>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8 border-amber-300 bg-white px-2 text-amber-900 hover:bg-amber-100"
-              onClick={() => setShowReminders(true)}
-            >
-              View Reminders
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 border-amber-300 bg-white px-2 text-amber-900 hover:bg-amber-100"
+                onClick={() => setShowReminders(true)}
+              >
+                View Reminders
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 text-amber-900 hover:bg-amber-100 hover:text-amber-950"
+                onClick={dismissReminderBanner}
+                aria-label="Close reminder banner"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </div>
       )}
