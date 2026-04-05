@@ -1133,7 +1133,6 @@ const IndexInner = () => {
       {isAdmin && !showAiInsights && !isShortcutActionBlocked && (
         <AiInsightsFab
           onClick={() => setShowAiInsights(true)}
-          credits={aiCreditsBalance}
         />
       )}
 
