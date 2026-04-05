@@ -63,6 +63,19 @@ public sealed class ShopProfile
     public string? Website { get; set; }
     public string? LogoUrl { get; set; }
     public string? ReceiptFooter { get; set; }
+    public bool ShowNewItemForCashier { get; set; } = true;
+    public bool ShowManageForCashier { get; set; } = true;
+    public bool ShowReportsForCashier { get; set; } = true;
+    public bool ShowAiInsightsForCashier { get; set; } = true;
+    public bool ShowHeldBillsForCashier { get; set; } = true;
+    public bool ShowRemindersForCashier { get; set; } = true;
+    public bool ShowAuditTrailForCashier { get; set; } = true;
+    public bool ShowEndShiftForCashier { get; set; } = true;
+    public bool ShowTodaySalesForCashier { get; set; } = true;
+    public bool ShowImportBillForCashier { get; set; } = true;
+    public bool ShowShopSettingsForCashier { get; set; } = true;
+    public bool ShowMyLicensesForCashier { get; set; } = true;
+    public bool ShowOfflineSyncForCashier { get; set; } = true;
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAtUtc { get; set; }
 }
