@@ -27,7 +27,7 @@ import SessionClosedSummary from "@/components/pos/cash-session/SessionClosedSum
 import ManageDrawerDialog from "@/components/pos/cash-session/ManageDrawerDialog";
 import AuditLogPanel from "@/components/pos/cash-session/AuditLogPanel";
 import type { CartItem, HeldBill, PaymentMethod, Product } from "@/components/pos/types";
-import type { DenominationCount } from "@/components/pos/cash-session/types";
+import type { CashSession, DenominationCount } from "@/components/pos/cash-session/types";
 import {
   acknowledgeReminder,
   completeSale,
@@ -104,6 +104,8 @@ const IndexInner = () => {
   const [isLoadingReminders, setIsLoadingReminders] = useState(false);
   const [isRunningRemindersNow, setIsRunningRemindersNow] = useState(false);
   const [refundSaleId, setRefundSaleId] = useState<string | null>(null);
+  const [openingSeedSession, setOpeningSeedSession] = useState<CashSession | null>(null);
+  const [lastClosedSession, setLastClosedSession] = useState<CashSession | null>(null);
   const [salesRefreshToken, setSalesRefreshToken] = useState(0);
   const [mobileTab, setMobileTab] = useState<"products" | "cart" | "checkout">("products");
   const [offlinePendingCount, setOfflinePendingCount] = useState(0);
@@ -141,6 +143,31 @@ const IndexInner = () => {
     auditLog,
     cashSalesTotal,
   } = useCashSession();
+
+  const openingInitialCounts = useMemo(
+    () =>
+      openingSeedSession?.closing?.counts ??
+      openingSeedSession?.drawer.counts ??
+      openingSeedSession?.opening.counts ??
+      [],
+    [openingSeedSession],
+  );
+
+  const openingSourceSession = useMemo(
+    () => openingSeedSession ?? lastClosedSession ?? (session?.status === "closed" ? session : null),
+    [lastClosedSession, openingSeedSession, session],
+  );
+
+  useEffect(() => {
+    if (session?.status === "closed") {
+      setLastClosedSession(session);
+      return;
+    }
+
+    if (canSell) {
+      setOpeningSeedSession(null);
+    }
+  }, [canSell, session]);
 
   const loadProducts = useCallback(async () => {
     try {
@@ -566,6 +593,10 @@ const IndexInner = () => {
   };
 
   const handleNewSession = () => {
+    if (session) {
+      setOpeningSeedSession(session);
+      setLastClosedSession(session);
+    }
     resetSession();
     toast.success("Ready for a new session.");
   };
@@ -879,6 +910,8 @@ const IndexInner = () => {
         <OpeningCashDialog
           open={true}
           cashierName={cashierName}
+          initialCounts={openingInitialCounts}
+          previousSession={openingSourceSession}
           onConfirm={(counts, total, enteredCashierName) => startSession(counts, total, enteredCashierName)}
         />
       )}
