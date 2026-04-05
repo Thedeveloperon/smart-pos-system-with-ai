@@ -121,7 +121,7 @@ const HeaderBar = ({
           </Button>
         )}
 
-        {isAdmin && allowCashier(cashierToolbarVisibility?.newItem) && (
+        {allowCashier(cashierToolbarVisibility?.newItem) && (
           <Button
             variant="ghost"
             size="sm"
@@ -133,7 +133,7 @@ const HeaderBar = ({
           </Button>
         )}
 
-        {isAdmin && onManageProducts && allowCashier(cashierToolbarVisibility?.manage) && (
+        {onManageProducts && allowCashier(cashierToolbarVisibility?.manage) && (
           <Button
             variant="ghost"
             size="sm"
@@ -145,7 +145,7 @@ const HeaderBar = ({
           </Button>
         )}
 
-        {isAdmin && onReports && allowCashier(cashierToolbarVisibility?.reports) && (
+        {onReports && allowCashier(cashierToolbarVisibility?.reports) && (
           <Button
             variant="ghost"
             size="sm"
@@ -157,7 +157,7 @@ const HeaderBar = ({
           </Button>
         )}
 
-        {isAdmin && onAiInsights && allowCashier(cashierToolbarVisibility?.aiInsights) && (
+        {onAiInsights && allowCashier(cashierToolbarVisibility?.aiInsights) && (
           <Button
             variant="ghost"
             size="sm"
@@ -191,7 +191,7 @@ const HeaderBar = ({
           </Button>
         )}
 
-        {isAdmin && (
+        {allowCashier(cashierToolbarVisibility?.todaySales) && (
           <Button
             variant="ghost"
             size="sm"
@@ -232,7 +232,7 @@ const HeaderBar = ({
           </Button>
         )}
 
-        {isAdmin && (
+        {allowCashier(cashierToolbarVisibility?.importBill) && (
           <Button
             variant="ghost"
             size="sm"
@@ -244,7 +244,7 @@ const HeaderBar = ({
           </Button>
         )}
 
-        {isAdmin && onShopSettings && (
+        {onShopSettings && allowCashier(cashierToolbarVisibility?.shopSettings) && (
           <Button
             variant="ghost"
             size="sm"
@@ -256,7 +256,7 @@ const HeaderBar = ({
           </Button>
         )}
 
-        {isAdmin && onMyAccountLicenses && (
+        {onMyAccountLicenses && allowCashier(cashierToolbarVisibility?.myLicenses) && (
           <Button
             variant="ghost"
             size="sm"
@@ -331,28 +331,28 @@ const HeaderBar = ({
               </DropdownMenuItem>
             )}
 
-            {isAdmin && allowCashier(cashierToolbarVisibility?.newItem) && (
+            {allowCashier(cashierToolbarVisibility?.newItem) && (
               <DropdownMenuItem onSelect={() => onNewItem()} className="min-h-11 px-3 py-2 text-base">
                 <PlusCircle className="mr-3 h-5 w-5" />
                 New Item
               </DropdownMenuItem>
             )}
 
-            {isAdmin && onManageProducts && allowCashier(cashierToolbarVisibility?.manage) && (
+            {onManageProducts && allowCashier(cashierToolbarVisibility?.manage) && (
               <DropdownMenuItem onSelect={() => onManageProducts()} className="min-h-11 px-3 py-2 text-base">
                 <PencilLine className="mr-3 h-5 w-5" />
                 Manage
               </DropdownMenuItem>
             )}
 
-            {isAdmin && onReports && allowCashier(cashierToolbarVisibility?.reports) && (
+            {onReports && allowCashier(cashierToolbarVisibility?.reports) && (
               <DropdownMenuItem onSelect={() => onReports()} className="min-h-11 px-3 py-2 text-base">
                 <BarChart3 className="mr-3 h-5 w-5" />
                 Reports
               </DropdownMenuItem>
             )}
 
-            {isAdmin && onAiInsights && allowCashier(cashierToolbarVisibility?.aiInsights) && (
+            {onAiInsights && allowCashier(cashierToolbarVisibility?.aiInsights) && (
               <DropdownMenuItem onSelect={() => onAiInsights()} className="min-h-11 px-3 py-2 text-base">
                 <Sparkles className="mr-3 h-5 w-5" />
                 AI Insights
@@ -376,7 +376,7 @@ const HeaderBar = ({
               </DropdownMenuItem>
             )}
 
-            {isAdmin && (
+            {allowCashier(cashierToolbarVisibility?.todaySales) && (
               <DropdownMenuItem onSelect={() => onTodaySales()} className="min-h-11 px-3 py-2 text-base">
                 <Clock className="mr-3 h-5 w-5" />
                 Today
@@ -402,21 +402,21 @@ const HeaderBar = ({
               </DropdownMenuItem>
             )}
 
-            {isAdmin && (
+            {allowCashier(cashierToolbarVisibility?.importBill) && (
               <DropdownMenuItem onSelect={() => onImportSupplierBill()} className="min-h-11 px-3 py-2 text-base">
                 <Upload className="mr-3 h-5 w-5" />
                 Import Bill
               </DropdownMenuItem>
             )}
 
-            {isAdmin && onShopSettings && (
+            {onShopSettings && allowCashier(cashierToolbarVisibility?.shopSettings) && (
               <DropdownMenuItem onSelect={() => onShopSettings()} className="min-h-11 px-3 py-2 text-base">
                 <Settings2 className="mr-3 h-5 w-5" />
                 Shop
               </DropdownMenuItem>
             )}
 
-            {isAdmin && onMyAccountLicenses && (
+            {onMyAccountLicenses && allowCashier(cashierToolbarVisibility?.myLicenses) && (
               <DropdownMenuItem onSelect={() => onMyAccountLicenses()} className="min-h-11 px-3 py-2 text-base">
                 <KeyRound className="mr-3 h-5 w-5" />
                 My Licenses
