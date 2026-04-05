@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, Loader2, RotateCcw, ReceiptText, ShieldCheck } from "lucide-react";
+import { Loader2, RotateCcw, ReceiptText, X } from "lucide-react";
 import { createRefund, fetchReceipt, fetchSaleRefundSummary, type RefundResponse, type SaleReceiptResponse, type SaleRefundSummary } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,12 +10,20 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogClose,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 type RefundSaleDialogProps = {
   open: boolean;
@@ -27,6 +35,17 @@ type RefundSaleDialogProps = {
 type RefundQuantityMap = Record<string, string>;
 
 const money = (value: number) => `Rs. ${value.toLocaleString()}`;
+
+const refundReasonOptions = [
+  { value: "customer_request", label: "Customer request" },
+  { value: "damaged_item", label: "Damaged item" },
+  { value: "wrong_item", label: "Wrong item" },
+  { value: "duplicate_charge", label: "Duplicate charge" },
+  { value: "other", label: "Other" },
+] as const;
+
+const getRefundReasonLabel = (value: string) =>
+  refundReasonOptions.find((option) => option.value === value)?.label ?? "Customer request";
 
 const getRefundableUnitAmount = (item: SaleReceiptResponse["items"][number]) => {
   if (item.quantity <= 0) {
@@ -48,7 +67,7 @@ const RefundSaleDialog = ({ open, saleId, onOpenChange, onRefunded }: RefundSale
   const [receipt, setReceipt] = useState<SaleReceiptResponse | null>(null);
   const [summary, setSummary] = useState<SaleRefundSummary | null>(null);
   const [quantities, setQuantities] = useState<RefundQuantityMap>({});
-  const [reason, setReason] = useState("customer_request");
+  const [reason, setReason] = useState(refundReasonOptions[0].value);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -74,7 +93,7 @@ const RefundSaleDialog = ({ open, saleId, onOpenChange, onRefunded }: RefundSale
         setReceipt(saleReceipt);
         setSummary(refundSummary);
         setQuantities(getInitialQuantities(refundSummary));
-        setReason("customer_request");
+        setReason(refundReasonOptions[0].value);
       } catch (error) {
         if (!alive) {
           return;
@@ -201,16 +220,25 @@ const RefundSaleDialog = ({ open, saleId, onOpenChange, onRefunded }: RefundSale
         }
       }}
     >
-      <DialogContent className="max-h-[92vh] max-w-4xl overflow-hidden border-border/70 bg-background p-0 shadow-2xl">
-        <div className="border-b border-border/70 bg-pos-header px-6 py-5 text-pos-header-foreground">
+      <DialogContent
+        hideClose
+        className="flex max-h-[calc(100dvh-1rem)] w-[min(96vw,72rem)] flex-col overflow-hidden border-border/50 bg-background p-0 shadow-xl"
+      >
+        <div className="relative border-b border-border/50 bg-pos-header px-4 py-4 pr-14 text-pos-header-foreground sm:px-5 sm:py-4">
+          <DialogClose
+            className="absolute right-4 top-4 inline-flex h-10 w-10 items-center justify-center rounded-full text-pos-header-foreground/80 transition-colors hover:bg-white/10 hover:text-pos-header-foreground focus:outline-none focus:ring-2 focus:ring-white/40 focus:ring-offset-0"
+            aria-label="Close dialog"
+          >
+            <X className="h-4 w-4" />
+          </DialogClose>
+
           <DialogHeader className="space-y-2 text-left">
             <DialogTitle className="flex items-center gap-2 text-xl font-semibold">
               <RotateCcw className="h-5 w-5 text-primary" />
               Create Refund
             </DialogTitle>
-            <DialogDescription className="text-pos-header-foreground/70">
-              Refund paid sales from the history view. Quantities can be partial and will follow the
-              remaining refundable balance from the backend.
+            <DialogDescription className="text-sm text-pos-header-foreground/60">
+              Sale ID: {summary?.sale_number ?? saleId}
             </DialogDescription>
           </DialogHeader>
         </div>
@@ -221,91 +249,61 @@ const RefundSaleDialog = ({ open, saleId, onOpenChange, onRefunded }: RefundSale
             Loading refund details...
           </div>
         ) : !receipt || !summary ? null : (
-          <div className="grid max-h-[calc(92vh-88px)] gap-6 overflow-hidden px-6 py-6 lg:grid-cols-[1.25fr_0.75fr]">
-            <div className="space-y-4 overflow-hidden">
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div className="rounded-2xl border border-border bg-card p-4">
-                  <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Sale</div>
-                  <div className="mt-1 text-lg font-semibold">{summary.sale_number}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    Status: <span className="capitalize">{summary.sale_status}</span>
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-border bg-card p-4">
-                  <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Refunded</div>
-                  <div className="mt-1 text-lg font-semibold">{money(summary.refunded_total)}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    Tax reversed {money(summary.refunded_tax_total)}
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-border bg-card p-4">
-                  <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Remaining</div>
-                  <div className="mt-1 text-lg font-semibold">{money(summary.remaining_refundable_total)}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">Available to refund</div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-border bg-card shadow-sm">
-                <div className="flex items-center justify-between border-b border-border px-4 py-3">
-                  <div className="flex items-center gap-2 text-sm font-semibold">
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-4 sm:py-4">
+            <div className="space-y-3">
+              <div className="min-h-0 rounded-2xl bg-card p-3.5 shadow-sm sm:p-4">
+                <div className="flex items-center justify-between pb-2.5">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                     <ReceiptText className="h-4 w-4 text-primary" />
-                    Refundable Items
+                    Refundable items
                   </div>
                   <Badge variant="secondary">{editableItems.length}</Badge>
                 </div>
 
-                <ScrollArea className="max-h-[42vh]">
-                  <div className="divide-y divide-border">
+                <ScrollArea className="max-h-[min(32vh,14rem)] md:max-h-[min(40vh,20rem)]">
+                  <div className="space-y-2.5 pr-2">
                     {editableItems.map(({ receiptItem, summaryItem }) => {
                       const maxQuantity = summaryItem?.refundable_quantity || 0;
                       const currentValue = quantities[receiptItem.sale_item_id] ?? String(maxQuantity);
-                      const currentQuantity = Number(currentValue) || 0;
-                      const estimatedLineTotal = currentQuantity * getRefundableUnitAmount(receiptItem);
 
                       return (
-                        <div key={receiptItem.sale_item_id} className="space-y-3 px-4 py-4">
-                          <div className="flex items-start justify-between gap-3">
+                        <div
+                          key={receiptItem.sale_item_id}
+                          className="rounded-xl bg-background p-3.5 shadow-[0_1px_2px_rgba(15,23,42,0.05)]"
+                        >
+                          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2.5">
                             <div className="min-w-0">
-                              <p className="font-medium">{receiptItem.product_name}</p>
-                              <p className="text-xs text-muted-foreground">
-                                Sold {summaryItem?.sold_quantity ?? 0} · Refunded {summaryItem?.refunded_quantity ?? 0} ·
-                                Refundable {maxQuantity}
+                              <p className="break-words text-[0.95rem] font-medium leading-snug text-foreground">
+                                {receiptItem.product_name}
                               </p>
                             </div>
-                            <div className="text-right text-sm">
-                              <div className="font-semibold">{money(estimatedLineTotal)}</div>
-                              <div className="text-xs text-muted-foreground">
-                                Unit {money(getRefundableUnitAmount(receiptItem))}
+                            <div className="shrink-0 text-right">
+                              <div className="whitespace-nowrap text-sm font-semibold tabular-nums text-foreground">
+                                {money(getRefundableUnitAmount(receiptItem))}
                               </div>
                             </div>
                           </div>
 
-                          <div className="grid gap-3 sm:grid-cols-[1fr_120px]">
-                            <div className="rounded-xl border border-border bg-background px-3 py-2">
-                              <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Refund Qty</div>
-                              <Input
-                                type="number"
-                                min="0"
-                                max={maxQuantity}
-                                step="0.001"
-                                value={currentValue}
-                                onChange={(event) =>
-                                  handleQuantityChange(
-                                    receiptItem.sale_item_id,
-                                    event.target.value,
-                                    maxQuantity
-                                  )
-                                }
-                                disabled={maxQuantity <= 0}
-                                className="mt-2 h-10 text-base font-semibold"
-                              />
-                            </div>
-                            <div className="rounded-xl border border-border bg-muted/30 px-3 py-2">
-                              <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Status</div>
-                              <div className="mt-2 text-sm font-medium">
-                                {maxQuantity > 0 ? "Refundable" : "Fully refunded"}
-                              </div>
-                            </div>
+                          <div className="mt-3">
+                            <Label
+                              htmlFor={`refund-qty-${receiptItem.sale_item_id}`}
+                              className="text-xs font-medium text-muted-foreground"
+                            >
+                              Quantity
+                            </Label>
+                            <Input
+                              id={`refund-qty-${receiptItem.sale_item_id}`}
+                              type="number"
+                              min="0"
+                              max={maxQuantity}
+                              step="0.001"
+                              value={currentValue}
+                              onChange={(event) =>
+                                handleQuantityChange(receiptItem.sale_item_id, event.target.value, maxQuantity)
+                              }
+                              disabled={maxQuantity <= 0}
+                              className="mt-1.5 h-11 text-base font-semibold"
+                            />
                           </div>
                         </div>
                       );
@@ -313,65 +311,65 @@ const RefundSaleDialog = ({ open, saleId, onOpenChange, onRefunded }: RefundSale
                   </div>
                 </ScrollArea>
               </div>
-            </div>
 
-            <div className="space-y-4">
-              <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
-                <div className="flex items-center gap-2 text-sm font-semibold">
-                  <ShieldCheck className="h-4 w-4 text-primary" />
-                  Refund Summary
-                </div>
-                <div className="mt-3 space-y-3 text-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Estimated refund</span>
-                    <span className="font-semibold">{money(estimatedRefundTotal)}</span>
+              <div className="rounded-2xl bg-card p-3.5 shadow-sm sm:p-4">
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Remaining amount</span>
+                    <span className="font-semibold text-foreground">{money(summary.remaining_refundable_total)}</span>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Items selected</span>
-                    <span className="font-semibold">{selectedRefundItems.length}</span>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Selected items</span>
+                    <span className="font-semibold text-foreground">{selectedRefundItems.length}</span>
                   </div>
-                  <Separator />
-                  <div className="rounded-xl border border-border bg-background p-3 text-xs text-muted-foreground">
-                    The backend will validate the exact refundable quantities, allocate payment reversals,
-                    and update inventory and audit logs atomically.
+                  <Separator className="bg-border/60" />
+                  <div className="flex items-center justify-between text-base">
+                    <span className="font-medium text-foreground">Total refund</span>
+                    <span className="font-semibold text-foreground">{money(estimatedRefundTotal)}</span>
                   </div>
                 </div>
               </div>
 
-              <div className="space-y-3 rounded-2xl border border-border bg-card p-4 shadow-sm">
+              <div className="rounded-2xl bg-card p-3.5 shadow-sm sm:p-4">
                 <div className="space-y-2">
-                  <Label htmlFor="refund-reason">Reason</Label>
-                  <Input
-                    id="refund-reason"
-                    value={reason}
-                    onChange={(event) => setReason(event.target.value)}
-                    placeholder="customer_request"
-                  />
+                  <Label htmlFor="refund-reason" className="text-sm font-medium text-foreground">
+                    Reason
+                  </Label>
+                  <Select value={reason} onValueChange={setReason}>
+                    <SelectTrigger id="refund-reason" className="h-11 w-full text-base">
+                      <SelectValue>{getRefundReasonLabel(reason)}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {refundReasonOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-
-                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-950">
-                  <div className="flex gap-2">
-                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
-                    <div className="space-y-1 text-sm">
-                      <p className="font-medium">Refund impact</p>
-                      <p className="text-amber-900/80">
-                        This will restore stock, create reversing payment entries, and mark the sale as
-                        partially or fully refunded.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <DialogFooter className="gap-2 pt-2">
-                  <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
-                    Cancel
-                  </Button>
-                  <Button type="button" onClick={() => void handleSubmit()} disabled={!canSubmit}>
-                    {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-                    Process Refund
-                  </Button>
-                </DialogFooter>
               </div>
+
+              <DialogFooter className="grid gap-2.5 pb-[calc(env(safe-area-inset-bottom)+0.25rem)] pt-0.5 sm:grid-cols-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => onOpenChange(false)}
+                  disabled={submitting}
+                  className="h-11 w-full"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void handleSubmit()}
+                  disabled={!canSubmit}
+                  className="h-11 w-full"
+                >
+                  {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                  Process Refund
+                </Button>
+              </DialogFooter>
             </div>
           </div>
         )}
