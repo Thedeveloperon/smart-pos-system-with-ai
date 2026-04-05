@@ -319,11 +319,13 @@ const HeaderBar = ({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-72 p-2">
-            <DropdownMenuItem onSelect={() => onHeldBills()} className="min-h-11 px-3 py-2 text-base">
-              <PauseCircle className="mr-3 h-5 w-5" />
-              Held
-              {heldBillsCount > 0 && <Badge className="ml-auto h-5 min-w-5 px-1 text-[10px]">{heldBillsCount}</Badge>}
-            </DropdownMenuItem>
+            {allowCashier(cashierToolbarVisibility?.heldBills) && (
+              <DropdownMenuItem onSelect={() => onHeldBills()} className="min-h-11 px-3 py-2 text-base">
+                <PauseCircle className="mr-3 h-5 w-5" />
+                Held
+                {heldBillsCount > 0 && <Badge className="ml-auto h-5 min-w-5 px-1 text-[10px]">{heldBillsCount}</Badge>}
+              </DropdownMenuItem>
+            )}
 
             {isAdmin && (
               <DropdownMenuItem onSelect={() => onNewItem()} className="min-h-11 px-3 py-2 text-base">
