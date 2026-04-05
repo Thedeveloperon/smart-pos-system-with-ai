@@ -14,7 +14,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -222,6 +221,7 @@ const RefundSaleDialog = ({ open, saleId, onOpenChange, onRefunded }: RefundSale
     >
       <DialogContent
         hideClose
+        overlayClassName="bg-black/55"
         className="flex max-h-[calc(100dvh-1rem)] w-[min(96vw,72rem)] flex-col overflow-hidden border-border/50 bg-background p-0 shadow-xl"
       >
         <div className="relative border-b border-border/50 bg-pos-header px-4 py-4 pr-14 text-pos-header-foreground sm:px-5 sm:py-4">
@@ -260,8 +260,11 @@ const RefundSaleDialog = ({ open, saleId, onOpenChange, onRefunded }: RefundSale
                   <Badge variant="secondary">{editableItems.length}</Badge>
                 </div>
 
-                <ScrollArea className="max-h-[min(32vh,14rem)] md:max-h-[min(40vh,20rem)]">
-                  <div className="space-y-2.5 pr-2">
+                <div
+                  className="max-h-[min(34vh,15rem)] overflow-y-auto pr-1 md:max-h-[min(44vh,21rem)]"
+                  style={{ scrollbarGutter: "stable" }}
+                >
+                  <div className="space-y-2.5 pr-1">
                     {editableItems.map(({ receiptItem, summaryItem }) => {
                       const maxQuantity = summaryItem?.refundable_quantity || 0;
                       const currentValue = quantities[receiptItem.sale_item_id] ?? String(maxQuantity);
@@ -309,7 +312,7 @@ const RefundSaleDialog = ({ open, saleId, onOpenChange, onRefunded }: RefundSale
                       );
                     })}
                   </div>
-                </ScrollArea>
+                </div>
               </div>
 
               <div className="rounded-2xl bg-card p-3.5 shadow-sm sm:p-4">
