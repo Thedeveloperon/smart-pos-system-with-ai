@@ -267,7 +267,6 @@ public static class DbSchemaUpdater
 
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_brands_StoreId_Name" ON "brands" ("StoreId", "Name");
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_brands_StoreId_Code" ON "brands" ("StoreId", "Code");
-            CREATE INDEX IF NOT EXISTS "IX_products_BrandId" ON "products" ("BrandId");
             CREATE INDEX IF NOT EXISTS "IX_inventory_StoreId" ON "inventory" ("StoreId");
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_product_suppliers_StoreId_ProductId_SupplierId" ON "product_suppliers" ("StoreId", "ProductId", "SupplierId");
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_product_suppliers_StoreId_ProductId_Preferred" ON "product_suppliers" ("StoreId", "ProductId") WHERE "IsPreferred" = 1;
@@ -278,6 +277,9 @@ public static class DbSchemaUpdater
         await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
 
         await EnsureSqliteColumnAsync(dbContext, "products", "BrandId", """ALTER TABLE "products" ADD COLUMN "BrandId" TEXT NULL;""", cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE INDEX IF NOT EXISTS "IX_products_BrandId" ON "products" ("BrandId");""",
+            cancellationToken);
         await EnsureSqliteColumnAsync(dbContext, "inventory", "SafetyStock", """ALTER TABLE "inventory" ADD COLUMN "SafetyStock" TEXT NOT NULL DEFAULT '0';""", cancellationToken);
         await EnsureSqliteColumnAsync(dbContext, "inventory", "TargetStockLevel", """ALTER TABLE "inventory" ADD COLUMN "TargetStockLevel" TEXT NOT NULL DEFAULT '0';""", cancellationToken);
         await EnsureSqliteColumnAsync(dbContext, "shop_stock_settings", "ThresholdMultiplier", """ALTER TABLE "shop_stock_settings" ADD COLUMN "ThresholdMultiplier" TEXT NOT NULL DEFAULT '1';""", cancellationToken);
@@ -341,7 +343,6 @@ public static class DbSchemaUpdater
 
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_brands_StoreId_Name" ON brands("StoreId", "Name");
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_brands_StoreId_Code" ON brands("StoreId", "Code");
-            CREATE INDEX IF NOT EXISTS "IX_products_BrandId" ON products("BrandId");
             CREATE INDEX IF NOT EXISTS "IX_inventory_StoreId" ON inventory("StoreId");
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_product_suppliers_StoreId_ProductId_SupplierId" ON product_suppliers("StoreId", "ProductId", "SupplierId");
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_product_suppliers_StoreId_ProductId_Preferred" ON product_suppliers("StoreId", "ProductId") WHERE "IsPreferred" = true;
@@ -353,6 +354,9 @@ public static class DbSchemaUpdater
 
         await dbContext.Database.ExecuteSqlRawAsync(
             """ALTER TABLE products ADD COLUMN IF NOT EXISTS "BrandId" uuid NULL;""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE INDEX IF NOT EXISTS "IX_products_BrandId" ON products("BrandId");""",
             cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(
             """ALTER TABLE inventory ADD COLUMN IF NOT EXISTS "SafetyStock" numeric(18,3) NOT NULL DEFAULT 0;""",
