@@ -10,6 +10,15 @@ export type PosChatbotFaqCategory = {
   questions: PosChatbotFaqQuestion[];
 };
 
+const v1SupportedCategoryIds = new Set([
+  "stock_inventory",
+  "sales",
+  "purchasing_suppliers",
+  "pricing_profit",
+  "cashier_operations",
+  "reports_summaries",
+]);
+
 const rawCategories: ReadonlyArray<{
   id: string;
   label: string;
@@ -154,12 +163,14 @@ function extractPlaceholders(text: string): string[] {
   return Array.from(text.matchAll(/\{([^}]+)\}/g), (match) => match[1]?.trim() ?? "").filter(Boolean);
 }
 
-export const posChatbotFaqCategories: PosChatbotFaqCategory[] = rawCategories.map((category) => ({
-  id: category.id,
-  label: category.label,
-  questions: category.templates.map((template, index) => ({
-    id: `${category.id}_${index + 1}`,
-    text: template,
-    placeholders: extractPlaceholders(template),
-  })),
-}));
+export const posChatbotFaqCategories: PosChatbotFaqCategory[] = rawCategories
+  .filter((category) => v1SupportedCategoryIds.has(category.id))
+  .map((category) => ({
+    id: category.id,
+    label: category.label,
+    questions: category.templates.map((template, index) => ({
+      id: `${category.id}_${index + 1}`,
+      text: template,
+      placeholders: extractPlaceholders(template),
+    })),
+  }));

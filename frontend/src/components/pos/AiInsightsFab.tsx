@@ -6,7 +6,7 @@ type AiInsightsFabProps = {
 };
 
 const AiInsightsFab = ({ onClick }: AiInsightsFabProps) => (
-  <div className="pointer-events-none fixed bottom-[5.25rem] left-4 z-40 md:bottom-20 md:left-6">
+  <div className="pointer-events-none fixed bottom-[5.25rem] right-4 z-40 md:bottom-20 md:right-6">
     <Button
       type="button"
       onClick={onClick}

@@ -89,12 +89,12 @@ export function FaqBrowser({ onSendQuestion, disabled = false }: FaqBrowserProps
   };
 
   return (
-    <ScrollArea className="h-[28rem] rounded-md border border-border/70 bg-muted/15">
+    <ScrollArea className="h-full rounded-md border border-border/70 bg-muted/15">
       <div className="space-y-1 p-3">
         <div className="px-2 pb-2">
-          <p className="text-sm font-medium text-foreground">FAQ Templates</p>
+          <p className="text-sm font-medium text-foreground">Choose a category to explore common questions:</p>
           <p className="text-xs text-muted-foreground">
-            Pick a category, then send a ready-made question or fill in the placeholders.
+            Tap a question to send instantly, or fill placeholders when prompted.
           </p>
         </div>
 
