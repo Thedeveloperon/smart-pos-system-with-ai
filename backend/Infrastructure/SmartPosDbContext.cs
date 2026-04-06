@@ -790,6 +790,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.Content).HasColumnType("text");
             entity.Property(x => x.IdempotencyKey).HasMaxLength(120);
             entity.Property(x => x.CitationsJson).HasColumnType("text");
+            entity.Property(x => x.BlocksJson).HasColumnType("text");
             entity.Property(x => x.Confidence).HasMaxLength(24);
             entity.Property(x => x.ReservedCredits).HasPrecision(18, 2);
             entity.Property(x => x.ChargedCredits).HasPrecision(18, 2);

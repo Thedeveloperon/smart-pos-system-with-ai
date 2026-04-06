@@ -16,6 +16,7 @@ public sealed class AiChatService(
     AiCreditBillingService creditBillingService,
     IOptions<AiInsightOptions> aiInsightOptions,
     AiChatGroundingOrchestrator groundingOrchestrator,
+    AiChatStructuredResponseBuilder structuredResponseBuilder,
     ReportService reportService,
     ILogger<AiChatService> logger)
 {
@@ -230,6 +231,7 @@ public sealed class AiChatService(
             IdempotencyKey = normalizedIdempotencyKey,
             Confidence = null,
             CitationsJson = null,
+            BlocksJson = null,
             ReservedCredits = 0m,
             ChargedCredits = 0m,
             RefundedCredits = 0m,
@@ -248,6 +250,10 @@ public sealed class AiChatService(
         try
         {
             var grounding = await BuildGroundingSnapshotAsync(normalizedMessage, cancellationToken);
+            var structuredResponse = await structuredResponseBuilder.BuildAsync(
+                normalizedMessage,
+                grounding,
+                cancellationToken);
             var aiPrompt = BuildAiPrompt(normalizedMessage, grounding);
             var aiIdempotencyKey = BuildAiInsightIdempotencyKey(conversation.Id, normalizedIdempotencyKey);
             var insight = await aiInsightService.GenerateInsightAsync(
@@ -264,10 +270,14 @@ public sealed class AiChatService(
                 Role = AiConversationMessageRole.Assistant,
                 Status = AiConversationMessageStatus.Succeeded,
                 UsageType = usageType,
-                Content = ResolveAssistantContent(grounding, insight.Insight),
+                Content = ResolveAssistantContent(
+                    grounding,
+                    insight.Insight,
+                    structuredResponse.CompanionContent),
                 IdempotencyKey = normalizedIdempotencyKey,
                 Confidence = grounding.Confidence,
                 CitationsJson = SerializeCitations(grounding.Citations),
+                BlocksJson = SerializeBlocks(structuredResponse.Blocks),
                 ReservedCredits = insight.ReservedCredits,
                 ChargedCredits = insight.ChargedCredits,
                 RefundedCredits = insight.RefundedCredits,
@@ -313,6 +323,7 @@ public sealed class AiChatService(
                 IdempotencyKey = normalizedIdempotencyKey,
                 Confidence = null,
                 CitationsJson = null,
+                BlocksJson = null,
                 ReservedCredits = 0m,
                 ChargedCredits = 0m,
                 RefundedCredits = 0m,
@@ -498,19 +509,26 @@ public sealed class AiChatService(
                """;
     }
 
-    private static string ResolveAssistantContent(AiChatGroundingResult grounding, string modelContent)
+    private static string ResolveAssistantContent(
+        AiChatGroundingResult grounding,
+        string modelContent,
+        string? companionContent)
     {
         if (grounding.IsUnsupported)
         {
             return BuildUnsupportedAssistantMessage(grounding);
         }
 
+        var baseContent = string.IsNullOrWhiteSpace(companionContent)
+            ? modelContent
+            : companionContent;
+
         if (grounding.MissingData.Count == 0)
         {
-            return modelContent;
+            return baseContent;
         }
 
-        var builder = new StringBuilder(modelContent.Trim());
+        var builder = new StringBuilder(baseContent.Trim());
         if (builder.Length > 0)
         {
             builder.AppendLine();
@@ -664,6 +682,16 @@ public sealed class AiChatService(
         return JsonSerializer.Serialize(citations);
     }
 
+    private static string? SerializeBlocks(List<AiChatMessageBlockResponse> blocks)
+    {
+        if (blocks.Count == 0)
+        {
+            return null;
+        }
+
+        return JsonSerializer.Serialize(blocks);
+    }
+
     private static List<AiChatCitationResponse> DeserializeCitations(string? json)
     {
         if (string.IsNullOrWhiteSpace(json))
@@ -674,6 +702,24 @@ public sealed class AiChatService(
         try
         {
             return JsonSerializer.Deserialize<List<AiChatCitationResponse>>(json)
+                   ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static List<AiChatMessageBlockResponse> DeserializeBlocks(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return [];
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<AiChatMessageBlockResponse>>(json)
                    ?? [];
         }
         catch (JsonException)
@@ -707,6 +753,7 @@ public sealed class AiChatService(
             Content = message.Content,
             Confidence = message.Confidence,
             Citations = DeserializeCitations(message.CitationsJson),
+            Blocks = DeserializeBlocks(message.BlocksJson),
             InputTokens = message.InputTokens,
             OutputTokens = message.OutputTokens,
             ReservedCredits = message.ReservedCredits,
@@ -729,6 +776,7 @@ public sealed class AiChatService(
             Content = content,
             Confidence = null,
             Citations = [],
+            Blocks = [],
             InputTokens = 0,
             OutputTokens = 0,
             ReservedCredits = 0m,

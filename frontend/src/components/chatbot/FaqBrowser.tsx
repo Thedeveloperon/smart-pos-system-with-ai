@@ -5,6 +5,7 @@ import {
   DollarSign,
   Monitor,
   Package,
+  Send,
   TriangleAlert,
   Truck,
   TrendingUp,
@@ -52,6 +53,7 @@ export function FaqBrowser({ onSendQuestion, disabled = false }: FaqBrowserProps
   const [expandedCategory, setExpandedCategory] = useState<string | null>(posChatbotFaqCategories[0]?.id ?? null);
   const [selectedQuestion, setSelectedQuestion] = useState<PosChatbotFaqQuestion | null>(null);
   const [placeholderValues, setPlaceholderValues] = useState<Record<string, string>>({});
+  const [customQuestion, setCustomQuestion] = useState("");
 
   const allPlaceholdersFilled = useMemo(
     () => selectedQuestion?.placeholders.every((placeholder) => placeholderValues[placeholder]?.trim()) ?? false,
@@ -88,99 +90,138 @@ export function FaqBrowser({ onSendQuestion, disabled = false }: FaqBrowserProps
     setPlaceholderValues({});
   };
 
+  const handleSendCustomQuestion = () => {
+    const normalized = customQuestion.trim();
+    if (!normalized || disabled) {
+      return;
+    }
+
+    onSendQuestion(normalized);
+    setCustomQuestion("");
+  };
+
   return (
-    <ScrollArea className="h-full rounded-md border border-border/70 bg-muted/15">
-      <div className="space-y-1 p-3">
-        <div className="px-2 pb-2">
-          <p className="text-sm font-medium text-foreground">Choose a category to explore common questions:</p>
-          <p className="text-xs text-muted-foreground">
-            Tap a question to send instantly, or fill placeholders when prompted.
-          </p>
-        </div>
+    <div className="flex h-full flex-col overflow-hidden rounded-md border border-border/70 bg-muted/15">
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="space-y-1 p-3">
+          <div className="px-2 pb-2">
+            <p className="text-sm font-medium text-foreground">Choose a category to explore common questions:</p>
+            <p className="text-xs text-muted-foreground">
+              Tap a question to send instantly, or fill placeholders when prompted.
+            </p>
+          </div>
 
-        {posChatbotFaqCategories.map((category) => {
-          const Icon = iconMap[category.id] ?? Package;
-          const isExpanded = expandedCategory === category.id;
+          {posChatbotFaqCategories.map((category) => {
+            const Icon = iconMap[category.id] ?? Package;
+            const isExpanded = expandedCategory === category.id;
 
-          return (
-            <div key={category.id} className="rounded-lg border border-transparent">
-              <button
-                type="button"
-                onClick={() => handleCategoryClick(category.id)}
-                className={cn(
-                  "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition-colors",
-                  "hover:bg-primary/8",
-                  isExpanded && "bg-primary/10 text-primary",
-                )}
-              >
-                <Icon className="h-4 w-4 shrink-0" />
-                <span className="flex-1">{category.label}</span>
-                <ChevronRight className={cn("h-4 w-4 shrink-0 transition-transform", isExpanded && "rotate-90")} />
-              </button>
+            return (
+              <div key={category.id} className="rounded-lg border border-transparent">
+                <button
+                  type="button"
+                  onClick={() => handleCategoryClick(category.id)}
+                  className={cn(
+                    "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition-colors",
+                    "hover:bg-primary/8",
+                    isExpanded && "bg-primary/10 text-primary",
+                  )}
+                >
+                  <Icon className="h-4 w-4 shrink-0" />
+                  <span className="flex-1">{category.label}</span>
+                  <ChevronRight className={cn("h-4 w-4 shrink-0 transition-transform", isExpanded && "rotate-90")} />
+                </button>
 
-              {isExpanded ? (
-                <div className="space-y-1 px-2 pb-2 pl-4">
-                  {category.questions.map((question) => {
-                    const isSelected = selectedQuestion?.id === question.id;
+                {isExpanded ? (
+                  <div className="space-y-1 px-2 pb-2 pl-4">
+                    {category.questions.map((question) => {
+                      const isSelected = selectedQuestion?.id === question.id;
 
-                    return (
-                      <div key={question.id} className="rounded-md">
-                        <button
-                          type="button"
-                          onClick={() => handleQuestionClick(question)}
-                          disabled={disabled}
-                          className={cn(
-                            "w-full rounded-md px-3 py-2 text-left text-xs transition-colors",
-                            "hover:bg-primary/5 hover:text-foreground",
-                            "disabled:cursor-not-allowed disabled:opacity-60",
-                            isSelected ? "bg-primary/10 font-medium text-primary" : "text-foreground/80",
-                          )}
-                        >
-                          {question.text}
-                        </button>
+                      return (
+                        <div key={question.id} className="rounded-md">
+                          <button
+                            type="button"
+                            onClick={() => handleQuestionClick(question)}
+                            disabled={disabled}
+                            className={cn(
+                              "w-full rounded-md px-3 py-2 text-left text-xs transition-colors",
+                              "hover:bg-primary/5 hover:text-foreground",
+                              "disabled:cursor-not-allowed disabled:opacity-60",
+                              isSelected ? "bg-primary/10 font-medium text-primary" : "text-foreground/80",
+                            )}
+                          >
+                            {question.text}
+                          </button>
 
-                        {isSelected && question.placeholders.length > 0 ? (
-                          <div className="space-y-2 px-3 py-2">
-                            {question.placeholders.map((placeholder) => (
-                              <Input
-                                key={placeholder}
-                                value={placeholderValues[placeholder] || ""}
-                                onChange={(event) =>
-                                  setPlaceholderValues((previous) => ({
-                                    ...previous,
-                                    [placeholder]: event.target.value,
-                                  }))
-                                }
-                                placeholder={`Enter ${placeholder}...`}
-                                className="h-8 text-xs"
-                                disabled={disabled}
-                                onKeyDown={(event) => {
-                                  if (event.key === "Enter" && allPlaceholdersFilled) {
-                                    handleSendWithPlaceholders();
+                          {isSelected && question.placeholders.length > 0 ? (
+                            <div className="space-y-2 px-3 py-2">
+                              {question.placeholders.map((placeholder) => (
+                                <Input
+                                  key={placeholder}
+                                  value={placeholderValues[placeholder] || ""}
+                                  onChange={(event) =>
+                                    setPlaceholderValues((previous) => ({
+                                      ...previous,
+                                      [placeholder]: event.target.value,
+                                    }))
                                   }
-                                }}
-                              />
-                            ))}
-                            <Button
-                              type="button"
-                              size="sm"
-                              className="h-7 text-xs"
-                              onClick={handleSendWithPlaceholders}
-                              disabled={!allPlaceholdersFilled || disabled}
-                            >
-                              Send Question
-                            </Button>
-                          </div>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
+                                  placeholder={`Enter ${placeholder}...`}
+                                  className="h-8 text-xs"
+                                  disabled={disabled}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter" && allPlaceholdersFilled) {
+                                      handleSendWithPlaceholders();
+                                    }
+                                  }}
+                                />
+                              ))}
+                              <Button
+                                type="button"
+                                size="sm"
+                                className="h-7 text-xs"
+                                onClick={handleSendWithPlaceholders}
+                                disabled={!allPlaceholdersFilled || disabled}
+                              >
+                                Send Question
+                              </Button>
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      </ScrollArea>
+
+      <div className="border-t border-border/70 bg-background/85 p-3">
+        <div className="flex gap-2">
+          <Input
+            value={customQuestion}
+            onChange={(event) => setCustomQuestion(event.target.value)}
+            placeholder="Type a custom question..."
+            className="h-9 text-xs"
+            disabled={disabled}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                handleSendCustomQuestion();
+              }
+            }}
+          />
+          <Button
+            type="button"
+            size="icon"
+            className="h-9 w-9 shrink-0"
+            onClick={handleSendCustomQuestion}
+            disabled={disabled || !customQuestion.trim()}
+            aria-label="Send custom question"
+          >
+            <Send className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
-    </ScrollArea>
+    </div>
   );
 }

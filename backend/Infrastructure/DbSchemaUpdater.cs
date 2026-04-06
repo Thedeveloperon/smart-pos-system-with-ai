@@ -1881,6 +1881,7 @@ public static class DbSchemaUpdater
               "Content" TEXT NOT NULL,
               "IdempotencyKey" TEXT NULL,
               "CitationsJson" TEXT NULL,
+              "BlocksJson" TEXT NULL,
               "Confidence" TEXT NULL,
               "ReservedCredits" TEXT NOT NULL,
               "ChargedCredits" TEXT NOT NULL,
@@ -1994,6 +1995,13 @@ public static class DbSchemaUpdater
         {
             await dbContext.Database.ExecuteSqlRawAsync(
                 """ALTER TABLE "ai_insight_requests" ADD COLUMN "UsageType" TEXT NOT NULL DEFAULT 'QuickInsights';""",
+                cancellationToken);
+        }
+
+        if (!await ColumnExistsAsync(dbContext, "ai_conversation_messages", "BlocksJson", cancellationToken))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "ai_conversation_messages" ADD COLUMN "BlocksJson" TEXT NULL;""",
                 cancellationToken);
         }
 
@@ -2129,6 +2137,7 @@ public static class DbSchemaUpdater
               "Content" text NOT NULL,
               "IdempotencyKey" varchar(120) NULL,
               "CitationsJson" text NULL,
+              "BlocksJson" text NULL,
               "Confidence" varchar(24) NULL,
               "ReservedCredits" numeric(18,2) NOT NULL,
               "ChargedCredits" numeric(18,2) NOT NULL,
@@ -2232,6 +2241,9 @@ public static class DbSchemaUpdater
         await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(
             """ALTER TABLE ai_insight_requests ADD COLUMN IF NOT EXISTS "UsageType" varchar(32) NOT NULL DEFAULT 'QuickInsights';""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE ai_conversation_messages ADD COLUMN IF NOT EXISTS "BlocksJson" text NULL;""",
             cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(
             """CREATE INDEX IF NOT EXISTS "IX_ai_insight_requests_UserId_UsageType_CreatedAtUtc" ON ai_insight_requests("UserId", "UsageType", "CreatedAtUtc");""",

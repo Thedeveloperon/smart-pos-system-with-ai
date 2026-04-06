@@ -297,6 +297,7 @@ builder.Services.AddScoped<AiChatIntentClassifier>();
 builder.Services.AddScoped<AiChatEntityResolver>();
 builder.Services.AddScoped<AiChatUnsupportedResponseBuilder>();
 builder.Services.AddScoped<AiChatGroundingOrchestrator>();
+builder.Services.AddScoped<AiChatStructuredResponseBuilder>();
 builder.Services.AddScoped<IAiChatGroundingHandler, StockGroundingHandler>();
 builder.Services.AddScoped<IAiChatGroundingHandler, SalesGroundingHandler>();
 builder.Services.AddScoped<IAiChatGroundingHandler, PurchasingGroundingHandler>();
