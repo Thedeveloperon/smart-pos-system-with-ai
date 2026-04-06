@@ -2,8 +2,11 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import NewItemDialog from "./NewItemDialog";
 import {
+  createProduct,
+  fetchBrands,
   fetchCategories,
   fetchProductCatalogItems,
+  fetchSuppliers,
   generateProductBarcode,
   validateProductBarcode,
 } from "@/lib/api";
@@ -23,8 +26,11 @@ vi.mock("@/lib/api", async () => {
 
   return {
     ...actual,
+    createProduct: vi.fn(),
+    fetchBrands: vi.fn(),
     fetchCategories: vi.fn(),
     fetchProductCatalogItems: vi.fn(),
+    fetchSuppliers: vi.fn(),
     generateProductBarcode: vi.fn(),
     validateProductBarcode: vi.fn(),
   };
@@ -42,8 +48,10 @@ function renderDialog() {
 describe("NewItemDialog barcode flow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(fetchBrands).mockResolvedValue([]);
     vi.mocked(fetchCategories).mockResolvedValue([]);
     vi.mocked(fetchProductCatalogItems).mockResolvedValue([]);
+    vi.mocked(fetchSuppliers).mockResolvedValue([]);
   });
 
   it("generates barcode and shows success message", async () => {
@@ -109,5 +117,53 @@ describe("NewItemDialog barcode flow", () => {
     expect(await screen.findByText("Barcode is valid (ean-13).")).toBeInTheDocument();
 
     expect(validateProductBarcode).toHaveBeenCalledTimes(3);
+  });
+
+  it("creates a product with the POS Manager stock fields", async () => {
+    vi.mocked(createProduct).mockResolvedValue({
+      id: "product-1",
+      name: "Test Item",
+      sku: "SKU-1",
+      barcode: null,
+      image: null,
+      imageUrl: null,
+      categoryId: null,
+      categoryName: null,
+      brandId: null,
+      brandName: null,
+      unitPrice: 25,
+      costPrice: 15,
+      stockQuantity: 0,
+      reorderLevel: 5,
+      alertLevel: 5,
+      allowNegativeStock: true,
+      safetyStock: 0,
+      targetStockLevel: 0,
+      isActive: true,
+      isLowStock: false,
+      createdAt: "2026-04-03T00:00:00Z",
+      updatedAt: null,
+    } as never);
+
+    renderDialog();
+
+    fireEvent.change(await screen.findByLabelText("Item name"), {
+      target: { value: "Test Item" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save Item" }));
+
+    await waitFor(() => {
+      expect(createProduct).toHaveBeenCalledTimes(1);
+    });
+
+    expect(createProduct).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "Test Item",
+        brand_id: null,
+        safety_stock: 0,
+        target_stock_level: 0,
+      }),
+    );
   });
 });

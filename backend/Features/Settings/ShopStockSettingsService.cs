@@ -38,15 +38,15 @@ public sealed class ShopStockSettingsService(SmartPosDbContext dbContext)
 
         await dbContext.Database.ExecuteSqlInterpolatedAsync(
             $"""
-             UPDATE "shop_stock_settings"
-             SET "DefaultLowStockThreshold" = {settings.DefaultLowStockThreshold},
-                 "ThresholdMultiplier" = {settings.ThresholdMultiplier},
-                 "DefaultSafetyStock" = {settings.DefaultSafetyStock},
-                 "DefaultLeadTimeDays" = {settings.DefaultLeadTimeDays},
-                 "DefaultTargetDaysOfCover" = {settings.DefaultTargetDaysOfCover},
-                 "UpdatedAtUtc" = {settings.UpdatedAtUtc}
-             WHERE "Id" = {settings.Id};
-             """,
+            UPDATE "shop_stock_settings"
+            SET
+                "DefaultLowStockThreshold" = {settings.DefaultLowStockThreshold},
+                "ThresholdMultiplier" = {settings.ThresholdMultiplier},
+                "DefaultSafetyStock" = {settings.DefaultSafetyStock},
+                "DefaultLeadTimeDays" = {settings.DefaultLeadTimeDays},
+                "DefaultTargetDaysOfCover" = {settings.DefaultTargetDaysOfCover},
+                "UpdatedAtUtc" = {settings.UpdatedAtUtc};
+            """,
             cancellationToken);
 
         return ToResponse(settings);
@@ -54,7 +54,11 @@ public sealed class ShopStockSettingsService(SmartPosDbContext dbContext)
 
     private async Task<ShopStockSettings> GetOrCreateAsync(CancellationToken cancellationToken)
     {
-        var settings = await dbContext.ShopStockSettings.FirstOrDefaultAsync(cancellationToken);
+        var settings = (await dbContext.ShopStockSettings
+                .ToListAsync(cancellationToken))
+            .OrderByDescending(x => x.UpdatedAtUtc ?? x.CreatedAtUtc)
+            .ThenByDescending(x => x.CreatedAtUtc)
+            .FirstOrDefault();
         if (settings is not null)
         {
             return settings;

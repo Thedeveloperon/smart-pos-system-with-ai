@@ -605,10 +605,13 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
         barcode: createProductDraft.barcode.trim() || null,
         image_url: null,
         category_id: null,
+        brand_id: null,
         unit_price: unitPrice,
         cost_price: costPrice,
         initial_stock_quantity: initialStockQuantity,
         reorder_level: reorderLevel,
+        safety_stock: 0,
+        target_stock_level: 0,
         allow_negative_stock: true,
         is_active: true,
       });

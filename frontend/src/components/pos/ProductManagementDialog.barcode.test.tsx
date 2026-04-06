@@ -3,9 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import ProductManagementDialog from "./ProductManagementDialog";
 import {
   deleteProduct,
+  fetchBrands,
   fetchCategories,
   fetchProductCatalogItems,
+  fetchProductSuppliers,
+  fetchSuppliers,
   generateAndAssignProductBarcode,
+  updateProduct,
   validateProductBarcode,
   type CatalogProduct,
 } from "@/lib/api";
@@ -29,7 +33,10 @@ vi.mock("@/lib/api", async () => {
 
   return {
     ...actual,
+    fetchBrands: vi.fn(),
     fetchProductCatalogItems: vi.fn(),
+    fetchProductSuppliers: vi.fn(),
+    fetchSuppliers: vi.fn(),
     fetchCategories: vi.fn(),
     generateAndAssignProductBarcode: vi.fn(),
     validateProductBarcode: vi.fn(),
@@ -79,7 +86,10 @@ async function openEditorForFirstProduct() {
 describe("ProductManagementDialog barcode flow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(fetchBrands).mockResolvedValue([]);
     vi.mocked(fetchCategories).mockResolvedValue([]);
+    vi.mocked(fetchProductSuppliers).mockResolvedValue([]);
+    vi.mocked(fetchSuppliers).mockResolvedValue([]);
   });
 
   it("generates barcode in editor and refreshes state", async () => {
@@ -172,6 +182,43 @@ describe("ProductManagementDialog barcode flow", () => {
     expect(toast.success).toHaveBeenCalledWith("Deleted 1 product.");
     await waitFor(() => {
       expect(screen.queryByText("Milk 1L")).not.toBeInTheDocument();
+    });
+  });
+
+  it("saves product edits with the POS Manager stock fields", async () => {
+    const product: CatalogProduct = { ...baseProduct, barcode: "4006381333931" };
+
+    vi.mocked(fetchProductCatalogItems).mockResolvedValue([product]);
+    vi.mocked(updateProduct).mockResolvedValue({
+      ...product,
+      unitPrice: 475,
+      costPrice: 310,
+      reorderLevel: 8,
+      safetyStock: 2,
+      targetStockLevel: 15,
+    });
+
+    renderDialog();
+    await openEditorForFirstProduct();
+
+    fireEvent.change(screen.getByLabelText("Unit price"), { target: { value: "475" } });
+    fireEvent.change(screen.getByLabelText("Cost price"), { target: { value: "310" } });
+    fireEvent.change(screen.getByLabelText("Reorder level"), { target: { value: "8" } });
+    fireEvent.change(screen.getByLabelText("Safety stock"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("Target stock"), { target: { value: "15" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => {
+      expect(updateProduct).toHaveBeenCalledWith(
+        "prod-1",
+        expect.objectContaining({
+          unit_price: 475,
+          cost_price: 310,
+          reorder_level: 8,
+          safety_stock: 2,
+          target_stock_level: 15,
+        }),
+      );
     });
   });
 });

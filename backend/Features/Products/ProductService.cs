@@ -392,8 +392,8 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
 
         await EnsureUniqueBarcodeAsync(normalizedBarcode, null, cancellationToken);
         await EnsureUniqueSkuAsync(normalizedSku, null, cancellationToken);
-        await EnsureCategoryExistsIfProvidedAsync(request.CategoryId, cancellationToken);
-        await EnsureBrandExistsIfProvidedAsync(request.BrandId, cancellationToken);
+        await EnsureCategoryExistsIfProvidedAsync(request.CategoryId, null, cancellationToken);
+        await EnsureBrandExistsIfProvidedAsync(request.BrandId, null, cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
         var product = new Product
@@ -481,8 +481,8 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
 
         await EnsureUniqueBarcodeAsync(normalizedBarcode, productId, cancellationToken);
         await EnsureUniqueSkuAsync(normalizedSku, productId, cancellationToken);
-        await EnsureCategoryExistsIfProvidedAsync(request.CategoryId, cancellationToken);
-        await EnsureBrandExistsIfProvidedAsync(request.BrandId, cancellationToken);
+        await EnsureCategoryExistsIfProvidedAsync(request.CategoryId, product.CategoryId, cancellationToken);
+        await EnsureBrandExistsIfProvidedAsync(request.BrandId, product.BrandId, cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
         var before = new
@@ -1137,10 +1137,25 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
 
     private async Task EnsureCategoryExistsIfProvidedAsync(
         Guid? categoryId,
+        Guid? currentCategoryId,
         CancellationToken cancellationToken)
     {
         if (!categoryId.HasValue)
         {
+            return;
+        }
+
+        if (currentCategoryId.HasValue && currentCategoryId.Value == categoryId.Value)
+        {
+            var currentExists = await dbContext.Categories
+                .AsNoTracking()
+                .AnyAsync(x => x.Id == categoryId.Value, cancellationToken);
+
+            if (!currentExists)
+            {
+                throw new InvalidOperationException("Selected category does not exist.");
+            }
+
             return;
         }
 
@@ -1156,10 +1171,25 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
 
     private async Task EnsureBrandExistsIfProvidedAsync(
         Guid? brandId,
+        Guid? currentBrandId,
         CancellationToken cancellationToken)
     {
         if (!brandId.HasValue)
         {
+            return;
+        }
+
+        if (currentBrandId.HasValue && currentBrandId.Value == brandId.Value)
+        {
+            var currentExists = await dbContext.Brands
+                .AsNoTracking()
+                .AnyAsync(x => x.Id == brandId.Value, cancellationToken);
+
+            if (!currentExists)
+            {
+                throw new InvalidOperationException("Selected brand does not exist.");
+            }
+
             return;
         }
 

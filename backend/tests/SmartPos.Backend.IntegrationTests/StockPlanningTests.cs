@@ -112,6 +112,14 @@ public sealed class StockPlanningTests(CustomWebApplicationFactory factory)
                 default_target_days_of_cover = 12m
             }));
         Assert.Equal(1.25m, TestJson.GetDecimal(updatedSettings, "threshold_multiplier"));
+
+        var refreshedSettings = await TestJson.ReadObjectAsync(
+            await client.GetAsync("/api/settings/stock-settings"));
+        Assert.Equal(6m, TestJson.GetDecimal(refreshedSettings, "default_low_stock_threshold"));
+        Assert.Equal(1.25m, TestJson.GetDecimal(refreshedSettings, "threshold_multiplier"));
+        Assert.Equal(2m, TestJson.GetDecimal(refreshedSettings, "default_safety_stock"));
+        Assert.Equal(4, TestJson.GetInt32(refreshedSettings, "default_lead_time_days"));
+        Assert.Equal(12m, TestJson.GetDecimal(refreshedSettings, "default_target_days_of_cover"));
     }
 
     private static JsonObject FirstObjectFromArray(JsonNode root, string propertyName)
