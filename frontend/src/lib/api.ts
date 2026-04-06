@@ -2458,6 +2458,43 @@ export type AiChatCitation = {
   summary: string;
 };
 
+export type AiChatStockTableRowBlock = {
+  item: string;
+  current_stock: number;
+  reorder_level: number;
+  status: "low" | "out" | "ok" | string;
+};
+
+export type AiChatStockTableBlock = {
+  title: string;
+  rows: AiChatStockTableRowBlock[];
+  footer_note?: string | null;
+};
+
+export type AiChatSalesKpiBlock = {
+  title: string;
+  from_date: string;
+  to_date: string;
+  revenue: number;
+  transactions: number;
+  average_basket: number;
+  top_seller?: string | null;
+  trend_percent: number;
+  trend_label: "up" | "down" | "flat" | string;
+};
+
+export type AiChatSummaryListBlock = {
+  title: string;
+  items: string[];
+};
+
+export type AiChatMessageBlock = {
+  type: "stock_table" | "sales_kpi" | "summary_list" | string;
+  stock_table?: AiChatStockTableBlock | null;
+  sales_kpi?: AiChatSalesKpiBlock | null;
+  summary_list?: AiChatSummaryListBlock | null;
+};
+
 export type AiChatMessage = {
   message_id: string;
   role: "user" | "assistant" | "system" | string;
@@ -2466,6 +2503,7 @@ export type AiChatMessage = {
   content: string;
   confidence?: string | null;
   citations: AiChatCitation[];
+  blocks?: AiChatMessageBlock[];
   input_tokens: number;
   output_tokens: number;
   reserved_credits: number;

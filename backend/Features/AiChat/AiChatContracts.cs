@@ -100,6 +100,9 @@ public sealed class AiChatMessageResponse
     [JsonPropertyName("citations")]
     public List<AiChatCitationResponse> Citations { get; set; } = [];
 
+    [JsonPropertyName("blocks")]
+    public List<AiChatMessageBlockResponse> Blocks { get; set; } = [];
+
     [JsonPropertyName("input_tokens")]
     public int InputTokens { get; set; }
 
@@ -135,4 +138,85 @@ public sealed class AiChatCitationResponse
 
     [JsonPropertyName("summary")]
     public string Summary { get; set; } = string.Empty;
+}
+
+public sealed class AiChatMessageBlockResponse
+{
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = string.Empty;
+
+    [JsonPropertyName("stock_table")]
+    public AiChatStockTableBlockResponse? StockTable { get; set; }
+
+    [JsonPropertyName("sales_kpi")]
+    public AiChatSalesKpiBlockResponse? SalesKpi { get; set; }
+
+    [JsonPropertyName("summary_list")]
+    public AiChatSummaryListBlockResponse? SummaryList { get; set; }
+}
+
+public sealed class AiChatStockTableBlockResponse
+{
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = "Stock & Inventory Update";
+
+    [JsonPropertyName("rows")]
+    public List<AiChatStockTableRowResponse> Rows { get; set; } = [];
+
+    [JsonPropertyName("footer_note")]
+    public string? FooterNote { get; set; }
+}
+
+public sealed class AiChatStockTableRowResponse
+{
+    [JsonPropertyName("item")]
+    public string Item { get; set; } = string.Empty;
+
+    [JsonPropertyName("current_stock")]
+    public decimal CurrentStock { get; set; }
+
+    [JsonPropertyName("reorder_level")]
+    public decimal ReorderLevel { get; set; }
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "ok";
+}
+
+public sealed class AiChatSalesKpiBlockResponse
+{
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = "Sales Summary";
+
+    [JsonPropertyName("from_date")]
+    public DateOnly FromDate { get; set; }
+
+    [JsonPropertyName("to_date")]
+    public DateOnly ToDate { get; set; }
+
+    [JsonPropertyName("revenue")]
+    public decimal Revenue { get; set; }
+
+    [JsonPropertyName("transactions")]
+    public int Transactions { get; set; }
+
+    [JsonPropertyName("average_basket")]
+    public decimal AverageBasket { get; set; }
+
+    [JsonPropertyName("top_seller")]
+    public string? TopSeller { get; set; }
+
+    [JsonPropertyName("trend_percent")]
+    public decimal TrendPercent { get; set; }
+
+    [JsonPropertyName("trend_label")]
+    public string TrendLabel { get; set; } = "flat";
+}
+
+public sealed class AiChatSummaryListBlockResponse
+{
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = "Business Summary";
+
+    [JsonPropertyName("items")]
+    public List<string> Items { get; set; } = [];
 }

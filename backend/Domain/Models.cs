@@ -792,6 +792,7 @@ public sealed class AiConversationMessage
     public string Content { get; set; } = string.Empty;
     public string? IdempotencyKey { get; set; }
     public string? CitationsJson { get; set; }
+    public string? BlocksJson { get; set; }
     public string? Confidence { get; set; }
     public decimal ReservedCredits { get; set; }
     public decimal ChargedCredits { get; set; }

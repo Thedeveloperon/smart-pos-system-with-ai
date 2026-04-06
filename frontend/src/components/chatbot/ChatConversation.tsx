@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, Loader2, Send } from "lucide-react";
-import type { AiChatMessage } from "@/lib/api";
+import type { AiChatMessage, AiChatMessageBlock } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -24,6 +24,101 @@ function TypingIndicator() {
           <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/60 [animation-delay:300ms]" />
         </div>
       </div>
+    </div>
+  );
+}
+
+function formatDecimal(value: number): string {
+  return Number(value).toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
+}
+
+function renderStructuredBlock(block: AiChatMessageBlock, messageId: string, index: number) {
+  const key = `${messageId}-block-${index}-${block.type}`;
+
+  if (block.type === "stock_table" && block.stock_table) {
+    return (
+      <div key={key} className="rounded-xl border border-primary/20 bg-primary/5 p-3">
+        <p className="text-sm font-semibold text-foreground">{block.stock_table.title}</p>
+        {block.stock_table.rows.length > 0 ? (
+          <div className="mt-2 overflow-x-auto">
+            <table className="w-full border-collapse text-xs">
+              <thead>
+                <tr className="text-muted-foreground">
+                  <th className="border-b border-border/60 px-1 py-1.5 text-left font-medium">Item</th>
+                  <th className="border-b border-border/60 px-1 py-1.5 text-left font-medium">Current</th>
+                  <th className="border-b border-border/60 px-1 py-1.5 text-left font-medium">Reorder</th>
+                  <th className="border-b border-border/60 px-1 py-1.5 text-left font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {block.stock_table.rows.map((row, rowIndex) => (
+                  <tr key={`${key}-row-${rowIndex}`}>
+                    <td className="border-b border-border/40 px-1 py-1.5">{row.item}</td>
+                    <td className="border-b border-border/40 px-1 py-1.5">{formatDecimal(row.current_stock)}</td>
+                    <td className="border-b border-border/40 px-1 py-1.5">{formatDecimal(row.reorder_level)}</td>
+                    <td className="border-b border-border/40 px-1 py-1.5">{row.status}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="mt-2 text-xs text-muted-foreground">No rows available.</p>
+        )}
+        {block.stock_table.footer_note ? (
+          <p className="mt-2 text-xs text-muted-foreground">{block.stock_table.footer_note}</p>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (block.type === "sales_kpi" && block.sales_kpi) {
+    return (
+      <div key={key} className="rounded-xl border border-primary/20 bg-primary/5 p-3">
+        <p className="text-sm font-semibold text-foreground">{block.sales_kpi.title}</p>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          {block.sales_kpi.from_date} to {block.sales_kpi.to_date}
+        </p>
+        <div className="mt-2 space-y-1.5 text-xs">
+          <p>
+            <span className="font-medium">Total revenue:</span> {formatDecimal(block.sales_kpi.revenue)}
+          </p>
+          <p>
+            <span className="font-medium">Transactions:</span> {block.sales_kpi.transactions}
+          </p>
+          <p>
+            <span className="font-medium">Average basket:</span> {formatDecimal(block.sales_kpi.average_basket)}
+          </p>
+          <p>
+            <span className="font-medium">Top seller:</span> {block.sales_kpi.top_seller || "N/A"}
+          </p>
+          <p>
+            <span className="font-medium">Trend:</span> {formatDecimal(block.sales_kpi.trend_percent)}% ({block.sales_kpi.trend_label})
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (block.type === "summary_list" && block.summary_list) {
+    return (
+      <div key={key} className="rounded-xl border border-primary/20 bg-primary/5 p-3">
+        <p className="text-sm font-semibold text-foreground">{block.summary_list.title}</p>
+        <ul className="mt-2 list-disc space-y-1 pl-4 text-xs">
+          {block.summary_list.items.map((item, itemIndex) => (
+            <li key={`${key}-item-${itemIndex}`}>{item}</li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
+  return (
+    <div key={key} className="rounded-xl border border-border/70 bg-background/80 p-3 text-xs text-muted-foreground">
+      Structured response block type "{block.type}" is not supported in this client yet.
     </div>
   );
 }
@@ -179,8 +274,10 @@ export function ChatConversation({
           ) : null}
 
           {messages.map((message) => {
-            const bodyText = message.content || message.error_message || "-";
+            const bodyText = (message.content || message.error_message || "").trim();
             const isAssistant = message.role === "assistant";
+            const hasBlocks = isAssistant && Array.isArray(message.blocks) && message.blocks.length > 0;
+            const hasBodyText = bodyText.length > 0;
 
             return (
               <div key={message.message_id} className={cn("flex", isAssistant ? "justify-start" : "justify-end")}>
@@ -207,9 +304,13 @@ export function ChatConversation({
                   </div>
 
                   {isAssistant ? (
-                    <SimpleMarkdown content={bodyText} />
+                    <div className="space-y-2">
+                      {hasBlocks ? message.blocks!.map((block, index) => renderStructuredBlock(block, message.message_id, index)) : null}
+                      {hasBodyText ? <SimpleMarkdown content={bodyText} /> : null}
+                      {!hasBlocks && !hasBodyText ? <p className="text-xs">-</p> : null}
+                    </div>
                   ) : (
-                    <p className="whitespace-pre-wrap text-xs">{bodyText}</p>
+                    <p className="whitespace-pre-wrap text-xs">{hasBodyText ? bodyText : "-"}</p>
                   )}
 
                   {message.citations.length > 0 ? (
