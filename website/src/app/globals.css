@@ -93,6 +93,9 @@
   .hero-dark-theme {
     --background: 222 47% 6%;
     --foreground: 210 40% 92%;
+    --border: 222 25% 16%;
+    --input: 222 25% 16%;
+    --ring: 160 84% 39%;
     --card: 222 40% 10%;
     --card-foreground: 210 40% 92%;
     --secondary: 222 30% 14%;
