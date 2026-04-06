@@ -9,7 +9,7 @@ const QuickValueStrip = () => {
   const values = get<string[]>("quickValue.items");
 
   return (
-    <section className="py-8 bg-background border-y border-border">
+    <section className="hero-dark-theme py-8 bg-hero border-y border-border">
       <div className="container mx-auto px-4">
         <div className="flex flex-wrap justify-center gap-4 md:gap-8">
           {values.map((text, i) => {
