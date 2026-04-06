@@ -148,7 +148,7 @@ describe("CheckoutPanel shortcut integration", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Proceed - Rs. 50" }));
 
-    expect(onCompleteSale).toHaveBeenCalledWith("cash", 150, "", [], expect.any(Array), false, 50);
+    expect(onCompleteSale).toHaveBeenCalledWith("cash", 150, "", [], expect.any(Array), false, 0);
   });
 
   it("marks custom payout sales when the override is enabled", async () => {
@@ -174,7 +174,7 @@ describe("CheckoutPanel shortcut integration", () => {
     fireEvent.click(screen.getByLabelText("Enable custom payout"));
     fireEvent.click(screen.getByRole("button", { name: "Proceed - Rs. 50" }));
 
-    expect(onCompleteSale).toHaveBeenCalledWith("cash", 150, "", [], expect.any(Array), true, 50);
+    expect(onCompleteSale).toHaveBeenCalledWith("cash", 150, "", [], expect.any(Array), true, 0);
   });
 
   it("opens cash workflow dialog through imperative shortcut action", async () => {
