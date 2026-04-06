@@ -167,7 +167,7 @@ export function ChatConversation({
         <p className="text-[11px] text-muted-foreground">Grounded responses use POS report citations.</p>
       </div>
 
-      <ScrollArea className="h-[28rem] rounded-md border border-border/70 bg-muted/15">
+      <ScrollArea className="h-[min(52vh,29rem)] rounded-md border border-border/70 bg-muted/15">
         <div className="space-y-3 p-3">
           {messages.length === 0 && !isTyping ? (
             <div className="rounded-lg border border-dashed border-border/70 bg-background/80 px-4 py-6 text-center">

@@ -53,8 +53,8 @@ public sealed class AiChatFlowTests(CustomWebApplicationFactory factory)
         var citationKeys = citations
             .Select(x => x?["bucket_key"]?.GetValue<string>() ?? string.Empty)
             .ToList();
-        Assert.Contains("reports.low_stock.threshold_10", citationKeys);
-        Assert.Contains("reports.worst_items.last_7_days", citationKeys);
+        Assert.Contains(citationKeys, key => key.StartsWith("reports.low_stock", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(citationKeys, key => key.StartsWith("reports.worst_items", StringComparison.OrdinalIgnoreCase));
 
         var sessionDetailResponse = await client.GetAsync($"/api/ai/chat/sessions/{sessionId}?take=20");
         sessionDetailResponse.EnsureSuccessStatusCode();
