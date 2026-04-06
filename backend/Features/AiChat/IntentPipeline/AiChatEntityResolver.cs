@@ -14,12 +14,22 @@ public sealed partial class AiChatEntityResolver(
     {
         var normalizedMessage = NormalizeMessage(message);
 
-        var mentionsProduct = ContainsAny(normalizedMessage, "product", "item", "sku", "barcode", "stock count", "units");
-        var mentionsBrand = ContainsAny(normalizedMessage, "brand");
-        var mentionsSupplier = ContainsAny(normalizedMessage, "supplier", "vendor");
-        var mentionsCategory = ContainsAny(normalizedMessage, "category");
-        var mentionsCashier = ContainsAny(normalizedMessage, "cashier", "session", "drawer");
-        var mentionsCustomer = ContainsAny(normalizedMessage, "customer", "client", "buyer");
+        var mentionsProduct = ContainsAny(
+            normalizedMessage,
+            "product",
+            "item",
+            "sku",
+            "barcode",
+            "stock count",
+            "units",
+            "භාණ්ඩ",
+            "අයිතම",
+            "තොග");
+        var mentionsBrand = ContainsAny(normalizedMessage, "brand", "වෙළඳ නාම");
+        var mentionsSupplier = ContainsAny(normalizedMessage, "supplier", "vendor", "සැපයුම්කරු");
+        var mentionsCategory = ContainsAny(normalizedMessage, "category", "කාණ්ඩ");
+        var mentionsCashier = ContainsAny(normalizedMessage, "cashier", "session", "drawer", "කැෂියර්", "සැසිය", "ඩ්‍රෝවර්");
+        var mentionsCustomer = ContainsAny(normalizedMessage, "customer", "client", "buyer", "පාරිභෝගික");
 
         var productMatches = await dbContext.Products
             .AsNoTracking()
@@ -118,24 +128,24 @@ public sealed partial class AiChatEntityResolver(
 
         var utcToday = DateOnly.FromDateTime(DateTime.UtcNow);
 
-        if (normalizedMessage.Contains("today", StringComparison.Ordinal))
+        if (ContainsAny(normalizedMessage, "today", "අද"))
         {
             return new AiChatDateRange(utcToday, utcToday, "today");
         }
 
-        if (normalizedMessage.Contains("yesterday", StringComparison.Ordinal))
+        if (ContainsAny(normalizedMessage, "yesterday", "ඊයේ"))
         {
             var yesterday = utcToday.AddDays(-1);
             return new AiChatDateRange(yesterday, yesterday, "yesterday");
         }
 
         var thisWeekStart = utcToday.AddDays(-((7 + (int)utcToday.DayOfWeek - (int)DayOfWeek.Monday) % 7));
-        if (normalizedMessage.Contains("this week", StringComparison.Ordinal))
+        if (ContainsAny(normalizedMessage, "this week", "මෙම සතිය"))
         {
             return new AiChatDateRange(thisWeekStart, utcToday, "this week");
         }
 
-        if (normalizedMessage.Contains("last week", StringComparison.Ordinal))
+        if (ContainsAny(normalizedMessage, "last week", "පසුගිය සතිය"))
         {
             var from = thisWeekStart.AddDays(-7);
             var to = thisWeekStart.AddDays(-1);
@@ -143,12 +153,12 @@ public sealed partial class AiChatEntityResolver(
         }
 
         var thisMonthStart = new DateOnly(utcToday.Year, utcToday.Month, 1);
-        if (normalizedMessage.Contains("this month", StringComparison.Ordinal))
+        if (ContainsAny(normalizedMessage, "this month", "මෙම මාසය"))
         {
             return new AiChatDateRange(thisMonthStart, utcToday, "this month");
         }
 
-        if (normalizedMessage.Contains("last month", StringComparison.Ordinal))
+        if (ContainsAny(normalizedMessage, "last month", "පසුගිය මාසය"))
         {
             var lastMonthReference = thisMonthStart.AddDays(-1);
             var from = new DateOnly(lastMonthReference.Year, lastMonthReference.Month, 1);
@@ -159,13 +169,13 @@ public sealed partial class AiChatEntityResolver(
             return new AiChatDateRange(from, to, "last month");
         }
 
-        if (normalizedMessage.Contains("this year", StringComparison.Ordinal))
+        if (ContainsAny(normalizedMessage, "this year", "මෙම වසර"))
         {
             var from = new DateOnly(utcToday.Year, 1, 1);
             return new AiChatDateRange(from, utcToday, "this year");
         }
 
-        if (normalizedMessage.Contains("compare", StringComparison.Ordinal))
+        if (ContainsAny(normalizedMessage, "compare", "සසඳ"))
         {
             var from = utcToday.AddDays(-6);
             return new AiChatDateRange(from, utcToday, "last 7 days");
