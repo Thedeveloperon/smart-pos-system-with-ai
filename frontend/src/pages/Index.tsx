@@ -1242,6 +1242,7 @@ const IndexInner = () => {
         onOpenChange={setShowAiInsights}
         onBalanceChange={setAiCreditsBalance}
         isSuperAdmin={isSuperAdmin}
+        language={shopProfile?.language}
       />
 
       <RemindersDialog
