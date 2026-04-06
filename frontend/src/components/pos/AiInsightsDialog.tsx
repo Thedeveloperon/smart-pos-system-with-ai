@@ -42,6 +42,8 @@ import {
 } from "@/components/ui/drawer";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { FaqBrowser } from "@/components/chatbot/FaqBrowser";
+import { ChatConversation } from "@/components/chatbot/ChatConversation";
 
 interface AiInsightsDialogProps {
   open: boolean;
@@ -98,25 +100,6 @@ const PAYMENT_METHOD_OPTIONS: ReadonlyArray<{
   },
 ];
 
-const CHAT_STARTER_PROMPTS: ReadonlyArray<{ label: string; prompt: string }> = [
-  {
-    label: "Low Stock",
-    prompt: "Which items are low stock right now, and what should I reorder first this week?",
-  },
-  {
-    label: "Price Check",
-    prompt: "Which products had margin drop today, and suggest better selling prices.",
-  },
-  {
-    label: "Weekly Summary",
-    prompt: "Summarize this week's best sellers, slow movers, and top revenue categories.",
-  },
-  {
-    label: "Restock Plan",
-    prompt: "Create a simple restock plan for next 7 days using current stock and sales velocity.",
-  },
-];
-
 function getUsageTypeLabel(value: AiInsightsUsageType): string {
   return USAGE_TYPE_OPTIONS.find((option) => option.value === value)?.label ?? "Quick Insights";
 }
@@ -165,7 +148,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, isSuperAdmin = 
   const [chatSessions, setChatSessions] = useState<AiChatSessionSummary[]>([]);
   const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(null);
   const [chatMessages, setChatMessages] = useState<AiChatMessage[]>([]);
-  const [chatInput, setChatInput] = useState("");
+  const [chatView, setChatView] = useState<"faq" | "chat">("faq");
   const [isLoadingChat, setIsLoadingChat] = useState(false);
   const [isSendingChatMessage, setIsSendingChatMessage] = useState(false);
   const [isCreatingChatSession, setIsCreatingChatSession] = useState(false);
@@ -260,6 +243,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, isSuperAdmin = 
       const response = await fetchAiChatSession(sessionId, 80);
       setActiveChatSessionId(response.session.session_id);
       setChatMessages(response.messages);
+      setChatView("chat");
     } catch (error) {
       console.error(error);
       toast.error("Failed to load AI chat session.");
@@ -278,9 +262,11 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, isSuperAdmin = 
         const sessionDetail = await fetchAiChatSession(firstSessionId, 80);
         setActiveChatSessionId(sessionDetail.session.session_id);
         setChatMessages(sessionDetail.messages);
+        setChatView("chat");
       } else {
         setActiveChatSessionId(null);
         setChatMessages([]);
+        setChatView("faq");
       }
     } catch (error) {
       console.error(error);
@@ -300,6 +286,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, isSuperAdmin = 
       setChatSessions((previous) => [session, ...previous.filter((item) => item.session_id !== session.session_id)]);
       setActiveChatSessionId(session.session_id);
       setChatMessages([]);
+      setChatView("faq");
     } catch (error) {
       console.error(error);
       toast.error("Failed to create chat session.");
@@ -394,8 +381,8 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, isSuperAdmin = 
     }
   };
 
-  const handleSendChatMessage = async () => {
-    const normalizedMessage = chatInput.trim();
+  const handleSendChatMessage = async (messageText: string) => {
+    const normalizedMessage = messageText.trim();
     if (!normalizedMessage) {
       toast.error("Type a chat message first.");
       return;
@@ -403,6 +390,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, isSuperAdmin = 
 
     setIsSendingChatMessage(true);
     try {
+      setChatView("chat");
       let sessionId = activeChatSessionId;
       if (!sessionId) {
         const created = await createAiChatSession({
@@ -433,7 +421,6 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, isSuperAdmin = 
         map.set(response.assistant_message.message_id, response.assistant_message);
         return Array.from(map.values()).sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at));
       });
-      setChatInput("");
       setWalletCredits(response.remaining_credits);
       setWalletUpdatedAt(new Date().toISOString());
       onBalanceChange?.(response.remaining_credits);
@@ -791,6 +778,10 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, isSuperAdmin = 
                     const nextSessionId = event.target.value;
                     if (nextSessionId) {
                       void loadChatSession(nextSessionId);
+                    } else {
+                      setActiveChatSessionId(null);
+                      setChatMessages([]);
+                      setChatView("faq");
                     }
                   }}
                   className="h-9 rounded-md border border-border bg-background px-2 text-xs"
@@ -815,75 +806,24 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, isSuperAdmin = 
               </div>
             </div>
 
-            <div className="max-h-72 space-y-2 overflow-y-auto rounded-md border border-border/70 bg-muted/20 p-2.5">
-              {isLoadingChat ? (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading chat...
-                </div>
-              ) : chatMessages.length === 0 ? (
-                <p className="text-xs text-muted-foreground">Start a conversation to see grounded chat responses.</p>
-              ) : (
-                chatMessages.map((message) => (
-                  <div
-                    key={message.message_id}
-                    className={`rounded-md border p-2 text-xs ${
-                      message.role === "assistant"
-                        ? "border-primary/30 bg-primary/5"
-                        : "border-border/70 bg-background"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-foreground">
-                        {message.role === "assistant" ? "Assistant" : message.role === "user" ? "You" : "System"}
-                      </span>
-                      <span className="text-muted-foreground">{new Date(message.created_at).toLocaleString()}</span>
-                      {message.charged_credits > 0 ? (
-                        <span className="ml-auto text-muted-foreground">{message.charged_credits.toFixed(2)} credits</span>
-                      ) : null}
-                    </div>
-                    <p className="mt-1 whitespace-pre-wrap text-foreground/90">{message.content || message.error_message || "-"}</p>
-                    {message.citations.length > 0 ? (
-                      <div className="mt-2 space-y-1 rounded-md border border-border/70 bg-background/80 p-2">
-                        <p className="text-[11px] font-medium text-foreground">Citations</p>
-                        {message.citations.map((citation) => (
-                          <p key={`${message.message_id}-${citation.bucket_key}`} className="text-[11px] text-muted-foreground">
-                            {citation.title}: {citation.summary}
-                          </p>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                ))
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex flex-wrap gap-2">
-                {CHAT_STARTER_PROMPTS.map((starter) => (
-                  <button
-                    key={starter.label}
-                    type="button"
-                    className="rounded-full border border-border/80 bg-background px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
-                    onClick={() => setChatInput(starter.prompt)}
-                  >
-                    {starter.label}
-                  </button>
-                ))}
-              </div>
-              <Textarea
-                value={chatInput}
-                onChange={(event) => setChatInput(event.target.value)}
-                placeholder="Ask: Which items are low stock, worst-selling this week, and what should I restock next month?"
-                className="min-h-[96px]"
+            {chatView === "faq" ? (
+              <FaqBrowser
+                onSendQuestion={(question) => {
+                  void handleSendChatMessage(question);
+                }}
+                disabled={isSendingChatMessage || isCreatingChatSession}
               />
-              <div className="flex justify-end">
-                <Button type="button" onClick={() => void handleSendChatMessage()} disabled={isSendingChatMessage}>
-                  {isSendingChatMessage ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                  Send Chat Message
-                </Button>
-              </div>
-            </div>
+            ) : (
+              <ChatConversation
+                messages={chatMessages}
+                isTyping={isLoadingChat || isSendingChatMessage}
+                onSendMessage={(question) => {
+                  void handleSendChatMessage(question);
+                }}
+                onBackToFaq={() => setChatView("faq")}
+                disabled={isSendingChatMessage}
+              />
+            )}
           </div>
 
           {hasInsight && insightResult && (

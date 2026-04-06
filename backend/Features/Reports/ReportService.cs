@@ -502,6 +502,392 @@ public sealed class ReportService(
         };
     }
 
+    public async Task<AiChatStockItemSnapshot?> GetStockItemSnapshotAsync(
+        Guid productId,
+        CancellationToken cancellationToken)
+    {
+        var product = await dbContext.Products
+            .AsNoTracking()
+            .Include(x => x.Inventory)
+            .FirstOrDefaultAsync(x => x.Id == productId, cancellationToken);
+        if (product is null)
+        {
+            return null;
+        }
+
+        var quantityOnHand = product.Inventory?.QuantityOnHand ?? 0m;
+        var reorderLevel = product.Inventory?.ReorderLevel ?? 0m;
+        return new AiChatStockItemSnapshot(
+            ProductId: product.Id,
+            ProductName: product.Name,
+            UnitPrice: RoundMoney(product.UnitPrice),
+            CostPrice: RoundMoney(product.CostPrice),
+            QuantityOnHand: RoundQuantity(quantityOnHand),
+            ReorderLevel: RoundQuantity(reorderLevel),
+            StockValue: RoundMoney(quantityOnHand * product.CostPrice));
+    }
+
+    public async Task<AiChatItemSalesSnapshot?> GetItemSalesSnapshotAsync(
+        Guid productId,
+        DateOnly? fromDate,
+        DateOnly? toDate,
+        CancellationToken cancellationToken)
+    {
+        var range = NormalizeDateRange(fromDate, toDate, defaultDays: 7);
+
+        var sales = await dbContext.Sales
+            .AsNoTracking()
+            .Include(x => x.Items)
+            .ToListAsync(cancellationToken);
+        var refunds = await dbContext.Refunds
+            .AsNoTracking()
+            .Include(x => x.Items)
+            .ToListAsync(cancellationToken);
+
+        var soldItems = sales
+            .Where(x => IsFinancialSaleStatus(x.Status) && IsInRange(GetSaleTimestamp(x), range))
+            .SelectMany(x => x.Items)
+            .Where(x => x.ProductId == productId)
+            .ToList();
+        var refundedItems = refunds
+            .Where(x => IsInRange(x.CreatedAtUtc, range))
+            .SelectMany(x => x.Items)
+            .Where(x => x.ProductId == productId)
+            .ToList();
+
+        var productName = soldItems
+            .Select(x => x.ProductNameSnapshot)
+            .Concat(refundedItems.Select(x => x.ProductNameSnapshot))
+            .FirstOrDefault();
+
+        if (string.IsNullOrWhiteSpace(productName))
+        {
+            var product = await dbContext.Products
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == productId, cancellationToken);
+            if (product is null)
+            {
+                return null;
+            }
+
+            productName = product.Name;
+        }
+
+        var soldQuantity = RoundQuantity(soldItems.Sum(x => x.Quantity));
+        var refundedQuantity = RoundQuantity(refundedItems.Sum(x => x.Quantity));
+        var netQuantity = RoundQuantity(soldQuantity - refundedQuantity);
+        var netSales = RoundMoney(soldItems.Sum(x => x.LineTotal) - refundedItems.Sum(x => x.TotalAmount));
+
+        return new AiChatItemSalesSnapshot(
+            ProductId: productId,
+            ProductName: productName ?? string.Empty,
+            FromDate: range.FromDate,
+            ToDate: range.ToDate,
+            SoldQuantity: soldQuantity,
+            RefundedQuantity: refundedQuantity,
+            NetQuantity: netQuantity,
+            NetSales: netSales);
+    }
+
+    public async Task<AiChatSupplierPurchaseSnapshot?> GetSupplierPurchaseSnapshotAsync(
+        Guid supplierId,
+        DateOnly? fromDate,
+        DateOnly? toDate,
+        CancellationToken cancellationToken)
+    {
+        var supplier = await dbContext.Suppliers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == supplierId, cancellationToken);
+        if (supplier is null)
+        {
+            return null;
+        }
+
+        var range = NormalizeDateRange(fromDate, toDate, defaultDays: 30);
+        var bills = await dbContext.PurchaseBills
+            .AsNoTracking()
+            .Where(x => x.SupplierId == supplierId)
+            .Include(x => x.Items)
+            .ToListAsync(cancellationToken);
+        var inRangeBills = bills
+            .Where(x => IsInRange(x.InvoiceDateUtc, range))
+            .ToList();
+
+        var topItems = inRangeBills
+            .SelectMany(x => x.Items)
+            .GroupBy(x => x.ProductId)
+            .Select(group => new AiChatSupplierPurchaseItemRow(
+                ProductId: group.Key,
+                ProductName: group.Select(x => x.ProductNameSnapshot).FirstOrDefault() ?? string.Empty,
+                QuantityPurchased: RoundQuantity(group.Sum(x => x.Quantity)),
+                TotalSpend: RoundMoney(group.Sum(x => x.LineTotal))))
+            .OrderByDescending(x => x.TotalSpend)
+            .ThenByDescending(x => x.QuantityPurchased)
+            .Take(5)
+            .ToList();
+
+        return new AiChatSupplierPurchaseSnapshot(
+            SupplierId: supplier.Id,
+            SupplierName: supplier.Name,
+            FromDate: range.FromDate,
+            ToDate: range.ToDate,
+            PurchaseCount: inRangeBills.Count,
+            TotalSpend: RoundMoney(inRangeBills.Sum(x => x.GrandTotal)),
+            LastPurchaseAt: inRangeBills
+                .OrderByDescending(x => x.InvoiceDateUtc)
+                .FirstOrDefault()
+                ?.InvoiceDateUtc,
+            TopItems: topItems);
+    }
+
+    public async Task<AiChatProductPurchaseSnapshot?> GetProductPurchaseSnapshotAsync(
+        Guid productId,
+        DateOnly? fromDate,
+        DateOnly? toDate,
+        CancellationToken cancellationToken)
+    {
+        var product = await dbContext.Products
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == productId, cancellationToken);
+        if (product is null)
+        {
+            return null;
+        }
+
+        var range = NormalizeDateRange(fromDate, toDate, defaultDays: 30);
+        var items = await dbContext.PurchaseBillItems
+            .AsNoTracking()
+            .Where(x => x.ProductId == productId)
+            .Include(x => x.PurchaseBill)
+            .ToListAsync(cancellationToken);
+        var inRangeItems = items
+            .Where(x => IsInRange(x.PurchaseBill.InvoiceDateUtc, range))
+            .ToList();
+
+        var lastPurchaseItem = inRangeItems
+            .OrderByDescending(x => x.PurchaseBill.InvoiceDateUtc)
+            .FirstOrDefault();
+        if (lastPurchaseItem is null)
+        {
+            return null;
+        }
+
+        var uniqueBillCount = inRangeItems
+            .Select(x => x.PurchaseBillId)
+            .Distinct()
+            .Count();
+
+        return new AiChatProductPurchaseSnapshot(
+            ProductId: product.Id,
+            ProductName: product.Name,
+            FromDate: range.FromDate,
+            ToDate: range.ToDate,
+            PurchaseCount: uniqueBillCount,
+            QuantityPurchased: RoundQuantity(inRangeItems.Sum(x => x.Quantity)),
+            TotalSpend: RoundMoney(inRangeItems.Sum(x => x.LineTotal)),
+            LastPurchaseAt: lastPurchaseItem.PurchaseBill.InvoiceDateUtc,
+            LastUnitCost: RoundMoney(lastPurchaseItem.UnitCost));
+    }
+
+    public async Task<AiChatMarginSummarySnapshot> GetMarginSummarySnapshotAsync(
+        Guid? productId,
+        DateOnly? fromDate,
+        DateOnly? toDate,
+        int take,
+        CancellationToken cancellationToken)
+    {
+        var normalizedTake = Math.Clamp(take, 1, 50);
+        var range = NormalizeDateRange(fromDate, toDate, defaultDays: 7);
+
+        var products = await dbContext.Products
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+        var productNamesById = products.ToDictionary(x => x.Id, x => x.Name);
+        var productCostsById = products.ToDictionary(x => x.Id, x => x.CostPrice);
+
+        var sales = await dbContext.Sales
+            .AsNoTracking()
+            .Include(x => x.Items)
+            .ToListAsync(cancellationToken);
+        var refunds = await dbContext.Refunds
+            .AsNoTracking()
+            .Include(x => x.Items)
+            .ToListAsync(cancellationToken);
+
+        var soldByProduct = sales
+            .Where(x => IsFinancialSaleStatus(x.Status) && IsInRange(GetSaleTimestamp(x), range))
+            .SelectMany(x => x.Items)
+            .GroupBy(x => x.ProductId)
+            .ToDictionary(
+                x => x.Key,
+                x => new ItemAgg(
+                    ProductName: x.Select(y => y.ProductNameSnapshot).FirstOrDefault() ?? string.Empty,
+                    Quantity: x.Sum(y => y.Quantity),
+                    Amount: x.Sum(y => y.LineTotal)));
+        var refundedByProduct = refunds
+            .Where(x => IsInRange(x.CreatedAtUtc, range))
+            .SelectMany(x => x.Items)
+            .GroupBy(x => x.ProductId)
+            .ToDictionary(
+                x => x.Key,
+                x => new ItemAgg(
+                    ProductName: x.Select(y => y.ProductNameSnapshot).FirstOrDefault() ?? string.Empty,
+                    Quantity: x.Sum(y => y.Quantity),
+                    Amount: x.Sum(y => y.TotalAmount)));
+
+        var baseIds = productId.HasValue
+            ? new List<Guid> { productId.Value }
+            : soldByProduct.Keys
+                .Union(refundedByProduct.Keys)
+                .ToList();
+
+        var rows = baseIds
+            .Select(id =>
+            {
+                var sold = soldByProduct.GetValueOrDefault(id, ItemAgg.Empty);
+                var refunded = refundedByProduct.GetValueOrDefault(id, ItemAgg.Empty);
+                var name = productNamesById.GetValueOrDefault(id) ??
+                           sold.ProductName ??
+                           string.Empty;
+                var cost = productCostsById.GetValueOrDefault(id);
+                var netQuantity = RoundQuantity(sold.Quantity - refunded.Quantity);
+                var netSales = RoundMoney(sold.Amount - refunded.Amount);
+                var estimatedCost = RoundMoney(netQuantity * cost);
+                var grossProfit = RoundMoney(netSales - estimatedCost);
+                var marginPercent = netSales == 0m
+                    ? 0m
+                    : RoundMoney((grossProfit / netSales) * 100m);
+
+                return new AiChatMarginRow(
+                    ProductId: id,
+                    ProductName: name,
+                    NetQuantity: netQuantity,
+                    NetSales: netSales,
+                    EstimatedCost: estimatedCost,
+                    GrossProfit: grossProfit,
+                    MarginPercent: marginPercent);
+            })
+            .OrderByDescending(x => x.GrossProfit)
+            .ThenByDescending(x => x.NetSales)
+            .Take(normalizedTake)
+            .ToList();
+
+        return new AiChatMarginSummarySnapshot(
+            FromDate: range.FromDate,
+            ToDate: range.ToDate,
+            TotalGrossProfit: RoundMoney(rows.Sum(x => x.GrossProfit)),
+            Rows: rows);
+    }
+
+    public async Task<AiChatCashierLeaderboardSnapshot> GetCashierLeaderboardSnapshotAsync(
+        DateOnly? fromDate,
+        DateOnly? toDate,
+        int take,
+        CancellationToken cancellationToken)
+    {
+        var normalizedTake = Math.Clamp(take, 1, 50);
+        var range = NormalizeDateRange(fromDate, toDate, defaultDays: 7);
+
+        var sales = await dbContext.Sales
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+        var refunds = await dbContext.Refunds
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        var refundsBySaleId = refunds
+            .Where(x => IsInRange(x.CreatedAtUtc, range))
+            .GroupBy(x => x.SaleId)
+            .ToDictionary(x => x.Key, x => RoundMoney(x.Sum(y => y.GrandTotal)));
+
+        var groupedRows = sales
+            .Where(x => x.CreatedByUserId.HasValue &&
+                        IsFinancialSaleStatus(x.Status) &&
+                        IsInRange(GetSaleTimestamp(x), range))
+            .GroupBy(x => x.CreatedByUserId!.Value)
+            .Select(group =>
+            {
+                var grossTotal = group.Sum(x => x.GrandTotal);
+                var refundedTotal = group.Sum(x => refundsBySaleId.GetValueOrDefault(x.Id, 0m));
+                return new
+                {
+                    CashierId = group.Key,
+                    TransactionCount = group.Count(),
+                    NetSales = RoundMoney(grossTotal - refundedTotal)
+                };
+            })
+            .OrderByDescending(x => x.NetSales)
+            .ThenByDescending(x => x.TransactionCount)
+            .Take(normalizedTake)
+            .ToList();
+
+        var cashierIds = groupedRows
+            .Select(x => x.CashierId)
+            .Distinct()
+            .ToArray();
+        var usersById = cashierIds.Length == 0
+            ? new Dictionary<Guid, CashierLookupRow>()
+            : await dbContext.Users
+                .AsNoTracking()
+                .Where(x => cashierIds.Contains(x.Id))
+                .Select(x => new CashierLookupRow(x.Id, x.Username, x.FullName))
+                .ToDictionaryAsync(x => x.UserId, cancellationToken);
+
+        var rows = groupedRows
+            .Select(x =>
+            {
+                usersById.TryGetValue(x.CashierId, out var user);
+                var label = user is null
+                    ? "Unknown cashier"
+                    : $"{user.FullName} ({user.Username})";
+                return new AiChatCashierLeaderboardRow(
+                    CashierId: x.CashierId,
+                    CashierLabel: label,
+                    TransactionCount: x.TransactionCount,
+                    NetSales: x.NetSales);
+            })
+            .ToList();
+
+        return new AiChatCashierLeaderboardSnapshot(
+            FromDate: range.FromDate,
+            ToDate: range.ToDate,
+            Rows: rows);
+    }
+
+    public async Task<AiChatSalesComparisonSnapshot> GetSalesComparisonSnapshotAsync(
+        DateOnly? fromDate,
+        DateOnly? toDate,
+        CancellationToken cancellationToken)
+    {
+        var currentRange = NormalizeDateRange(fromDate, toDate, defaultDays: 7);
+        var periodLengthDays = currentRange.ToDate.DayNumber - currentRange.FromDate.DayNumber + 1;
+        var previousToDate = currentRange.FromDate.AddDays(-1);
+        var previousFromDate = previousToDate.AddDays(-(periodLengthDays - 1));
+        var previousRange = NormalizeDateRange(previousFromDate, previousToDate, defaultDays: periodLengthDays);
+
+        var sales = await dbContext.Sales
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+        var refunds = await dbContext.Refunds
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        var currentNetSales = CalculateNetSales(sales, refunds, currentRange);
+        var previousNetSales = CalculateNetSales(sales, refunds, previousRange);
+        var deltaPercent = previousNetSales == 0m
+            ? (currentNetSales == 0m ? 0m : 100m)
+            : RoundMoney(((currentNetSales - previousNetSales) / previousNetSales) * 100m);
+
+        return new AiChatSalesComparisonSnapshot(
+            FromDate: currentRange.FromDate,
+            ToDate: currentRange.ToDate,
+            PreviousFromDate: previousRange.FromDate,
+            PreviousToDate: previousRange.ToDate,
+            CurrentNetSales: currentNetSales,
+            PreviousNetSales: previousNetSales,
+            DeltaPercent: deltaPercent);
+    }
+
     public async Task<SupportTriageReportResponse> GetSupportTriageReportAsync(
         int windowMinutes,
         CancellationToken cancellationToken)
@@ -757,6 +1143,21 @@ public sealed class ReportService(
     private static decimal RoundMoney(decimal value)
     {
         return decimal.Round(value, 2, MidpointRounding.AwayFromZero);
+    }
+
+    private static decimal CalculateNetSales(
+        IEnumerable<Sale> sales,
+        IEnumerable<Refund> refunds,
+        DateRange range)
+    {
+        var gross = sales
+            .Where(x => IsFinancialSaleStatus(x.Status) && IsInRange(GetSaleTimestamp(x), range))
+            .Sum(x => x.GrandTotal);
+        var refunded = refunds
+            .Where(x => IsInRange(x.CreatedAtUtc, range))
+            .Sum(x => x.GrandTotal);
+
+        return RoundMoney(gross - refunded);
     }
 
     private static decimal RoundQuantity(decimal value)

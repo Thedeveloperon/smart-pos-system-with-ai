@@ -41,6 +41,7 @@ public sealed class AiInsightOptions
     public bool EnableManualWalletTopUp { get; set; } = false;
     public bool CanaryOnlyEnabled { get; set; } = false;
     public string[] CanaryAllowedUsers { get; set; } = [];
+    public bool UseIntentPipelineForChatbot { get; set; } = false;
     public string PaymentProvider { get; set; } = "mockpay";
     public string CheckoutBaseUrl { get; set; } = string.Empty;
     public List<AiCreditPackOption> CreditPacks { get; set; } = [];

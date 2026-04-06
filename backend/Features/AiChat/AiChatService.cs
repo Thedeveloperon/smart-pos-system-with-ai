@@ -1,8 +1,10 @@
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Features.Ai;
+using SmartPos.Backend.Features.AiChat.IntentPipeline;
 using SmartPos.Backend.Features.Reports;
 using SmartPos.Backend.Infrastructure;
 
@@ -12,6 +14,8 @@ public sealed class AiChatService(
     SmartPosDbContext dbContext,
     AiInsightService aiInsightService,
     AiCreditBillingService creditBillingService,
+    IOptions<AiInsightOptions> aiInsightOptions,
+    AiChatGroundingOrchestrator groundingOrchestrator,
     ReportService reportService,
     ILogger<AiChatService> logger)
 {
@@ -260,7 +264,7 @@ public sealed class AiChatService(
                 Role = AiConversationMessageRole.Assistant,
                 Status = AiConversationMessageStatus.Succeeded,
                 UsageType = usageType,
-                Content = insight.Insight,
+                Content = ResolveAssistantContent(grounding, insight.Insight),
                 IdempotencyKey = normalizedIdempotencyKey,
                 Confidence = grounding.Confidence,
                 CitationsJson = SerializeCitations(grounding.Citations),
@@ -330,7 +334,19 @@ public sealed class AiChatService(
         }
     }
 
-    private async Task<AiChatGroundingSnapshot> BuildGroundingSnapshotAsync(
+    private async Task<AiChatGroundingResult> BuildGroundingSnapshotAsync(
+        string message,
+        CancellationToken cancellationToken)
+    {
+        if (aiInsightOptions.Value.UseIntentPipelineForChatbot)
+        {
+            return await groundingOrchestrator.BuildGroundingAsync(message, cancellationToken);
+        }
+
+        return await BuildLegacyGroundingSnapshotAsync(message, cancellationToken);
+    }
+
+    private async Task<AiChatGroundingResult> BuildLegacyGroundingSnapshotAsync(
         string message,
         CancellationToken cancellationToken)
     {
@@ -449,11 +465,21 @@ public sealed class AiChatService(
                 ? "medium"
                 : "low";
 
-        return new AiChatGroundingSnapshot(context.ToString().Trim(), citations, confidence);
+        return new AiChatGroundingResult(
+            ContextText: context.ToString().Trim(),
+            Citations: citations,
+            MissingData: [],
+            Confidence: confidence,
+            IsUnsupported: false,
+            UnsupportedReason: null);
     }
 
-    private static string BuildAiPrompt(string message, AiChatGroundingSnapshot grounding)
+    private static string BuildAiPrompt(string message, AiChatGroundingResult grounding)
     {
+        var missingDataSection = grounding.MissingData.Count == 0
+            ? "None."
+            : string.Join(Environment.NewLine, grounding.MissingData.Select(x => $"- {x}"));
+
         return $"""
                User question:
                {message}
@@ -461,11 +487,70 @@ public sealed class AiChatService(
                Grounded data buckets:
                {grounding.ContextText}
 
+               Missing data:
+               {missingDataSection}
+
                Instructions:
                - Use only grounded bucket values for factual claims.
                - If data is insufficient, explicitly say what is missing.
+               - Do not fabricate values, counts, percentages, dates, or entities.
                - Keep answer practical and concise for POS operations.
                """;
+    }
+
+    private static string ResolveAssistantContent(AiChatGroundingResult grounding, string modelContent)
+    {
+        if (grounding.IsUnsupported)
+        {
+            return BuildUnsupportedAssistantMessage(grounding);
+        }
+
+        if (grounding.MissingData.Count == 0)
+        {
+            return modelContent;
+        }
+
+        var builder = new StringBuilder(modelContent.Trim());
+        if (builder.Length > 0)
+        {
+            builder.AppendLine();
+            builder.AppendLine();
+        }
+
+        builder.AppendLine("Missing data:");
+        foreach (var missing in grounding.MissingData)
+        {
+            builder.AppendLine($"- {missing}");
+        }
+
+        return builder.ToString().Trim();
+    }
+
+    private static string BuildUnsupportedAssistantMessage(AiChatGroundingResult grounding)
+    {
+        var headline = grounding.UnsupportedReason switch
+        {
+            AiChatUnsupportedReason.CustomersCategoryNotInV1 =>
+                "Customer-related questions are not supported in POS chatbot V1.",
+            AiChatUnsupportedReason.AlertsAndExceptionsCategoryNotInV1 =>
+                "Alerts and exception questions are not supported in POS chatbot V1.",
+            _ =>
+                "This request is outside POS chatbot V1 scope."
+        };
+
+        var builder = new StringBuilder();
+        builder.AppendLine(headline);
+        builder.AppendLine("Supported V1 categories: Stock, Sales, Purchasing, Pricing, Cashier Operations, Reports.");
+        if (grounding.MissingData.Count > 0)
+        {
+            builder.AppendLine("Missing data:");
+            foreach (var item in grounding.MissingData)
+            {
+                builder.AppendLine($"- {item}");
+            }
+        }
+
+        return builder.ToString().Trim();
     }
 
     private static string BuildAiInsightIdempotencyKey(Guid sessionId, string idempotencyKey)
@@ -661,9 +746,4 @@ public sealed class AiChatService(
             .FirstOrDefaultAsync(x => x.Id == userId, cancellationToken)
             ?? throw new InvalidOperationException("User account was not found.");
     }
-
-    private sealed record AiChatGroundingSnapshot(
-        string ContextText,
-        List<AiChatCitationResponse> Citations,
-        string Confidence);
 }
