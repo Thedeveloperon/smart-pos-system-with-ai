@@ -5,12 +5,17 @@ import { Camera, Images, Loader2, PackagePlus, Plus, Sparkles, UploadCloud } fro
 import {
   createCategory,
   createProduct,
+  fetchBrands,
   fetchCategories,
+  fetchSuppliers,
   fetchProductCatalogItems,
   generateProductBarcode,
   generateProductFromImageSuggestions,
   generateProductAiSuggestion,
+  upsertProductSupplier,
   validateProductBarcode,
+  type BrandRecord,
+  type SupplierRecord,
   type ProductAiSuggestionTarget,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -55,10 +60,14 @@ const defaultForm = {
   barcode: "",
   imageUrl: "",
   categoryId: "",
+  brandId: "",
+  preferredSupplierId: "",
   unitPrice: "0",
   costPrice: "0",
   initialStockQuantity: "0",
   reorderLevel: "5",
+  safetyStock: "0",
+  targetStockLevel: "0",
   allowNegativeStock: true,
   isActive: true,
 };
@@ -241,7 +250,11 @@ const inferCategoryCreateSuggestion = (name: string, imageHint: string) => {
 
 const NewItemDialog = ({ open, onOpenChange, onCreated }: NewItemDialogProps) => {
   const [categories, setCategories] = useState<CategoryOption[]>([]);
+  const [brands, setBrands] = useState<BrandRecord[]>([]);
+  const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
   const [loadingCategories, setLoadingCategories] = useState(false);
+  const [loadingBrands, setLoadingBrands] = useState(false);
+  const [loadingSuppliers, setLoadingSuppliers] = useState(false);
   const [loadingExistingImages, setLoadingExistingImages] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [generatingBarcode, setGeneratingBarcode] = useState(false);
@@ -275,6 +288,36 @@ const NewItemDialog = ({ open, onOpenChange, onCreated }: NewItemDialogProps) =>
       return [];
     } finally {
       setLoadingCategories(false);
+    }
+  }, []);
+
+  const loadBrands = useCallback(async () => {
+    setLoadingBrands(true);
+    try {
+      const items = await fetchBrands(true);
+      setBrands(items);
+      return items;
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to load brands.");
+      return [];
+    } finally {
+      setLoadingBrands(false);
+    }
+  }, []);
+
+  const loadSuppliers = useCallback(async () => {
+    setLoadingSuppliers(true);
+    try {
+      const items = await fetchSuppliers(true);
+      setSuppliers(items);
+      return items;
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to load suppliers.");
+      return [];
+    } finally {
+      setLoadingSuppliers(false);
     }
   }, []);
 
@@ -326,8 +369,8 @@ const NewItemDialog = ({ open, onOpenChange, onCreated }: NewItemDialogProps) =>
       }
     };
 
-    void Promise.all([loadCategories(), loadExistingImages()]);
-  }, [loadCategories, open]);
+    void Promise.all([loadCategories(), loadBrands(), loadSuppliers(), loadExistingImages()]);
+  }, [loadBrands, loadCategories, loadSuppliers, open]);
 
   const categoryOptions = useMemo(
     () => categories.filter((category) => category.is_active),
@@ -337,6 +380,16 @@ const NewItemDialog = ({ open, onOpenChange, onCreated }: NewItemDialogProps) =>
   const selectedCategoryName = useMemo(
     () => categoryOptions.find((category) => category.category_id === form.categoryId)?.name || "",
     [categoryOptions, form.categoryId]
+  );
+
+  const selectedBrandName = useMemo(
+    () => brands.find((brand) => brand.id === form.brandId)?.name || "",
+    [brands, form.brandId]
+  );
+
+  const selectedSupplierName = useMemo(
+    () => suppliers.find((supplier) => supplier.id === form.preferredSupplierId)?.name || "",
+    [form.preferredSupplierId, suppliers]
   );
 
   const effectiveImageHint = useMemo(() => {
@@ -884,6 +937,8 @@ const NewItemDialog = ({ open, onOpenChange, onCreated }: NewItemDialogProps) =>
     const costPrice = Number(form.costPrice);
     const initialStockQuantity = Number(form.initialStockQuantity);
     const reorderLevel = Number(form.reorderLevel);
+    const safetyStock = Number(form.safetyStock);
+    const targetStockLevel = Number(form.targetStockLevel);
 
     if (!name) {
       toast.error("Item name is required.");
@@ -910,23 +965,55 @@ const NewItemDialog = ({ open, onOpenChange, onCreated }: NewItemDialogProps) =>
       return;
     }
 
+    if (!Number.isFinite(safetyStock) || safetyStock < 0) {
+      toast.error("Enter a valid safety stock value.");
+      return;
+    }
+
+    if (!Number.isFinite(targetStockLevel) || targetStockLevel < 0) {
+      toast.error("Enter a valid target stock level.");
+      return;
+    }
+
     setSubmitting(true);
     try {
       const imageSource = uploadedImageDataUrl || form.imageUrl.trim();
-
-      await createProduct({
+      const createdProduct = await createProduct({
         name,
         sku: form.sku.trim() || null,
         barcode: form.barcode.trim() || null,
         image_url: imageSource || null,
         category_id: form.categoryId || null,
+        brand_id: form.brandId || null,
         unit_price: unitPrice,
         cost_price: costPrice,
         initial_stock_quantity: initialStockQuantity,
         reorder_level: reorderLevel,
+        safety_stock: safetyStock,
+        target_stock_level: targetStockLevel,
         allow_negative_stock: form.allowNegativeStock,
         is_active: form.isActive,
       });
+
+      if (form.preferredSupplierId) {
+        try {
+          const preferredSupplier = suppliers.find((supplier) => supplier.id === form.preferredSupplierId);
+          await upsertProductSupplier(createdProduct.id, {
+            supplier_id: form.preferredSupplierId,
+            supplier_sku: form.sku.trim() || null,
+            supplier_item_name: name,
+            is_preferred: true,
+            is_active: true,
+            last_purchase_price: costPrice,
+          });
+          if (preferredSupplier) {
+            toast.success(`Linked preferred supplier "${preferredSupplier.name}".`);
+          }
+        } catch (supplierError) {
+          console.error(supplierError);
+          toast.warning("Item saved, but supplier link could not be saved.");
+        }
+      }
 
       toast.success("New item added.");
       onOpenChange(false);
@@ -1225,6 +1312,56 @@ const NewItemDialog = ({ open, onOpenChange, onCreated }: NewItemDialogProps) =>
                 </div>
 
                 <div className="space-y-2">
+                  <Label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">Brand</Label>
+                  <Select
+                    value={form.brandId || "__none__"}
+                    onValueChange={(value) =>
+                      setForm((prev) => ({ ...prev, brandId: value === "__none__" ? "" : value }))
+                    }
+                  >
+                    <SelectTrigger aria-label="Brand" className="h-10 rounded-xl border-slate-300 bg-white">
+                      <SelectValue
+                        placeholder={loadingBrands ? "Loading brands..." : "Select brand (optional)"}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">No brand</SelectItem>
+                      {brands.map((brand) => (
+                        <SelectItem key={brand.id} value={brand.id}>
+                          {brand.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+                    Preferred supplier
+                  </Label>
+                  <Select
+                    value={form.preferredSupplierId || "__none__"}
+                    onValueChange={(value) =>
+                      setForm((prev) => ({ ...prev, preferredSupplierId: value === "__none__" ? "" : value }))
+                    }
+                  >
+                    <SelectTrigger aria-label="Preferred supplier" className="h-10 rounded-xl border-slate-300 bg-white">
+                      <SelectValue
+                        placeholder={loadingSuppliers ? "Loading suppliers..." : "Select supplier (optional)"}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">No supplier</SelectItem>
+                      {suppliers.map((supplier) => (
+                        <SelectItem key={supplier.id} value={supplier.id}>
+                          {supplier.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
                   <Label htmlFor="unitPrice" className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
                     Unit price
                   </Label>
@@ -1285,6 +1422,36 @@ const NewItemDialog = ({ open, onOpenChange, onCreated }: NewItemDialogProps) =>
                     className="h-10 rounded-xl border-slate-300 bg-white"
                   />
                 </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="safetyStock" className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+                    Safety stock
+                  </Label>
+                  <Input
+                    id="safetyStock"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.safetyStock}
+                    onChange={(event) => setForm((prev) => ({ ...prev, safetyStock: event.target.value }))}
+                    className="h-10 rounded-xl border-slate-300 bg-white"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="targetStockLevel" className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+                    Target stock
+                  </Label>
+                  <Input
+                    id="targetStockLevel"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.targetStockLevel}
+                    onChange={(event) => setForm((prev) => ({ ...prev, targetStockLevel: event.target.value }))}
+                    className="h-10 rounded-xl border-slate-300 bg-white"
+                  />
+                </div>
               </div>
             </div>
 
@@ -1310,6 +1477,10 @@ const NewItemDialog = ({ open, onOpenChange, onCreated }: NewItemDialogProps) =>
                             "Selected category"
                           : "Groceries"}
                       </p>
+                      <p className="text-xs text-muted-foreground">
+                        {selectedBrandName || "No brand"}
+                        {selectedSupplierName ? ` | ${selectedSupplierName}` : ""}
+                      </p>
                     </div>
                   </div>
 
@@ -1329,6 +1500,14 @@ const NewItemDialog = ({ open, onOpenChange, onCreated }: NewItemDialogProps) =>
                     <div className="flex justify-between">
                       <span className="text-slate-500">Reorder level</span>
                       <span className="font-semibold text-slate-800">{Number(form.reorderLevel || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Safety stock</span>
+                      <span className="font-semibold text-slate-800">{Number(form.safetyStock || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Target stock</span>
+                      <span className="font-semibold text-slate-800">{Number(form.targetStockLevel || 0).toLocaleString()}</span>
                     </div>
                   </div>
                 </div>

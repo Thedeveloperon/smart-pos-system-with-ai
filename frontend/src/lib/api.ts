@@ -172,10 +172,14 @@ type BackendProductCatalogItem = {
   image_url?: string | null;
   category_id?: string | null;
   category_name?: string | null;
+  brand_id?: string | null;
+  brand_name?: string | null;
   unit_price: number;
   cost_price: number;
   stock_quantity: number;
   reorder_level: number;
+  safety_stock?: number;
+  target_stock_level?: number;
   alert_level: number;
   allow_negative_stock: boolean;
   is_active: boolean;
@@ -362,6 +366,71 @@ type BackendCategoryListResponse = {
   items: BackendCategoryItem[];
 };
 
+type BackendBrandItem = {
+  brand_id: string;
+  name: string;
+  code?: string | null;
+  description?: string | null;
+  is_active: boolean;
+  product_count: number;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+type BackendBrandListResponse = {
+  items: BackendBrandItem[];
+};
+
+export type BrandRecord = {
+  id: string;
+  name: string;
+  code: string;
+  description: string;
+  isActive: boolean;
+  productCount: number;
+  createdAt: string;
+  updatedAt?: string | null;
+};
+
+export type CreateBrandRequest = {
+  name: string;
+  code?: string | null;
+  description?: string | null;
+  isActive?: boolean;
+};
+
+type BackendShopStockSettings = {
+  id: string;
+  store_id?: string | null;
+  default_low_stock_threshold: number;
+  threshold_multiplier: number;
+  default_safety_stock: number;
+  default_lead_time_days: number;
+  default_target_days_of_cover: number;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+export type ShopStockSettingsRecord = {
+  id: string;
+  storeId?: string | null;
+  defaultLowStockThreshold: number;
+  thresholdMultiplier: number;
+  defaultSafetyStock: number;
+  defaultLeadTimeDays: number;
+  defaultTargetDaysOfCover: number;
+  createdAt: string;
+  updatedAt?: string | null;
+};
+
+export type UpdateShopStockSettingsRequest = {
+  defaultLowStockThreshold: number;
+  thresholdMultiplier: number;
+  defaultSafetyStock: number;
+  defaultLeadTimeDays: number;
+  defaultTargetDaysOfCover: number;
+};
+
 type BackendShopProfileResponse = {
   id: string;
   shop_name: string;
@@ -396,10 +465,13 @@ export type CreateProductRequest = {
   barcode?: string | null;
   image_url?: string | null;
   category_id?: string | null;
+  brand_id?: string | null;
   unit_price: number;
   cost_price: number;
   initial_stock_quantity: number;
   reorder_level: number;
+  safety_stock: number;
+  target_stock_level: number;
   allow_negative_stock: boolean;
   is_active: boolean;
 };
@@ -467,6 +539,114 @@ export type CreateCategoryRequest = {
   is_active?: boolean;
 };
 
+type BackendSupplierItem = {
+  supplier_id: string;
+  name: string;
+  code?: string | null;
+  contact_name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  is_active: boolean;
+  linked_product_count: number;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+type BackendSupplierListResponse = {
+  items: BackendSupplierItem[];
+};
+
+export type SupplierRecord = {
+  id: string;
+  name: string;
+  code: string;
+  contactPerson: string;
+  phone: string;
+  email: string;
+  address: string;
+  isActive: boolean;
+  linkedProductCount: number;
+  createdAt: string;
+  updatedAt?: string | null;
+};
+
+export type CreateSupplierRequest = {
+  name: string;
+  code?: string | null;
+  contactPerson?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  isActive?: boolean;
+};
+
+type BackendProductSupplierItem = {
+  product_supplier_id: string;
+  supplier_id: string;
+  supplier_name: string;
+  supplier_sku?: string | null;
+  supplier_item_name?: string | null;
+  is_preferred: boolean;
+  lead_time_days?: number | null;
+  min_order_qty?: number | null;
+  pack_size?: number | null;
+  last_purchase_price?: number | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+type BackendProductSupplierListResponse = {
+  items: BackendProductSupplierItem[];
+};
+
+type BackendUpsertProductSupplierRequest = {
+  supplier_id: string;
+  supplier_sku?: string | null;
+  supplier_item_name?: string | null;
+  is_preferred: boolean;
+  lead_time_days?: number | null;
+  min_order_qty?: number | null;
+  pack_size?: number | null;
+  last_purchase_price?: number | null;
+  is_active: boolean;
+};
+
+export type ProductSupplierRecord = {
+  id: string;
+  supplierId: string;
+  supplierName: string;
+  supplierSku: string;
+  supplierItemName: string;
+  isPreferred: boolean;
+  leadTimeDays?: number | null;
+  minOrderQty?: number | null;
+  packSize?: number | null;
+  lastPurchasePrice?: number | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt?: string | null;
+};
+
+function mapProductSupplier(item: BackendProductSupplierItem): ProductSupplierRecord {
+  return {
+    id: item.product_supplier_id,
+    supplierId: item.supplier_id,
+    supplierName: item.supplier_name,
+    supplierSku: item.supplier_sku ?? "",
+    supplierItemName: item.supplier_item_name ?? "",
+    isPreferred: item.is_preferred,
+    leadTimeDays: item.lead_time_days ?? null,
+    minOrderQty: item.min_order_qty ?? null,
+    packSize: item.pack_size ?? null,
+    lastPurchasePrice: item.last_purchase_price ?? null,
+    isActive: item.is_active,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+  };
+}
+
 export type CatalogProduct = {
   id: string;
   name: string;
@@ -476,12 +656,16 @@ export type CatalogProduct = {
   imageUrl?: string | null;
   categoryId?: string | null;
   categoryName?: string | null;
+  brandId?: string | null;
+  brandName?: string | null;
   unitPrice: number;
   costPrice: number;
   stockQuantity: number;
   reorderLevel: number;
   alertLevel: number;
   allowNegativeStock: boolean;
+  safetyStock?: number;
+  targetStockLevel?: number;
   isActive: boolean;
   isLowStock: boolean;
   createdAt: string;
@@ -738,8 +922,14 @@ type LowStockReportResponse = {
     product_name: string;
     sku?: string | null;
     barcode?: string | null;
+    brand_id?: string | null;
+    brand_name?: string | null;
+    preferred_supplier_id?: string | null;
+    preferred_supplier_name?: string | null;
     quantity_on_hand: number;
     reorder_level: number;
+    safety_stock: number;
+    target_stock_level: number;
     alert_level: number;
     deficit: number;
   }[];
@@ -1990,10 +2180,14 @@ function mapCatalogProductItem(item: BackendProductCatalogItem): CatalogProduct 
     imageUrl: item.image_url || null,
     categoryId: item.category_id || null,
     categoryName: item.category_name || null,
+    brandId: item.brand_id || null,
+    brandName: item.brand_name || null,
     unitPrice: Number(item.unit_price),
     costPrice: Number(item.cost_price),
     stockQuantity: Number(item.stock_quantity),
     reorderLevel: Number(item.reorder_level),
+    safetyStock: Number(item.safety_stock ?? 0),
+    targetStockLevel: Number(item.target_stock_level ?? 0),
     alertLevel: Number(item.alert_level),
     allowNegativeStock: item.allow_negative_stock,
     isActive: item.is_active,
@@ -2234,6 +2428,53 @@ export async function fetchCategories(includeInactive = false) {
   return response.items;
 }
 
+function mapBrand(item: BackendBrandItem): BrandRecord {
+  return {
+    id: item.brand_id,
+    name: item.name,
+    code: item.code ?? "",
+    description: item.description ?? "",
+    isActive: item.is_active,
+    productCount: item.product_count,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+  };
+}
+
+export async function fetchBrands(includeInactive = false) {
+  const query = `?include_inactive=${includeInactive ? "true" : "false"}`;
+  const response = await request<BackendBrandListResponse>(`/api/brands${query}`);
+  return response.items.map(mapBrand);
+}
+
+export async function createBrand(requestBody: CreateBrandRequest) {
+  const response = await request<BackendBrandItem>("/api/brands", {
+    method: "POST",
+    body: JSON.stringify({
+      name: requestBody.name,
+      code: normalizeOptionalString(requestBody.code),
+      description: normalizeOptionalString(requestBody.description),
+      is_active: requestBody.isActive ?? true,
+    }),
+  });
+
+  return mapBrand(response);
+}
+
+export async function updateBrand(brandId: string, requestBody: CreateBrandRequest) {
+  const response = await request<BackendBrandItem>(`/api/brands/${encodeURIComponent(brandId)}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      name: requestBody.name,
+      code: normalizeOptionalString(requestBody.code),
+      description: normalizeOptionalString(requestBody.description),
+      is_active: requestBody.isActive ?? true,
+    }),
+  });
+
+  return mapBrand(response);
+}
+
 export async function createCategory(requestBody: CreateCategoryRequest) {
   return request<BackendCategoryItem>("/api/categories", {
     method: "POST",
@@ -2254,6 +2495,152 @@ export async function updateCategory(categoryId: string, requestBody: CreateCate
       name: requestBody.name,
     }),
   });
+}
+
+function mapSupplier(item: BackendSupplierItem): SupplierRecord {
+  return {
+    id: item.supplier_id,
+    name: item.name,
+    code: item.code ?? "",
+    contactPerson: item.contact_name ?? "",
+    phone: item.phone ?? "",
+    email: item.email ?? "",
+    address: item.address ?? "",
+    isActive: item.is_active,
+    linkedProductCount: item.linked_product_count,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+  };
+}
+
+export async function fetchSuppliers(includeInactive = false) {
+  const query = `?include_inactive=${includeInactive ? "true" : "false"}`;
+  const response = await request<BackendSupplierListResponse>(`/api/suppliers${query}`);
+  return response.items.map(mapSupplier);
+}
+
+export async function createSupplier(requestBody: CreateSupplierRequest) {
+  const response = await request<BackendSupplierItem>("/api/suppliers", {
+    method: "POST",
+    body: JSON.stringify({
+      name: requestBody.name,
+      code: normalizeOptionalString(requestBody.code),
+      contact_name: normalizeOptionalString(requestBody.contactPerson),
+      phone: normalizeOptionalString(requestBody.phone),
+      email: normalizeOptionalString(requestBody.email),
+      address: normalizeOptionalString(requestBody.address),
+      is_active: requestBody.isActive ?? true,
+    }),
+  });
+
+  return mapSupplier(response);
+}
+
+function mapShopStockSettings(item: BackendShopStockSettings): ShopStockSettingsRecord {
+  return {
+    id: item.id,
+    storeId: item.store_id ?? null,
+    defaultLowStockThreshold: item.default_low_stock_threshold,
+    thresholdMultiplier: item.threshold_multiplier,
+    defaultSafetyStock: item.default_safety_stock,
+    defaultLeadTimeDays: item.default_lead_time_days,
+    defaultTargetDaysOfCover: item.default_target_days_of_cover,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+  };
+}
+
+export async function fetchShopStockSettings() {
+  const response = await request<BackendShopStockSettings>("/api/settings/stock-settings");
+  return mapShopStockSettings(response);
+}
+
+export async function updateShopStockSettings(requestBody: UpdateShopStockSettingsRequest) {
+  const response = await request<BackendShopStockSettings>("/api/settings/stock-settings", {
+    method: "PUT",
+    body: JSON.stringify({
+      default_low_stock_threshold: requestBody.defaultLowStockThreshold,
+      threshold_multiplier: requestBody.thresholdMultiplier,
+      default_safety_stock: requestBody.defaultSafetyStock,
+      default_lead_time_days: requestBody.defaultLeadTimeDays,
+      default_target_days_of_cover: requestBody.defaultTargetDaysOfCover,
+    }),
+  });
+
+  return mapShopStockSettings(response);
+}
+
+export async function updateSupplier(supplierId: string, requestBody: CreateSupplierRequest) {
+  const response = await request<BackendSupplierItem>(`/api/suppliers/${encodeURIComponent(supplierId)}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      name: requestBody.name,
+      code: normalizeOptionalString(requestBody.code),
+      contact_name: normalizeOptionalString(requestBody.contactPerson),
+      phone: normalizeOptionalString(requestBody.phone),
+      email: normalizeOptionalString(requestBody.email),
+      address: normalizeOptionalString(requestBody.address),
+      is_active: requestBody.isActive ?? true,
+    }),
+  });
+
+  return mapSupplier(response);
+}
+
+export async function fetchProductSuppliers(productId: string) {
+  const response = await request<BackendProductSupplierListResponse>(
+    `/api/products/${encodeURIComponent(productId)}/suppliers`
+  );
+  return response.items.map(mapProductSupplier);
+}
+
+export async function upsertProductSupplier(
+  productId: string,
+  requestBody: {
+    supplier_id: string;
+    supplier_sku?: string | null;
+    supplier_item_name?: string | null;
+    is_preferred: boolean;
+    lead_time_days?: number | null;
+    min_order_qty?: number | null;
+    pack_size?: number | null;
+    last_purchase_price?: number | null;
+    is_active?: boolean;
+  }
+) {
+  const response = await request<BackendProductSupplierItem>(
+    `/api/products/${encodeURIComponent(productId)}/suppliers`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        supplier_id: requestBody.supplier_id,
+        supplier_sku: normalizeOptionalString(requestBody.supplier_sku),
+        supplier_item_name: normalizeOptionalString(requestBody.supplier_item_name),
+        is_preferred: requestBody.is_preferred,
+        lead_time_days: requestBody.lead_time_days ?? null,
+        min_order_qty: requestBody.min_order_qty ?? null,
+        pack_size: requestBody.pack_size ?? null,
+        last_purchase_price: requestBody.last_purchase_price ?? null,
+        is_active: requestBody.is_active ?? true,
+      }),
+    }
+  );
+
+  return mapProductSupplier(response);
+}
+
+export async function setPreferredProductSupplier(productId: string, supplierId: string) {
+  const response = await request<BackendProductSupplierItem>(
+    `/api/products/${encodeURIComponent(productId)}/preferred-supplier`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        supplier_id: supplierId,
+      }),
+    }
+  );
+
+  return mapProductSupplier(response);
 }
 
 export async function createProduct(requestBody: CreateProductRequest) {
@@ -2845,9 +3232,12 @@ export type UpdateProductRequest = {
   barcode?: string | null;
   image_url?: string | null;
   category_id?: string | null;
+  brand_id?: string | null;
   unit_price: number;
   cost_price: number;
   reorder_level: number;
+  safety_stock: number;
+  target_stock_level: number;
   allow_negative_stock: boolean;
   is_active: boolean;
 };
