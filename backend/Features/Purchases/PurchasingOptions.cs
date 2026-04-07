@@ -5,13 +5,13 @@ public sealed class PurchasingOptions
     public const string SectionName = "Purchasing";
 
     public bool EnableOcrImport { get; set; } = true;
-    public string OcrProvider { get; set; } = "basic-text";
+    public string OcrProvider { get; set; } = "openai";
     public string OpenAiApiBaseUrl { get; set; } = "https://api.openai.com/v1";
     public string OpenAiApiKey { get; set; } = string.Empty;
     public string OpenAiApiKeyEnvironmentVariable { get; set; } = "OPENAI_API_KEY";
-    public string OpenAiModel { get; set; } = "gpt-5.4-mini";
+    public string OpenAiModel { get; set; } = "gpt-4.1-mini";
     public int OpenAiRequestTimeoutMs { get; set; } = 20000;
-    public int OpenAiMaxOutputTokens { get; set; } = 1600;
+    public int OpenAiMaxOutputTokens { get; set; } = 2200;
     public string TesseractCommand { get; set; } = "tesseract";
     public string TesseractLanguage { get; set; } = "eng";
     public int TesseractPageSegMode { get; set; } = 6;

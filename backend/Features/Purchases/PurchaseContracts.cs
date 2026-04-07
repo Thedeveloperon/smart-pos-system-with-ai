@@ -49,6 +49,12 @@ public sealed class PurchaseOcrDraftResponse
     [JsonPropertyName("ocr_confidence")]
     public decimal? OcrConfidence { get; set; }
 
+    [JsonPropertyName("extraction_provider")]
+    public string? ExtractionProvider { get; set; }
+
+    [JsonPropertyName("extraction_model")]
+    public string? ExtractionModel { get; set; }
+
     [JsonPropertyName("review_required")]
     public bool ReviewRequired { get; set; }
 

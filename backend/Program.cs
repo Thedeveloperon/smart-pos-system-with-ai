@@ -311,7 +311,7 @@ builder.Services.AddHttpClient<AiInsightService>();
 builder.Services.AddHttpClient("openai-ocr");
 builder.Services.AddSingleton<BasicTextOcrProvider>();
 builder.Services.AddSingleton<TesseractOcrProvider>();
-builder.Services.AddSingleton<OpenAiOcrProvider>();
+builder.Services.AddSingleton<OpenAiVisionOcrProvider>();
 builder.Services.AddSingleton<IOcrProviderCore>(serviceProvider =>
 {
     var purchasingOptions = serviceProvider.GetRequiredService<IOptions<PurchasingOptions>>().Value;
@@ -319,7 +319,7 @@ builder.Services.AddSingleton<IOcrProviderCore>(serviceProvider =>
 
     if (string.Equals(configuredProvider, "openai", StringComparison.OrdinalIgnoreCase))
     {
-        return serviceProvider.GetRequiredService<OpenAiOcrProvider>();
+        return serviceProvider.GetRequiredService<OpenAiVisionOcrProvider>();
     }
 
     if (string.Equals(configuredProvider, "tesseract", StringComparison.OrdinalIgnoreCase))
@@ -337,11 +337,16 @@ builder.Services.AddSingleton<IOcrProviderCore>(serviceProvider =>
     {
         var logger = serviceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
         logger.LogWarning(
-            "Unknown Purchasing:OcrProvider value '{Provider}'. Supported values: basic-text, tesseract, openai. Falling back to basic-text.",
+            "Unknown Purchasing:OcrProvider value '{Provider}'. Falling back to openai.",
             configuredProvider);
     }
 
-    return serviceProvider.GetRequiredService<BasicTextOcrProvider>();
+    if (string.Equals(configuredProvider, "basic-text", StringComparison.OrdinalIgnoreCase))
+    {
+        return serviceProvider.GetRequiredService<BasicTextOcrProvider>();
+    }
+
+    return serviceProvider.GetRequiredService<OpenAiVisionOcrProvider>();
 });
 builder.Services.AddSingleton<IOcrProvider, ResilientOcrProvider>();
 builder.Services.AddSingleton<IBillMalwareScanner, NoOpBillMalwareScanner>();
