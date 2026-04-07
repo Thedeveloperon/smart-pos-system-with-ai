@@ -88,6 +88,16 @@ public sealed class PurchaseOcrOpenAiImportTests
         Assert.Contains("ocr_provider_unavailable", blockedReasonValues, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("manual_review_required", blockedReasonValues, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("no_line_items_extracted", blockedReasonValues, StringComparer.OrdinalIgnoreCase);
+
+        var warnings = draftPayload["warnings"]?.AsArray()
+                       ?? throw new InvalidOperationException("Missing warnings payload.");
+        var warningMessages = warnings
+            .Select(x => x?.GetValue<string>())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToList();
+        Assert.Contains(
+            warningMessages,
+            message => message!.Contains("OpenAI OCR stub failure for integration test.", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

@@ -723,6 +723,8 @@ export type PurchaseOcrDraftResponse = {
   tax_total?: number | null;
   grand_total?: number | null;
   ocr_confidence?: number | null;
+  extraction_provider?: string | null;
+  extraction_model?: string | null;
   review_required: boolean;
   can_auto_commit: boolean;
   blocked_reasons: string[];
