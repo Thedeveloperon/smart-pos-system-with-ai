@@ -156,8 +156,13 @@ type BackendProductSearchItem = {
   sku?: string | null;
   barcode?: string | null;
   image_url?: string | null;
+  category_id?: string | null;
+  category_name?: string | null;
+  brand_id?: string | null;
+  brand_name?: string | null;
   unitPrice: number;
   stockQuantity: number;
+  is_low_stock?: boolean;
 };
 
 type BackendProductSearchResponse = {
@@ -2014,7 +2019,12 @@ function mapProduct(item: BackendProductSearchItem): Product {
     sku: item.sku || item.id.slice(0, 8),
     barcode: item.barcode || undefined,
     price: Number(item.unitPrice),
-    category: undefined,
+    category: item.category_name || undefined,
+    categoryId: item.category_id || undefined,
+    categoryName: item.category_name || undefined,
+    brandId: item.brand_id || undefined,
+    brandName: item.brand_name || undefined,
+    isLowStock: item.is_low_stock ?? undefined,
     stock: Number(item.stockQuantity),
     image: resolveImageUrl(item.image_url) || sampleImage || createProductImage(item.name, accent),
   };
@@ -2029,7 +2039,12 @@ function mapCatalogProduct(item: BackendProductCatalogItem): Product {
     sku: item.sku || item.product_id.slice(0, 8),
     barcode: item.barcode || undefined,
     price: Number(item.unit_price),
-    category: undefined,
+    category: item.category_name || undefined,
+    categoryId: item.category_id || undefined,
+    categoryName: item.category_name || undefined,
+    brandId: item.brand_id || undefined,
+    brandName: item.brand_name || undefined,
+    isLowStock: item.is_low_stock,
     stock: Number(item.stock_quantity),
     image: resolveImageUrl(item.image_url) || sampleImage || createProductImage(item.name, accent),
   };
@@ -2402,9 +2417,14 @@ export async function logout() {
   });
 }
 
-export async function fetchProducts(query?: string) {
-  const search = query ? `?q=${encodeURIComponent(query)}` : "";
-  const response = await request<BackendProductSearchResponse>(`/api/products/search${search}`);
+export async function fetchProducts(query?: string, take = 200) {
+  const params = new URLSearchParams();
+  if (query?.trim()) {
+    params.set("q", query.trim());
+  }
+  params.set("take", String(Math.max(1, Math.min(200, Math.trunc(take) || 200))));
+
+  const response = await request<BackendProductSearchResponse>(`/api/products/search?${params.toString()}`);
   return response.items.map(mapProduct);
 }
 

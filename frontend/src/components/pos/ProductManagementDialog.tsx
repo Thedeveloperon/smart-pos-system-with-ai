@@ -1006,6 +1006,10 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
     () => products.filter((product) => selectedProductIds.has(product.id)),
     [products, selectedProductIds]
   );
+  const lowStockCount = useMemo(
+    () => products.filter((product) => product.isLowStock).length,
+    [products],
+  );
 
   const selectedCountInFiltered = filtered.reduce(
     (count, product) => (selectedProductIds.has(product.id) ? count + 1 : count),
@@ -1243,6 +1247,25 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
               <TabsContent value="products" className="mt-0">
           <div className="space-y-4">
             <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-xl border border-border bg-card px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Total</p>
+                  <p className="mt-1 text-2xl font-bold tabular-nums text-foreground">{products.length}</p>
+                </div>
+                <div className="rounded-xl border border-border bg-card px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Filtered</p>
+                  <p className="mt-1 text-2xl font-bold tabular-nums text-foreground">{filtered.length}</p>
+                </div>
+                <div className="rounded-xl border border-border bg-card px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Selected</p>
+                  <p className="mt-1 text-2xl font-bold tabular-nums text-foreground">{selectedProductIds.size}</p>
+                </div>
+                <div className="rounded-xl border border-border bg-card px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Low Stock</p>
+                  <p className="mt-1 text-2xl font-bold tabular-nums text-amber-700">{lowStockCount}</p>
+                </div>
+              </div>
+
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div className="relative w-full md:max-w-md">
                   <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -1254,12 +1277,6 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
                   />
                 </div>
                 <div className="flex items-center gap-2">
-                  <Badge variant="secondary" className="w-fit">
-                    {filtered.length} products
-                  </Badge>
-                  <Badge variant="outline" className="w-fit">
-                    {selectedProductIds.size} selected
-                  </Badge>
                   {isBarcodeFeatureEnabled ? (
                     <>
                       <Button

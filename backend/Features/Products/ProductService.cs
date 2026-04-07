@@ -13,11 +13,15 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
 
     public async Task<ProductSearchResponse> SearchProductsAsync(
         string? query,
+        int take,
         CancellationToken cancellationToken)
     {
+        var normalizedTake = Math.Clamp(take, 1, 200);
         var productQuery = dbContext.Products
             .AsNoTracking()
+            .Include(x => x.Category)
             .Include(x => x.Brand)
+            .Include(x => x.Inventory)
             .Where(x => x.IsActive);
 
         if (!string.IsNullOrWhiteSpace(query))
@@ -31,22 +35,47 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
 
         var items = await productQuery
             .OrderBy(x => x.Name)
-            .Take(30)
-            .Select(x => new ProductSearchItem
+            .Take(normalizedTake)
+            .Select(x => new
             {
                 Id = x.Id,
                 Name = x.Name,
                 Sku = x.Sku,
                 Barcode = x.Barcode,
                 ImageUrl = x.ImageUrl,
+                CategoryId = x.CategoryId,
+                CategoryName = x.Category != null ? x.Category.Name : null,
                 BrandId = x.BrandId,
                 BrandName = x.Brand != null ? x.Brand.Name : null,
                 UnitPrice = x.UnitPrice,
-                StockQuantity = x.Inventory != null ? x.Inventory.QuantityOnHand : 0m
+                StockQuantity = x.Inventory != null ? x.Inventory.QuantityOnHand : 0m,
+                ReorderLevel = x.Inventory != null ? x.Inventory.ReorderLevel : 0m
             })
             .ToListAsync(cancellationToken);
 
-        return new ProductSearchResponse { Items = items };
+        return new ProductSearchResponse
+        {
+            Items = items.Select(item =>
+            {
+                var stockQuantity = RoundQuantity(item.StockQuantity);
+                var alertLevel = RoundQuantity(Math.Max(RoundQuantity(item.ReorderLevel), DefaultLowStockThreshold));
+                return new ProductSearchItem
+                {
+                    Id = item.Id,
+                    Name = item.Name,
+                    Sku = item.Sku,
+                    Barcode = item.Barcode,
+                    ImageUrl = item.ImageUrl,
+                    CategoryId = item.CategoryId,
+                    CategoryName = item.CategoryName,
+                    BrandId = item.BrandId,
+                    BrandName = item.BrandName,
+                    UnitPrice = RoundMoney(item.UnitPrice),
+                    StockQuantity = stockQuantity,
+                    IsLowStock = stockQuantity <= alertLevel
+                };
+            }).ToList()
+        };
     }
 
     public async Task<ProductCatalogResponse> GetCatalogAsync(

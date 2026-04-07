@@ -14,10 +14,11 @@ public static class ProductEndpoints
 
         productGroup.MapGet("/search", async (
             string? q,
+            int? take,
             ProductService productService,
             CancellationToken cancellationToken) =>
         {
-            var result = await productService.SearchProductsAsync(q, cancellationToken);
+            var result = await productService.SearchProductsAsync(q, take ?? 30, cancellationToken);
             return Results.Ok(result);
         })
         .RequireAuthorization()

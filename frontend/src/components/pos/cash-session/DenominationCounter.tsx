@@ -126,8 +126,8 @@ const DenominationCounter = ({ onChange, initialCounts, compact = false }: Denom
   };
 
   return (
-    <div className={compact ? "flex min-h-0 flex-col rounded-2xl border border-slate-300 bg-[#f7f8fa]" : "flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-300 bg-[#f7f8fa]"}>
-      <div className={compact ? "grid grid-cols-1 divide-y divide-slate-300 md:grid-cols-2 md:divide-x md:divide-y-0" : "grid min-h-0 flex-1 grid-cols-1 divide-y divide-slate-300 md:grid-cols-2 md:divide-x md:divide-y-0"}>
+    <div className={compact ? "flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-300 bg-[#f7f8fa]" : "flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-300 bg-[#f7f8fa]"}>
+      <div className={compact ? "grid min-h-0 flex-1 grid-cols-1 divide-y divide-slate-300 md:grid-cols-2 md:divide-x md:divide-y-0" : "grid min-h-0 flex-1 grid-cols-1 divide-y divide-slate-300 md:grid-cols-2 md:divide-x md:divide-y-0"}>
         <section className={`flex min-h-0 h-full flex-col ${compact ? "p-2" : "p-3"}`}>
           <div className={`flex items-center justify-between ${compact ? "mb-1.5" : "mb-2.5"}`}>
             <div className="flex items-center gap-2">
@@ -139,7 +139,7 @@ const DenominationCounter = ({ onChange, initialCounts, compact = false }: Denom
             </span>
           </div>
 
-          <div className={`grid auto-rows-min content-start grid-cols-1 ${compact ? "gap-0.5 pr-0.5" : "flex-1 min-h-0 gap-0.5 overflow-y-auto pr-1"}`}>
+          <div className={`grid auto-rows-min content-start grid-cols-1 ${compact ? "flex-1 min-h-0 gap-0.5 overflow-y-auto pr-0.5" : "flex-1 min-h-0 gap-0.5 overflow-y-auto pr-1"}`}>
             {notes.map((d) => renderItem(d, "note"))}
           </div>
         </section>
@@ -155,7 +155,7 @@ const DenominationCounter = ({ onChange, initialCounts, compact = false }: Denom
             </span>
           </div>
 
-          <div className={`grid auto-rows-min content-start grid-cols-1 ${compact ? "gap-0.5 pr-0.5" : "flex-1 min-h-0 gap-0.5 overflow-y-auto pr-1"}`}>
+          <div className={`grid auto-rows-min content-start grid-cols-1 ${compact ? "flex-1 min-h-0 gap-0.5 overflow-y-auto pr-0.5" : "flex-1 min-h-0 gap-0.5 overflow-y-auto pr-1"}`}>
             {coins.map((d) => renderItem(d, "coin"))}
           </div>
         </section>

@@ -190,31 +190,6 @@ const OpeningCashDialog = ({
               </div>
             </div>
 
-            {prefillingMessage ? (
-              <div
-                className={`flex items-start gap-2 rounded-xl border p-3 ${
-                  hasPreviousShortage
-                    ? "border-amber-300 bg-amber-50"
-                    : "border-primary/20 bg-primary/5"
-                }`}
-              >
-                <AlertTriangle
-                  className={`mt-0.5 h-4 w-4 shrink-0 ${
-                    hasPreviousShortage ? "text-amber-600" : "text-primary"
-                  }`}
-                />
-                <p className={`text-xs ${hasPreviousShortage ? "text-amber-900" : "text-slate-700"}`}>
-                  {prefillingMessage}
-                </p>
-              </div>
-            ) : null}
-
-            <div className="flex items-start gap-2 rounded-xl border border-warning/30 bg-warning/5 p-3">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
-              <p className="text-xs text-warning-foreground">
-                Once confirmed, the opening cash cannot be modified without manager approval. Please ensure the count is accurate.
-              </p>
-            </div>
           </div>
 
           <DialogFooter className="gap-2 border-t border-slate-300 bg-slate-100 px-6 py-3">

@@ -208,3 +208,132 @@ test("shows grace banner when authenticated in grace mode", async ({ page }) => 
   await expect(page.getByText("License grace mode")).toBeVisible();
   await expect(page.getByText(/Grace until/i)).toBeVisible();
 });
+
+test("keeps offline banner dismissed across rotating grant tokens and re-shows after grant removal", async ({ page }) => {
+  await seedDeviceCode(page);
+
+  let licensePhase = "initial";
+  await page.route(`${API_ORIGIN}/api/license/status`, async (route) => {
+    const offlineGrantToken =
+      licensePhase === "initial"
+        ? "offline-grant-1"
+        : licensePhase === "rotated"
+          ? "offline-grant-2"
+          : licensePhase === "missing"
+            ? null
+            : "offline-grant-3";
+
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(
+        licenseStatus("active", {
+          offline_grant_token: offlineGrantToken,
+          offline_grant_expires_at: "2026-04-07T18:00:00.000Z",
+          offline_max_checkout_operations: 40,
+          offline_max_refund_operations: 10,
+        }),
+      ),
+    });
+  });
+
+  await page.route(`${API_ORIGIN}/api/auth/me`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        user_id: "u-manager",
+        username: "manager",
+        full_name: "Test Manager",
+        role: "manager",
+        device_id: "d-1",
+        device_code: DEVICE_CODE,
+        expires_at: "2026-04-01T12:00:00.000Z",
+      }),
+    });
+  });
+
+  await page.route(`${API_ORIGIN}/api/products/search*`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ items: [] }),
+    });
+  });
+
+  await page.route(`${API_ORIGIN}/api/checkout/held`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ items: [] }),
+    });
+  });
+
+  await page.route(`${API_ORIGIN}/api/cash-sessions/current`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        cash_session_id: "session-1",
+        device_id: "d-1",
+        device_code: DEVICE_CODE,
+        cashier_name: "Test Manager",
+        shift_number: 1,
+        status: "open",
+        opened_at: "2026-04-07T09:00:00.000Z",
+        closed_at: null,
+        opening: {
+          counts: [],
+          total: 0,
+          submitted_by: "Test Manager",
+          submitted_at: "2026-04-07T09:00:00.000Z",
+          approved_by: null,
+          approved_at: null,
+        },
+        drawer: {
+          counts: [],
+          total: 0,
+          updated_at: "2026-04-07T09:00:00.000Z",
+        },
+        closing: null,
+        expected_cash: 0,
+        difference: 0,
+        difference_reason: null,
+        cash_sales_total: 0,
+        audit_log: [],
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await expect(page.getByText("Offline fallback ready")).toBeVisible();
+
+  await page.locator('[aria-label="Close offline fallback banner"]').click();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.localStorage.getItem("smartpos.license.offline.banner.dismissed.v1:playwright-license-gate-device"),
+      ),
+    )
+    .toBe("1");
+  await expect(page.getByText("Offline fallback ready")).toHaveCount(0);
+
+  licensePhase = "rotated";
+  await page.reload();
+  await expect(page.getByText("Offline fallback ready")).toHaveCount(0);
+
+  licensePhase = "missing";
+  await page.reload();
+  await expect(page.getByText("Offline fallback ready")).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.localStorage.getItem("smartpos.license.offline.banner.dismissed.v1:playwright-license-gate-device"),
+      ),
+    )
+    .toBe(null);
+
+  licensePhase = "restored";
+  await page.reload();
+  await expect(page.getByText("Offline fallback ready")).toBeVisible();
+});

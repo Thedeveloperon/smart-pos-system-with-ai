@@ -172,6 +172,7 @@ describe("CheckoutPanel shortcut integration", () => {
     expect(await screen.findByText("Change breakdown")).toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText("Enable custom payout"));
+    expect(await screen.findByText(/Selected total: Rs\./)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Proceed - Rs. 50" }));
 
     expect(onCompleteSale).toHaveBeenCalledWith("cash", 150, "", [], expect.any(Array), true, 0);

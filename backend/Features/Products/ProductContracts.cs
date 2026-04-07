@@ -15,6 +15,11 @@ public sealed class ProductSearchItem
     public string? Barcode { get; set; }
     [JsonPropertyName("image_url")]
     public string? ImageUrl { get; set; }
+    [JsonPropertyName("category_id")]
+    public Guid? CategoryId { get; set; }
+
+    [JsonPropertyName("category_name")]
+    public string? CategoryName { get; set; }
     [JsonPropertyName("brand_id")]
     public Guid? BrandId { get; set; }
 
@@ -23,6 +28,8 @@ public sealed class ProductSearchItem
 
     public decimal UnitPrice { get; set; }
     public decimal StockQuantity { get; set; }
+    [JsonPropertyName("is_low_stock")]
+    public bool IsLowStock { get; set; }
 }
 
 public sealed class BrandListResponse
