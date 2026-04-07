@@ -22,11 +22,11 @@ public sealed class PurchaseOcrImportTests(CustomWebApplicationFactory factory)
                 %PDF-1.7
                 Supplier: Acme Traders
                 Invoice No: INV-2026-1001
-                Ceylon Tea 100g 1 850.00 850.00
+                Color Pencils 1 280.00 280.00
                 Unknown Snack 1 100.00 100.00
-                Subtotal: 950.00
+                Subtotal: 380.00
                 Tax: 0.00
-                Total: 950.00
+                Total: 380.00
                 /Type /Page
                 """);
 

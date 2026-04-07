@@ -4,16 +4,22 @@ import { AlertTriangle, Loader2, Package, PencilLine, Printer, RefreshCw, Search
 import type {
   BulkGenerateMissingProductBarcodesResponse,
   CatalogProduct,
+  SupplierRecord,
   UpdateProductRequest
 } from "@/lib/api";
 import {
   bulkGenerateMissingProductBarcodes,
   deleteProduct,
+  fetchBrands,
   fetchCategories,
   fetchProductCatalogItems,
+  fetchProductSuppliers,
+  fetchSuppliers,
   generateAndAssignProductBarcode,
+  upsertProductSupplier,
   updateProduct,
   validateProductBarcode,
+  type BrandRecord,
 } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -63,9 +69,13 @@ type ProductFormState = {
   barcode: string;
   imageUrl: string;
   categoryId: string;
+  brandId: string;
+  preferredSupplierId: string;
   unitPrice: string;
   costPrice: string;
   reorderLevel: string;
+  safetyStock: string;
+  targetStockLevel: string;
   allowNegativeStock: boolean;
   isActive: boolean;
 };
@@ -76,9 +86,13 @@ const buildFormState = (product: CatalogProduct): ProductFormState => ({
   barcode: product.barcode || "",
   imageUrl: product.image || "",
   categoryId: product.categoryId || "",
+  brandId: product.brandId || "",
+  preferredSupplierId: "",
   unitPrice: String(product.unitPrice),
   costPrice: String(product.costPrice),
   reorderLevel: String(product.reorderLevel),
+  safetyStock: String(product.safetyStock ?? 0),
+  targetStockLevel: String(product.targetStockLevel ?? 0),
   allowNegativeStock: product.allowNegativeStock,
   isActive: product.isActive,
 });
@@ -89,9 +103,13 @@ const emptyFormState = (): ProductFormState => ({
   barcode: "",
   imageUrl: "",
   categoryId: "",
+  brandId: "",
+  preferredSupplierId: "",
   unitPrice: "0",
   costPrice: "0",
   reorderLevel: "5",
+  safetyStock: "0",
+  targetStockLevel: "0",
   allowNegativeStock: true,
   isActive: true,
 });
@@ -134,7 +152,11 @@ type ProductEditorDialogProps = {
 
 function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabel }: ProductEditorDialogProps) {
   const [categories, setCategories] = useState<CategoryOption[]>([]);
+  const [brands, setBrands] = useState<BrandRecord[]>([]);
+  const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
   const [loadingCategories, setLoadingCategories] = useState(false);
+  const [loadingBrands, setLoadingBrands] = useState(false);
+  const [loadingSuppliers, setLoadingSuppliers] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [generatingBarcode, setGeneratingBarcode] = useState(false);
@@ -156,22 +178,49 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabe
 
     let alive = true;
     setLoadingCategories(true);
+    setLoadingBrands(true);
+    setLoadingSuppliers(true);
 
-    void fetchCategories(true)
-      .then((items) => {
-        if (alive) {
-          setCategories(items);
+    void Promise.all([fetchCategories(true), fetchBrands(true), fetchSuppliers(true)])
+      .then(([categoryItems, brandItems, supplierItems]) => {
+        if (!alive) {
+          return;
         }
+
+        setCategories(categoryItems);
+        setBrands(brandItems);
+        setSuppliers(supplierItems);
       })
       .catch((error) => {
         console.error(error);
-        toast.error("Failed to load categories.");
+        toast.error("Failed to load catalog metadata.");
       })
       .finally(() => {
         if (alive) {
           setLoadingCategories(false);
+          setLoadingBrands(false);
+          setLoadingSuppliers(false);
         }
       });
+
+    if (product) {
+      void fetchProductSuppliers(product.id)
+        .then((items) => {
+          if (!alive) {
+            return;
+          }
+
+          const preferredSupplier = items.find((item) => item.isPreferred && item.isActive) ?? items[0];
+          setForm((current) => ({
+            ...current,
+            preferredSupplierId: preferredSupplier?.supplierId || "",
+          }));
+        })
+        .catch((error) => {
+          console.error(error);
+          toast.error("Failed to load product suppliers.");
+        });
+    }
 
     return () => {
       alive = false;
@@ -195,6 +244,8 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabe
     const unitPrice = Number(form.unitPrice);
     const costPrice = Number(form.costPrice);
     const reorderLevel = Number(form.reorderLevel);
+    const safetyStock = Number(form.safetyStock);
+    const targetStockLevel = Number(form.targetStockLevel);
 
     if (!name) {
       toast.error("Product name is required.");
@@ -216,15 +267,28 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabe
       return;
     }
 
+    if (!Number.isFinite(safetyStock) || safetyStock < 0) {
+      toast.error("Enter a valid safety stock value.");
+      return;
+    }
+
+    if (!Number.isFinite(targetStockLevel) || targetStockLevel < 0) {
+      toast.error("Enter a valid target stock level.");
+      return;
+    }
+
     const payload: UpdateProductRequest = {
       name,
       sku: form.sku.trim() || null,
       barcode: form.barcode.trim() || null,
       image_url: form.imageUrl.trim() || null,
       category_id: form.categoryId || null,
+      brand_id: form.brandId || null,
       unit_price: unitPrice,
       cost_price: costPrice,
       reorder_level: reorderLevel,
+      safety_stock: safetyStock,
+      target_stock_level: targetStockLevel,
       allow_negative_stock: form.allowNegativeStock,
       is_active: form.isActive,
     };
@@ -232,6 +296,16 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabe
     setSaving(true);
     try {
       await updateProduct(product.id, payload);
+      if (form.preferredSupplierId) {
+        await upsertProductSupplier(product.id, {
+          supplier_id: form.preferredSupplierId,
+          supplier_sku: form.sku.trim() || null,
+          supplier_item_name: name,
+          is_preferred: true,
+          is_active: true,
+          last_purchase_price: costPrice,
+        });
+      }
       toast.success("Product updated.");
       await onSaved();
       onOpenChange(false);
@@ -363,6 +437,12 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabe
   const selectedCategoryName = form.categoryId
     ? categories.find((category) => category.category_id === form.categoryId)?.name || "Selected category"
     : product?.categoryName || "No category";
+  const selectedBrandName = form.brandId
+    ? brands.find((brand) => brand.id === form.brandId)?.name || "Selected brand"
+    : product?.brandName || "No brand";
+  const selectedSupplierName = form.preferredSupplierId
+    ? suppliers.find((supplier) => supplier.id === form.preferredSupplierId)?.name || "Selected supplier"
+    : "";
   const imagePreviewUrl = form.imageUrl.trim() || product?.image || "";
   const printableProduct: CatalogProduct | null = product
     ? {
@@ -511,6 +591,48 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabe
                   </div>
 
                   <div className="space-y-2">
+                    <Label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">Brand</Label>
+                    <Select
+                      value={form.brandId || "__none__"}
+                      onValueChange={(value) => updateField("brandId", value === "__none__" ? "" : value)}
+                    >
+                      <SelectTrigger aria-label="Brand" className="h-10 rounded-xl border-slate-300 bg-white">
+                        <SelectValue placeholder={loadingBrands ? "Loading brands..." : "Select brand"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">No brand</SelectItem>
+                        {brands.map((brand) => (
+                          <SelectItem key={brand.id} value={brand.id}>
+                            {brand.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+                      Preferred supplier
+                    </Label>
+                    <Select
+                      value={form.preferredSupplierId || "__none__"}
+                      onValueChange={(value) => updateField("preferredSupplierId", value === "__none__" ? "" : value)}
+                    >
+                      <SelectTrigger aria-label="Preferred supplier" className="h-10 rounded-xl border-slate-300 bg-white">
+                        <SelectValue placeholder={loadingSuppliers ? "Loading suppliers..." : "Select supplier"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">No supplier</SelectItem>
+                        {suppliers.map((supplier) => (
+                          <SelectItem key={supplier.id} value={supplier.id}>
+                            {supplier.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
                     <Label htmlFor="manage-unit-price" className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
                       Unit price
                     </Label>
@@ -554,6 +676,36 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabe
                       className="h-10 rounded-xl border-slate-300 bg-white"
                     />
                   </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="manage-safety-stock" className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+                      Safety stock
+                    </Label>
+                    <Input
+                      id="manage-safety-stock"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={form.safetyStock}
+                      onChange={(event) => updateField("safetyStock", event.target.value)}
+                      className="h-10 rounded-xl border-slate-300 bg-white"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="manage-target-stock" className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+                      Target stock
+                    </Label>
+                    <Input
+                      id="manage-target-stock"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={form.targetStockLevel}
+                      onChange={(event) => updateField("targetStockLevel", event.target.value)}
+                      className="h-10 rounded-xl border-slate-300 bg-white"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -575,6 +727,10 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabe
                         </p>
                         <p className="text-sm text-muted-foreground">
                           {selectedCategoryName}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {selectedBrandName}
+                          {selectedSupplierName ? ` | ${selectedSupplierName}` : ""}
                         </p>
                       </div>
                       <Badge variant={form.isActive ? "default" : "secondary"} className="shrink-0">
@@ -598,6 +754,14 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabe
                       <div className="flex justify-between">
                         <span className="text-slate-500">Reorder level</span>
                         <span className="font-semibold text-slate-800">{Number(form.reorderLevel || 0).toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Safety stock</span>
+                        <span className="font-semibold text-slate-800">{Number(form.safetyStock || 0).toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Target stock</span>
+                        <span className="font-semibold text-slate-800">{Number(form.targetStockLevel || 0).toLocaleString()}</span>
                       </div>
                     </div>
                   </div>

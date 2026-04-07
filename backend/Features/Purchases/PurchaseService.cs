@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.Metrics;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -26,6 +27,22 @@ public sealed class PurchaseService(
     private static readonly string[] AllowedExtensions = [".pdf", ".png", ".jpg", ".jpeg"];
     private static readonly Regex CodeTokenRegex = new(@"[A-Za-z0-9\-]{3,}", RegexOptions.Compiled);
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> ConfirmLocks = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Meter PurchasingMeter = new("SmartPos.Purchasing", "1.0.0");
+    private static readonly Counter<long> OcrDraftCounter = PurchasingMeter.CreateCounter<long>(
+        "smartpos.purchasing.ocr_draft.total",
+        description: "Number of OCR draft attempts.");
+    private static readonly Counter<long> OcrManualReviewCounter = PurchasingMeter.CreateCounter<long>(
+        "smartpos.purchasing.ocr_manual_review.total",
+        description: "Number of OCR drafts that require manual review.");
+    private static readonly Counter<long> OcrProviderFallbackCounter = PurchasingMeter.CreateCounter<long>(
+        "smartpos.purchasing.ocr_provider_fallback.total",
+        description: "Number of OCR provider fallback events.");
+    private static readonly Counter<long> OcrTotalsMismatchCounter = PurchasingMeter.CreateCounter<long>(
+        "smartpos.purchasing.ocr_totals_mismatch.total",
+        description: "Number of OCR drafts with totals mismatch requiring approval.");
+    private static readonly Counter<long> ImportConfirmCounter = PurchasingMeter.CreateCounter<long>(
+        "smartpos.purchasing.import_confirm.total",
+        description: "Number of purchase import confirm outcomes.");
 
     public async Task<PurchaseOcrDraftResponse> CreateOcrDraftAsync(
         IFormFile? file,
@@ -48,6 +65,12 @@ public sealed class PurchaseService(
                 "Supplier bill upload rejected by malware scanner for file {FileName}. Status: {Status}",
                 validated.FileData.FileName,
                 scanResult.Status);
+            RecordDraftTelemetry(
+                provider: "malware-scan",
+                status: "rejected",
+                reviewRequired: true,
+                blockedReasons: ["malware_scan_rejected", "manual_review_required"],
+                totalsMismatch: false);
             var rejectedDocument = await SaveDraftDocumentAsync(
                 validated.FileData,
                 fileHash: validated.FileHash,
@@ -99,6 +122,7 @@ public sealed class PurchaseService(
         catch (OcrProviderUnavailableException exception)
         {
             providerFallback = true;
+            OcrProviderFallbackCounter.Add(1);
             logger.LogWarning(
                 exception,
                 "OCR provider fallback triggered for file {FileName}.",
@@ -145,6 +169,7 @@ public sealed class PurchaseService(
 
         if (totals.RequiresApprovalReason)
         {
+            OcrTotalsMismatchCounter.Add(1);
             blockedReasons.Add("totals_mismatch_requires_approval");
             warnings.Add(
                 $"Totals mismatch detected (difference {totals.Difference:0.00} > tolerance {totals.Tolerance:0.00}). Approval reason is required.");
@@ -232,6 +257,20 @@ public sealed class PurchaseService(
             payloadJson: JsonSerializer.Serialize(payload),
             processedAtUtc: now,
             cancellationToken: cancellationToken);
+        var orderedBlockedReasons = blockedReasons.OrderBy(x => x).ToList();
+        RecordDraftTelemetry(
+            provider: extraction.ProviderName,
+            status: status,
+            reviewRequired: reviewRequired,
+            blockedReasons: orderedBlockedReasons,
+            totalsMismatch: totals.RequiresApprovalReason);
+        logger.LogInformation(
+            "Purchase OCR draft completed. Provider={Provider}, Status={Status}, ReviewRequired={ReviewRequired}, LineCount={LineCount}, BlockedReasons={BlockedReasons}.",
+            extraction.ProviderName,
+            status,
+            reviewRequired,
+            matchOutcome.Lines.Count,
+            orderedBlockedReasons.Count == 0 ? "none" : string.Join(",", orderedBlockedReasons));
 
         return new PurchaseOcrDraftResponse
         {
@@ -254,7 +293,7 @@ public sealed class PurchaseService(
             ExtractionModel = extraction.ProviderModel,
             ReviewRequired = reviewRequired,
             CanAutoCommit = canAutoCommit,
-            BlockedReasons = blockedReasons.OrderBy(x => x).ToList(),
+            BlockedReasons = orderedBlockedReasons,
             Totals = totals,
             LineItems = matchOutcome.Lines,
             Warnings = warnings,
@@ -301,6 +340,11 @@ public sealed class PurchaseService(
             .FirstOrDefaultAsync(x => x.ImportRequestId == importRequestId, cancellationToken);
         if (existingByImportId is not null)
         {
+            RecordConfirmTelemetry("idempotent_replay");
+            logger.LogInformation(
+                "Purchase import confirm replayed by import request id. ImportRequestId={ImportRequestId}, PurchaseBillId={PurchaseBillId}.",
+                importRequestId,
+                existingByImportId.Id);
             return ToConfirmResponse(existingByImportId, idempotentReplay: true, []);
         }
 
@@ -323,6 +367,12 @@ public sealed class PurchaseService(
 
             if (string.Equals(linked.ImportRequestId, importRequestId, StringComparison.OrdinalIgnoreCase))
             {
+                RecordConfirmTelemetry("idempotent_replay");
+                logger.LogInformation(
+                    "Purchase import confirm replayed by draft link. ImportRequestId={ImportRequestId}, DraftId={DraftId}, PurchaseBillId={PurchaseBillId}.",
+                    importRequestId,
+                    request.DraftId,
+                    linked.Id);
                 return ToConfirmResponse(linked, idempotentReplay: true, []);
             }
 
@@ -563,6 +613,14 @@ public sealed class PurchaseService(
 
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
+            RecordConfirmTelemetry("confirmed");
+            logger.LogInformation(
+                "Purchase import confirmed. ImportRequestId={ImportRequestId}, PurchaseBillId={PurchaseBillId}, SupplierId={SupplierId}, ItemCount={ItemCount}, GrandTotal={GrandTotal}.",
+                importRequestId,
+                purchaseBill.Id,
+                supplier.Id,
+                purchaseBillItems.Count,
+                purchaseBill.GrandTotal);
 
             return ToConfirmResponse(purchaseBill, idempotentReplay: false, inventoryUpdates);
         }
@@ -578,6 +636,11 @@ public sealed class PurchaseService(
                 .FirstOrDefaultAsync(x => x.ImportRequestId == importRequestId, cancellationToken);
             if (replay is not null)
             {
+                RecordConfirmTelemetry("idempotent_replay");
+                logger.LogInformation(
+                    "Purchase import confirm replayed after db update conflict. ImportRequestId={ImportRequestId}, PurchaseBillId={PurchaseBillId}.",
+                    importRequestId,
+                    replay.Id);
                 return ToConfirmResponse(replay, idempotentReplay: true, []);
             }
 
@@ -1457,6 +1520,68 @@ public sealed class PurchaseService(
 
         var intersection = lineTokens.Intersect(product.NameTokens).Count();
         return Math.Round((decimal)intersection / union, 4);
+    }
+
+    private void RecordDraftTelemetry(
+        string provider,
+        string status,
+        bool reviewRequired,
+        IReadOnlyCollection<string> blockedReasons,
+        bool totalsMismatch)
+    {
+        OcrDraftCounter.Add(
+            1,
+            new KeyValuePair<string, object?>("provider", provider),
+            new KeyValuePair<string, object?>("status", status));
+
+        if (totalsMismatch)
+        {
+            OcrTotalsMismatchCounter.Add(
+                1,
+                new KeyValuePair<string, object?>("provider", provider),
+                new KeyValuePair<string, object?>("status", status));
+        }
+
+        if (reviewRequired)
+        {
+            OcrManualReviewCounter.Add(
+                1,
+                new KeyValuePair<string, object?>("provider", provider),
+                new KeyValuePair<string, object?>("status", status),
+                new KeyValuePair<string, object?>("reason", ResolvePrimaryReviewReason(blockedReasons)));
+        }
+    }
+
+    private static string ResolvePrimaryReviewReason(IReadOnlyCollection<string> blockedReasons)
+    {
+        string[] priority =
+        [
+            "ocr_provider_unavailable",
+            "malware_scan_rejected",
+            "totals_mismatch_requires_approval",
+            "no_line_items_extracted",
+            "low_confidence_lines",
+            "fuzzy_match_requires_review",
+            "unmatched_line_items",
+            "manual_review_required"
+        ];
+
+        foreach (var reason in priority)
+        {
+            if (blockedReasons.Contains(reason, StringComparer.OrdinalIgnoreCase))
+            {
+                return reason;
+            }
+        }
+
+        return "manual_review_required";
+    }
+
+    private static void RecordConfirmTelemetry(string status)
+    {
+        ImportConfirmCounter.Add(
+            1,
+            new KeyValuePair<string, object?>("status", status));
     }
 
     private sealed record ConfirmLine(

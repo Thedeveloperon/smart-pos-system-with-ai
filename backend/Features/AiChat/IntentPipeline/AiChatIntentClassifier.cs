@@ -12,7 +12,9 @@ public sealed class AiChatIntentClassifier
             "customers",
             "client",
             "buyer",
-            "pending payment");
+            "pending payment",
+            "පාරිභෝගික",
+            "ගනුදෙනුකරු");
 
         var hasAlertSignals = ContainsAny(normalized,
             "alert",
@@ -20,7 +22,12 @@ public sealed class AiChatIntentClassifier
             "mismatch",
             "negative stock",
             "unusual",
-            "suspicious");
+            "suspicious",
+            "අවවාද",
+            "විශේෂත්ව",
+            "නොගැළප",
+            "අසාමාන්‍ය",
+            "සැකසහිත");
 
         if (hasCustomerSignals)
         {
@@ -40,7 +47,15 @@ public sealed class AiChatIntentClassifier
                 "out of stock",
                 "overstock",
                 "stock value",
-                "expir"))
+                "expir",
+                "තොග",
+                "ඉන්වෙන්ටරි",
+                "නැවත තොග",
+                "නැවත ඇණවුම්",
+                "තොග අවසන්",
+                "අධික තොග",
+                "තොග වටිනාකම",
+                "කල් ඉකුත්"))
         {
             intents.Add(AiChatIntentType.Stock);
         }
@@ -55,7 +70,14 @@ public sealed class AiChatIntentClassifier
                 "revenue",
                 "transaction",
                 "compare",
-                "busiest"))
+                "busiest",
+                "විකුණුම්",
+                "විකුණ",
+                "ආදායම",
+                "ගනුදෙනු",
+                "සසඳ",
+                "වැඩිපුරම",
+                "අඩුවෙන්ම"))
         {
             intents.Add(AiChatIntentType.Sales);
         }
@@ -66,7 +88,11 @@ public sealed class AiChatIntentClassifier
                 "purchas",
                 "reorder",
                 "vendor",
-                "invoice"))
+                "invoice",
+                "සැපයුම්කරු",
+                "මිලදී",
+                "ඇණවුම්",
+                "ඉන්වොයිස්"))
         {
             intents.Add(AiChatIntentType.Purchasing);
         }
@@ -76,7 +102,12 @@ public sealed class AiChatIntentClassifier
                 "cost",
                 "margin",
                 "profit",
-                "discount"))
+                "discount",
+                "මිල",
+                "පිරිවැය",
+                "ලාභ",
+                "වට්ටම්",
+                "අනුපාත"))
         {
             intents.Add(AiChatIntentType.Pricing);
         }
@@ -88,7 +119,14 @@ public sealed class AiChatIntentClassifier
                 "refund",
                 "void",
                 "cash sales",
-                "card sales"))
+                "card sales",
+                "කැෂියර්",
+                "ඩ්‍රෝවර්",
+                "සැසිය",
+                "ආපසු",
+                "අවලංගු",
+                "මුදල් විකුණුම්",
+                "කාඩ් විකුණුම්"))
         {
             intents.Add(AiChatIntentType.CashierOperations);
         }
@@ -100,7 +138,13 @@ public sealed class AiChatIntentClassifier
                 "performance",
                 "forecast",
                 "trend",
-                "key insight"))
+                "key insight",
+                "සාරාංශ",
+                "වාර්තාව",
+                "අවබෝධ",
+                "කාර්යසාධනය",
+                "අනාවැකි",
+                "ප්‍රවණතාව"))
         {
             intents.Add(AiChatIntentType.Reports);
         }

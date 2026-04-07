@@ -6,6 +6,12 @@ public sealed class PurchasingOptions
 
     public bool EnableOcrImport { get; set; } = true;
     public string OcrProvider { get; set; } = "openai";
+    public string OpenAiApiBaseUrl { get; set; } = "https://api.openai.com/v1";
+    public string OpenAiApiKey { get; set; } = string.Empty;
+    public string OpenAiApiKeyEnvironmentVariable { get; set; } = "OPENAI_API_KEY";
+    public string OpenAiModel { get; set; } = "gpt-4.1-mini";
+    public int OpenAiRequestTimeoutMs { get; set; } = 20000;
+    public int OpenAiMaxOutputTokens { get; set; } = 2200;
     public string TesseractCommand { get; set; } = "tesseract";
     public string TesseractLanguage { get; set; } = "eng";
     public int TesseractPageSegMode { get; set; } = 6;
@@ -15,9 +21,6 @@ public sealed class PurchasingOptions
     public int OcrRetryCount { get; set; } = 2;
     public int OcrCircuitBreakerFailureThreshold { get; set; } = 4;
     public int OcrCircuitBreakerOpenSeconds { get; set; } = 45;
-    public string OpenAiApiBaseUrl { get; set; } = string.Empty;
-    public string OpenAiModel { get; set; } = "gpt-4.1-mini";
-    public int OpenAiMaxOutputTokens { get; set; } = 2200;
     public decimal LowConfidenceThreshold { get; set; } = 0.75m;
     public decimal FuzzyMatchThreshold { get; set; } = 0.72m;
     public decimal TotalsToleranceAmount { get; set; } = 2.00m;

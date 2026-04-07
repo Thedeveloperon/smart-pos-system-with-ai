@@ -1,4 +1,4 @@
-import { useMemo, useState, type ElementType } from "react";
+import { useEffect, useMemo, useState, type ElementType } from "react";
 import {
   BarChart3,
   ChevronRight,
@@ -11,12 +11,13 @@ import {
   TrendingUp,
   Users,
 } from "lucide-react";
+import type { ShopProfileLanguage } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import {
-  posChatbotFaqCategories,
+  getPosChatbotFaqCategories,
   type PosChatbotFaqCategory,
   type PosChatbotFaqQuestion,
 } from "@/data/posChatbotFaq";
@@ -32,31 +33,89 @@ const iconMap: Record<string, ElementType> = {
   reports_summaries: BarChart3,
 };
 
+type FaqBrowserText = {
+  chooseCategory: string;
+  tapQuestion: string;
+  enterPlaceholder: (placeholderLabel: string) => string;
+  sendQuestion: string;
+  customQuestionPlaceholder: string;
+  sendCustomQuestionAriaLabel: string;
+};
+
 type FaqBrowserProps = {
   onSendQuestion: (question: string) => void;
   disabled?: boolean;
+  language?: ShopProfileLanguage;
 };
+
+function getFaqBrowserText(language: ShopProfileLanguage): FaqBrowserText {
+  if (language === "sinhala") {
+    return {
+      chooseCategory: "සාමාන්‍ය ප්‍රශ්න පිරික්සීමට කාණ්ඩයක් තෝරන්න:",
+      tapQuestion: "ප්‍රශ්නයක් වහාම යැවීමට ඔබන්න, හෝ අවශ්‍ය තැන් පුරවන්න.",
+      enterPlaceholder: (placeholderLabel) => `${placeholderLabel} ඇතුළත් කරන්න...`,
+      sendQuestion: "ප්‍රශ්නය යවන්න",
+      customQuestionPlaceholder: "ඔබගේ ප්‍රශ්නය ලියන්න...",
+      sendCustomQuestionAriaLabel: "අභිරුචි ප්‍රශ්නය යවන්න",
+    };
+  }
+
+  if (language === "tamil") {
+    return {
+      chooseCategory: "பொதுவான கேள்விகளை பார்க்க ஒரு வகையை தேர்ந்தெடுக்கவும்:",
+      tapQuestion: "ஒரு கேள்வியை உடனே அனுப்ப தட்டவும், அல்லது கேட்கப்பட்ட புலங்களை நிரப்பவும்.",
+      enterPlaceholder: (placeholderLabel) => `${placeholderLabel} உள்ளிடவும்...`,
+      sendQuestion: "கேள்வியை அனுப்பு",
+      customQuestionPlaceholder: "உங்கள் கேள்வியை தட்டச்சு செய்யவும்...",
+      sendCustomQuestionAriaLabel: "தனிப்பயன் கேள்வியை அனுப்பு",
+    };
+  }
+
+  return {
+    chooseCategory: "Choose a category to explore common questions:",
+    tapQuestion: "Tap a question to send instantly, or fill placeholders when prompted.",
+    enterPlaceholder: (placeholderLabel) => `Enter ${placeholderLabel}...`,
+    sendQuestion: "Send Question",
+    customQuestionPlaceholder: "Type a custom question...",
+    sendCustomQuestionAriaLabel: "Send custom question",
+  };
+}
 
 function buildQuestionWithPlaceholders(
   question: PosChatbotFaqQuestion,
   placeholderValues: Record<string, string>,
 ): string {
-  let text = question.text;
+  let text = question.template;
   question.placeholders.forEach((placeholder) => {
-    text = text.replace(`{${placeholder}}`, placeholderValues[placeholder]?.trim() || `{${placeholder}}`);
+    text = text.replaceAll(`{${placeholder.key}}`, placeholderValues[placeholder.key]?.trim() || "");
   });
 
   return text;
 }
 
-export function FaqBrowser({ onSendQuestion, disabled = false }: FaqBrowserProps) {
-  const [expandedCategory, setExpandedCategory] = useState<string | null>(posChatbotFaqCategories[0]?.id ?? null);
+export function FaqBrowser({ onSendQuestion, disabled = false, language = "english" }: FaqBrowserProps) {
+  const faqText = useMemo(() => getFaqBrowserText(language), [language]);
+  const categories = useMemo(() => getPosChatbotFaqCategories(language), [language]);
+
+  const [expandedCategory, setExpandedCategory] = useState<string | null>(categories[0]?.id ?? null);
   const [selectedQuestion, setSelectedQuestion] = useState<PosChatbotFaqQuestion | null>(null);
   const [placeholderValues, setPlaceholderValues] = useState<Record<string, string>>({});
   const [customQuestion, setCustomQuestion] = useState("");
 
+  useEffect(() => {
+    setExpandedCategory((previous) => {
+      if (previous && categories.some((category) => category.id === previous)) {
+        return previous;
+      }
+
+      return categories[0]?.id ?? null;
+    });
+    setSelectedQuestion(null);
+    setPlaceholderValues({});
+  }, [categories]);
+
   const allPlaceholdersFilled = useMemo(
-    () => selectedQuestion?.placeholders.every((placeholder) => placeholderValues[placeholder]?.trim()) ?? false,
+    () => selectedQuestion?.placeholders.every((placeholder) => placeholderValues[placeholder.key]?.trim()) ?? false,
     [placeholderValues, selectedQuestion],
   );
 
@@ -72,7 +131,7 @@ export function FaqBrowser({ onSendQuestion, disabled = false }: FaqBrowserProps
     }
 
     if (question.placeholders.length === 0) {
-      onSendQuestion(question.text);
+      onSendQuestion(question.template);
       return;
     }
 
@@ -105,13 +164,11 @@ export function FaqBrowser({ onSendQuestion, disabled = false }: FaqBrowserProps
       <ScrollArea className="min-h-0 flex-1">
         <div className="space-y-1 p-3">
           <div className="px-2 pb-2">
-            <p className="text-sm font-medium text-foreground">Choose a category to explore common questions:</p>
-            <p className="text-xs text-muted-foreground">
-              Tap a question to send instantly, or fill placeholders when prompted.
-            </p>
+            <p className="text-sm font-medium text-foreground">{faqText.chooseCategory}</p>
+            <p className="text-xs text-muted-foreground">{faqText.tapQuestion}</p>
           </div>
 
-          {posChatbotFaqCategories.map((category) => {
+          {categories.map((category) => {
             const Icon = iconMap[category.id] ?? Package;
             const isExpanded = expandedCategory === category.id;
 
@@ -156,15 +213,15 @@ export function FaqBrowser({ onSendQuestion, disabled = false }: FaqBrowserProps
                             <div className="space-y-2 px-3 py-2">
                               {question.placeholders.map((placeholder) => (
                                 <Input
-                                  key={placeholder}
-                                  value={placeholderValues[placeholder] || ""}
+                                  key={placeholder.key}
+                                  value={placeholderValues[placeholder.key] || ""}
                                   onChange={(event) =>
                                     setPlaceholderValues((previous) => ({
                                       ...previous,
-                                      [placeholder]: event.target.value,
+                                      [placeholder.key]: event.target.value,
                                     }))
                                   }
-                                  placeholder={`Enter ${placeholder}...`}
+                                  placeholder={faqText.enterPlaceholder(placeholder.label)}
                                   className="h-8 text-xs"
                                   disabled={disabled}
                                   onKeyDown={(event) => {
@@ -181,7 +238,7 @@ export function FaqBrowser({ onSendQuestion, disabled = false }: FaqBrowserProps
                                 onClick={handleSendWithPlaceholders}
                                 disabled={!allPlaceholdersFilled || disabled}
                               >
-                                Send Question
+                                {faqText.sendQuestion}
                               </Button>
                             </div>
                           ) : null}
@@ -201,7 +258,7 @@ export function FaqBrowser({ onSendQuestion, disabled = false }: FaqBrowserProps
           <Input
             value={customQuestion}
             onChange={(event) => setCustomQuestion(event.target.value)}
-            placeholder="Type a custom question..."
+            placeholder={faqText.customQuestionPlaceholder}
             className="h-9 text-xs"
             disabled={disabled}
             onKeyDown={(event) => {
@@ -216,7 +273,7 @@ export function FaqBrowser({ onSendQuestion, disabled = false }: FaqBrowserProps
             className="h-9 w-9 shrink-0"
             onClick={handleSendCustomQuestion}
             disabled={disabled || !customQuestion.trim()}
-            aria-label="Send custom question"
+            aria-label={faqText.sendCustomQuestionAriaLabel}
           >
             <Send className="h-4 w-4" />
           </Button>

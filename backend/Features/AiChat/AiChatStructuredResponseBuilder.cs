@@ -1,5 +1,7 @@
+using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Features.AiChat.IntentPipeline;
 using SmartPos.Backend.Features.Reports;
+using SmartPos.Backend.Infrastructure;
 
 namespace SmartPos.Backend.Features.AiChat;
 
@@ -10,8 +12,13 @@ public sealed record AiChatStructuredResponseBuildResult(
 public sealed class AiChatStructuredResponseBuilder(
     AiChatIntentClassifier intentClassifier,
     AiChatEntityResolver entityResolver,
-    ReportService reportService)
+    ReportService reportService,
+    SmartPosDbContext dbContext)
 {
+    private const string OutputLanguageEnglish = "english";
+    private const string OutputLanguageSinhala = "sinhala";
+    private const string OutputLanguageTamil = "tamil";
+
     public async Task<AiChatStructuredResponseBuildResult> BuildAsync(
         string message,
         AiChatGroundingResult grounding,
@@ -25,26 +32,28 @@ public sealed class AiChatStructuredResponseBuilder(
         var classification = intentClassifier.Classify(message);
         var entities = await entityResolver.ResolveAsync(message, cancellationToken);
         var normalized = entities.NormalizedMessage;
+        var outputLanguage = await ResolveOutputLanguageAsync(cancellationToken);
 
         if (ShouldRenderStockTable(normalized, classification.Intents))
         {
-            return await BuildStockTableAsync(cancellationToken);
+            return await BuildStockTableAsync(outputLanguage, cancellationToken);
         }
 
         if (ShouldRenderSalesKpi(normalized, classification.Intents))
         {
-            return await BuildSalesKpiAsync(entities.DateRange, cancellationToken);
+            return await BuildSalesKpiAsync(entities.DateRange, outputLanguage, cancellationToken);
         }
 
         if (ShouldRenderSummaryList(normalized, classification.Intents))
         {
-            return await BuildSummaryListAsync(entities.DateRange, cancellationToken);
+            return await BuildSummaryListAsync(entities.DateRange, outputLanguage, cancellationToken);
         }
 
         return Empty();
     }
 
     private async Task<AiChatStructuredResponseBuildResult> BuildStockTableAsync(
+        string outputLanguage,
         CancellationToken cancellationToken)
     {
         var lowStock = await reportService.GetLowStockReportAsync(8, 10m, cancellationToken);
@@ -70,17 +79,26 @@ public sealed class AiChatStructuredResponseBuilder(
 
         var attentionCount = rows.Count(x => x.Status is "low" or "out");
         var footer = rows.Count == 0
-            ? "No low-stock items found at or below the current threshold."
+            ? Localize(
+                "No low-stock items found at or below the current threshold.",
+                "වත්මන් සීමාවට සමාන හෝ ඊට අඩු තොග සහිත භාණ්ඩ හමු නොවීය.",
+                outputLanguage)
             : fallbackMode
-                ? "No rows matched threshold 10. Showing nearest stock rows for quick review."
-            : $"{attentionCount} item(s) need attention.";
+                ? Localize(
+                    "No rows matched threshold 10. Showing nearest stock rows for quick review.",
+                    "10 සීමාවට ගැළපෙන පේළි නොමැත. ඉක්මන් සමාලෝචනය සඳහා ආසන්නතම තොග පේළි පෙන්වයි.",
+                    outputLanguage)
+                : Localize(
+                    $"{attentionCount} item(s) need attention.",
+                    $"භාණ්ඩ {attentionCount}ක් සඳහා අවධානය අවශ්‍යයි.",
+                    outputLanguage);
 
         var block = new AiChatMessageBlockResponse
         {
             Type = "stock_table",
             StockTable = new AiChatStockTableBlockResponse
             {
-                Title = "Stock & Inventory Update",
+                Title = Localize("Stock & Inventory Update", "තොග සහ ඉන්වෙන්ටරි යාවත්කාලීන කිරීම", outputLanguage),
                 Rows = rows,
                 FooterNote = footer
             }
@@ -89,12 +107,19 @@ public sealed class AiChatStructuredResponseBuilder(
         return new AiChatStructuredResponseBuildResult(
             Blocks: [block],
             CompanionContent: rows.Count == 0
-                ? "All tracked items are currently above the low-stock threshold."
-                : "Structured stock snapshot generated from the latest low-stock report.");
+                ? Localize(
+                    "All tracked items are currently above the low-stock threshold.",
+                    "නිරීක්ෂණය වන සියලු භාණ්ඩ මේ මොහොතේ අඩු තොග සීමාවට ඉහළින් ඇත.",
+                    outputLanguage)
+                : Localize(
+                    "Structured stock snapshot generated from the latest low-stock report.",
+                    "නවතම අඩු තොග වාර්තාවෙන් ව්‍යුහගත තොග සංක්ෂිප්තයක් නිර්මාණය කර ඇත.",
+                    outputLanguage));
     }
 
     private async Task<AiChatStructuredResponseBuildResult> BuildSalesKpiAsync(
         AiChatDateRange? dateRange,
+        string outputLanguage,
         CancellationToken cancellationToken)
     {
         var fromDate = dateRange?.FromDate;
@@ -120,7 +145,7 @@ public sealed class AiChatStructuredResponseBuilder(
             Type = "sales_kpi",
             SalesKpi = new AiChatSalesKpiBlockResponse
             {
-                Title = "Today's Sales Summary",
+                Title = Localize("Today's Sales Summary", "අද විකුණුම් සාරාංශය", outputLanguage),
                 FromDate = daily.FromDate,
                 ToDate = daily.ToDate,
                 Revenue = daily.NetSalesTotal,
@@ -128,7 +153,10 @@ public sealed class AiChatStructuredResponseBuilder(
                 AverageBasket = avgBasket,
                 TopSeller = topSeller is null
                     ? null
-                    : $"{topSeller.ProductName} ({topSeller.NetQuantity:0.###} units)",
+                    : Localize(
+                        $"{topSeller.ProductName} ({topSeller.NetQuantity:0.###} units)",
+                        $"{topSeller.ProductName} ({topSeller.NetQuantity:0.###} ඒකක)",
+                        outputLanguage),
                 TrendPercent = comparison.DeltaPercent,
                 TrendLabel = trendLabel
             }
@@ -137,11 +165,15 @@ public sealed class AiChatStructuredResponseBuilder(
         return new AiChatStructuredResponseBuildResult(
             Blocks: [block],
             CompanionContent:
-            $"Sales snapshot for {daily.FromDate:yyyy-MM-dd} to {daily.ToDate:yyyy-MM-dd}.");
+            Localize(
+                $"Sales snapshot for {daily.FromDate:yyyy-MM-dd} to {daily.ToDate:yyyy-MM-dd}.",
+                $"{daily.FromDate:yyyy-MM-dd} සිට {daily.ToDate:yyyy-MM-dd} දක්වා විකුණුම් සංක්ෂිප්තය.",
+                outputLanguage));
     }
 
     private async Task<AiChatStructuredResponseBuildResult> BuildSummaryListAsync(
         AiChatDateRange? dateRange,
+        string outputLanguage,
         CancellationToken cancellationToken)
     {
         var fromDate = dateRange?.FromDate;
@@ -154,11 +186,26 @@ public sealed class AiChatStructuredResponseBuilder(
 
         var items = new List<string>
         {
-            $"Net sales: {daily.NetSalesTotal:0.##} from {daily.FromDate:yyyy-MM-dd} to {daily.ToDate:yyyy-MM-dd}.",
-            $"Transactions: {daily.SalesCount} (refunds: {daily.RefundCount}).",
-            $"Low-stock items (threshold 10): {lowStock.Items.Count}.",
-            $"Period trend vs previous window: {comparison.DeltaPercent:0.##}%.",
-            $"Next-month forecast: {forecast.ForecastNextMonthNetSales:0.##} ({forecast.Confidence} confidence)."
+            Localize(
+                $"Net sales: {daily.NetSalesTotal:0.##} from {daily.FromDate:yyyy-MM-dd} to {daily.ToDate:yyyy-MM-dd}.",
+                $"ශුද්ධ විකුණුම්: {daily.FromDate:yyyy-MM-dd} සිට {daily.ToDate:yyyy-MM-dd} දක්වා {daily.NetSalesTotal:0.##}.",
+                outputLanguage),
+            Localize(
+                $"Transactions: {daily.SalesCount} (refunds: {daily.RefundCount}).",
+                $"ගනුදෙනු: {daily.SalesCount} (ආපසු ගෙවීම්: {daily.RefundCount}).",
+                outputLanguage),
+            Localize(
+                $"Low-stock items (threshold 10): {lowStock.Items.Count}.",
+                $"අඩු තොග භාණ්ඩ (සීමාව 10): {lowStock.Items.Count}.",
+                outputLanguage),
+            Localize(
+                $"Period trend vs previous window: {comparison.DeltaPercent:0.##}%.",
+                $"පෙර කාලය සමඟ සැසඳූ ප්‍රවණතාව: {comparison.DeltaPercent:0.##}%.",
+                outputLanguage),
+            Localize(
+                $"Next-month forecast: {forecast.ForecastNextMonthNetSales:0.##} ({forecast.Confidence} confidence).",
+                $"ඊළඟ මාස අනාවැකිය: {forecast.ForecastNextMonthNetSales:0.##} ({forecast.Confidence} විශ්වාස මට්ටම).",
+                outputLanguage)
         };
 
         var block = new AiChatMessageBlockResponse
@@ -166,14 +213,17 @@ public sealed class AiChatStructuredResponseBuilder(
             Type = "summary_list",
             SummaryList = new AiChatSummaryListBlockResponse
             {
-                Title = "Business Summary",
+                Title = Localize("Business Summary", "ව්‍යාපාර සාරාංශය", outputLanguage),
                 Items = items
             }
         };
 
         return new AiChatStructuredResponseBuildResult(
             Blocks: [block],
-            CompanionContent: "Structured business summary generated from current report buckets.");
+            CompanionContent: Localize(
+                "Structured business summary generated from current report buckets.",
+                "වත්මන් වාර්තා දත්ත මත ව්‍යුහගත ව්‍යාපාර සාරාංශයක් නිර්මාණය කර ඇත.",
+                outputLanguage));
     }
 
     private static bool ShouldRenderStockTable(string normalizedMessage, IReadOnlyCollection<AiChatIntentType> intents)
@@ -183,14 +233,23 @@ public sealed class AiChatStructuredResponseBuilder(
             "low stock",
             "stock items",
             "out of stock",
-            "reorder"))
+            "reorder",
+            "තොග අඩු",
+            "තොග භාණ්ඩ",
+            "තොග අවසන්",
+            "නැවත ඇණවුම්"))
         {
             return true;
         }
 
         return intents.Count == 1 &&
                intents.Contains(AiChatIntentType.Stock) &&
-               normalizedMessage.Contains("stock", StringComparison.Ordinal);
+               ContainsAny(
+                   normalizedMessage,
+                   "stock",
+                   "inventory",
+                   "තොග",
+                   "ඉන්වෙන්ටරි");
     }
 
     private static bool ShouldRenderSalesKpi(string normalizedMessage, IReadOnlyCollection<AiChatIntentType> intents)
@@ -202,14 +261,17 @@ public sealed class AiChatStructuredResponseBuilder(
             "top sales",
             "today sales summary",
             "daily sales summary",
-            "sales summary"))
+            "sales summary",
+            "වැඩිපුරම විකුණුම්",
+            "අද විකුණුම් සාරාංශ",
+            "විකුණුම් සාරාංශ"))
         {
             return true;
         }
 
         return intents.Contains(AiChatIntentType.Sales) &&
-               normalizedMessage.Contains("sales", StringComparison.Ordinal) &&
-               normalizedMessage.Contains("summary", StringComparison.Ordinal);
+               ContainsAny(normalizedMessage, "sales", "විකුණුම්") &&
+               ContainsAny(normalizedMessage, "summary", "සාරාංශ");
     }
 
     private static bool ShouldRenderSummaryList(string normalizedMessage, IReadOnlyCollection<AiChatIntentType> intents)
@@ -220,14 +282,18 @@ public sealed class AiChatStructuredResponseBuilder(
             "performance summary",
             "summary report",
             "report summary",
-            "key summary"))
+            "key summary",
+            "ව්‍යාපාර සාරාංශ",
+            "කාර්යසාධන සාරාංශ",
+            "වාර්තා සාරාංශ",
+            "ප්‍රධාන සාරාංශ"))
         {
             return true;
         }
 
         return intents.Contains(AiChatIntentType.Reports) &&
-               normalizedMessage.Contains("summary", StringComparison.Ordinal) &&
-               !normalizedMessage.Contains("sales summary", StringComparison.Ordinal);
+               ContainsAny(normalizedMessage, "summary", "සාරාංශ") &&
+               !ContainsAny(normalizedMessage, "sales summary", "විකුණුම් සාරාංශ");
     }
 
     private static string ResolveStockStatus(decimal currentStock, decimal reorderLevel)
@@ -248,6 +314,48 @@ public sealed class AiChatStructuredResponseBuilder(
     private static bool ContainsAny(string value, params string[] tokens)
     {
         return tokens.Any(token => value.Contains(token, StringComparison.Ordinal));
+    }
+
+    private async Task<string> ResolveOutputLanguageAsync(CancellationToken cancellationToken)
+    {
+        string? value;
+        if (dbContext.Database.IsSqlite())
+        {
+            value = (await dbContext.ShopProfiles
+                    .AsNoTracking()
+                    .Select(x => x.Language)
+                    .ToListAsync(cancellationToken))
+                .FirstOrDefault();
+        }
+        else
+        {
+            value = await dbContext.ShopProfiles
+                .AsNoTracking()
+                .Select(x => x.Language)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        return NormalizeOutputLanguage(value);
+    }
+
+    private static string NormalizeOutputLanguage(string? value)
+    {
+        var normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            OutputLanguageSinhala => OutputLanguageSinhala,
+            OutputLanguageTamil => OutputLanguageTamil,
+            _ => OutputLanguageEnglish
+        };
+    }
+
+    private static string Localize(string english, string sinhala, string outputLanguage)
+    {
+        return outputLanguage switch
+        {
+            OutputLanguageSinhala => sinhala,
+            _ => english
+        };
     }
 
     private static AiChatStructuredResponseBuildResult Empty()

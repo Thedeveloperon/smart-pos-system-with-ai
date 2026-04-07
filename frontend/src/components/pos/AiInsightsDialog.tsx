@@ -10,6 +10,7 @@ import {
   type AiChatMessage,
   type AiChatSessionSummary,
   type AiInsightsUsageType,
+  type ShopProfileLanguage,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { FaqBrowser } from "@/components/chatbot/FaqBrowser";
@@ -20,11 +21,90 @@ interface AiInsightsDialogProps {
   onOpenChange: (open: boolean) => void;
   onBalanceChange?: (balance: number) => void;
   isSuperAdmin?: boolean;
+  language?: ShopProfileLanguage;
 }
 
 const CHAT_USAGE_TYPE: AiInsightsUsageType = "quick_insights";
 
-const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDialogProps) => {
+type AiInsightsDialogText = {
+  posAssistantTitle: string;
+  alwaysHereToHelp: string;
+  collapseAssistant: string;
+  expandAssistant: string;
+  closeAssistant: string;
+  aiCredits: string;
+  creditsLabel: string;
+  newChat: string;
+  untitledChat: string;
+  savedChat: string;
+  newChatSessionLabel: string;
+  failedToLoadChatSession: string;
+  failedToLoadChatHistory: string;
+  failedToCreateChatSession: string;
+  failedToSendChatMessage: string;
+};
+
+function getAiInsightsDialogText(language: ShopProfileLanguage): AiInsightsDialogText {
+  if (language === "sinhala") {
+    return {
+      posAssistantTitle: "POS සහායක",
+      alwaysHereToHelp: "ඔබට උදව් කිරීමට සැමවිටම සූදානම්",
+      collapseAssistant: "සහායකය හකුළන්න",
+      expandAssistant: "සහායකය විහිදුවන්න",
+      closeAssistant: "සහායකය වසන්න",
+      aiCredits: "AI ක්‍රෙඩිට්",
+      creditsLabel: "ක්‍රෙඩිට්",
+      newChat: "නව චැට්",
+      untitledChat: "ශීර්ෂය නැති චැට්",
+      savedChat: "සුරකින්නා ලද චැට්",
+      newChatSessionLabel: "නව චැට්",
+      failedToLoadChatSession: "චැට් සැසිය පූරණය කළ නොහැකි විය.",
+      failedToLoadChatHistory: "චැට් ඉතිහාසය පූරණය කළ නොහැකි විය.",
+      failedToCreateChatSession: "චැට් සැසිය නිර්මාණය කළ නොහැකි විය.",
+      failedToSendChatMessage: "චැට් පණිවිඩය යැවීමට නොහැකි විය.",
+    };
+  }
+
+  if (language === "tamil") {
+    return {
+      posAssistantTitle: "POS உதவியாளர்",
+      alwaysHereToHelp: "உங்களுக்கு உதவ எப்போதும் தயார்",
+      collapseAssistant: "உதவியாளரை சுருக்கு",
+      expandAssistant: "உதவியாளரை விரிவு செய்",
+      closeAssistant: "உதவியாளரை மூடு",
+      aiCredits: "AI கிரெடிட்ஸ்",
+      creditsLabel: "கிரெடிட்ஸ்",
+      newChat: "புதிய அரட்டை",
+      untitledChat: "தலைப்பு இல்லா அரட்டை",
+      savedChat: "சேமித்த அரட்டை",
+      newChatSessionLabel: "புதிய அரட்டை",
+      failedToLoadChatSession: "அரட்டை அமர்வை ஏற்ற முடியவில்லை.",
+      failedToLoadChatHistory: "அரட்டை வரலாற்றை ஏற்ற முடியவில்லை.",
+      failedToCreateChatSession: "அரட்டை அமர்வை உருவாக்க முடியவில்லை.",
+      failedToSendChatMessage: "அரட்டை செய்தியை அனுப்ப முடியவில்லை.",
+    };
+  }
+
+  return {
+    posAssistantTitle: "POS Assistant",
+    alwaysHereToHelp: "Always here to help",
+    collapseAssistant: "Collapse assistant",
+    expandAssistant: "Expand assistant",
+    closeAssistant: "Close assistant",
+    aiCredits: "AI credits",
+    creditsLabel: "Credits",
+    newChat: "New Chat",
+    untitledChat: "Untitled chat",
+    savedChat: "Saved chat",
+    newChatSessionLabel: "New chat",
+    failedToLoadChatSession: "Failed to load chat session.",
+    failedToLoadChatHistory: "Failed to load chat history.",
+    failedToCreateChatSession: "Failed to create chat session.",
+    failedToSendChatMessage: "Failed to send chat message.",
+  };
+}
+
+const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, language = "english" }: AiInsightsDialogProps) => {
   const [chatSessions, setChatSessions] = useState<AiChatSessionSummary[]>([]);
   const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(null);
   const [chatMessages, setChatMessages] = useState<AiChatMessage[]>([]);
@@ -34,24 +114,25 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
   const [isCreatingChatSession, setIsCreatingChatSession] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [walletCredits, setWalletCredits] = useState<number | null>(null);
+  const uiText = useMemo(() => getAiInsightsDialogText(language), [language]);
 
   const sessionLabel = useMemo(() => {
     if (!activeChatSessionId) {
-      return "New chat";
+      return uiText.newChatSessionLabel;
     }
 
     const session = chatSessions.find((item) => item.session_id === activeChatSessionId);
     if (!session) {
-      return "Saved chat";
+      return uiText.savedChat;
     }
 
     const normalizedTitle = (session.title ?? "").trim();
     if (!normalizedTitle) {
-      return "Saved chat";
+      return uiText.savedChat;
     }
 
     return normalizedTitle.length > 30 ? `${normalizedTitle.slice(0, 30)}...` : normalizedTitle;
-  }, [activeChatSessionId, chatSessions]);
+  }, [activeChatSessionId, chatSessions, uiText.newChatSessionLabel, uiText.savedChat]);
 
   const loadWallet = async () => {
     try {
@@ -72,7 +153,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
       setChatView("chat");
     } catch (error) {
       console.error(error);
-      toast.error("Failed to load chat session.");
+      toast.error(uiText.failedToLoadChatSession);
     } finally {
       setIsLoadingChat(false);
     }
@@ -85,7 +166,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
       setChatSessions(response.items);
     } catch (error) {
       console.error(error);
-      toast.error("Failed to load chat history.");
+      toast.error(uiText.failedToLoadChatHistory);
     } finally {
       setIsLoadingChat(false);
     }
@@ -104,7 +185,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
       setChatView("faq");
     } catch (error) {
       console.error(error);
-      toast.error("Failed to create chat session.");
+      toast.error(uiText.failedToCreateChatSession);
     } finally {
       setIsCreatingChatSession(false);
     }
@@ -155,7 +236,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
       await loadChatHistory();
     } catch (error) {
       console.error(error);
-      toast.error(error instanceof Error ? error.message : "Failed to send chat message.");
+      toast.error(error instanceof Error ? error.message : uiText.failedToSendChatMessage);
     } finally {
       setIsSendingChatMessage(false);
     }
@@ -184,8 +265,8 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
                 <MessageCircle className="h-4 w-4" />
               </div>
               <div>
-                <p className="text-lg font-semibold leading-tight">POS Assistant</p>
-                <p className="text-xs text-primary-foreground/85">Always here to help</p>
+                <p className="text-lg font-semibold leading-tight">{uiText.posAssistantTitle}</p>
+                <p className="text-xs text-primary-foreground/85">{uiText.alwaysHereToHelp}</p>
               </div>
             </div>
             <div className="flex items-center gap-1">
@@ -193,7 +274,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
                 type="button"
                 className="rounded-md p-1 text-primary-foreground/90 transition-colors hover:bg-primary-foreground/15 hover:text-primary-foreground"
                 onClick={() => setIsCollapsed((previous) => !previous)}
-                aria-label={isCollapsed ? "Expand assistant" : "Collapse assistant"}
+                aria-label={isCollapsed ? uiText.expandAssistant : uiText.collapseAssistant}
               >
                 {isCollapsed ? <Plus className="h-4 w-4" /> : <Minus className="h-4 w-4" />}
               </button>
@@ -201,7 +282,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
                 type="button"
                 className="rounded-md p-1 text-primary-foreground/90 transition-colors hover:bg-primary-foreground/15 hover:text-primary-foreground"
                 onClick={() => onOpenChange(false)}
-                aria-label="Close assistant"
+                aria-label={uiText.closeAssistant}
               >
                 <X className="h-4 w-4" />
               </button>
@@ -212,7 +293,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
             <>
               <div className="flex items-center justify-between border-b border-border bg-muted/10 px-3 py-2">
                 <p className="text-xs text-muted-foreground">
-                  {walletCredits === null ? "AI credits" : `Credits: ${walletCredits.toFixed(2)}`}
+                  {walletCredits === null ? uiText.aiCredits : `${uiText.creditsLabel}: ${walletCredits.toFixed(2)}`}
                 </p>
                 <div className="flex items-center gap-2">
                   <select
@@ -233,7 +314,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
                     <option value="">{sessionLabel}</option>
                     {chatSessions.map((session) => (
                       <option key={session.session_id} value={session.session_id}>
-                        {session.title || "Untitled chat"}
+                        {session.title || uiText.untitledChat}
                       </option>
                     ))}
                   </select>
@@ -246,7 +327,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
                     disabled={isCreatingChatSession}
                   >
                     {isCreatingChatSession ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
-                    New Chat
+                    {uiText.newChat}
                   </Button>
                 </div>
               </div>
@@ -257,12 +338,14 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange }: AiInsightsDia
                     onSendQuestion={(question) => {
                       void handleSendChatMessage(question);
                     }}
+                    language={language}
                     disabled={isSendingChatMessage || isCreatingChatSession || isLoadingChat}
                   />
                 ) : (
                   <ChatConversation
                     messages={chatMessages}
                     isTyping={isLoadingChat || isSendingChatMessage}
+                    language={language}
                     onSendMessage={(question) => {
                       void handleSendChatMessage(question);
                     }}

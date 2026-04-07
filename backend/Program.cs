@@ -308,6 +308,7 @@ builder.Services.AddScoped<AiChatService>();
 builder.Services.AddScoped<ReminderService>();
 builder.Services.AddHttpClient<AiSuggestionService>();
 builder.Services.AddHttpClient<AiInsightService>();
+builder.Services.AddHttpClient("openai-ocr");
 builder.Services.AddSingleton<BasicTextOcrProvider>();
 builder.Services.AddSingleton<TesseractOcrProvider>();
 builder.Services.AddSingleton<OpenAiVisionOcrProvider>();
@@ -326,8 +327,13 @@ builder.Services.AddSingleton<IOcrProviderCore>(serviceProvider =>
         return serviceProvider.GetRequiredService<TesseractOcrProvider>();
     }
 
-    if (!string.IsNullOrWhiteSpace(configuredProvider) &&
-        !string.Equals(configuredProvider, "basic-text", StringComparison.OrdinalIgnoreCase))
+    if (string.IsNullOrWhiteSpace(configuredProvider) ||
+        string.Equals(configuredProvider, "basic-text", StringComparison.OrdinalIgnoreCase))
+    {
+        return serviceProvider.GetRequiredService<BasicTextOcrProvider>();
+    }
+
+    if (!string.Equals(configuredProvider, "basic-text", StringComparison.OrdinalIgnoreCase))
     {
         var logger = serviceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
         logger.LogWarning(
