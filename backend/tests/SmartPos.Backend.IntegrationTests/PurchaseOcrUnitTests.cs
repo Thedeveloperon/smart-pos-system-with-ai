@@ -1,7 +1,11 @@
+using System.Net;
+using System.Net.Http;
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using SmartPos.Backend.Domain;
@@ -150,6 +154,78 @@ public sealed class PurchaseOcrUnitTests
             provider.ExtractAsync(
                 new BillFileData("missing-command.png", "image/png", pngLikeBytes),
                 CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task OpenAiVisionOcrProvider_ShouldMapStructuredPayload()
+    {
+        var openAiResponse = JsonSerializer.Serialize(new
+        {
+            output_text = """
+                {
+                  "supplier_name": "Sammana Stationer",
+                  "invoice_number": "103511583",
+                  "invoice_date": "2026-04-04",
+                  "currency": "LKR",
+                  "subtotal": 39626.45,
+                  "tax_total": 0,
+                  "grand_total": 39626.45,
+                  "confidence": 0.93,
+                  "warnings": [],
+                  "lines": [
+                    {
+                      "line_no": 1,
+                      "item_name": "70gsm B4 (1000*2) 1K",
+                      "raw_text": "70gsm B4 (1000*2) 1K",
+                      "quantity": 2,
+                      "unit_cost": 4800,
+                      "line_total": 9600,
+                      "confidence": 0.92
+                    },
+                    {
+                      "line_no": 2,
+                      "item_name": "80gsm A3 (1000*2) 1K",
+                      "raw_text": "80gsm A3 (1000*2) 1K",
+                      "quantity": 3,
+                      "unit_cost": 7550,
+                      "line_total": 22650,
+                      "confidence": 0.90
+                    }
+                  ]
+                }
+                """
+        });
+
+        var provider = BuildOpenAiProvider(
+            openAiResponse,
+            HttpStatusCode.OK);
+
+        var file = new BillFileData("invoice.jpg", "image/jpeg", [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10]);
+        var result = await provider.ExtractAsync(file, CancellationToken.None);
+
+        Assert.Equal("openai-vision", result.ProviderName);
+        Assert.Equal("gpt-4.1-mini", result.ProviderModel);
+        Assert.Equal("Sammana Stationer", result.SupplierName);
+        Assert.Equal("103511583", result.InvoiceNumber);
+        Assert.Equal("LKR", result.Currency);
+        Assert.Equal(39626.45m, result.GrandTotal);
+        Assert.Equal(2, result.Lines.Count);
+        Assert.Equal("70gsm B4 (1000*2) 1K", result.Lines[0].ItemName);
+        Assert.Equal(2m, result.Lines[0].Quantity);
+        Assert.Equal(4800m, result.Lines[0].UnitCost);
+        Assert.Equal(9600m, result.Lines[0].LineTotal);
+    }
+
+    [Fact]
+    public async Task OpenAiVisionOcrProvider_ShouldThrowUnavailable_OnMalformedPayload()
+    {
+        var openAiResponse = """{"output_text":"not-json"}""";
+        var provider = BuildOpenAiProvider(openAiResponse, HttpStatusCode.OK);
+
+        var file = new BillFileData("invoice.jpg", "image/jpeg", [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10]);
+
+        await Assert.ThrowsAsync<OcrProviderUnavailableException>(() =>
+            provider.ExtractAsync(file, CancellationToken.None));
     }
 
     [Fact]
@@ -368,6 +444,33 @@ public sealed class PurchaseOcrUnitTests
             NullLogger<PurchaseService>.Instance);
     }
 
+    private static OpenAiVisionOcrProvider BuildOpenAiProvider(string responseBody, HttpStatusCode statusCode)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["OPENAI_API_KEY"] = "test-key"
+            })
+            .Build();
+
+        var options = Options.Create(new PurchasingOptions
+        {
+            OcrTimeoutMs = 5000,
+            OpenAiModel = "gpt-4.1-mini",
+            OpenAiApiBaseUrl = "https://api.openai.test/v1",
+            OpenAiMaxOutputTokens = 1024
+        });
+
+        var client = new HttpClient(new StubHttpMessageHandler(responseBody, statusCode));
+        var factory = new StubHttpClientFactory(client);
+
+        return new OpenAiVisionOcrProvider(
+            factory,
+            configuration,
+            options,
+            NullLogger<OpenAiVisionOcrProvider>.Instance);
+    }
+
     private static void SeedCatalogProducts(SmartPosDbContext dbContext)
     {
         var now = DateTimeOffset.UtcNow;
@@ -428,6 +531,22 @@ public sealed class PurchaseOcrUnitTests
         public Task<PurchaseOcrExtractionResult> ExtractAsync(BillFileData file, CancellationToken cancellationToken)
         {
             return Task.FromResult(extraction);
+        }
+    }
+
+    private sealed class StubHttpClientFactory(HttpClient client) : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => client;
+    }
+
+    private sealed class StubHttpMessageHandler(string responseBody, HttpStatusCode statusCode) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new HttpResponseMessage(statusCode)
+            {
+                Content = new StringContent(responseBody, Encoding.UTF8, "application/json")
+            });
         }
     }
 }

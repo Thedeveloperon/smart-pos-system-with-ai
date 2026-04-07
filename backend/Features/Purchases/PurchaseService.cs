@@ -107,12 +107,18 @@ public sealed class PurchaseService(
             extraction = new PurchaseOcrExtractionResult
             {
                 ProviderName = "fallback-manual",
+                ProviderModel = null,
                 SupplierName = NormalizeOptional(supplierHint),
                 Currency = "LKR",
                 OverallConfidence = 0m,
                 RawText = null,
                 Lines = []
             };
+        }
+
+        if (extraction.Warnings.Count > 0)
+        {
+            warnings.AddRange(extraction.Warnings);
         }
 
         var lowConfidenceThreshold = Math.Clamp(options.Value.LowConfidenceThreshold, 0m, 1m);
@@ -174,6 +180,7 @@ public sealed class PurchaseService(
         {
             correlation_id = correlationId,
             provider = extraction.ProviderName,
+            provider_model = extraction.ProviderModel,
             extraction.SupplierName,
             extraction.InvoiceNumber,
             extraction.InvoiceDate,
@@ -243,6 +250,8 @@ public sealed class PurchaseService(
             TaxTotal = extraction.TaxTotal,
             GrandTotal = extraction.GrandTotal,
             OcrConfidence = extraction.OverallConfidence,
+            ExtractionProvider = extraction.ProviderName,
+            ExtractionModel = extraction.ProviderModel,
             ReviewRequired = reviewRequired,
             CanAutoCommit = canAutoCommit,
             BlockedReasons = blockedReasons.OrderBy(x => x).ToList(),

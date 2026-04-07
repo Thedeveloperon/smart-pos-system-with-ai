@@ -14,6 +14,7 @@ public sealed record BillFileData(
 public sealed class PurchaseOcrExtractionResult
 {
     public string ProviderName { get; set; } = "basic-text";
+    public string? ProviderModel { get; set; }
     public string? SupplierName { get; set; }
     public string? InvoiceNumber { get; set; }
     public DateTimeOffset? InvoiceDate { get; set; }
@@ -23,6 +24,7 @@ public sealed class PurchaseOcrExtractionResult
     public decimal? GrandTotal { get; set; }
     public decimal? OverallConfidence { get; set; }
     public string? RawText { get; set; }
+    public List<string> Warnings { get; set; } = [];
     public List<PurchaseOcrExtractionLine> Lines { get; set; } = [];
 }
 
