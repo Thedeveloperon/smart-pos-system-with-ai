@@ -4,7 +4,9 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SmartPos.Backend.Domain;
+using SmartPos.Backend.Features.Licensing;
 using SmartPos.Backend.Infrastructure;
+using SmartPos.Backend.Security;
 
 namespace SmartPos.Backend.Features.Ai;
 
@@ -12,7 +14,9 @@ public sealed class AiCreditPaymentService(
     SmartPosDbContext dbContext,
     AiCreditBillingService creditBillingService,
     IOptions<AiInsightOptions> options,
-    ILogger<AiCreditPaymentService> logger)
+    ILogger<AiCreditPaymentService> logger,
+    AuditLogService auditLogService,
+    ILicensingAlertMonitor licensingAlertMonitor)
 {
     private const string WebhookStatusProcessing = "processing";
     private const string WebhookStatusProcessed = "processed";
@@ -70,7 +74,9 @@ public sealed class AiCreditPaymentService(
         var aiOptions = options.Value;
         var pack = ResolvePack(aiOptions, packCode);
         var normalizedIdempotencyKey = NormalizeIdempotencyKey(idempotencyKey);
-        var normalizedPaymentMethod = NormalizePaymentMethod(paymentMethod);
+        var normalizedPaymentMethod = NormalizePaymentMethod(
+            paymentMethod,
+            aiOptions.EnableManualPaymentFallback);
         var normalizedBankReference = NormalizeBankReference(bankReference);
         var normalizedDepositSlipUrl = ValidateDepositSlipUrl(depositSlipUrl);
         ValidateManualPaymentEvidence(
@@ -87,8 +93,25 @@ public sealed class AiCreditPaymentService(
         {
             var existingPackCode = ResolvePackCodeForPayment(existingPayment, pack.PackCode);
             var existingPaymentMethod = ResolvePaymentMethodForPayment(existingPayment, PaymentMethodCard);
-            EnsureIdempotentPackConsistency(pack.PackCode, existingPackCode);
-            EnsureIdempotentPaymentMethodConsistency(normalizedPaymentMethod, existingPaymentMethod);
+            ValidateIdempotentConsistency(
+                pack.PackCode,
+                existingPackCode,
+                normalizedPaymentMethod,
+                existingPaymentMethod);
+            auditLogService.Queue(
+                action: "ai_payment_checkout_replayed",
+                entityName: nameof(AiCreditPayment),
+                entityId: existingPayment.Id.ToString(),
+                before: new
+                {
+                    payment_status = MapPaymentStatus(existingPayment.Status, existingPaymentMethod),
+                    payment_method = existingPaymentMethod
+                },
+                after: new
+                {
+                    requested_pack_code = pack.PackCode,
+                    external_reference = existingPayment.ExternalReference
+                });
             return MapCheckoutSessionResponse(
                 existingPayment,
                 existingPackCode,
@@ -135,6 +158,22 @@ public sealed class AiCreditPaymentService(
         };
 
         dbContext.AiCreditPayments.Add(payment);
+        auditLogService.Queue(
+            action: "ai_payment_checkout_created",
+            entityName: nameof(AiCreditPayment),
+            entityId: payment.Id.ToString(),
+            before: null,
+            after: new
+            {
+                user_id = payment.UserId,
+                payment_status = MapPaymentStatus(payment.Status, normalizedPaymentMethod),
+                payment_method = normalizedPaymentMethod,
+                pack_code = pack.PackCode,
+                credits = payment.CreditsPurchased,
+                amount = payment.Amount,
+                currency = payment.Currency,
+                external_reference = payment.ExternalReference
+            });
         try
         {
             await dbContext.SaveChangesAsync(cancellationToken);
@@ -157,8 +196,25 @@ public sealed class AiCreditPaymentService(
 
             var conflictedPackCode = ResolvePackCodeForPayment(conflictedPayment, pack.PackCode);
             var conflictedPaymentMethod = ResolvePaymentMethodForPayment(conflictedPayment, PaymentMethodCard);
-            EnsureIdempotentPackConsistency(pack.PackCode, conflictedPackCode);
-            EnsureIdempotentPaymentMethodConsistency(normalizedPaymentMethod, conflictedPaymentMethod);
+            ValidateIdempotentConsistency(
+                pack.PackCode,
+                conflictedPackCode,
+                normalizedPaymentMethod,
+                conflictedPaymentMethod);
+            auditLogService.Queue(
+                action: "ai_payment_checkout_replayed",
+                entityName: nameof(AiCreditPayment),
+                entityId: conflictedPayment.Id.ToString(),
+                before: new
+                {
+                    payment_status = MapPaymentStatus(conflictedPayment.Status, conflictedPaymentMethod),
+                    payment_method = conflictedPaymentMethod
+                },
+                after: new
+                {
+                    requested_pack_code = pack.PackCode,
+                    external_reference = conflictedPayment.ExternalReference
+                });
             return MapCheckoutSessionResponse(
                 conflictedPayment,
                 conflictedPackCode,
@@ -357,6 +413,22 @@ public sealed class AiCreditPaymentService(
         payment.FailureReason = null;
         payment.UpdatedAtUtc = now;
         payment.CompletedAtUtc ??= now;
+        auditLogService.Queue(
+            action: "ai_payment_manual_verified",
+            entityName: nameof(AiCreditPayment),
+            entityId: payment.Id.ToString(),
+            before: new
+            {
+                payment_status = "pending_verification",
+                payment_method = paymentMethod
+            },
+            after: new
+            {
+                payment_status = "succeeded",
+                payment_method = paymentMethod,
+                purchase_reference = purchaseReference,
+                external_reference = payment.ExternalReference
+            });
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -472,6 +544,7 @@ public sealed class AiCreditPaymentService(
                     "Payment was not found for this webhook.",
                     now,
                     cancellationToken);
+                licensingAlertMonitor.RecordSecurityAnomaly("ai_payment_webhook_payment_not_found");
                 throw new InvalidOperationException("Payment was not found for this webhook.");
             }
 
@@ -523,6 +596,8 @@ public sealed class AiCreditPaymentService(
                 "Webhook processing failed.",
                 now,
                 cancellationToken);
+            licensingAlertMonitor.RecordWebhookFailure(eventType, "invalid_operation");
+            licensingAlertMonitor.RecordSecurityAnomaly("ai_payment_webhook_processing_failed");
             throw;
         }
         catch (Exception exception)
@@ -534,6 +609,8 @@ public sealed class AiCreditPaymentService(
                 "Webhook processing failed unexpectedly.",
                 now,
                 cancellationToken);
+            licensingAlertMonitor.RecordWebhookFailure(eventType, "unexpected_error");
+            licensingAlertMonitor.RecordSecurityAnomaly("ai_payment_webhook_processing_failed");
             throw;
         }
     }
@@ -583,12 +660,43 @@ public sealed class AiCreditPaymentService(
                 payment.PurchaseReference = purchaseReference;
                 payment.FailureReason = null;
                 payment.CompletedAtUtc = now;
+                auditLogService.Queue(
+                    action: "ai_payment_settled",
+                    entityName: nameof(AiCreditPayment),
+                    entityId: payment.Id.ToString(),
+                    before: new
+                    {
+                        payment_status = "pending",
+                        payment_method = ResolvePaymentMethodForPayment(payment, PaymentMethodCard)
+                    },
+                    after: new
+                    {
+                        payment_status = "succeeded",
+                        purchase_reference = purchaseReference,
+                        external_reference = payment.ExternalReference
+                    });
                 break;
 
             case "payment.failed":
                 payment.Status = AiCreditPaymentStatus.Failed;
                 payment.FailureReason = "payment_failed";
                 payment.CompletedAtUtc = now;
+                licensingAlertMonitor.RecordSecurityAnomaly("ai_payment_failed");
+                auditLogService.Queue(
+                    action: "ai_payment_failed",
+                    entityName: nameof(AiCreditPayment),
+                    entityId: payment.Id.ToString(),
+                    before: new
+                    {
+                        payment_status = "pending",
+                        payment_method = ResolvePaymentMethodForPayment(payment, PaymentMethodCard)
+                    },
+                    after: new
+                    {
+                        payment_status = "failed",
+                        failure_reason = payment.FailureReason,
+                        external_reference = payment.ExternalReference
+                    });
                 break;
 
             case "payment.refunded":
@@ -608,6 +716,21 @@ public sealed class AiCreditPaymentService(
                     payment.Status = AiCreditPaymentStatus.Refunded;
                     payment.FailureReason = "payment_refunded";
                     payment.CompletedAtUtc = now;
+                    auditLogService.Queue(
+                        action: "ai_payment_refunded",
+                        entityName: nameof(AiCreditPayment),
+                        entityId: payment.Id.ToString(),
+                        before: new
+                        {
+                            payment_status = "succeeded",
+                            payment_method = ResolvePaymentMethodForPayment(payment, PaymentMethodCard)
+                        },
+                        after: new
+                        {
+                            payment_status = "refunded",
+                            failure_reason = payment.FailureReason,
+                            external_reference = payment.ExternalReference
+                        });
                 }
                 break;
         }
@@ -787,16 +910,23 @@ public sealed class AiCreditPaymentService(
         };
     }
 
-    private static string NormalizePaymentMethod(string? paymentMethod)
+    private static string NormalizePaymentMethod(string? paymentMethod, bool manualFallbackEnabled)
     {
         var normalized = NormalizeOptional(paymentMethod)?.ToLowerInvariant();
-        return normalized switch
+        var resolved = normalized switch
         {
             null or "" or "card" => PaymentMethodCard,
             "cash" => PaymentMethodCash,
             "bank_deposit" or "bankdeposit" => PaymentMethodBankDeposit,
             _ => throw new InvalidOperationException("payment_method must be one of: card, cash, bank_deposit.")
         };
+
+        if (resolved != PaymentMethodCard && !manualFallbackEnabled)
+        {
+            throw new InvalidOperationException("Manual payment fallback is disabled.");
+        }
+
+        return resolved;
     }
 
     private static bool IsManualPaymentMethod(string paymentMethod)
@@ -887,7 +1017,7 @@ public sealed class AiCreditPaymentService(
         {
             try
             {
-                return NormalizePaymentMethod(metadataPaymentMethod);
+                return NormalizePaymentMethod(metadataPaymentMethod, manualFallbackEnabled: true);
             }
             catch (InvalidOperationException)
             {
@@ -1082,19 +1212,22 @@ public sealed class AiCreditPaymentService(
         return fallbackPackCode;
     }
 
-    private static void EnsureIdempotentPackConsistency(string requestedPackCode, string existingPackCode)
+    private void ValidateIdempotentConsistency(
+        string requestedPackCode,
+        string existingPackCode,
+        string requestedPaymentMethod,
+        string existingPaymentMethod)
     {
         if (!string.Equals(requestedPackCode, existingPackCode, StringComparison.OrdinalIgnoreCase))
         {
+            licensingAlertMonitor.RecordSecurityAnomaly("ai_payment_checkout_idempotency_conflict");
             throw new InvalidOperationException(
                 "Idempotency key already exists for a different pack_code.");
         }
-    }
 
-    private static void EnsureIdempotentPaymentMethodConsistency(string requestedMethod, string existingMethod)
-    {
-        if (!string.Equals(requestedMethod, existingMethod, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(requestedPaymentMethod, existingPaymentMethod, StringComparison.OrdinalIgnoreCase))
         {
+            licensingAlertMonitor.RecordSecurityAnomaly("ai_payment_checkout_idempotency_conflict");
             throw new InvalidOperationException(
                 "Idempotency key already exists for a different payment_method.");
         }

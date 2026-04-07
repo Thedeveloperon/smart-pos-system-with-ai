@@ -39,6 +39,9 @@ public sealed class AiInsightOptions
     public string[] BlockedPromptTerms { get; set; } = [];
     public string[] BlockedOutputTerms { get; set; } = [];
     public bool EnableManualWalletTopUp { get; set; } = false;
+    public bool EnableManualPaymentFallback { get; set; } = true;
+    public int PaymentCheckoutRateLimitPerMinute { get; set; } = 24;
+    public int PaymentStatusRateLimitPerMinute { get; set; } = 90;
     public bool CanaryOnlyEnabled { get; set; } = false;
     public string[] CanaryAllowedUsers { get; set; } = [];
     public bool UseIntentPipelineForChatbot { get; set; } = true;

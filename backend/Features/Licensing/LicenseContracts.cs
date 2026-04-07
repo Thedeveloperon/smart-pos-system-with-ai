@@ -1073,6 +1073,84 @@ public sealed class MarketingPaymentRequestCreateResponse
     public MarketingAiCreditOrderSummaryResponse? AiCreditOrder { get; set; }
 }
 
+public sealed class MarketingStripeCheckoutSessionResponse
+{
+    [JsonPropertyName("created_at")]
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("shop_code")]
+    public string ShopCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("shop_name")]
+    public string ShopName { get; set; } = string.Empty;
+
+    [JsonPropertyName("marketing_plan_code")]
+    public string MarketingPlanCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("internal_plan_code")]
+    public string InternalPlanCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("amount_due")]
+    public decimal AmountDue { get; set; }
+
+    [JsonPropertyName("currency")]
+    public string Currency { get; set; } = "USD";
+
+    [JsonPropertyName("invoice")]
+    public MarketingPaymentInvoiceResponse Invoice { get; set; } = new();
+
+    [JsonPropertyName("checkout_session_id")]
+    public string CheckoutSessionId { get; set; } = string.Empty;
+
+    [JsonPropertyName("checkout_url")]
+    public string CheckoutUrl { get; set; } = string.Empty;
+
+    [JsonPropertyName("expires_at")]
+    public DateTimeOffset? ExpiresAt { get; set; }
+}
+
+public sealed class MarketingStripeCheckoutSessionStatusResponse
+{
+    [JsonPropertyName("generated_at")]
+    public DateTimeOffset GeneratedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("checkout_session_id")]
+    public string CheckoutSessionId { get; set; } = string.Empty;
+
+    [JsonPropertyName("checkout_status")]
+    public string CheckoutStatus { get; set; } = "open";
+
+    [JsonPropertyName("checkout_payment_status")]
+    public string CheckoutPaymentStatus { get; set; } = "unpaid";
+
+    [JsonPropertyName("shop_code")]
+    public string? ShopCode { get; set; }
+
+    [JsonPropertyName("shop_name")]
+    public string? ShopName { get; set; }
+
+    [JsonPropertyName("invoice")]
+    public MarketingPaymentInvoiceResponse? Invoice { get; set; }
+
+    [JsonPropertyName("payment_status")]
+    public string? PaymentStatus { get; set; }
+
+    [JsonPropertyName("subscription_id")]
+    public string? SubscriptionId { get; set; }
+
+    [JsonPropertyName("subscription_status")]
+    public string? SubscriptionStatus { get; set; }
+
+    [JsonPropertyName("plan")]
+    public string? Plan { get; set; }
+
+    [JsonPropertyName("access_ready")]
+    public bool AccessReady { get; set; }
+
+    [JsonPropertyName("stripe_event_hint")]
+    public string? StripeEventHint { get; set; }
+}
+
 public sealed class MarketingPaymentSubmissionRequest
 {
     [JsonPropertyName("invoice_id")]
@@ -1777,8 +1855,14 @@ public sealed class AdminBillingStateReconciliationWebhookFailureRow
     [JsonPropertyName("last_error_code")]
     public string? LastErrorCode { get; set; }
 
+    [JsonPropertyName("failure_count")]
+    public int FailureCount { get; set; }
+
     [JsonPropertyName("received_at")]
     public DateTimeOffset ReceivedAt { get; set; }
+
+    [JsonPropertyName("dead_lettered_at")]
+    public DateTimeOffset? DeadLetteredAt { get; set; }
 
     [JsonPropertyName("updated_at")]
     public DateTimeOffset? UpdatedAt { get; set; }

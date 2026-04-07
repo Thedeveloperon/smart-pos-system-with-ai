@@ -7,6 +7,7 @@ using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SmartPos.Backend.Domain;
+using SmartPos.Backend.Features.Licensing;
 using SmartPos.Backend.Infrastructure;
 
 namespace SmartPos.Backend.IntegrationTests;
@@ -719,6 +720,89 @@ public sealed class AiInsightsCreditFlowTests(CustomWebApplicationFactory factor
             item => string.Equals(item?["payment_id"]?.GetValue<string>(), paymentId, StringComparison.Ordinal));
         Assert.NotNull(failedPayment);
         Assert.Equal("failed", failedPayment?["payment_status"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task CheckoutAndManualVerify_ShouldWriteAuditTrailEntries()
+    {
+        await TestAuth.SignInAsBillingAdminAsync(client);
+        await ResetWalletAsync("billing_admin");
+
+        var checkoutPayload = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/ai/payments/checkout", new
+            {
+                pack_code = "pack_100",
+                payment_method = "cash",
+                bank_reference = $"CASH-{Guid.NewGuid():N}"[..20],
+                idempotency_key = $"it-audit-manual-{Guid.NewGuid():N}"
+            }));
+        var paymentId = TestJson.GetString(checkoutPayload, "payment_id");
+        var externalReference = TestJson.GetString(checkoutPayload, "external_reference");
+
+        var verifyResponse = await client.PostAsJsonAsync("/api/ai/payments/verify", new
+        {
+            external_reference = externalReference
+        });
+        verifyResponse.EnsureSuccessStatusCode();
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+        var auditRows = await dbContext.AuditLogs
+            .Where(x => x.EntityName == nameof(AiCreditPayment) && x.EntityId == paymentId)
+            .OrderBy(x => x.CreatedAtUtc)
+            .ToListAsync();
+
+        Assert.Contains(auditRows, x => x.Action == "ai_payment_checkout_created");
+        Assert.Contains(auditRows, x => x.Action == "ai_payment_manual_verified");
+    }
+
+    [Fact]
+    public async Task FailedPaymentWebhook_ShouldRecordSecurityAnomaly_AndAuditFailure()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+        await ResetWalletAsync("manager");
+
+        var checkoutPayload = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/ai/payments/checkout", new
+            {
+                pack_code = "pack_100",
+                idempotency_key = $"it-anomaly-failed-{Guid.NewGuid():N}"
+            }));
+        var paymentId = TestJson.GetString(checkoutPayload, "payment_id");
+        var externalReference = TestJson.GetString(checkoutPayload, "external_reference");
+
+        await using var beforeScope = factory.Services.CreateAsyncScope();
+        var alertMonitor = beforeScope.ServiceProvider.GetRequiredService<ILicensingAlertMonitor>();
+        var anomaliesBefore = alertMonitor.GetSnapshot(180).SecurityAnomalyCount;
+
+        var webhookPayload = new
+        {
+            event_id = $"evt-{Guid.NewGuid():N}",
+            event_type = "payment.failed",
+            provider = "mockpay",
+            external_reference = externalReference,
+            payment_id = $"prov-pay-{Guid.NewGuid():N}",
+            checkout_session_id = $"cs-{Guid.NewGuid():N}",
+            amount = 5m,
+            currency = "USD",
+            occurred_at = DateTimeOffset.UtcNow
+        };
+
+        var webhookResponse = await SendSignedAiPaymentWebhookAsync(webhookPayload);
+        webhookResponse.EnsureSuccessStatusCode();
+
+        await using var afterScope = factory.Services.CreateAsyncScope();
+        var afterMonitor = afterScope.ServiceProvider.GetRequiredService<ILicensingAlertMonitor>();
+        var anomaliesAfter = afterMonitor.GetSnapshot(180).SecurityAnomalyCount;
+        Assert.True(anomaliesAfter >= anomaliesBefore + 1);
+
+        var dbContext = afterScope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+        var failureAudit = await dbContext.AuditLogs
+            .FirstOrDefaultAsync(x =>
+                x.Action == "ai_payment_failed" &&
+                x.EntityName == nameof(AiCreditPayment) &&
+                x.EntityId == paymentId);
+        Assert.NotNull(failureAudit);
     }
 
     private async Task ResetWalletAsync(string username)

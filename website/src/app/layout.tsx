@@ -1,6 +1,7 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Lato } from "next/font/google";
 import "./globals.css";
+import PwaServiceWorkerRegistration from "@/components/PwaServiceWorkerRegistration";
 
 const lato = Lato({
   subsets: ["latin"],
@@ -12,10 +13,27 @@ const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://smartpos.lk";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "SmartPOS",
+  },
+  icons: {
+    icon: [
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
+  },
   robots: {
     index: true,
     follow: true,
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#1fa783",
 };
 
 export default function RootLayout({
@@ -25,7 +43,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={lato.variable}>
-      <body>{children}</body>
+      <body>
+        {children}
+        <PwaServiceWorkerRegistration />
+      </body>
     </html>
   );
 }

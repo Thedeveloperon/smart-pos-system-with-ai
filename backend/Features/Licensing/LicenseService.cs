@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Net;
 using System.Net.Mail;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Globalization;
@@ -23,18 +24,21 @@ public sealed class LicenseService(
     IHttpContextAccessor httpContextAccessor,
     ILicensingAlertMonitor licensingAlertMonitor,
     IBillMalwareScanner billMalwareScanner,
-    IWebHostEnvironment webHostEnvironment)
+    IWebHostEnvironment webHostEnvironment,
+    IHttpClientFactory httpClientFactory)
 {
     private static readonly HashSet<string> SupportedBillingWebhookEvents = new(StringComparer.OrdinalIgnoreCase)
     {
         "invoice.paid",
         "invoice.payment_failed",
         "customer.subscription.updated",
-        "customer.subscription.deleted"
+        "customer.subscription.deleted",
+        "checkout.session.completed"
     };
     private const string WebhookEventStatusProcessing = "processing";
     private const string WebhookEventStatusProcessed = "processed";
     private const string WebhookEventStatusFailed = "failed";
+    private const string WebhookEventStatusDeadLetter = "dead_letter";
     private const string EncryptedValuePrefix = "enc:v1:";
     private const string DefaultDeviceKeyAlgorithm = "ECDSA_P256_SHA256";
     private const int DefaultManualPaymentExtensionDays = 30;
@@ -115,6 +119,21 @@ public sealed class LicenseService(
         decimal AmountDue,
         string Currency,
         bool RequiresPayment);
+    private readonly record struct StripeCheckoutSessionResult(
+        string SessionId,
+        string CheckoutUrl,
+        DateTimeOffset? ExpiresAt);
+    private readonly record struct StripeCheckoutSessionLookup(
+        string SessionId,
+        string Status,
+        string PaymentStatus,
+        string? CustomerId,
+        string? SubscriptionId,
+        DateTimeOffset? ExpiresAt,
+        string? InvoiceId,
+        string? InvoiceNumber,
+        string? ShopCode,
+        string? ShopName);
     private readonly record struct InstallerDownloadAccess(
         string? DownloadUrl,
         DateTimeOffset? ExpiresAt,
@@ -810,12 +829,16 @@ public sealed class LicenseService(
             var existingEvent = await dbContext.BillingWebhookEvents
                 .AsNoTracking()
                 .FirstAsync(x => x.ProviderEventId == providerEventId, cancellationToken);
+            var existingStatus = NormalizeOptionalValue(existingEvent.Status)?.ToLowerInvariant();
+            var reason = string.Equals(existingStatus, WebhookEventStatusDeadLetter, StringComparison.Ordinal)
+                ? "dead_letter_event"
+                : "duplicate_event";
 
             return new BillingWebhookEventResponse
             {
                 EventType = eventType,
                 Handled = false,
-                Reason = "duplicate_event",
+                Reason = reason,
                 ShopId = existingEvent.ShopId,
                 SubscriptionId = existingEvent.BillingSubscriptionId,
                 ProcessedAt = now
@@ -825,7 +848,20 @@ public sealed class LicenseService(
         var subscription = await ResolveSubscriptionForWebhookAsync(request, now, cancellationToken);
         if (subscription is null)
         {
-            await MarkWebhookEventFailedAsync(eventLog, LicenseErrorCodes.InvalidWebhook, now, cancellationToken);
+            var deadLettered = await MarkWebhookEventFailedAsync(eventLog, LicenseErrorCodes.InvalidWebhook, now, cancellationToken);
+            if (deadLettered)
+            {
+                return new BillingWebhookEventResponse
+                {
+                    EventType = eventType,
+                    Handled = false,
+                    Reason = "dead_letter_event",
+                    ShopId = eventLog.ShopId,
+                    SubscriptionId = eventLog.BillingSubscriptionId,
+                    ProcessedAt = now
+                };
+            }
+
             throw new LicenseException(
                 LicenseErrorCodes.InvalidWebhook,
                 "Webhook does not include enough identifiers to resolve a subscription.",
@@ -1008,6 +1044,7 @@ public sealed class LicenseService(
             eventLog.ShopId = subscription.ShopId;
             eventLog.BillingSubscriptionId = subscription.BillingSubscriptionId;
             eventLog.LastErrorCode = null;
+            eventLog.DeadLetteredAtUtc = null;
             eventLog.ProcessedAtUtc = now;
             eventLog.UpdatedAtUtc = now;
 
@@ -1030,14 +1067,159 @@ public sealed class LicenseService(
         }
         catch (LicenseException ex)
         {
-            await MarkWebhookEventFailedAsync(eventLog, ex.Code, now, cancellationToken);
+            var deadLettered = await MarkWebhookEventFailedAsync(eventLog, ex.Code, now, cancellationToken);
+            if (deadLettered)
+            {
+                return new BillingWebhookEventResponse
+                {
+                    EventType = eventType,
+                    Handled = false,
+                    Reason = "dead_letter_event",
+                    ShopId = eventLog.ShopId,
+                    SubscriptionId = eventLog.BillingSubscriptionId,
+                    ProcessedAt = now
+                };
+            }
+
             throw;
         }
         catch (Exception ex)
         {
-            await MarkWebhookEventFailedAsync(eventLog, ex.GetType().Name, now, cancellationToken);
+            var deadLettered = await MarkWebhookEventFailedAsync(eventLog, ex.GetType().Name, now, cancellationToken);
+            if (deadLettered)
+            {
+                return new BillingWebhookEventResponse
+                {
+                    EventType = eventType,
+                    Handled = false,
+                    Reason = "dead_letter_event",
+                    ShopId = eventLog.ShopId,
+                    SubscriptionId = eventLog.BillingSubscriptionId,
+                    ProcessedAt = now
+                };
+            }
+
             throw;
         }
+    }
+
+    public BillingWebhookEventRequest MapStripeWebhookEvent(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidWebhook,
+                "Webhook payload is empty.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        JsonElement root;
+        try
+        {
+            using var document = JsonDocument.Parse(payload);
+            root = document.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidWebhook,
+                "Webhook payload is invalid JSON.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var eventId = TryGetString(root, "id");
+        var eventType = TryGetString(root, "type");
+        if (string.IsNullOrWhiteSpace(eventId) || string.IsNullOrWhiteSpace(eventType))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidWebhook,
+                "Stripe webhook is missing required fields (id/type).",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var request = new BillingWebhookEventRequest
+        {
+            EventId = eventId,
+            EventType = eventType,
+            OccurredAt = TryGetUnixTimestamp(root, "created"),
+            Actor = "stripe-webhook"
+        };
+
+        if (!TryGetObject(root, "data", out var dataElement) ||
+            !TryGetObject(dataElement, "object", out var stripeObject))
+        {
+            return request;
+        }
+
+        request.CustomerId = TryGetString(stripeObject, "customer");
+        request.CustomerEmail =
+            TryGetString(stripeObject, "customer_email")
+            ?? TryGetNestedString(stripeObject, "customer_details", "email");
+
+        var metadata = TryGetObject(stripeObject, "metadata", out var metadataElement)
+            ? metadataElement
+            : default;
+        if (metadata.ValueKind == JsonValueKind.Object)
+        {
+            request.ShopCode =
+                TryGetString(metadata, "shop_code")
+                ?? TryGetString(metadata, "shopCode");
+            request.Plan =
+                TryGetString(metadata, "internal_plan_code")
+                ?? TryGetString(metadata, "plan")
+                ?? TryGetString(metadata, "plan_code");
+            request.CustomerEmail ??= TryGetString(metadata, "contact_email");
+        }
+
+        switch (eventType.Trim().ToLowerInvariant())
+        {
+            case "invoice.paid":
+            case "invoice.payment_failed":
+                request.SubscriptionId = TryGetString(stripeObject, "subscription");
+                request.PriceId =
+                    TryGetNestedString(stripeObject, "lines", "data", "price", "id")
+                    ?? TryGetNestedString(stripeObject, "lines", "data", "plan", "id");
+                request.PeriodStart =
+                    TryGetNestedUnixTimestamp(stripeObject, "lines", "data", "period", "start")
+                    ?? TryGetUnixTimestamp(stripeObject, "period_start");
+                request.PeriodEnd =
+                    TryGetNestedUnixTimestamp(stripeObject, "lines", "data", "period", "end")
+                    ?? TryGetUnixTimestamp(stripeObject, "period_end");
+                break;
+
+            case "customer.subscription.updated":
+            case "customer.subscription.deleted":
+                request.SubscriptionId = TryGetString(stripeObject, "id");
+                request.SubscriptionStatus = TryGetString(stripeObject, "status");
+                request.PriceId =
+                    TryGetNestedString(stripeObject, "items", "data", "price", "id")
+                    ?? TryGetNestedString(stripeObject, "items", "data", "plan", "id");
+                request.PeriodStart = TryGetUnixTimestamp(stripeObject, "current_period_start");
+                request.PeriodEnd = TryGetUnixTimestamp(stripeObject, "current_period_end");
+                break;
+
+            case "checkout.session.completed":
+                request.SubscriptionId = TryGetString(stripeObject, "subscription");
+                request.PriceId = TryGetString(stripeObject, "price");
+                request.SubscriptionStatus = TryGetString(stripeObject, "status");
+                request.CustomerEmail ??=
+                    TryGetNestedString(stripeObject, "customer_details", "email")
+                    ?? TryGetString(stripeObject, "customer_email");
+                break;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Plan))
+        {
+            request.Plan = ResolveInternalPlanCodeForStripePrice(request.PriceId);
+        }
+
+        if (string.IsNullOrWhiteSpace(request.SubscriptionId) &&
+            TryGetObject(stripeObject, "subscription_details", out var subscriptionDetails))
+        {
+            request.SubscriptionId = TryGetString(subscriptionDetails, "id");
+        }
+
+        return request;
     }
 
     public async Task<SubscriptionReconciliationResponse> ReconcileSubscriptionStateAsync(
@@ -1432,6 +1614,17 @@ public sealed class LicenseService(
 
         deactivationsUsedToday++;
         var remaining = Math.Max(0, deactivationLimitPerDay - deactivationsUsedToday);
+        var deactivationAnomalyThreshold = Math.Max(1, options.SelfServiceDeactivationAnomalyThresholdPerDay);
+        if (deactivationsUsedToday >= deactivationAnomalyThreshold)
+        {
+            licensingAlertMonitor.RecordSecurityAnomaly("self_service_device_deactivation_spike");
+        }
+
+        if (remaining == 0)
+        {
+            licensingAlertMonitor.RecordSecurityAnomaly("self_service_device_deactivation_limit_reached");
+        }
+
         dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
         {
             ShopId = context.Shop.Id,
@@ -2902,11 +3095,280 @@ public sealed class LicenseService(
         };
     }
 
+    public async Task<MarketingStripeCheckoutSessionResponse> CreateMarketingStripeCheckoutSessionAsync(
+        MarketingPaymentRequestCreateRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var now = DateTimeOffset.UtcNow;
+        var shopName = NormalizeOptionalValue(request.ShopName);
+        if (string.IsNullOrWhiteSpace(shopName))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "shop_name is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var contactName = NormalizeOptionalValue(request.ContactName);
+        if (string.IsNullOrWhiteSpace(contactName))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "contact_name is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var contactEmail = NormalizeOptionalValue(request.ContactEmail);
+        var contactPhone = NormalizeOptionalValue(request.ContactPhone);
+        if (string.IsNullOrWhiteSpace(contactEmail) && string.IsNullOrWhiteSpace(contactPhone))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Either contact_email or contact_phone is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var quote = ResolveMarketingPlanQuote(request.PlanCode);
+        if (!quote.RequiresPayment || quote.AmountDue <= 0m)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Selected plan does not require Stripe checkout.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var normalizedAiPackageCode = NormalizeOptionalValue(request.AiPackageCode);
+        var requestedAiCredits = ResolveRequestedAiCredits(request.AiCreditsRequested, normalizedAiPackageCode);
+        if (requestedAiCredits.HasValue)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Stripe checkout currently supports subscription plans only. AI credit purchase should use the AI credit checkout flow.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var normalizedCurrency = ResolveCurrency(request.Currency ?? quote.Currency);
+        var normalizedSource = NormalizeOptionalValue(request.Source) ?? "marketing_website";
+        var normalizedCampaign = NormalizeOptionalValue(request.Campaign);
+        var normalizedLocale = NormalizeOptionalValue(request.Locale);
+        var customerNotes = NormalizeOptionalValue(request.Notes);
+
+        var shopCode = string.IsNullOrWhiteSpace(request.ShopCode)
+            ? await GenerateUniqueMarketingShopCodeAsync(shopName, cancellationToken)
+            : NormalizeMarketingShopCode(request.ShopCode);
+
+        var invoiceNotes = BuildMarketingInvoiceNotes(
+            quote,
+            paymentMethod: "stripe",
+            contactName,
+            contactEmail,
+            contactPhone,
+            normalizedSource,
+            normalizedCampaign,
+            normalizedLocale,
+            targetUsername: null,
+            aiPackageCode: null,
+            aiCreditsRequested: null,
+            customerNotes);
+        var actorNote = $"plan={quote.InternalPlanCode}; method=stripe; source={normalizedSource}";
+
+        var invoiceRow = await CreateManualInvoiceAsAdminAsync(
+            new AdminManualBillingInvoiceCreateRequest
+            {
+                ShopCode = shopCode,
+                AmountDue = decimal.Round(quote.AmountDue, 2),
+                Currency = normalizedCurrency,
+                DueAt = now.AddDays(7),
+                Notes = invoiceNotes,
+                Actor = "marketing-stripe-checkout",
+                ReasonCode = "marketing_stripe_checkout_created",
+                ActorNote = actorNote
+            },
+            cancellationToken);
+
+        var shop = await dbContext.Shops
+            .FirstOrDefaultAsync(x => x.Id == invoiceRow.ShopId, cancellationToken);
+        if (shop is not null &&
+            (shop.Name.StartsWith("Shop ", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(shop.Name, options.DefaultShopName, StringComparison.OrdinalIgnoreCase)) &&
+            !string.Equals(shop.Name, shopName, StringComparison.Ordinal))
+        {
+            shop.Name = shopName;
+            shop.UpdatedAtUtc = now;
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        var resolvedShopCode = shop?.Code ?? invoiceRow.ShopCode;
+        var resolvedShopName = shop?.Name ?? shopName;
+
+        var priceId = ResolveStripePriceIdForMarketingPlan(quote.MarketingPlanCode);
+        var successUrl = ResolveStripeCheckoutSuccessUrl();
+        var cancelUrl = ResolveStripeCheckoutCancelUrl();
+        var stripeSession = await CreateStripeCheckoutSessionAsync(
+            priceId,
+            successUrl,
+            cancelUrl,
+            contactEmail,
+            invoiceRow,
+            resolvedShopCode,
+            resolvedShopName,
+            quote,
+            normalizedSource,
+            normalizedCampaign,
+            normalizedLocale,
+            cancellationToken);
+
+        return new MarketingStripeCheckoutSessionResponse
+        {
+            CreatedAt = now,
+            ShopCode = resolvedShopCode,
+            ShopName = resolvedShopName,
+            MarketingPlanCode = quote.MarketingPlanCode,
+            InternalPlanCode = quote.InternalPlanCode,
+            AmountDue = invoiceRow.AmountDue,
+            Currency = invoiceRow.Currency,
+            Invoice = new MarketingPaymentInvoiceResponse
+            {
+                InvoiceId = invoiceRow.InvoiceId,
+                InvoiceNumber = invoiceRow.InvoiceNumber,
+                Status = invoiceRow.Status,
+                DueAt = invoiceRow.DueAt
+            },
+            CheckoutSessionId = stripeSession.SessionId,
+            CheckoutUrl = stripeSession.CheckoutUrl,
+            ExpiresAt = stripeSession.ExpiresAt
+        };
+    }
+
+    public async Task<MarketingStripeCheckoutSessionStatusResponse> GetMarketingStripeCheckoutSessionStatusAsync(
+        string sessionId,
+        CancellationToken cancellationToken)
+    {
+        var normalizedSessionId = NormalizeOptionalValue(sessionId);
+        if (string.IsNullOrWhiteSpace(normalizedSessionId))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "session_id is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        if (!normalizedSessionId.StartsWith("cs_", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "session_id format is invalid.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var checkout = await RetrieveStripeCheckoutSessionAsync(normalizedSessionId, cancellationToken);
+
+        ManualBillingInvoice? invoice = null;
+        var invoiceId = TryParseGuid(checkout.InvoiceId);
+        if (invoiceId.HasValue)
+        {
+            invoice = await dbContext.ManualBillingInvoices
+                .Include(x => x.Shop)
+                .FirstOrDefaultAsync(x => x.Id == invoiceId.Value, cancellationToken);
+        }
+
+        if (invoice is null && !string.IsNullOrWhiteSpace(checkout.InvoiceNumber))
+        {
+            invoice = await dbContext.ManualBillingInvoices
+                .Include(x => x.Shop)
+                .FirstOrDefaultAsync(
+                    x => x.InvoiceNumber.ToLower() == checkout.InvoiceNumber.ToLower(),
+                    cancellationToken);
+        }
+
+        var invoiceStatus = invoice is null ? null : MapManualBillingInvoiceStatusValue(invoice.Status);
+        string? paymentStatus = null;
+        if (invoice is not null)
+        {
+            var latestPayment = (await dbContext.ManualBillingPayments
+                    .AsNoTracking()
+                    .Where(x => x.InvoiceId == invoice.Id)
+                    .ToListAsync(cancellationToken))
+                .OrderByDescending(x => x.UpdatedAtUtc ?? x.CreatedAtUtc)
+                .FirstOrDefault();
+            paymentStatus = latestPayment is null ? null : MapManualBillingPaymentStatusValue(latestPayment.Status);
+        }
+
+        Subscription? subscription = null;
+        if (invoice is not null)
+        {
+            subscription = await dbContext.Subscriptions
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.ShopId == invoice.ShopId, cancellationToken);
+        }
+        else if (!string.IsNullOrWhiteSpace(checkout.SubscriptionId))
+        {
+            subscription = await dbContext.Subscriptions
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.BillingSubscriptionId == checkout.SubscriptionId, cancellationToken);
+        }
+
+        var subscriptionStatus = subscription?.Status.ToString().ToLowerInvariant();
+        var accessReady =
+            string.Equals(subscriptionStatus, "active", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(invoiceStatus, "paid", StringComparison.OrdinalIgnoreCase);
+
+        string? stripeEventHint = null;
+        if (accessReady)
+        {
+            stripeEventHint = "license_access_ready";
+        }
+        else if (string.Equals(checkout.PaymentStatus, "paid", StringComparison.OrdinalIgnoreCase) &&
+                 !string.Equals(invoiceStatus, "paid", StringComparison.OrdinalIgnoreCase))
+        {
+            stripeEventHint = "awaiting_webhook_processing";
+        }
+        else if (string.Equals(checkout.Status, "expired", StringComparison.OrdinalIgnoreCase))
+        {
+            stripeEventHint = "checkout_session_expired";
+        }
+
+        return new MarketingStripeCheckoutSessionStatusResponse
+        {
+            GeneratedAt = now,
+            CheckoutSessionId = checkout.SessionId,
+            CheckoutStatus = checkout.Status,
+            CheckoutPaymentStatus = checkout.PaymentStatus,
+            ShopCode = checkout.ShopCode ?? invoice?.Shop.Code,
+            ShopName = checkout.ShopName ?? invoice?.Shop.Name,
+            Invoice = invoice is null
+                ? (string.IsNullOrWhiteSpace(checkout.InvoiceNumber) ? null : new MarketingPaymentInvoiceResponse
+                {
+                    InvoiceId = invoiceId ?? Guid.Empty,
+                    InvoiceNumber = checkout.InvoiceNumber!,
+                    Status = "open",
+                    DueAt = now.AddDays(7)
+                })
+                : new MarketingPaymentInvoiceResponse
+                {
+                    InvoiceId = invoice.Id,
+                    InvoiceNumber = invoice.InvoiceNumber,
+                    Status = invoiceStatus ?? "open",
+                    DueAt = invoice.DueAtUtc
+                },
+            PaymentStatus = paymentStatus,
+            SubscriptionId = subscription?.BillingSubscriptionId ?? checkout.SubscriptionId,
+            SubscriptionStatus = subscriptionStatus,
+            Plan = subscription?.Plan,
+            AccessReady = accessReady,
+            StripeEventHint = stripeEventHint
+        };
+    }
+
     public async Task<MarketingPaymentSubmissionResponse> SubmitMarketingPaymentAsync(
         MarketingPaymentSubmissionRequest request,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        EnsureMarketingManualBillingFallbackEnabled("payment_submit");
 
         if (request.Amount <= 0m)
         {
@@ -3048,6 +3510,7 @@ public sealed class LicenseService(
         string? invoiceNumber,
         CancellationToken cancellationToken)
     {
+        EnsureMarketingManualBillingFallbackEnabled("ai_credit_order_status");
         var normalizedInvoiceNumber = NormalizeOptionalValue(invoiceNumber);
         var hasOrderId = orderId.HasValue && orderId.Value != Guid.Empty;
         if (!hasOrderId && string.IsNullOrWhiteSpace(normalizedInvoiceNumber))
@@ -3147,6 +3610,7 @@ public sealed class LicenseService(
         IFormFile? file,
         CancellationToken cancellationToken)
     {
+        EnsureMarketingManualBillingFallbackEnabled("payment_proof_upload");
         var validated = await ValidateAndReadMarketingProofFileAsync(file, cancellationToken);
         var scanResult = await billMalwareScanner.ScanAsync(validated.FileData, cancellationToken);
         if (!scanResult.IsClean)
@@ -3268,6 +3732,13 @@ public sealed class LicenseService(
         });
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        var anomalyThresholdPerHour = Math.Max(1, options.InstallerDownloadAnomalyThresholdPerHour);
+        var recentDownloadCount = await CountRecentInstallerDownloadEventsAsync(entitlement.ShopId, now, cancellationToken);
+        if (recentDownloadCount >= anomalyThresholdPerHour)
+        {
+            licensingAlertMonitor.RecordSecurityAnomaly("installer_download_frequency_spike");
+        }
+
         return new MarketingLicenseDownloadTrackResponse
         {
             TrackedAt = now,
@@ -3279,6 +3750,32 @@ public sealed class LicenseService(
             InvoiceId = invoiceId,
             InvoiceNumber = invoiceNumber
         };
+    }
+
+    private async Task<int> CountRecentInstallerDownloadEventsAsync(
+        Guid shopId,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var windowStart = now.AddHours(-1);
+        if (dbContext.Database.IsSqlite())
+        {
+            return (await dbContext.LicenseAuditLogs
+                    .AsNoTracking()
+                    .Where(x =>
+                        x.ShopId == shopId &&
+                        x.Action == "marketing_installer_download_tracked")
+                    .ToListAsync(cancellationToken))
+                .Count(x => x.CreatedAtUtc >= windowStart);
+        }
+
+        return await dbContext.LicenseAuditLogs
+            .AsNoTracking()
+            .Where(x =>
+                x.ShopId == shopId &&
+                x.Action == "marketing_installer_download_tracked" &&
+                x.CreatedAtUtc >= windowStart)
+            .CountAsync(cancellationToken);
     }
 
     public async Task<string> ResolveProtectedInstallerDownloadRedirectAsync(
@@ -4496,7 +4993,7 @@ public sealed class LicenseService(
                     .AsNoTracking()
                     .ToListAsync(cancellationToken))
                 .Where(x =>
-                    string.Equals(x.Status, WebhookEventStatusFailed, StringComparison.OrdinalIgnoreCase) &&
+                    IsFailedOrDeadLetterWebhookStatus(x.Status) &&
                     x.ReceivedAtUtc >= webhookFailureWindowStart)
                 .OrderByDescending(x => x.ReceivedAtUtc)
                 .ThenByDescending(x => x.UpdatedAtUtc)
@@ -4508,7 +5005,7 @@ public sealed class LicenseService(
             failedWebhookEventsSource = await dbContext.BillingWebhookEvents
                 .AsNoTracking()
                 .Where(x =>
-                    x.Status == WebhookEventStatusFailed &&
+                    (x.Status == WebhookEventStatusFailed || x.Status == WebhookEventStatusDeadLetter) &&
                     x.ReceivedAtUtc >= webhookFailureWindowStart)
                 .OrderByDescending(x => x.ReceivedAtUtc)
                 .ThenByDescending(x => x.UpdatedAtUtc)
@@ -4541,7 +5038,9 @@ public sealed class LicenseService(
                     : null,
                 SubscriptionId = entry.BillingSubscriptionId,
                 LastErrorCode = entry.LastErrorCode,
+                FailureCount = entry.FailureCount,
                 ReceivedAt = entry.ReceivedAtUtc,
+                DeadLetteredAt = entry.DeadLetteredAtUtc,
                 UpdatedAt = entry.UpdatedAtUtc
             })
             .ToList();
@@ -4599,6 +5098,8 @@ public sealed class LicenseService(
                             shop_code = entry.ShopCode,
                             subscription_id = entry.SubscriptionId,
                             last_error_code = entry.LastErrorCode,
+                            failure_count = entry.FailureCount,
+                            dead_lettered_at = entry.DeadLetteredAt,
                             received_at = entry.ReceivedAt
                         })
                 }),
@@ -4623,6 +5124,19 @@ public sealed class LicenseService(
             SubscriptionUpdates = subscriptionUpdates,
             FailedWebhookEvents = failedWebhookRows
         };
+    }
+
+    private void EnsureMarketingManualBillingFallbackEnabled(string operation)
+    {
+        if (options.MarketingManualBillingFallbackEnabled)
+        {
+            return;
+        }
+
+        throw new LicenseException(
+            LicenseErrorCodes.InvalidAdminRequest,
+            $"Manual payment fallback is disabled for this environment ({operation}).",
+            StatusCodes.Status403Forbidden);
     }
 
     public void VerifyBillingWebhookSignature(string payload, IHeaderDictionary headers)
@@ -5650,6 +6164,7 @@ public sealed class LicenseService(
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
+        var maxRetryAttempts = ResolveBillingWebhookMaxRetryAttempts();
         var existing = await dbContext.BillingWebhookEvents
             .FirstOrDefaultAsync(x => x.ProviderEventId == providerEventId, cancellationToken);
 
@@ -5660,6 +6175,7 @@ public sealed class LicenseService(
                 ProviderEventId = providerEventId,
                 EventType = eventType,
                 Status = WebhookEventStatusProcessing,
+                FailureCount = 0,
                 ReceivedAtUtc = now,
                 UpdatedAtUtc = now
             };
@@ -5681,38 +6197,111 @@ public sealed class LicenseService(
                 }
 
                 return string.Equals(raceWinner.Status, WebhookEventStatusFailed, StringComparison.OrdinalIgnoreCase)
-                    ? await ResetFailedWebhookEventAsync(raceWinner, now, cancellationToken)
+                    ? await ResetFailedWebhookEventAsync(raceWinner, now, maxRetryAttempts, cancellationToken)
                     : null;
             }
         }
 
         return string.Equals(existing.Status, WebhookEventStatusFailed, StringComparison.OrdinalIgnoreCase)
-            ? await ResetFailedWebhookEventAsync(existing, now, cancellationToken)
+            ? await ResetFailedWebhookEventAsync(existing, now, maxRetryAttempts, cancellationToken)
             : null;
     }
 
-    private async Task<BillingWebhookEvent> ResetFailedWebhookEventAsync(
+    private async Task<BillingWebhookEvent?> ResetFailedWebhookEventAsync(
         BillingWebhookEvent existing,
         DateTimeOffset now,
+        int maxRetryAttempts,
         CancellationToken cancellationToken)
     {
+        if (existing.FailureCount >= maxRetryAttempts)
+        {
+            await MarkWebhookEventDeadLetterAsync(existing, now, cancellationToken);
+            return null;
+        }
+
         existing.Status = WebhookEventStatusProcessing;
         existing.LastErrorCode = null;
+        existing.DeadLetteredAtUtc = null;
         existing.UpdatedAtUtc = now;
         await dbContext.SaveChangesAsync(cancellationToken);
         return existing;
     }
 
-    private async Task MarkWebhookEventFailedAsync(
+    private async Task<bool> MarkWebhookEventFailedAsync(
         BillingWebhookEvent eventLog,
         string errorCode,
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
-        eventLog.Status = WebhookEventStatusFailed;
+        var maxRetryAttempts = ResolveBillingWebhookMaxRetryAttempts();
+        eventLog.FailureCount = Math.Max(0, eventLog.FailureCount) + 1;
         eventLog.LastErrorCode = NormalizeOptionalValue(errorCode) ?? "UNKNOWN";
+        var shouldDeadLetter = eventLog.FailureCount >= maxRetryAttempts;
+        eventLog.Status = shouldDeadLetter ? WebhookEventStatusDeadLetter : WebhookEventStatusFailed;
+        eventLog.DeadLetteredAtUtc = shouldDeadLetter ? now : null;
         eventLog.UpdatedAtUtc = now;
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (shouldDeadLetter)
+        {
+            licensingAlertMonitor.RecordWebhookFailure(eventLog.EventType, $"dead_letter:{eventLog.LastErrorCode}");
+            licensingAlertMonitor.RecordSecurityAnomaly("billing_webhook_dead_lettered");
+            dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+            {
+                ShopId = eventLog.ShopId,
+                Action = "billing_webhook_dead_lettered",
+                Actor = "billing-webhook",
+                Reason = "max_retry_attempts_reached",
+                MetadataJson = JsonSerializer.Serialize(new
+                {
+                    event_id = eventLog.ProviderEventId,
+                    event_type = eventLog.EventType,
+                    failure_count = eventLog.FailureCount,
+                    max_retry_attempts = maxRetryAttempts,
+                    last_error_code = eventLog.LastErrorCode,
+                    subscription_id = eventLog.BillingSubscriptionId,
+                    dead_lettered_at = eventLog.DeadLetteredAtUtc
+                }),
+                CreatedAtUtc = now
+            });
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        return shouldDeadLetter;
+    }
+
+    private async Task MarkWebhookEventDeadLetterAsync(
+        BillingWebhookEvent eventLog,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        if (string.Equals(eventLog.Status, WebhookEventStatusDeadLetter, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        eventLog.Status = WebhookEventStatusDeadLetter;
+        eventLog.DeadLetteredAtUtc = eventLog.DeadLetteredAtUtc ?? now;
+        eventLog.UpdatedAtUtc = now;
+        await dbContext.SaveChangesAsync(cancellationToken);
+        licensingAlertMonitor.RecordWebhookFailure(eventLog.EventType, $"dead_letter:{eventLog.LastErrorCode ?? "UNKNOWN"}");
+        licensingAlertMonitor.RecordSecurityAnomaly("billing_webhook_dead_lettered");
+    }
+
+    private int ResolveBillingWebhookMaxRetryAttempts()
+    {
+        return Math.Clamp(options.BillingWebhookMaxRetryAttempts, 1, 10);
+    }
+
+    private static bool IsFailedOrDeadLetterWebhookStatus(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return false;
+        }
+
+        var normalized = status.Trim();
+        return string.Equals(normalized, WebhookEventStatusFailed, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalized, WebhookEventStatusDeadLetter, StringComparison.OrdinalIgnoreCase);
     }
 
     private string ResolveWebhookSignatureHeaderName()
@@ -6122,6 +6711,123 @@ public sealed class LicenseService(
         };
     }
 
+    private string ResolveStripePriceIdForMarketingPlan(string marketingPlanCode)
+    {
+        var normalizedPlan = NormalizeOptionalValue(marketingPlanCode)?.ToLowerInvariant();
+        var stripeOptions = options.Stripe;
+        var priceId = normalizedPlan switch
+        {
+            "starter" => NormalizeOptionalValue(stripeOptions.StarterPriceId),
+            "pro" => NormalizeOptionalValue(stripeOptions.ProPriceId),
+            "business" => NormalizeOptionalValue(stripeOptions.BusinessPriceId),
+            _ => null
+        };
+
+        if (!string.IsNullOrWhiteSpace(priceId))
+        {
+            return priceId;
+        }
+
+        throw new LicenseException(
+            LicenseErrorCodes.LicensingConfigurationError,
+            $"Stripe price id is not configured for marketing plan '{marketingPlanCode}'.",
+            StatusCodes.Status500InternalServerError);
+    }
+
+    private string ResolveStripeCheckoutSuccessUrl()
+    {
+        var configured = NormalizeOptionalValue(options.Stripe.CheckoutSuccessUrl);
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.LicensingConfigurationError,
+                $"Stripe checkout success URL is not configured. Set '{LicenseOptions.SectionName}:Stripe:CheckoutSuccessUrl'.",
+                StatusCodes.Status500InternalServerError);
+        }
+
+        if (!configured.StartsWith("https://", StringComparison.OrdinalIgnoreCase) &&
+            !configured.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.LicensingConfigurationError,
+                "Stripe checkout success URL must be an absolute http/https URL.",
+                StatusCodes.Status500InternalServerError);
+        }
+
+        return configured;
+    }
+
+    private string ResolveStripeCheckoutCancelUrl()
+    {
+        var configured = NormalizeOptionalValue(options.Stripe.CheckoutCancelUrl);
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.LicensingConfigurationError,
+                $"Stripe checkout cancel URL is not configured. Set '{LicenseOptions.SectionName}:Stripe:CheckoutCancelUrl'.",
+                StatusCodes.Status500InternalServerError);
+        }
+
+        if (!configured.StartsWith("https://", StringComparison.OrdinalIgnoreCase) &&
+            !configured.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.LicensingConfigurationError,
+                "Stripe checkout cancel URL must be an absolute http/https URL.",
+                StatusCodes.Status500InternalServerError);
+        }
+
+        return configured;
+    }
+
+    private string ResolveStripeSecretKey()
+    {
+        var fromConfig = NormalizeOptionalValue(options.Stripe.SecretKey);
+        var envVarName = NormalizeOptionalValue(options.Stripe.SecretKeyEnvironmentVariable)
+                         ?? "SMARTPOS_STRIPE_SECRET_KEY";
+        var fromEnvironment = NormalizeOptionalValue(Environment.GetEnvironmentVariable(envVarName));
+        if (!string.IsNullOrWhiteSpace(fromEnvironment))
+        {
+            return fromEnvironment;
+        }
+
+        if (!string.IsNullOrWhiteSpace(fromConfig))
+        {
+            return fromConfig;
+        }
+
+        throw new LicenseException(
+            LicenseErrorCodes.LicensingConfigurationError,
+            $"Stripe secret key is not configured. Set '{LicenseOptions.SectionName}:Stripe:SecretKey' or environment variable '{envVarName}'.",
+            StatusCodes.Status500InternalServerError);
+    }
+
+    private string? ResolveInternalPlanCodeForStripePrice(string? priceId)
+    {
+        var normalizedPriceId = NormalizeOptionalValue(priceId);
+        if (string.IsNullOrWhiteSpace(normalizedPriceId))
+        {
+            return null;
+        }
+
+        if (string.Equals(normalizedPriceId, NormalizeOptionalValue(options.Stripe.StarterPriceId), StringComparison.Ordinal))
+        {
+            return "trial";
+        }
+
+        if (string.Equals(normalizedPriceId, NormalizeOptionalValue(options.Stripe.ProPriceId), StringComparison.Ordinal))
+        {
+            return "growth";
+        }
+
+        if (string.Equals(normalizedPriceId, NormalizeOptionalValue(options.Stripe.BusinessPriceId), StringComparison.Ordinal))
+        {
+            return "pro";
+        }
+
+        return null;
+    }
+
     private static string ResolveMarketingPaymentMethod(string? paymentMethod)
     {
         var normalized = NormalizeOptionalValue(paymentMethod)?.ToLowerInvariant();
@@ -6154,6 +6860,214 @@ public sealed class LicenseService(
             Message = "Complete a bank deposit and submit payment details with the invoice reference.",
             ReferenceHint = "Use the invoice number as your bank reference."
         };
+    }
+
+    private async Task<StripeCheckoutSessionResult> CreateStripeCheckoutSessionAsync(
+        string priceId,
+        string successUrl,
+        string cancelUrl,
+        string? contactEmail,
+        AdminManualBillingInvoiceRow invoiceRow,
+        string shopCode,
+        string shopName,
+        MarketingPlanQuote quote,
+        string source,
+        string? campaign,
+        string? locale,
+        CancellationToken cancellationToken)
+    {
+        if (!options.Stripe.Enabled)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.LicensingConfigurationError,
+                $"Stripe checkout is disabled. Set '{LicenseOptions.SectionName}:Stripe:Enabled=true' to enable this endpoint.",
+                StatusCodes.Status503ServiceUnavailable);
+        }
+
+        var secretKey = ResolveStripeSecretKey();
+        var apiBaseUrl = NormalizeOptionalValue(options.Stripe.ApiBaseUrl) ?? "https://api.stripe.com";
+        apiBaseUrl = apiBaseUrl.TrimEnd('/');
+
+        var form = new List<KeyValuePair<string, string>>
+        {
+            new("mode", "subscription"),
+            new("line_items[0][price]", priceId),
+            new("line_items[0][quantity]", "1"),
+            new("success_url", successUrl),
+            new("cancel_url", cancelUrl),
+            new("client_reference_id", invoiceRow.InvoiceNumber),
+            new("metadata[invoice_id]", invoiceRow.InvoiceId.ToString("D")),
+            new("metadata[invoice_number]", invoiceRow.InvoiceNumber),
+            new("metadata[shop_code]", shopCode),
+            new("metadata[shop_name]", shopName),
+            new("metadata[marketing_plan_code]", quote.MarketingPlanCode),
+            new("metadata[internal_plan_code]", quote.InternalPlanCode),
+            new("metadata[source]", source),
+            new("subscription_data[metadata][invoice_id]", invoiceRow.InvoiceId.ToString("D")),
+            new("subscription_data[metadata][invoice_number]", invoiceRow.InvoiceNumber),
+            new("subscription_data[metadata][shop_code]", shopCode),
+            new("subscription_data[metadata][shop_name]", shopName),
+            new("subscription_data[metadata][marketing_plan_code]", quote.MarketingPlanCode),
+            new("subscription_data[metadata][internal_plan_code]", quote.InternalPlanCode),
+            new("subscription_data[metadata][source]", source)
+        };
+
+        if (!string.IsNullOrWhiteSpace(contactEmail))
+        {
+            form.Add(new KeyValuePair<string, string>("customer_email", contactEmail));
+        }
+
+        if (!string.IsNullOrWhiteSpace(campaign))
+        {
+            form.Add(new KeyValuePair<string, string>("metadata[campaign]", campaign));
+            form.Add(new KeyValuePair<string, string>("subscription_data[metadata][campaign]", campaign));
+        }
+
+        if (!string.IsNullOrWhiteSpace(locale))
+        {
+            form.Add(new KeyValuePair<string, string>("metadata[locale]", locale));
+            form.Add(new KeyValuePair<string, string>("subscription_data[metadata][locale]", locale));
+        }
+
+        var client = httpClientFactory.CreateClient("stripe-billing");
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{apiBaseUrl}/v1/checkout/sessions")
+        {
+            Content = new FormUrlEncodedContent(form)
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", secretKey);
+
+        using var response = await client.SendAsync(request, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var detail = ExtractStripeErrorMessage(body) ?? response.ReasonPhrase ?? "Stripe request failed.";
+            var statusCode = (int)response.StatusCode;
+            var mappedStatus = statusCode >= 400 && statusCode < 500
+                ? StatusCodes.Status400BadRequest
+                : StatusCodes.Status502BadGateway;
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                $"Unable to create Stripe checkout session. {detail}",
+                mappedStatus);
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            var root = document.RootElement;
+            var sessionId = TryGetString(root, "id");
+            var checkoutUrl = TryGetString(root, "url");
+            if (string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(checkoutUrl))
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.InvalidAdminRequest,
+                    "Stripe checkout session response is missing id or url.",
+                    StatusCodes.Status502BadGateway);
+            }
+
+            return new StripeCheckoutSessionResult(
+                sessionId,
+                checkoutUrl,
+                TryGetUnixTimestamp(root, "expires_at"));
+        }
+        catch (JsonException)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Stripe checkout session response is invalid JSON.",
+                StatusCodes.Status502BadGateway);
+        }
+    }
+
+    private async Task<StripeCheckoutSessionLookup> RetrieveStripeCheckoutSessionAsync(
+        string sessionId,
+        CancellationToken cancellationToken)
+    {
+        if (!options.Stripe.Enabled)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.LicensingConfigurationError,
+                $"Stripe checkout is disabled. Set '{LicenseOptions.SectionName}:Stripe:Enabled=true' to enable this endpoint.",
+                StatusCodes.Status503ServiceUnavailable);
+        }
+
+        var secretKey = ResolveStripeSecretKey();
+        var apiBaseUrl = NormalizeOptionalValue(options.Stripe.ApiBaseUrl) ?? "https://api.stripe.com";
+        apiBaseUrl = apiBaseUrl.TrimEnd('/');
+
+        var client = httpClientFactory.CreateClient("stripe-billing");
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"{apiBaseUrl}/v1/checkout/sessions/{Uri.EscapeDataString(sessionId)}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", secretKey);
+
+        using var response = await client.SendAsync(request, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var detail = ExtractStripeErrorMessage(body) ?? response.ReasonPhrase ?? "Stripe request failed.";
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.InvalidAdminRequest,
+                    $"Stripe checkout session '{sessionId}' was not found.",
+                    StatusCodes.Status404NotFound);
+            }
+
+            var statusCode = (int)response.StatusCode;
+            var mappedStatus = statusCode >= 400 && statusCode < 500
+                ? StatusCodes.Status400BadRequest
+                : StatusCodes.Status502BadGateway;
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                $"Unable to retrieve Stripe checkout session. {detail}",
+                mappedStatus);
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            var root = document.RootElement;
+            var resolvedSessionId = TryGetString(root, "id");
+            if (string.IsNullOrWhiteSpace(resolvedSessionId))
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.InvalidAdminRequest,
+                    "Stripe checkout session response is missing id.",
+                    StatusCodes.Status502BadGateway);
+            }
+
+            string? invoiceId = null;
+            string? invoiceNumber = null;
+            string? shopCode = null;
+            string? shopName = null;
+            if (TryGetObject(root, "metadata", out var metadata))
+            {
+                invoiceId = TryGetString(metadata, "invoice_id");
+                invoiceNumber = TryGetString(metadata, "invoice_number");
+                shopCode = TryGetString(metadata, "shop_code");
+                shopName = TryGetString(metadata, "shop_name");
+            }
+
+            return new StripeCheckoutSessionLookup(
+                resolvedSessionId,
+                TryGetString(root, "status") ?? "open",
+                TryGetString(root, "payment_status") ?? "unpaid",
+                TryGetString(root, "customer"),
+                TryGetString(root, "subscription"),
+                TryGetUnixTimestamp(root, "expires_at"),
+                invoiceId,
+                invoiceNumber,
+                shopCode,
+                shopName);
+        }
+        catch (JsonException)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Stripe checkout session response is invalid JSON.",
+                StatusCodes.Status502BadGateway);
+        }
     }
 
     private async Task<string> GenerateUniqueMarketingShopCodeAsync(
@@ -8991,6 +9905,171 @@ public sealed class LicenseService(
 
         var defaultCode = NormalizeOptionalValue(options.DefaultShopCode);
         return string.IsNullOrWhiteSpace(defaultCode) ? "default" : defaultCode;
+    }
+
+    private static string? ExtractStripeErrorMessage(string? payload)
+    {
+        var raw = NormalizeOptionalValue(payload);
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(raw);
+            if (!TryGetObject(document.RootElement, "error", out var errorObject))
+            {
+                return null;
+            }
+
+            return TryGetString(errorObject, "message");
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static bool TryGetObject(JsonElement source, string propertyName, out JsonElement value)
+    {
+        if (source.ValueKind == JsonValueKind.Object &&
+            source.TryGetProperty(propertyName, out var candidate) &&
+            candidate.ValueKind == JsonValueKind.Object)
+        {
+            value = candidate;
+            return true;
+        }
+
+        value = default;
+        return false;
+    }
+
+    private static string? TryGetString(JsonElement source, string propertyName)
+    {
+        if (source.ValueKind != JsonValueKind.Object ||
+            !source.TryGetProperty(propertyName, out var candidate))
+        {
+            return null;
+        }
+
+        return candidate.ValueKind switch
+        {
+            JsonValueKind.String => NormalizeOptionalValue(candidate.GetString()),
+            JsonValueKind.Number => candidate.ToString(),
+            _ => null
+        };
+    }
+
+    private static DateTimeOffset? TryGetUnixTimestamp(JsonElement source, string propertyName)
+    {
+        if (source.ValueKind != JsonValueKind.Object ||
+            !source.TryGetProperty(propertyName, out var candidate))
+        {
+            return null;
+        }
+
+        long unixSeconds;
+        if (candidate.ValueKind == JsonValueKind.Number && candidate.TryGetInt64(out unixSeconds))
+        {
+            return SafeFromUnixTimeSeconds(unixSeconds);
+        }
+
+        if (candidate.ValueKind == JsonValueKind.String &&
+            long.TryParse(candidate.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out unixSeconds))
+        {
+            return SafeFromUnixTimeSeconds(unixSeconds);
+        }
+
+        return null;
+    }
+
+    private static DateTimeOffset? SafeFromUnixTimeSeconds(long unixSeconds)
+    {
+        try
+        {
+            return DateTimeOffset.FromUnixTimeSeconds(unixSeconds);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return null;
+        }
+    }
+
+    private static Guid? TryParseGuid(string? value)
+    {
+        var normalized = NormalizeOptionalValue(value);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        return Guid.TryParse(normalized, out var parsed) ? parsed : null;
+    }
+
+    private static string? TryGetNestedString(
+        JsonElement source,
+        string parentPropertyName,
+        string leafPropertyName)
+    {
+        return TryGetObject(source, parentPropertyName, out var parentObject)
+            ? TryGetString(parentObject, leafPropertyName)
+            : null;
+    }
+
+    private static string? TryGetNestedString(
+        JsonElement source,
+        string parentPropertyName,
+        string arrayPropertyName,
+        string nestedPropertyName,
+        string leafPropertyName)
+    {
+        if (!TryGetObject(source, parentPropertyName, out var parentObject) ||
+            parentObject.ValueKind != JsonValueKind.Object ||
+            !parentObject.TryGetProperty(arrayPropertyName, out var arrayElement) ||
+            arrayElement.ValueKind != JsonValueKind.Array ||
+            arrayElement.GetArrayLength() == 0)
+        {
+            return null;
+        }
+
+        var firstItem = arrayElement[0];
+        if (firstItem.ValueKind != JsonValueKind.Object ||
+            !firstItem.TryGetProperty(nestedPropertyName, out var nestedElement))
+        {
+            return null;
+        }
+
+        return nestedElement.ValueKind == JsonValueKind.Object
+            ? TryGetString(nestedElement, leafPropertyName)
+            : null;
+    }
+
+    private static DateTimeOffset? TryGetNestedUnixTimestamp(
+        JsonElement source,
+        string parentPropertyName,
+        string arrayPropertyName,
+        string nestedPropertyName,
+        string leafPropertyName)
+    {
+        if (!TryGetObject(source, parentPropertyName, out var parentObject) ||
+            parentObject.ValueKind != JsonValueKind.Object ||
+            !parentObject.TryGetProperty(arrayPropertyName, out var arrayElement) ||
+            arrayElement.ValueKind != JsonValueKind.Array ||
+            arrayElement.GetArrayLength() == 0)
+        {
+            return null;
+        }
+
+        var firstItem = arrayElement[0];
+        if (firstItem.ValueKind != JsonValueKind.Object ||
+            !firstItem.TryGetProperty(nestedPropertyName, out var nestedElement) ||
+            nestedElement.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        return TryGetUnixTimestamp(nestedElement, leafPropertyName);
     }
 
     private static string? NormalizeOptionalValue(string? value)

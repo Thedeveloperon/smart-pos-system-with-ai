@@ -43,6 +43,7 @@ public sealed class LicenseOptions
     public string TokenCookieSameSite { get; set; } = "Lax";
     public string TokenCookiePath { get; set; } = "/";
     public string AccessSuccessPageBaseUrl { get; set; } = "/license/success";
+    public StripeBillingOptions Stripe { get; set; } = new();
     public string InstallerDownloadBaseUrl { get; set; } = string.Empty;
     public bool InstallerDownloadProtectedEnabled { get; set; }
     public int InstallerDownloadTokenTtlMinutes { get; set; } = 30;
@@ -70,13 +71,21 @@ public sealed class LicenseOptions
     public decimal BankReconciliationMismatchToleranceAmount { get; set; } = 1m;
     public bool BillingReconciliationEnabled { get; set; } = true;
     public int BillingReconciliationIntervalSeconds { get; set; } = 900;
+    public int BillingWebhookMaxRetryAttempts { get; set; } = 3;
     public int BillingReconciliationPeriodEndGraceHours { get; set; } = 24;
     public int BillingReconciliationWebhookFailureLookbackHours { get; set; } = 72;
     public int BillingReconciliationTake { get; set; } = 100;
     public int BillingReconciliationWebhookFailureTake { get; set; } = 50;
+    public bool MarketingManualBillingFallbackEnabled { get; set; } = true;
     public int ProvisioningRateLimitPerMinute { get; set; } = 20;
     public int MarketingPaymentRequestRateLimitPerMinute { get; set; } = 12;
     public int MarketingPaymentSubmitRateLimitPerMinute { get; set; } = 8;
+    public int MarketingDownloadTrackRateLimitPerMinute { get; set; } = 40;
+    public int LicenseAccessLookupRateLimitPerMinute { get; set; } = 60;
+    public int AccountPortalRateLimitPerMinute { get; set; } = 60;
+    public int AccountDeviceDeactivationRateLimitPerMinute { get; set; } = 20;
+    public int InstallerDownloadAnomalyThresholdPerHour { get; set; } = 8;
+    public int SelfServiceDeactivationAnomalyThresholdPerDay { get; set; } = 2;
     public int MarketingPaymentReplayGuardWindowMinutes { get; set; } = 15;
     public int MarketingPaymentProofMaxFileBytes { get; set; } = 10 * 1024 * 1024;
     public List<LicenseSigningKeyOptions> SigningKeys { get; set; } = [];
@@ -146,4 +155,17 @@ public sealed class BillingWebhookSecurityOptions
     public string SignatureHeaderName { get; set; } = "Stripe-Signature";
     public string SignatureScheme { get; set; } = "v1";
     public int TimestampToleranceSeconds { get; set; } = 300;
+}
+
+public sealed class StripeBillingOptions
+{
+    public bool Enabled { get; set; }
+    public string ApiBaseUrl { get; set; } = "https://api.stripe.com";
+    public string SecretKey { get; set; } = string.Empty;
+    public string SecretKeyEnvironmentVariable { get; set; } = "SMARTPOS_STRIPE_SECRET_KEY";
+    public string CheckoutSuccessUrl { get; set; } = string.Empty;
+    public string CheckoutCancelUrl { get; set; } = string.Empty;
+    public string StarterPriceId { get; set; } = string.Empty;
+    public string ProPriceId { get; set; } = string.Empty;
+    public string BusinessPriceId { get; set; } = string.Empty;
 }

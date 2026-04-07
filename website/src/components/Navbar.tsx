@@ -56,7 +56,12 @@ const Navbar = () => {
               </Link>
             ))}
           </div>
-          <Button variant="hero" size="sm">{t("nav.cta")}</Button>
+          <Button variant="outline" size="sm" asChild>
+            <Link href={`/${locale}/account`}>{t("nav.account")}</Link>
+          </Button>
+          <Button variant="hero" size="sm" asChild>
+            <Link href={`/${locale}/start?plan=starter`}>{t("nav.cta")}</Link>
+          </Button>
         </div>
 
         <button className="md:hidden text-foreground" onClick={() => setOpen(!open)}>
@@ -97,7 +102,16 @@ const Navbar = () => {
                   </Link>
                 ))}
               </div>
-              <Button variant="hero" size="sm">{t("nav.cta")}</Button>
+              <Button variant="outline" size="sm" asChild>
+                <Link href={`/${locale}/account`} onClick={() => setOpen(false)}>
+                  {t("nav.account")}
+                </Link>
+              </Button>
+              <Button variant="hero" size="sm" asChild>
+                <Link href={`/${locale}/start?plan=starter`} onClick={() => setOpen(false)}>
+                  {t("nav.cta")}
+                </Link>
+              </Button>
             </div>
           </motion.div>
         )}

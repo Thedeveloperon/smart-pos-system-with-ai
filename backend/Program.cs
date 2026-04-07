@@ -309,6 +309,7 @@ builder.Services.AddScoped<ReminderService>();
 builder.Services.AddHttpClient<AiSuggestionService>();
 builder.Services.AddHttpClient<AiInsightService>();
 builder.Services.AddHttpClient("openai-ocr");
+builder.Services.AddHttpClient("stripe-billing");
 builder.Services.AddSingleton<BasicTextOcrProvider>();
 builder.Services.AddSingleton<TesseractOcrProvider>();
 builder.Services.AddSingleton<OpenAiVisionOcrProvider>();

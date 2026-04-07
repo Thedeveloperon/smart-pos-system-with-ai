@@ -551,6 +551,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.HasIndex(x => x.ProviderEventId).IsUnique();
             entity.HasIndex(x => x.EventType);
             entity.HasIndex(x => x.ShopId);
+            entity.HasIndex(x => x.DeadLetteredAtUtc);
             entity.HasOne<Shop>()
                 .WithMany()
                 .HasForeignKey(x => x.ShopId)

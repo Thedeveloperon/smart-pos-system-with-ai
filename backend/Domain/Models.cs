@@ -569,8 +569,10 @@ public sealed class BillingWebhookEvent
     public Guid? ShopId { get; set; }
     public string? BillingSubscriptionId { get; set; }
     public string? LastErrorCode { get; set; }
+    public int FailureCount { get; set; }
     public DateTimeOffset ReceivedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? ProcessedAtUtc { get; set; }
+    public DateTimeOffset? DeadLetteredAtUtc { get; set; }
     public DateTimeOffset? UpdatedAtUtc { get; set; }
 }
 
