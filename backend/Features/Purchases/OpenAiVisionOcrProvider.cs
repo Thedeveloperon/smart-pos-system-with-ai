@@ -85,9 +85,9 @@ public sealed class OpenAiVisionOcrProvider(
             message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(TimeSpan.FromMilliseconds(Math.Clamp(options.Value.OcrTimeoutMs, 1000, 60000)));
+            timeoutCts.CancelAfter(TimeSpan.FromMilliseconds(Math.Clamp(options.Value.OpenAiRequestTimeoutMs, 1000, 180000)));
 
-            var client = httpClientFactory.CreateClient(nameof(OpenAiVisionOcrProvider));
+            var client = httpClientFactory.CreateClient("openai-ocr");
             using var response = await client.SendAsync(message, timeoutCts.Token);
             var rawResponse = await response.Content.ReadAsStringAsync(timeoutCts.Token);
 
@@ -145,9 +145,12 @@ public sealed class OpenAiVisionOcrProvider(
 
     private static object[] BuildUserContent(BillFileData file)
     {
-        if (file.ContentType is "image/png" or "image/jpeg")
+        if (file.ContentType is "image/png" or "image/jpeg" or "image/jpg")
         {
-            var dataUri = $"data:{file.ContentType};base64,{Convert.ToBase64String(file.Bytes)}";
+            var contentType = string.Equals(file.ContentType, "image/jpg", StringComparison.OrdinalIgnoreCase)
+                ? "image/jpeg"
+                : file.ContentType;
+            var dataUri = $"data:{contentType};base64,{Convert.ToBase64String(file.Bytes)}";
             return
             [
                 new
@@ -166,25 +169,53 @@ public sealed class OpenAiVisionOcrProvider(
         if (file.ContentType == "application/pdf")
         {
             var text = TryExtractPdfText(file.Bytes);
-            if (string.IsNullOrWhiteSpace(text))
+            var content = new List<object>
             {
-                throw new OcrProviderUnavailableException(
-                    "PDF could not be parsed for text extraction. Upload a clear image (PNG/JPG) for OpenAI bill identification.");
-            }
-
-            return
-            [
                 new
                 {
                     type = "input_text",
-                    text = "Identify supplier, invoice fields, and all line items from this supplier bill text."
-                },
-                new
+                    text = "Identify supplier, invoice fields, and all line items from this supplier bill document."
+                }
+            };
+
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                content.Add(new
                 {
                     type = "input_text",
                     text = text.Length > 24000 ? text[..24000] : text
+                });
+            }
+
+            content.Add(new
+            {
+                type = "input_file",
+                filename = file.FileName,
+                file_data = $"data:application/pdf;base64,{Convert.ToBase64String(file.Bytes)}"
+            });
+
+            return content.ToArray();
+        }
+
+        if (string.Equals(Path.GetExtension(file.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            var content = new List<object>
+            {
+                new
+                {
+                    type = "input_text",
+                    text = "Identify supplier, invoice fields, and all line items from this supplier bill document."
                 }
-            ];
+            };
+
+            content.Add(new
+            {
+                type = "input_file",
+                filename = file.FileName,
+                file_data = $"data:application/pdf;base64,{Convert.ToBase64String(file.Bytes)}"
+            });
+
+            return content.ToArray();
         }
 
         throw new OcrProviderUnavailableException($"Unsupported file content type '{file.ContentType}' for OpenAI extraction.");
@@ -432,6 +463,7 @@ public sealed class OpenAiVisionOcrProvider(
     private static (string ApiKey, string EnvironmentVariableName) ResolveOpenAiApiKey(IConfiguration configuration)
     {
         var configuredEnvironmentVariable =
+            configuration[$"{PurchasingOptions.SectionName}:OpenAiApiKeyEnvironmentVariable"] ??
             configuration["AiInsights:OpenAiApiKeyEnvironmentVariable"] ??
             configuration["AiSuggestions:OpenAiApiKeyEnvironmentVariable"] ??
             "OPENAI_API_KEY";
@@ -445,7 +477,8 @@ public sealed class OpenAiVisionOcrProvider(
             return (apiKeyFromEnvironment.Trim(), environmentVariableName);
         }
 
-        var apiKeyFromConfiguration = configuration["OpenAI:ApiKey"] ??
+        var apiKeyFromConfiguration = configuration[$"{PurchasingOptions.SectionName}:OpenAiApiKey"] ??
+                                      configuration["OpenAI:ApiKey"] ??
                                       configuration["OPENAI_API_KEY"] ??
                                       configuration["AiInsights:OpenAiApiKey"] ??
                                       configuration["AiSuggestions:OpenAiApiKey"] ??

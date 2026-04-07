@@ -822,16 +822,27 @@ public sealed class ResilientOcrProvider(
 
         Exception? lastException = null;
         var retryCount = Math.Max(0, options.Value.OcrRetryCount);
+        var timeoutMs = ResolveProviderTimeoutMs(options.Value);
 
         for (var attempt = 1; attempt <= retryCount + 1; attempt++)
         {
             try
             {
                 using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                timeoutCts.CancelAfter(TimeSpan.FromMilliseconds(Math.Max(1000, options.Value.OcrTimeoutMs)));
+                timeoutCts.CancelAfter(TimeSpan.FromMilliseconds(timeoutMs));
                 var result = await innerProvider.ExtractAsync(file, timeoutCts.Token);
                 ResetCircuit();
                 return result;
+            }
+            catch (OcrProviderUnavailableException exception)
+            {
+                lastException = exception;
+                logger.LogWarning(
+                    exception,
+                    "OCR provider reported unavailable on attempt {Attempt} for file {FileName}. Reason: {Reason}",
+                    attempt,
+                    file.FileName,
+                    exception.Message);
             }
             catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
             {
@@ -858,9 +869,35 @@ public sealed class ResilientOcrProvider(
         }
 
         MarkFailure();
+        if (lastException is OcrProviderUnavailableException providerException)
+        {
+            throw providerException;
+        }
+
+        if (lastException is OperationCanceledException)
+        {
+            throw new OcrProviderUnavailableException(
+                "OCR provider request timed out. Please retry with a clearer image or check provider availability.",
+                lastException);
+        }
+
         throw new OcrProviderUnavailableException(
             "OCR provider is currently unavailable. Switch to manual review for this bill.",
             lastException);
+    }
+
+    private static int ResolveProviderTimeoutMs(PurchasingOptions settings)
+    {
+        var provider = (settings.OcrProvider ?? string.Empty).Trim();
+        var configuredTimeout = string.Equals(provider, "openai", StringComparison.OrdinalIgnoreCase)
+            ? settings.OpenAiRequestTimeoutMs
+            : settings.OcrTimeoutMs;
+        if (configuredTimeout <= 0)
+        {
+            configuredTimeout = string.Equals(provider, "openai", StringComparison.OrdinalIgnoreCase) ? 20000 : 8000;
+        }
+
+        return Math.Clamp(configuredTimeout, 1000, 180000);
     }
 
     private void ThrowIfCircuitOpen()

@@ -213,6 +213,13 @@ function getMatchBadge(line: EditableLine) {
   return <Badge variant="destructive">Unmatched</Badge>;
 }
 
+function formatBlockedReason(reason: string) {
+  return reason
+    .replaceAll("_", " ")
+    .replace(/\bocr\b/gi, "OpenAI extraction")
+    .replace(/\bai\b/gi, "AI");
+}
+
 export default function ImportSupplierBillDialog({ open, onOpenChange, onImported }: ImportSupplierBillDialogProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -365,6 +372,32 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
     [lineSummaries],
   );
 
+  const extractionWarnings = useMemo(() => {
+    if (!draft) {
+      return [];
+    }
+
+    return Array.from(
+      new Set(
+        (draft.warnings || [])
+          .map((warning) => warning?.trim())
+          .filter((warning): warning is string => Boolean(warning)),
+      ),
+    );
+  }, [draft]);
+
+  const providerUnavailableWarning = useMemo(
+    () =>
+      extractionWarnings.find(
+        (warning) =>
+          warning.toLowerCase().includes("openai") ||
+          warning.toLowerCase().includes("provider") ||
+          warning.toLowerCase().includes("timeout") ||
+          warning.toLowerCase().includes("http"),
+      ) ?? null,
+    [extractionWarnings],
+  );
+
   const requiresApprovalReason = draft?.totals.requires_approval_reason ?? false;
 
   const canConfirm =
@@ -383,6 +416,10 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
 
     if (!draft || !importRequestId) {
       blockers.push("Upload and scan a supplier bill first.");
+    }
+
+    if (draft?.blocked_reasons.includes("ocr_provider_unavailable") && providerUnavailableWarning) {
+      blockers.push(providerUnavailableWarning);
     }
 
     if (editableLines.length === 0) {
@@ -421,6 +458,7 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
     importRequestId,
     invalidLineCount,
     invoiceNumber,
+    providerUnavailableWarning,
     requiresApprovalReason,
     supplierName,
     unresolvedLineCount,
@@ -487,7 +525,18 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
       setApprovalReason("");
       setCreateProductDraft(null);
 
-      toast.success("Bill scanned. Review and confirm the import.");
+      const firstWarning = response.warnings?.find((warning) => warning?.trim());
+      if (response.line_items.length === 0) {
+        if (firstWarning) {
+          toast.warning(firstWarning);
+        } else {
+          toast.warning("No line items detected. Manual review is required.");
+        }
+      } else if (response.review_required) {
+        toast.warning("Bill extracted with review required. Please verify all mapped lines.");
+      } else {
+        toast.success("Bill scanned. Review and confirm the import.");
+      }
     } catch (error) {
       console.error(error);
       const message = error instanceof ApiError ? error.message : "Failed to scan supplier bill.";
@@ -959,12 +1008,20 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                           </div>
                           <div className="min-w-0">
                             <p className="text-sm font-semibold text-foreground">
-                              {draft ? "Bill scanned and ready for review" : "Upload a supplier bill to get started"}
+                              {!draft
+                                ? "Upload a supplier bill to get started"
+                                : draft.blocked_reasons.includes("ocr_provider_unavailable")
+                                  ? "OpenAI extraction unavailable - manual review required"
+                                  : editableLines.length === 0
+                                    ? "No line items detected - manual mapping required"
+                                    : "Bill scanned and ready for review"}
                             </p>
                             <p className="text-sm text-muted-foreground">
-                              {draft
-                                ? "Review detected items and confirm stock intake."
-                                : "Drag and drop your bill or tap browse to begin."}
+                              {!draft
+                                ? "Drag and drop your bill or tap browse to begin."
+                                : draft.blocked_reasons.includes("ocr_provider_unavailable")
+                                  ? "Check extraction warning details below, then retry upload or continue manually."
+                                  : "Review detected items and confirm stock intake."}
                             </p>
                           </div>
                         </div>
@@ -1056,6 +1113,49 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                       </p>
                     </div>
                   </section>
+
+                  {(extractionWarnings.length > 0 || draft.blocked_reasons.length > 0) && (
+                    <section
+                      className={cn(
+                        "rounded-2xl border p-4 shadow-sm",
+                        draft.blocked_reasons.includes("ocr_provider_unavailable")
+                          ? "border-amber-200 bg-amber-50/60"
+                          : "border-slate-200 bg-slate-50/70",
+                      )}
+                    >
+                      <div className="flex flex-wrap items-center gap-2 text-sm">
+                        <span className="font-semibold text-foreground">Extraction diagnostics</span>
+                        {draft.extraction_provider && (
+                          <Badge variant="outline" className="rounded-full">
+                            Provider: {draft.extraction_provider}
+                          </Badge>
+                        )}
+                        {draft.extraction_model && (
+                          <Badge variant="outline" className="rounded-full">
+                            Model: {draft.extraction_model}
+                          </Badge>
+                        )}
+                      </div>
+
+                      {extractionWarnings.length > 0 && (
+                        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-800">
+                          {extractionWarnings.map((warning) => (
+                            <li key={warning}>{warning}</li>
+                          ))}
+                        </ul>
+                      )}
+
+                      {draft.blocked_reasons.length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-1.5">
+                          {draft.blocked_reasons.map((reason) => (
+                            <Badge key={reason} variant="secondary" className="rounded-full">
+                              {formatBlockedReason(reason)}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                  )}
 
                   <section className="flex max-h-[62vh] flex-col rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
                     <div className="mb-3 flex items-center justify-between gap-3">
