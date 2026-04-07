@@ -3,13 +3,17 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Camera, Keyboard, Package, Plus, ScanBarcode, Search } from "lucide-react";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Camera, Check, ChevronsUpDown, Keyboard, Package, Plus, ScanBarcode, Search } from "lucide-react";
 import ProductCard from "./ProductCard";
 import type { Product } from "./types";
 import { POS_SHORTCUT_INLINE_HINT, POS_SHORTCUT_LABELS } from "./shortcuts";
@@ -22,6 +26,29 @@ const CAMERA_SCAN_DUPLICATE_COOLDOWN_MS = 1300;
 const normalizeBarcode = (value: string) => value.trim().toLowerCase();
 const isBarcodeFeatureEnabled = import.meta.env.VITE_BARCODE_FEATURE_ENABLED !== "false";
 const CAMERA_SCAN_FORMATS = ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "itf", "codabar"];
+const DEFAULT_CATEGORY = "Uncategorized";
+const DEFAULT_BRAND = "Unbranded";
+
+type StockFilter = "all" | "in" | "out" | "low";
+type SortOption = "name_asc" | "name_desc" | "price_asc" | "price_desc" | "stock_asc" | "stock_desc";
+
+const resolveCategoryName = (product: Product) => {
+  const raw = product.categoryName ?? product.category;
+  if (!raw || !raw.trim()) {
+    return DEFAULT_CATEGORY;
+  }
+
+  return raw.trim();
+};
+
+const resolveBrandName = (product: Product) => {
+  const raw = product.brandName;
+  if (!raw || !raw.trim()) {
+    return DEFAULT_BRAND;
+  }
+
+  return raw.trim();
+};
 
 type BarcodeDetectionResultLike = {
   rawValue?: string | null;
@@ -59,6 +86,12 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
   ({ products, onAddToCart, showShortcutHints = false, expertMode = false }, ref) => {
     const [searchQuery, setSearchQuery] = useState("");
     const [searchMode, setSearchMode] = useState<"manual" | "barcode">("manual");
+    const [selectedCategory, setSelectedCategory] = useState("all");
+    const [selectedBrand, setSelectedBrand] = useState("all");
+    const [selectedProductId, setSelectedProductId] = useState("all");
+    const [stockFilter, setStockFilter] = useState<StockFilter>("all");
+    const [sortOption, setSortOption] = useState<SortOption>("name_asc");
+    const [productFilterOpen, setProductFilterOpen] = useState(false);
     const [barcodeFeedback, setBarcodeFeedback] = useState<string | null>(null);
     const [cameraOpen, setCameraOpen] = useState(false);
     const [cameraStarting, setCameraStarting] = useState(false);
@@ -162,14 +195,114 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
     );
 
     const normalizedQuery = searchQuery.trim().toLowerCase();
-    const filtered = products.filter((p) => {
-      const q = normalizedQuery;
-      return (
-        p.name.toLowerCase().includes(q) ||
-        p.sku.toLowerCase().includes(q) ||
-        (p.barcode && p.barcode.toLowerCase().includes(q))
-      );
-    });
+    const categoryOptions = useMemo(
+      () => Array.from(new Set(products.map(resolveCategoryName))).sort((left, right) => left.localeCompare(right)),
+      [products],
+    );
+    const brandOptions = useMemo(
+      () => Array.from(new Set(products.map(resolveBrandName))).sort((left, right) => left.localeCompare(right)),
+      [products],
+    );
+    const productOptions = useMemo(
+      () => [...products].sort((left, right) => left.name.localeCompare(right.name)),
+      [products],
+    );
+
+    useEffect(() => {
+      if (selectedCategory !== "all" && !categoryOptions.includes(selectedCategory)) {
+        setSelectedCategory("all");
+      }
+    }, [categoryOptions, selectedCategory]);
+
+    useEffect(() => {
+      if (selectedBrand !== "all" && !brandOptions.includes(selectedBrand)) {
+        setSelectedBrand("all");
+      }
+    }, [brandOptions, selectedBrand]);
+
+    useEffect(() => {
+      if (selectedProductId !== "all" && !products.some((product) => product.id === selectedProductId)) {
+        setSelectedProductId("all");
+      }
+    }, [products, selectedProductId]);
+
+    const filtered = useMemo(() => {
+      let next = [...products];
+
+      if (selectedCategory !== "all") {
+        next = next.filter((product) => resolveCategoryName(product) === selectedCategory);
+      }
+
+      if (selectedBrand !== "all") {
+        next = next.filter((product) => resolveBrandName(product) === selectedBrand);
+      }
+
+      if (selectedProductId !== "all") {
+        next = next.filter((product) => product.id === selectedProductId);
+      }
+
+      if (stockFilter === "in") {
+        next = next.filter((product) => product.stock > 0);
+      } else if (stockFilter === "out") {
+        next = next.filter((product) => product.stock <= 0);
+      } else if (stockFilter === "low") {
+        next = next.filter((product) => product.isLowStock === true);
+      }
+
+      if (normalizedQuery) {
+        next = next.filter((product) =>
+          [
+            product.name,
+            product.sku,
+            product.barcode || "",
+            resolveCategoryName(product),
+            resolveBrandName(product),
+          ]
+            .join(" ")
+            .toLowerCase()
+            .includes(normalizedQuery),
+        );
+      }
+
+      next.sort((left, right) => {
+        switch (sortOption) {
+          case "name_desc":
+            return right.name.localeCompare(left.name);
+          case "price_asc":
+            return left.price - right.price;
+          case "price_desc":
+            return right.price - left.price;
+          case "stock_asc":
+            return left.stock - right.stock;
+          case "stock_desc":
+            return right.stock - left.stock;
+          case "name_asc":
+          default:
+            return left.name.localeCompare(right.name);
+        }
+      });
+
+      return next;
+    }, [products, selectedCategory, selectedBrand, selectedProductId, stockFilter, normalizedQuery, sortOption]);
+
+    const selectedProductLabel = useMemo(() => {
+      if (selectedProductId === "all") {
+        return "All products";
+      }
+
+      return productOptions.find((product) => product.id === selectedProductId)?.name ?? "All products";
+    }, [productOptions, selectedProductId]);
+
+    const clearFilters = useCallback(() => {
+      setSearchQuery("");
+      setSelectedCategory("all");
+      setSelectedBrand("all");
+      setSelectedProductId("all");
+      setStockFilter("all");
+      setSortOption("name_asc");
+      setBarcodeFeedback(null);
+      focusAndSelectSearch();
+    }, [focusAndSelectSearch]);
 
     const submitBarcodeQuery = useCallback(
       (scannerLike: boolean) => {
@@ -519,6 +652,108 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
                 )}
               </Button>
             ) : null}
+          </div>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
+            <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+              <SelectTrigger className="h-9 rounded-xl text-xs">
+                <SelectValue placeholder="Category" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All categories</SelectItem>
+                {categoryOptions.map((category) => (
+                  <SelectItem key={category} value={category}>
+                    {category}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={selectedBrand} onValueChange={setSelectedBrand}>
+              <SelectTrigger className="h-9 rounded-xl text-xs">
+                <SelectValue placeholder="Brand" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All brands</SelectItem>
+                {brandOptions.map((brand) => (
+                  <SelectItem key={brand} value={brand}>
+                    {brand}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Popover open={productFilterOpen} onOpenChange={setProductFilterOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="h-9 justify-between rounded-xl text-xs font-normal xl:col-span-2">
+                  <span className="truncate">{selectedProductLabel}</span>
+                  <ChevronsUpDown className="h-3.5 w-3.5 opacity-60" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-[min(92vw,24rem)] p-0">
+                <Command>
+                  <CommandInput placeholder="Search product..." />
+                  <CommandList>
+                    <CommandEmpty>No product found.</CommandEmpty>
+                    <CommandGroup>
+                      <CommandItem
+                        value="all products"
+                        onSelect={() => {
+                          setSelectedProductId("all");
+                          setProductFilterOpen(false);
+                        }}
+                      >
+                        <Check className={`mr-2 h-4 w-4 ${selectedProductId === "all" ? "opacity-100" : "opacity-0"}`} />
+                        All products
+                      </CommandItem>
+                      {productOptions.map((product) => (
+                        <CommandItem
+                          key={product.id}
+                          value={`${product.name} ${product.sku} ${product.barcode || ""}`}
+                          onSelect={() => {
+                            setSelectedProductId(product.id);
+                            setProductFilterOpen(false);
+                          }}
+                        >
+                          <Check className={`mr-2 h-4 w-4 ${selectedProductId === product.id ? "opacity-100" : "opacity-0"}`} />
+                          <span className="truncate">{product.name}</span>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+
+            <Select value={stockFilter} onValueChange={(value) => setStockFilter(value as StockFilter)}>
+              <SelectTrigger className="h-9 rounded-xl text-xs">
+                <SelectValue placeholder="Stock status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All stock</SelectItem>
+                <SelectItem value="in">In stock</SelectItem>
+                <SelectItem value="out">Out of stock</SelectItem>
+                <SelectItem value="low">Low stock</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <div className="flex gap-2">
+              <Select value={sortOption} onValueChange={(value) => setSortOption(value as SortOption)}>
+                <SelectTrigger className="h-9 rounded-xl text-xs">
+                  <SelectValue placeholder="Sort" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="name_asc">Name A-Z</SelectItem>
+                  <SelectItem value="name_desc">Name Z-A</SelectItem>
+                  <SelectItem value="price_asc">Price Low-High</SelectItem>
+                  <SelectItem value="price_desc">Price High-Low</SelectItem>
+                  <SelectItem value="stock_asc">Stock Low-High</SelectItem>
+                  <SelectItem value="stock_desc">Stock High-Low</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button type="button" variant="outline" className="h-9 rounded-xl text-xs" onClick={clearFilters}>
+                Clear
+              </Button>
+            </div>
           </div>
           <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
             <span>{filtered.length} products</span>

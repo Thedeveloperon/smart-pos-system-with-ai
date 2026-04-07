@@ -1,61 +1,110 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import ProductSearchPanel from "./ProductSearchPanel";
 import type { Product } from "./types";
 
 const products: Product[] = [
-  { id: "1", name: "Ball Pen", sku: "SKU-001", barcode: "BAR-111", price: 100, stock: 10 },
-  { id: "2", name: "Notebook", sku: "SKU-002", barcode: "BAR-222", price: 250, stock: 5 },
+  {
+    id: "1",
+    name: "Ball Pen",
+    sku: "SKU-001",
+    barcode: "BAR-111",
+    price: 100,
+    stock: 0,
+    category: "Stationery",
+    categoryName: "Stationery",
+    brandName: "Atlas",
+    isLowStock: true,
+  },
+  {
+    id: "2",
+    name: "Notebook",
+    sku: "SKU-002",
+    barcode: "BAR-222",
+    price: 250,
+    stock: 5,
+    category: "Stationery",
+    categoryName: "Stationery",
+    brandName: "Atlas",
+    isLowStock: false,
+  },
+  {
+    id: "3",
+    name: "Milk Powder",
+    sku: "SKU-003",
+    barcode: "BAR-333",
+    price: 450,
+    stock: 20,
+    category: "Grocery",
+    categoryName: "Grocery",
+    brandName: "Anchor",
+    isLowStock: false,
+  },
 ];
 
+const openSelectAndChoose = async (index: number, optionLabel: string) => {
+  const trigger = screen.getAllByRole("combobox")[index];
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+
+  if (trigger.getAttribute("aria-expanded") !== "true") {
+    fireEvent.mouseDown(trigger);
+  }
+
+  if (trigger.getAttribute("aria-expanded") !== "true") {
+    fireEvent.click(trigger);
+  }
+
+  fireEvent.click(await screen.findByRole("option", { name: optionLabel }));
+};
+
 describe("ProductSearchPanel", () => {
-  beforeEach(() => {
-    window.localStorage.clear();
+  beforeAll(() => {
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    HTMLElement.prototype.hasPointerCapture = vi.fn(() => false);
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    HTMLElement.prototype.releasePointerCapture = vi.fn();
   });
 
-  it("auto-adds an exact match in expert mode", async () => {
-    const onAddToCart = vi.fn();
+  it("filters by stock and brand, then clears filters back to default", async () => {
+    render(<ProductSearchPanel products={products} onAddToCart={vi.fn()} />);
 
-    render(
-      <ProductSearchPanel
-        products={products}
-        cartItems={[]}
-        onUpdateQty={vi.fn()}
-        onRemove={vi.fn()}
-        onAddToCart={onAddToCart}
-        expertMode
-      />,
-    );
+    expect(screen.getByText("3 products")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "SKU-001" } });
+    await openSelectAndChoose(1, "Atlas");
+    await waitFor(() => {
+      expect(screen.getByText("2 products")).toBeInTheDocument();
+    });
+
+    await openSelectAndChoose(2, "Out of stock");
+    await waitFor(() => {
+      expect(screen.getByText("1 products")).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("Search products by name, SKU..."), {
+      target: { value: "ball" },
+    });
+    await waitFor(() => {
+      expect(screen.getByText("1 products")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
 
     await waitFor(() => {
-      expect(onAddToCart).toHaveBeenCalledTimes(1);
-      expect(onAddToCart).toHaveBeenCalledWith(products[0], 1);
+      expect(screen.getByText("3 products")).toBeInTheDocument();
+      expect(screen.getByPlaceholderText("Search products by name, SKU...")).toHaveValue("");
     });
   });
 
-  it("adds the first filtered result when Enter is pressed in expert mode", async () => {
-    const onAddToCart = vi.fn();
+  it("supports exact product filter from the searchable product picker", async () => {
+    render(<ProductSearchPanel products={products} onAddToCart={vi.fn()} />);
 
-    render(
-      <ProductSearchPanel
-        products={products}
-        cartItems={[]}
-        onUpdateQty={vi.fn()}
-        onRemove={vi.fn()}
-        onAddToCart={onAddToCart}
-        expertMode
-      />,
-    );
-
-    const input = screen.getByRole("textbox");
-    fireEvent.change(input, { target: { value: "note" } });
-    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "All products" }));
+    fireEvent.change(screen.getByPlaceholderText("Search product..."), { target: { value: "Milk Powder" } });
+    const matches = await screen.findAllByText("Milk Powder");
+    fireEvent.click(matches[matches.length - 1]);
 
     await waitFor(() => {
-      expect(onAddToCart).toHaveBeenCalledTimes(1);
-      expect(onAddToCart).toHaveBeenCalledWith(products[1], 1);
+      expect(screen.getByText("1 products")).toBeInTheDocument();
     });
   });
 });

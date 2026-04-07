@@ -6,6 +6,11 @@ export interface Product {
   price: number;
   image?: string;
   category?: string;
+  categoryId?: string;
+  categoryName?: string;
+  brandId?: string;
+  brandName?: string;
+  isLowStock?: boolean;
   stock: number;
 }
 

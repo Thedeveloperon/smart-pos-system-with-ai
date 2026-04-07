@@ -137,16 +137,19 @@ const CashChangeDialog = ({
 
             {showEditableCounter ? (
               <div className="min-h-0 flex-1 rounded-2xl border border-slate-300 bg-white p-3">
-                <DenominationCounter
-                  key={`${normalizedChange}-${availableCountsKey}`}
-                  initialCounts={breakdown}
-                  compact
-                  onChange={(counts, total) => {
-                    setManualCounts(counts);
-                    setManualTotal(total);
-                  }}
-                />
-                <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm">
+                <div className="flex h-full min-h-0 flex-col">
+                  <div className="min-h-0 flex-1 overflow-hidden">
+                    <DenominationCounter
+                      key={`${normalizedChange}-${availableCountsKey}`}
+                      initialCounts={breakdown}
+                      compact
+                      onChange={(counts, total) => {
+                        setManualCounts(counts);
+                        setManualTotal(total);
+                      }}
+                    />
+                  </div>
+                  <div className="mt-2 shrink-0 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm">
                   <p className="font-medium text-slate-700">
                     Selected total: Rs. {selectedTotal.toLocaleString()}
                   </p>
@@ -165,6 +168,7 @@ const CashChangeDialog = ({
                         ? "The selected notes and coins match the balance to return."
                         : "Adjust the counts until the selected total matches the balance to return.")}
                   </p>
+                  </div>
                 </div>
               </div>
             ) : (

@@ -82,6 +82,24 @@ describe("ProductManagementDialog barcode flow", () => {
     vi.mocked(fetchCategories).mockResolvedValue([]);
   });
 
+  it("shows aligned summary cards with total, filtered, selected, and low-stock counts", async () => {
+    const lowStockProduct: CatalogProduct = { ...baseProduct, id: "prod-2", name: "Soap", isLowStock: true, barcode: undefined };
+    const healthyProduct: CatalogProduct = { ...baseProduct, id: "prod-3", name: "Rice", isLowStock: false, barcode: undefined };
+    vi.mocked(fetchProductCatalogItems).mockResolvedValue([lowStockProduct, healthyProduct]);
+
+    renderDialog();
+
+    expect(await screen.findByText("Total")).toBeInTheDocument();
+    expect(screen.getByText("Filtered")).toBeInTheDocument();
+    expect(screen.getByText("Selected")).toBeInTheDocument();
+    expect(screen.getAllByText("Low Stock").length).toBeGreaterThan(0);
+
+    expect(screen.getByText("Soap")).toBeInTheDocument();
+    expect(screen.getByText("Rice")).toBeInTheDocument();
+    expect(screen.getAllByText("2").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("1").length).toBeGreaterThan(0);
+  });
+
   it("generates barcode in editor and refreshes state", async () => {
     const productWithoutBarcode: CatalogProduct = { ...baseProduct, barcode: undefined };
 

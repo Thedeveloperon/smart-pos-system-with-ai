@@ -69,6 +69,7 @@ import { X } from "lucide-react";
 
 const SHORTCUTS_ONBOARDING_STORAGE_KEY_PREFIX = "smartpos.shortcuts.onboarding.v1";
 const REMINDER_BANNER_DISMISSAL_STORAGE_KEY_PREFIX = "smartpos.reminders.banner.dismissed.v1";
+const OFFLINE_BANNER_DISMISSAL_STORAGE_KEY_PREFIX = "smartpos.license.offline.banner.dismissed.v1";
 const isPosShortcutsFeatureEnabled = import.meta.env.VITE_POS_SHORTCUTS_ENABLED !== "false";
 
 const IndexInner = () => {
@@ -119,7 +120,7 @@ const IndexInner = () => {
   const [isOfflineSyncing, setIsOfflineSyncing] = useState(false);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const [showShortcutOnboarding, setShowShortcutOnboarding] = useState(false);
-  const [dismissedOfflineGrantToken, setDismissedOfflineGrantToken] = useState<string | null>(null);
+  const [isOfflineBannerDismissed, setIsOfflineBannerDismissed] = useState(false);
   const [dismissedReminderId, setDismissedReminderId] = useState<string | null>(null);
   const isOfflineFlushInProgressRef = useRef(false);
   const desktopSearchRef = useRef<ProductSearchPanelHandle | null>(null);
@@ -143,6 +144,13 @@ const IndexInner = () => {
         user?.username?.trim().toLowerCase() || "anonymous"
       }`,
     [user?.username],
+  );
+  const offlineBannerDismissalStorageKey = useMemo(
+    () =>
+      `${OFFLINE_BANNER_DISMISSAL_STORAGE_KEY_PREFIX}:${
+        licenseStatus?.deviceCode?.trim().toLowerCase() || "unknown"
+      }`,
+    [licenseStatus?.deviceCode],
   );
 
   const {
@@ -854,15 +862,43 @@ const IndexInner = () => {
   }, [canSell]);
 
   useEffect(() => {
-    if (!licenseStatus?.offlineGrantToken) {
-      setDismissedOfflineGrantToken(null);
+    if (!licenseStatus?.deviceCode) {
+      setIsOfflineBannerDismissed(false);
       return;
     }
 
-    if (dismissedOfflineGrantToken && dismissedOfflineGrantToken !== licenseStatus.offlineGrantToken) {
-      setDismissedOfflineGrantToken(null);
+    try {
+      const storedValue = window.localStorage.getItem(offlineBannerDismissalStorageKey);
+      setIsOfflineBannerDismissed(storedValue === "1");
+    } catch (error) {
+      console.error(error);
+      setIsOfflineBannerDismissed(false);
     }
-  }, [dismissedOfflineGrantToken, licenseStatus?.offlineGrantToken]);
+  }, [licenseStatus?.deviceCode, offlineBannerDismissalStorageKey]);
+
+  useEffect(() => {
+    const isLicenseEligibleForOfflineBanner =
+      licenseStatus?.state === "active" || licenseStatus?.state === "grace";
+    if (isLicenseEligibleForOfflineBanner && licenseStatus?.offlineGrantToken) {
+      return;
+    }
+
+    setIsOfflineBannerDismissed(false);
+    if (!licenseStatus?.deviceCode) {
+      return;
+    }
+
+    try {
+      window.localStorage.removeItem(offlineBannerDismissalStorageKey);
+    } catch (error) {
+      console.error(error);
+    }
+  }, [
+    licenseStatus?.deviceCode,
+    licenseStatus?.offlineGrantToken,
+    licenseStatus?.state,
+    offlineBannerDismissalStorageKey,
+  ]);
 
   useEffect(() => {
     try {
@@ -949,7 +985,7 @@ const IndexInner = () => {
 
       {(licenseStatus?.state === "active" || licenseStatus?.state === "grace") && (
         <>
-          {licenseStatus.offlineGrantToken !== dismissedOfflineGrantToken && (
+          {!isOfflineBannerDismissed && licenseStatus.offlineGrantToken && (
             <LicenseOfflineBanner
               status={licenseStatus}
               pendingSyncCount={offlinePendingCount}
@@ -958,7 +994,12 @@ const IndexInner = () => {
                 void refreshLicenseStatus();
               }}
               onDismiss={() => {
-                setDismissedOfflineGrantToken(licenseStatus.offlineGrantToken ?? null);
+                setIsOfflineBannerDismissed(true);
+                try {
+                  window.localStorage.setItem(offlineBannerDismissalStorageKey, "1");
+                } catch (error) {
+                  console.error(error);
+                }
               }}
             />
           )}
