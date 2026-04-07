@@ -988,14 +988,14 @@ public sealed class MarketingPaymentRequestCreateRequest
     [JsonPropertyName("notes")]
     public string? Notes { get; set; }
 
-    [JsonPropertyName("target_username")]
-    public string? TargetUsername { get; set; }
+    [JsonPropertyName("owner_username")]
+    public string? OwnerUsername { get; set; }
 
-    [JsonPropertyName("ai_package_code")]
-    public string? AiPackageCode { get; set; }
+    [JsonPropertyName("owner_full_name")]
+    public string? OwnerFullName { get; set; }
 
-    [JsonPropertyName("ai_credits_requested")]
-    public decimal? AiCreditsRequested { get; set; }
+    [JsonPropertyName("owner_password")]
+    public string? OwnerPassword { get; set; }
 }
 
 public sealed class MarketingPaymentInstructionsResponse
@@ -1069,6 +1069,12 @@ public sealed class MarketingPaymentRequestCreateResponse
     [JsonPropertyName("next_step")]
     public string NextStep { get; set; } = "await_customer_payment";
 
+    [JsonPropertyName("owner_username")]
+    public string? OwnerUsername { get; set; }
+
+    [JsonPropertyName("owner_account_state")]
+    public string? OwnerAccountState { get; set; }
+
     [JsonPropertyName("ai_credit_order")]
     public MarketingAiCreditOrderSummaryResponse? AiCreditOrder { get; set; }
 }
@@ -1098,6 +1104,12 @@ public sealed class MarketingStripeCheckoutSessionResponse
 
     [JsonPropertyName("invoice")]
     public MarketingPaymentInvoiceResponse Invoice { get; set; } = new();
+
+    [JsonPropertyName("owner_username")]
+    public string? OwnerUsername { get; set; }
+
+    [JsonPropertyName("owner_account_state")]
+    public string? OwnerAccountState { get; set; }
 
     [JsonPropertyName("checkout_session_id")]
     public string CheckoutSessionId { get; set; } = string.Empty;

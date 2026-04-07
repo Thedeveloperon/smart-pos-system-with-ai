@@ -138,6 +138,9 @@ public sealed class LicenseService(
         string? DownloadUrl,
         DateTimeOffset? ExpiresAt,
         bool IsProtected);
+    private readonly record struct OwnerAccountProvisioningResult(
+        AppUser User,
+        string AccountState);
 
     private static readonly JsonSerializerOptions TokenSerializerOptions = new()
     {
@@ -2929,39 +2932,31 @@ public sealed class LicenseService(
         var normalizedCampaign = NormalizeOptionalValue(request.Campaign);
         var normalizedLocale = NormalizeOptionalValue(request.Locale);
         var customerNotes = NormalizeOptionalValue(request.Notes);
-        var normalizedTargetUsername = NormalizeOptionalValue(request.TargetUsername);
-        var normalizedAiPackageCode = NormalizeOptionalValue(request.AiPackageCode);
-        var requestedAiCredits = ResolveRequestedAiCredits(request.AiCreditsRequested, normalizedAiPackageCode);
-
-        AppUser? targetWalletUser = null;
-        if (requestedAiCredits.HasValue)
-        {
-            if (string.IsNullOrWhiteSpace(normalizedTargetUsername))
-            {
-                throw new LicenseException(
-                    LicenseErrorCodes.InvalidAdminRequest,
-                    "target_username is required when ai_credits_requested or ai_package_code is provided.",
-                    StatusCodes.Status400BadRequest);
-            }
-
-            targetWalletUser = await ResolveAiCreditOrderTargetUserAsync(normalizedTargetUsername, cancellationToken);
-        }
+        var ownerUsername = ResolveMarketingOwnerUsername(request.OwnerUsername);
+        var ownerPassword = ResolveMarketingOwnerPassword(request.OwnerPassword);
+        var ownerFullName = ResolveMarketingOwnerFullName(request.OwnerFullName, contactName);
+        var shopCode = string.IsNullOrWhiteSpace(request.ShopCode)
+            ? await GenerateUniqueMarketingShopCodeAsync(shopName, cancellationToken)
+            : NormalizeMarketingShopCode(request.ShopCode);
 
         if (!quote.RequiresPayment || quote.AmountDue <= 0m)
         {
-            if (requestedAiCredits.HasValue)
-            {
-                throw new LicenseException(
-                    LicenseErrorCodes.InvalidAdminRequest,
-                    "AI credit orders require a paid marketing request in this phase.",
-                    StatusCodes.Status400BadRequest);
-            }
+            var trialShop = await GetOrCreateShopAsync(shopCode, now, cancellationToken);
+            EnsureMarketingShopName(trialShop, shopName, now);
+            var ownerAccount = await EnsureMarketingOwnerAccountAsync(
+                trialShop,
+                ownerUsername,
+                ownerPassword,
+                ownerFullName,
+                now,
+                cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
 
             return new MarketingPaymentRequestCreateResponse
             {
                 GeneratedAt = now,
-                ShopCode = ResolveMarketingShopCodeCandidate(shopName),
-                ShopName = shopName,
+                ShopCode = trialShop.Code,
+                ShopName = trialShop.Name,
                 ContactName = contactName,
                 ContactEmail = contactEmail,
                 ContactPhone = contactPhone,
@@ -2976,13 +2971,11 @@ public sealed class LicenseService(
                     PaymentMethod = paymentMethod,
                     Message = "This plan does not require payment. Install SmartPOS and continue with trial activation.",
                     ReferenceHint = "No payment reference required for free trial."
-                }
+                },
+                OwnerUsername = ownerAccount.User.Username,
+                OwnerAccountState = ownerAccount.AccountState
             };
         }
-
-        var shopCode = string.IsNullOrWhiteSpace(request.ShopCode)
-            ? await GenerateUniqueMarketingShopCodeAsync(shopName, cancellationToken)
-            : NormalizeMarketingShopCode(request.ShopCode);
 
         var invoiceNotes = BuildMarketingInvoiceNotes(
             quote,
@@ -2990,12 +2983,10 @@ public sealed class LicenseService(
             contactName,
             contactEmail,
             contactPhone,
+            ownerUsername,
             normalizedSource,
             normalizedCampaign,
             normalizedLocale,
-            normalizedTargetUsername,
-            normalizedAiPackageCode,
-            requestedAiCredits,
             customerNotes);
         var actorNote = $"plan={quote.InternalPlanCode}; method={paymentMethod}; source={normalizedSource}";
 
@@ -3015,18 +3006,6 @@ public sealed class LicenseService(
 
         var shop = await dbContext.Shops
             .FirstOrDefaultAsync(x => x.Id == invoiceRow.ShopId, cancellationToken);
-        if (shop is not null &&
-            (shop.Name.StartsWith("Shop ", StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(shop.Name, options.DefaultShopName, StringComparison.OrdinalIgnoreCase)) &&
-            !string.Equals(shop.Name, shopName, StringComparison.Ordinal))
-        {
-            shop.Name = shopName;
-            shop.UpdatedAtUtc = now;
-            await dbContext.SaveChangesAsync(cancellationToken);
-        }
-
-        var resolvedShopCode = shop?.Code ?? invoiceRow.ShopCode;
-        var resolvedShopName = shop?.Name ?? shopName;
         var persistedShop = shop ??
                             await dbContext.Shops
                                 .FirstOrDefaultAsync(x => x.Id == invoiceRow.ShopId, cancellationToken) ??
@@ -3034,44 +3013,21 @@ public sealed class LicenseService(
                                 LicenseErrorCodes.InvalidAdminRequest,
                                 "Shop was not found for marketing payment request.",
                                 StatusCodes.Status404NotFound);
-
-        AiCreditOrder? aiCreditOrder = null;
-        if (requestedAiCredits.HasValue && targetWalletUser is not null)
-        {
-            aiCreditOrder = new AiCreditOrder
-            {
-                ShopId = persistedShop.Id,
-                Shop = persistedShop,
-                InvoiceId = invoiceRow.InvoiceId,
-                TargetUserId = targetWalletUser.Id,
-                TargetUser = targetWalletUser,
-                TargetUsername = targetWalletUser.Username,
-                PackageCode = normalizedAiPackageCode,
-                RequestedCredits = requestedAiCredits.Value,
-                SettledCredits = 0m,
-                Status = AiCreditOrderStatus.Submitted,
-                Source = normalizedSource,
-                MetadataJson = JsonSerializer.Serialize(new
-                {
-                    marketing_plan_code = quote.MarketingPlanCode,
-                    requested_internal_plan = quote.InternalPlanCode,
-                    source = normalizedSource,
-                    campaign = normalizedCampaign,
-                    locale = normalizedLocale,
-                    invoice_number = invoiceRow.InvoiceNumber
-                }),
-                SubmittedAtUtc = now,
-                CreatedAtUtc = now
-            };
-            dbContext.AiCreditOrders.Add(aiCreditOrder);
-            await dbContext.SaveChangesAsync(cancellationToken);
-        }
+        EnsureMarketingShopName(persistedShop, shopName, now);
+        var ownerAccountResult = await EnsureMarketingOwnerAccountAsync(
+            persistedShop,
+            ownerUsername,
+            ownerPassword,
+            ownerFullName,
+            now,
+            cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         return new MarketingPaymentRequestCreateResponse
         {
             GeneratedAt = now,
-            ShopCode = resolvedShopCode,
-            ShopName = resolvedShopName,
+            ShopCode = persistedShop.Code,
+            ShopName = persistedShop.Name,
             ContactName = contactName,
             ContactEmail = contactEmail,
             ContactPhone = contactPhone,
@@ -3089,9 +3045,8 @@ public sealed class LicenseService(
                 DueAt = invoiceRow.DueAt
             },
             Instructions = BuildMarketingPaymentInstructions(paymentMethod),
-            AiCreditOrder = aiCreditOrder is null
-                ? null
-                : MapMarketingAiCreditOrderSummary(aiCreditOrder)
+            OwnerUsername = ownerAccountResult.User.Username,
+            OwnerAccountState = ownerAccountResult.AccountState
         };
     }
 
@@ -3139,21 +3094,14 @@ public sealed class LicenseService(
                 StatusCodes.Status400BadRequest);
         }
 
-        var normalizedAiPackageCode = NormalizeOptionalValue(request.AiPackageCode);
-        var requestedAiCredits = ResolveRequestedAiCredits(request.AiCreditsRequested, normalizedAiPackageCode);
-        if (requestedAiCredits.HasValue)
-        {
-            throw new LicenseException(
-                LicenseErrorCodes.InvalidAdminRequest,
-                "Stripe checkout currently supports subscription plans only. AI credit purchase should use the AI credit checkout flow.",
-                StatusCodes.Status400BadRequest);
-        }
-
         var normalizedCurrency = ResolveCurrency(request.Currency ?? quote.Currency);
         var normalizedSource = NormalizeOptionalValue(request.Source) ?? "marketing_website";
         var normalizedCampaign = NormalizeOptionalValue(request.Campaign);
         var normalizedLocale = NormalizeOptionalValue(request.Locale);
         var customerNotes = NormalizeOptionalValue(request.Notes);
+        var ownerUsername = ResolveMarketingOwnerUsername(request.OwnerUsername);
+        var ownerPassword = ResolveMarketingOwnerPassword(request.OwnerPassword);
+        var ownerFullName = ResolveMarketingOwnerFullName(request.OwnerFullName, contactName);
 
         var shopCode = string.IsNullOrWhiteSpace(request.ShopCode)
             ? await GenerateUniqueMarketingShopCodeAsync(shopName, cancellationToken)
@@ -3165,12 +3113,10 @@ public sealed class LicenseService(
             contactName,
             contactEmail,
             contactPhone,
+            ownerUsername,
             normalizedSource,
             normalizedCampaign,
             normalizedLocale,
-            targetUsername: null,
-            aiPackageCode: null,
-            aiCreditsRequested: null,
             customerNotes);
         var actorNote = $"plan={quote.InternalPlanCode}; method=stripe; source={normalizedSource}";
 
@@ -3188,20 +3134,25 @@ public sealed class LicenseService(
             },
             cancellationToken);
 
-        var shop = await dbContext.Shops
+        var persistedShop = await dbContext.Shops
             .FirstOrDefaultAsync(x => x.Id == invoiceRow.ShopId, cancellationToken);
-        if (shop is not null &&
-            (shop.Name.StartsWith("Shop ", StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(shop.Name, options.DefaultShopName, StringComparison.OrdinalIgnoreCase)) &&
-            !string.Equals(shop.Name, shopName, StringComparison.Ordinal))
+        if (persistedShop is null)
         {
-            shop.Name = shopName;
-            shop.UpdatedAtUtc = now;
-            await dbContext.SaveChangesAsync(cancellationToken);
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Shop was not found for marketing Stripe checkout.",
+                StatusCodes.Status404NotFound);
         }
 
-        var resolvedShopCode = shop?.Code ?? invoiceRow.ShopCode;
-        var resolvedShopName = shop?.Name ?? shopName;
+        EnsureMarketingShopName(persistedShop, shopName, now);
+        var ownerAccountResult = await EnsureMarketingOwnerAccountAsync(
+            persistedShop,
+            ownerUsername,
+            ownerPassword,
+            ownerFullName,
+            now,
+            cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         var priceId = ResolveStripePriceIdForMarketingPlan(quote.MarketingPlanCode);
         var successUrl = ResolveStripeCheckoutSuccessUrl();
@@ -3212,8 +3163,8 @@ public sealed class LicenseService(
             cancelUrl,
             contactEmail,
             invoiceRow,
-            resolvedShopCode,
-            resolvedShopName,
+            persistedShop.Code,
+            persistedShop.Name,
             quote,
             normalizedSource,
             normalizedCampaign,
@@ -3223,8 +3174,8 @@ public sealed class LicenseService(
         return new MarketingStripeCheckoutSessionResponse
         {
             CreatedAt = now,
-            ShopCode = resolvedShopCode,
-            ShopName = resolvedShopName,
+            ShopCode = persistedShop.Code,
+            ShopName = persistedShop.Name,
             MarketingPlanCode = quote.MarketingPlanCode,
             InternalPlanCode = quote.InternalPlanCode,
             AmountDue = invoiceRow.AmountDue,
@@ -3236,6 +3187,8 @@ public sealed class LicenseService(
                 Status = invoiceRow.Status,
                 DueAt = invoiceRow.DueAt
             },
+            OwnerUsername = ownerAccountResult.User.Username,
+            OwnerAccountState = ownerAccountResult.AccountState,
             CheckoutSessionId = stripeSession.SessionId,
             CheckoutUrl = stripeSession.CheckoutUrl,
             ExpiresAt = stripeSession.ExpiresAt
@@ -7152,18 +7105,190 @@ public sealed class LicenseService(
         return result.Length > 64 ? result[..64] : result;
     }
 
+    private static string ResolveMarketingOwnerUsername(string? ownerUsername)
+    {
+        var normalized = NormalizeOptionalValue(ownerUsername)?.ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "owner_username is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        if (normalized.Length is < 3 or > 64)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "owner_username must be between 3 and 64 characters.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        foreach (var character in normalized)
+        {
+            if (char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.')
+            {
+                continue;
+            }
+
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "owner_username contains invalid characters.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        return normalized;
+    }
+
+    private static string ResolveMarketingOwnerPassword(string? ownerPassword)
+    {
+        var normalized = NormalizeOptionalValue(ownerPassword);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "owner_password is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        if (normalized.Length is < 8 or > 128)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "owner_password must be between 8 and 128 characters.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        return normalized;
+    }
+
+    private static string ResolveMarketingOwnerFullName(string? ownerFullName, string fallbackContactName)
+    {
+        var resolved = NormalizeOptionalValue(ownerFullName) ?? fallbackContactName;
+        if (string.IsNullOrWhiteSpace(resolved))
+        {
+            return "Shop Owner";
+        }
+
+        return resolved.Length > 120
+            ? resolved[..120]
+            : resolved;
+    }
+
+    private void EnsureMarketingShopName(Shop shop, string requestedShopName, DateTimeOffset now)
+    {
+        if (string.IsNullOrWhiteSpace(requestedShopName))
+        {
+            return;
+        }
+
+        if (string.Equals(shop.Name, requestedShopName, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        shop.Name = requestedShopName.Trim();
+        shop.UpdatedAtUtc = now;
+    }
+
+    private async Task<OwnerAccountProvisioningResult> EnsureMarketingOwnerAccountAsync(
+        Shop shop,
+        string ownerUsername,
+        string ownerPassword,
+        string ownerFullName,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var ownerRole = await dbContext.Roles
+            .FirstOrDefaultAsync(
+                x => x.Code.ToLower() == SmartPosRoles.Owner,
+                cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.LicensingConfigurationError,
+                "Owner role is not configured.",
+                StatusCodes.Status500InternalServerError);
+
+        var existingUser = await dbContext.Users
+            .Include(x => x.UserRoles)
+            .FirstOrDefaultAsync(
+                x => x.Username.ToLower() == ownerUsername,
+                cancellationToken);
+
+        if (existingUser is null)
+        {
+            var createdUser = new AppUser
+            {
+                StoreId = shop.Id,
+                Username = ownerUsername,
+                FullName = ownerFullName,
+                PasswordHash = string.Empty,
+                IsActive = true,
+                CreatedAtUtc = now,
+                LastLoginAtUtc = null
+            };
+            createdUser.PasswordHash = PasswordHashing.HashPassword(createdUser, ownerPassword);
+            dbContext.Users.Add(createdUser);
+            dbContext.UserRoles.Add(new UserRole
+            {
+                UserId = createdUser.Id,
+                RoleId = ownerRole.Id,
+                AssignedAtUtc = now,
+                User = createdUser,
+                Role = ownerRole
+            });
+
+            return new OwnerAccountProvisioningResult(createdUser, "created");
+        }
+
+        if (existingUser.StoreId.HasValue &&
+            existingUser.StoreId.Value != Guid.Empty &&
+            existingUser.StoreId.Value != shop.Id)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.DuplicateSubmission,
+                "owner_username is already assigned to another shop.",
+                StatusCodes.Status409Conflict);
+        }
+
+        existingUser.StoreId = shop.Id;
+        existingUser.IsActive = true;
+        if (!string.IsNullOrWhiteSpace(ownerFullName) &&
+            !string.Equals(existingUser.FullName, ownerFullName, StringComparison.Ordinal))
+        {
+            existingUser.FullName = ownerFullName;
+        }
+
+        if (string.IsNullOrWhiteSpace(existingUser.PasswordHash))
+        {
+            existingUser.PasswordHash = PasswordHashing.HashPassword(existingUser, ownerPassword);
+        }
+
+        var hasOwnerRole = existingUser.UserRoles.Any(x => x.RoleId == ownerRole.Id);
+        if (!hasOwnerRole)
+        {
+            dbContext.UserRoles.Add(new UserRole
+            {
+                UserId = existingUser.Id,
+                RoleId = ownerRole.Id,
+                AssignedAtUtc = now,
+                User = existingUser,
+                Role = ownerRole
+            });
+        }
+
+        return new OwnerAccountProvisioningResult(existingUser, "existing");
+    }
+
     private static string BuildMarketingInvoiceNotes(
         MarketingPlanQuote quote,
         string paymentMethod,
         string? contactName,
         string? contactEmail,
         string? contactPhone,
+        string ownerUsername,
         string source,
         string? campaign,
         string? locale,
-        string? targetUsername,
-        string? aiPackageCode,
-        decimal? aiCreditsRequested,
         string? customerNotes)
     {
         var metadata = JsonSerializer.Serialize(new
@@ -7174,9 +7299,7 @@ public sealed class LicenseService(
             contact_name = contactName,
             contact_email = contactEmail,
             contact_phone = contactPhone,
-            target_username = targetUsername,
-            ai_package_code = aiPackageCode,
-            ai_credits_requested = aiCreditsRequested,
+            owner_username = ownerUsername,
             source,
             campaign,
             locale
@@ -8288,13 +8411,23 @@ public sealed class LicenseService(
             return;
         }
 
-        var wallet = await GetOrCreateAiWalletForSettlementAsync(targetUser, now, cancellationToken);
+        if (!targetUser.StoreId.HasValue || targetUser.StoreId == Guid.Empty)
+        {
+            targetUser.StoreId = order.ShopId;
+        }
+
+        var wallet = await GetOrCreateAiWalletForSettlementAsync(
+            order.ShopId,
+            targetUser,
+            now,
+            cancellationToken);
         wallet.AvailableCredits = RoundAiCredits(wallet.AvailableCredits + creditsToSettle);
         wallet.UpdatedAtUtc = now;
 
         dbContext.AiCreditLedgerEntries.Add(new AiCreditLedgerEntry
         {
             UserId = targetUser.Id,
+            ShopId = order.ShopId,
             User = targetUser,
             WalletId = wallet.Id,
             Wallet = wallet,
@@ -8339,20 +8472,23 @@ public sealed class LicenseService(
     }
 
     private async Task<AiCreditWallet> GetOrCreateAiWalletForSettlementAsync(
+        Guid shopId,
         AppUser targetUser,
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
         var wallet = await dbContext.AiCreditWallets
-            .FirstOrDefaultAsync(x => x.UserId == targetUser.Id, cancellationToken);
+            .FirstOrDefaultAsync(x => x.ShopId == shopId, cancellationToken);
         if (wallet is not null)
         {
+            wallet.UserId = targetUser.Id;
             return wallet;
         }
 
         wallet = new AiCreditWallet
         {
             UserId = targetUser.Id,
+            ShopId = shopId,
             User = targetUser,
             AvailableCredits = 0m,
             CreatedAtUtc = now,

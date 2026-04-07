@@ -72,6 +72,7 @@ public sealed class AiCreditPaymentService(
         CancellationToken cancellationToken)
     {
         var aiOptions = options.Value;
+        var context = await ResolveUserShopContextAsync(userId, cancellationToken);
         var pack = ResolvePack(aiOptions, packCode);
         var normalizedIdempotencyKey = NormalizeIdempotencyKey(idempotencyKey);
         var normalizedPaymentMethod = NormalizePaymentMethod(
@@ -83,7 +84,7 @@ public sealed class AiCreditPaymentService(
             normalizedPaymentMethod,
             normalizedBankReference,
             normalizedDepositSlipUrl);
-        var externalReference = BuildExternalReference(userId, normalizedIdempotencyKey);
+        var externalReference = BuildExternalReference(context.ShopId, normalizedIdempotencyKey);
 
         var existingPayment = await dbContext.AiCreditPayments
             .AsNoTracking()
@@ -119,15 +120,12 @@ public sealed class AiCreditPaymentService(
                 BuildCheckoutUrl(aiOptions, externalReference, existingPackCode, existingPaymentMethod));
         }
 
-        var user = await dbContext.Users
-            .FirstOrDefaultAsync(x => x.Id == userId, cancellationToken)
-            ?? throw new InvalidOperationException("User account was not found.");
-
         var now = DateTimeOffset.UtcNow;
-        var shopNameSnapshot = await ResolveCurrentShopNameAsync(cancellationToken);
+        var shopNameSnapshot = await ResolveCurrentShopNameAsync(context.ShopId, cancellationToken);
         var payment = new AiCreditPayment
         {
-            UserId = userId,
+            UserId = context.User.Id,
+            ShopId = context.ShopId,
             Status = AiCreditPaymentStatus.Pending,
             Provider = normalizedPaymentMethod == PaymentMethodCard
                 ? NormalizeProvider(aiOptions.PaymentProvider)
@@ -149,12 +147,13 @@ public sealed class AiCreditPaymentService(
                 payment_method = normalizedPaymentMethod,
                 bank_reference = normalizedBankReference,
                 deposit_slip_url = normalizedDepositSlipUrl,
+                shop_id = context.ShopId,
                 shop_name = shopNameSnapshot
             }, JsonOptions),
             CreatedAtUtc = now,
             UpdatedAtUtc = now,
             CompletedAtUtc = null,
-            User = user
+            User = context.User
         };
 
         dbContext.AiCreditPayments.Add(payment);
@@ -166,6 +165,7 @@ public sealed class AiCreditPaymentService(
             after: new
             {
                 user_id = payment.UserId,
+                shop_id = payment.ShopId,
                 payment_status = MapPaymentStatus(payment.Status, normalizedPaymentMethod),
                 payment_method = normalizedPaymentMethod,
                 pack_code = pack.PackCode,
@@ -234,13 +234,14 @@ public sealed class AiCreditPaymentService(
         int take,
         CancellationToken cancellationToken)
     {
+        var context = await ResolveUserShopContextAsync(userId, cancellationToken);
         var normalizedTake = Math.Clamp(take, 1, 100);
         List<AiCreditPayment> payments;
         if (dbContext.Database.IsSqlite())
         {
             payments = (await dbContext.AiCreditPayments
                     .AsNoTracking()
-                    .Where(x => x.UserId == userId)
+                    .Where(x => x.ShopId == context.ShopId)
                     .ToListAsync(cancellationToken))
                 .OrderByDescending(x => x.CreatedAtUtc)
                 .Take(normalizedTake)
@@ -250,7 +251,7 @@ public sealed class AiCreditPaymentService(
         {
             payments = await dbContext.AiCreditPayments
                 .AsNoTracking()
-                .Where(x => x.UserId == userId)
+                .Where(x => x.ShopId == context.ShopId)
                 .OrderByDescending(x => x.CreatedAtUtc)
                 .Take(normalizedTake)
                 .ToListAsync(cancellationToken);
@@ -295,6 +296,7 @@ public sealed class AiCreditPaymentService(
             pendingPayments = (await dbContext.AiCreditPayments
                     .AsNoTracking()
                     .Include(x => x.User)
+                    .Include(x => x.Shop)
                     .Where(x => x.Status == AiCreditPaymentStatus.Pending)
                     .ToListAsync(cancellationToken))
                 .OrderByDescending(x => x.CreatedAtUtc)
@@ -306,6 +308,7 @@ public sealed class AiCreditPaymentService(
             pendingPayments = await dbContext.AiCreditPayments
                 .AsNoTracking()
                 .Include(x => x.User)
+                .Include(x => x.Shop)
                 .Where(x => x.Status == AiCreditPaymentStatus.Pending)
                 .OrderByDescending(x => x.CreatedAtUtc)
                 .Take(candidateTake)
@@ -329,7 +332,9 @@ public sealed class AiCreditPaymentService(
                     PaymentId = payment.Id,
                     TargetUsername = payment.User.Username,
                     TargetFullName = NormalizeOptional(payment.User.FullName),
-                    ShopName = !string.IsNullOrWhiteSpace(metadataShopName) ? metadataShopName : fallbackShopName,
+                    ShopName = !string.IsNullOrWhiteSpace(metadataShopName)
+                        ? metadataShopName
+                        : NormalizeOptional(payment.Shop?.Name) ?? fallbackShopName,
                     PaymentStatus = MapPaymentStatus(payment.Status, paymentMethod),
                     PaymentMethod = paymentMethod,
                     Credits = payment.CreditsPurchased,
@@ -400,8 +405,10 @@ public sealed class AiCreditPaymentService(
         var purchaseReference = string.IsNullOrWhiteSpace(payment.PurchaseReference)
             ? $"ai-payment-manual-{payment.Id:N}"
             : payment.PurchaseReference.Trim();
+        var paymentShopId = await ResolvePaymentShopIdAsync(payment, cancellationToken);
 
-        await creditBillingService.AddCreditsAsync(
+        await creditBillingService.AddCreditsToShopAsync(
+            paymentShopId,
             payment.UserId,
             payment.CreditsPurchased,
             purchaseReference,
@@ -648,8 +655,10 @@ public sealed class AiCreditPaymentService(
                 var purchaseReference = string.IsNullOrWhiteSpace(payment.PurchaseReference)
                     ? $"ai-payment-{payment.Id:N}"
                     : payment.PurchaseReference.Trim();
+                var paymentShopId = await ResolvePaymentShopIdAsync(payment, cancellationToken);
 
-                await creditBillingService.AddCreditsAsync(
+                await creditBillingService.AddCreditsToShopAsync(
+                    paymentShopId,
                     payment.UserId,
                     payment.CreditsPurchased,
                     purchaseReference,
@@ -705,7 +714,9 @@ public sealed class AiCreditPaymentService(
                     if (payment.Status == AiCreditPaymentStatus.Succeeded)
                     {
                         var refundReference = $"ai-payment-refund-{payment.Id:N}";
-                        await creditBillingService.AdjustCreditsAsync(
+                        var refundShopId = await ResolvePaymentShopIdAsync(payment, cancellationToken);
+                        await creditBillingService.AdjustCreditsForShopAsync(
+                            refundShopId,
                             payment.UserId,
                             -payment.CreditsPurchased,
                             refundReference,
@@ -875,6 +886,27 @@ public sealed class AiCreditPaymentService(
             AiCreditPaymentStatus.Canceled => "canceled",
             _ => "unknown"
         };
+    }
+
+    private async Task<string?> ResolveCurrentShopNameAsync(Guid shopId, CancellationToken cancellationToken)
+    {
+        var shop = await dbContext.Shops
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == shopId, cancellationToken);
+        var normalizedShopName = NormalizeOptional(shop?.Name);
+        if (!string.IsNullOrWhiteSpace(normalizedShopName))
+        {
+            return normalizedShopName;
+        }
+
+        var profiles = await dbContext.ShopProfiles
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        return profiles
+            .OrderByDescending(x => x.UpdatedAtUtc ?? x.CreatedAtUtc)
+            .Select(x => NormalizeOptional(x.ShopName))
+            .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
     }
 
     private async Task<string?> ResolveCurrentShopNameAsync(CancellationToken cancellationToken)
@@ -1109,10 +1141,10 @@ public sealed class AiCreditPaymentService(
         return result;
     }
 
-    private static string BuildExternalReference(Guid userId, string idempotencyKey)
+    private static string BuildExternalReference(Guid shopId, string idempotencyKey)
     {
         var hash = ComputeSha256Hex(idempotencyKey);
-        return $"aicpay_{userId:N}_{hash[..20]}";
+        return $"aicpay_{shopId:N}_{hash[..20]}";
     }
 
     private static string NormalizeIdempotencyKey(string idempotencyKey)
@@ -1263,4 +1295,49 @@ public sealed class AiCreditPaymentService(
     {
         return decimal.Round(value, 2, MidpointRounding.AwayFromZero);
     }
+
+    private async Task<ShopActorContext> ResolveUserShopContextAsync(
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var user = await dbContext.Users
+            .FirstOrDefaultAsync(x => x.Id == userId, cancellationToken)
+            ?? throw new InvalidOperationException("User account was not found.");
+
+        if (!user.StoreId.HasValue || user.StoreId == Guid.Empty)
+        {
+            throw new InvalidOperationException(
+                "AI billing is unavailable because this account is not mapped to a shop. Contact support.");
+        }
+
+        return new ShopActorContext(user, user.StoreId.Value);
+    }
+
+    private async Task<Guid> ResolvePaymentShopIdAsync(
+        AiCreditPayment payment,
+        CancellationToken cancellationToken)
+    {
+        if (payment.ShopId.HasValue && payment.ShopId.Value != Guid.Empty)
+        {
+            return payment.ShopId.Value;
+        }
+
+        var userStoreId = await dbContext.Users
+            .Where(x => x.Id == payment.UserId)
+            .Select(x => x.StoreId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (!userStoreId.HasValue || userStoreId.Value == Guid.Empty)
+        {
+            throw new InvalidOperationException(
+                "AI billing is unavailable because this payment is not mapped to a shop.");
+        }
+
+        payment.ShopId = userStoreId.Value;
+        return userStoreId.Value;
+    }
+
+    private readonly record struct ShopActorContext(
+        AppUser User,
+        Guid ShopId);
 }

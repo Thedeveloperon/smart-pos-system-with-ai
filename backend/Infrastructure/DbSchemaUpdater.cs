@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using SmartPos.Backend.Domain;
 
 namespace SmartPos.Backend.Infrastructure;
 
@@ -654,6 +655,8 @@ public static class DbSchemaUpdater
         {
             await EnsurePostgresAiInsightsSchemaAsync(dbContext, cancellationToken);
         }
+
+        await EnsureAiWalletShopScopeMigrationAsync(dbContext, cancellationToken);
     }
 
     private static async Task EnsureSqliteRefundSchemaAsync(
@@ -775,6 +778,347 @@ public static class DbSchemaUpdater
         command.CommandText = $"""SELECT 1 FROM "{tableName}" LIMIT 1;""";
         var result = await command.ExecuteScalarAsync(cancellationToken);
         return result is not null && result is not DBNull;
+    }
+
+    private static async Task EnsureAiWalletShopScopeMigrationAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+
+        if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "ai_credit_wallets",
+                "ShopId",
+                """ALTER TABLE "ai_credit_wallets" ADD COLUMN "ShopId" TEXT NULL;""",
+                cancellationToken);
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "ai_credit_ledger",
+                "ShopId",
+                """ALTER TABLE "ai_credit_ledger" ADD COLUMN "ShopId" TEXT NULL;""",
+                cancellationToken);
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "ai_credit_payments",
+                "ShopId",
+                """ALTER TABLE "ai_credit_payments" ADD COLUMN "ShopId" TEXT NULL;""",
+                cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                CREATE TABLE IF NOT EXISTS "ai_credit_wallet_migration_ledger" (
+                  "Id" TEXT NOT NULL CONSTRAINT "PK_ai_credit_wallet_migration_ledger" PRIMARY KEY,
+                  "ShopId" TEXT NULL,
+                  "SourceUserId" TEXT NOT NULL,
+                  "SourceWalletId" TEXT NOT NULL,
+                  "TargetWalletId" TEXT NOT NULL,
+                  "MigratedCredits" TEXT NOT NULL,
+                  "MigrationReference" TEXT NOT NULL,
+                  "MetadataJson" TEXT NULL,
+                  "CreatedAtUtc" TEXT NOT NULL,
+                  CONSTRAINT "FK_ai_credit_wallet_migration_ledger_users_SourceUserId" FOREIGN KEY ("SourceUserId") REFERENCES "users" ("Id") ON DELETE CASCADE,
+                  CONSTRAINT "FK_ai_credit_wallet_migration_ledger_shops_ShopId" FOREIGN KEY ("ShopId") REFERENCES "shops" ("Id") ON DELETE CASCADE
+                );
+                """,
+                cancellationToken);
+        }
+        else if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE ai_credit_wallets ADD COLUMN IF NOT EXISTS "ShopId" uuid NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE ai_credit_ledger ADD COLUMN IF NOT EXISTS "ShopId" uuid NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE ai_credit_payments ADD COLUMN IF NOT EXISTS "ShopId" uuid NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                DO $$
+                BEGIN
+                  IF NOT EXISTS (
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conname = 'FK_ai_credit_wallets_shops_ShopId'
+                  ) THEN
+                    ALTER TABLE ai_credit_wallets
+                    ADD CONSTRAINT "FK_ai_credit_wallets_shops_ShopId"
+                    FOREIGN KEY ("ShopId") REFERENCES shops("Id") ON DELETE CASCADE;
+                  END IF;
+                END
+                $$;
+                """,
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                DO $$
+                BEGIN
+                  IF NOT EXISTS (
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conname = 'FK_ai_credit_ledger_shops_ShopId'
+                  ) THEN
+                    ALTER TABLE ai_credit_ledger
+                    ADD CONSTRAINT "FK_ai_credit_ledger_shops_ShopId"
+                    FOREIGN KEY ("ShopId") REFERENCES shops("Id") ON DELETE CASCADE;
+                  END IF;
+                END
+                $$;
+                """,
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                DO $$
+                BEGIN
+                  IF NOT EXISTS (
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conname = 'FK_ai_credit_payments_shops_ShopId'
+                  ) THEN
+                    ALTER TABLE ai_credit_payments
+                    ADD CONSTRAINT "FK_ai_credit_payments_shops_ShopId"
+                    FOREIGN KEY ("ShopId") REFERENCES shops("Id") ON DELETE CASCADE;
+                  END IF;
+                END
+                $$;
+                """,
+                cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                CREATE TABLE IF NOT EXISTS ai_credit_wallet_migration_ledger (
+                  "Id" uuid NOT NULL PRIMARY KEY,
+                  "ShopId" uuid NULL REFERENCES shops("Id") ON DELETE CASCADE,
+                  "SourceUserId" uuid NOT NULL REFERENCES users("Id") ON DELETE CASCADE,
+                  "SourceWalletId" uuid NOT NULL,
+                  "TargetWalletId" uuid NOT NULL,
+                  "MigratedCredits" numeric(18,2) NOT NULL,
+                  "MigrationReference" varchar(160) NOT NULL,
+                  "MetadataJson" text NULL,
+                  "CreatedAtUtc" timestamptz NOT NULL
+                );
+                """,
+                cancellationToken);
+        }
+
+        await PopulateAiBillingShopIdsAsync(dbContext, cancellationToken);
+        await ConsolidateAiWalletsByShopAsync(dbContext, cancellationToken);
+        await PopulateAiBillingShopIdsAsync(dbContext, cancellationToken);
+        await EnsureAiWalletShopScopeIndexesAsync(dbContext, cancellationToken);
+    }
+
+    private static async Task PopulateAiBillingShopIdsAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+        if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                UPDATE "ai_credit_wallets"
+                SET "ShopId" = (
+                    SELECT "StoreId"
+                    FROM "users"
+                    WHERE "users"."Id" = "ai_credit_wallets"."UserId"
+                )
+                WHERE "ShopId" IS NULL;
+                """,
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                UPDATE "ai_credit_ledger"
+                SET "ShopId" = (
+                    SELECT "ShopId"
+                    FROM "ai_credit_wallets"
+                    WHERE "ai_credit_wallets"."Id" = "ai_credit_ledger"."WalletId"
+                )
+                WHERE "ShopId" IS NULL;
+                """,
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                UPDATE "ai_credit_ledger"
+                SET "ShopId" = (
+                    SELECT "StoreId"
+                    FROM "users"
+                    WHERE "users"."Id" = "ai_credit_ledger"."UserId"
+                )
+                WHERE "ShopId" IS NULL;
+                """,
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                UPDATE "ai_credit_payments"
+                SET "ShopId" = (
+                    SELECT "StoreId"
+                    FROM "users"
+                    WHERE "users"."Id" = "ai_credit_payments"."UserId"
+                )
+                WHERE "ShopId" IS NULL;
+                """,
+                cancellationToken);
+            return;
+        }
+
+        if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                UPDATE ai_credit_wallets w
+                SET "ShopId" = u."StoreId"
+                FROM users u
+                WHERE w."ShopId" IS NULL
+                  AND u."Id" = w."UserId";
+                """,
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                UPDATE ai_credit_ledger l
+                SET "ShopId" = w."ShopId"
+                FROM ai_credit_wallets w
+                WHERE l."ShopId" IS NULL
+                  AND w."Id" = l."WalletId";
+                """,
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                UPDATE ai_credit_ledger l
+                SET "ShopId" = u."StoreId"
+                FROM users u
+                WHERE l."ShopId" IS NULL
+                  AND u."Id" = l."UserId";
+                """,
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                UPDATE ai_credit_payments p
+                SET "ShopId" = u."StoreId"
+                FROM users u
+                WHERE p."ShopId" IS NULL
+                  AND u."Id" = p."UserId";
+                """,
+                cancellationToken);
+        }
+    }
+
+    private static async Task ConsolidateAiWalletsByShopAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var wallets = await dbContext.AiCreditWallets
+            .Where(x => x.ShopId.HasValue)
+            .OrderBy(x => x.CreatedAtUtc)
+            .ToListAsync(cancellationToken);
+        if (wallets.Count == 0)
+        {
+            return;
+        }
+
+        var groupedByShop = wallets
+            .GroupBy(x => x.ShopId!.Value)
+            .Where(group => group.Count() > 1)
+            .ToList();
+        if (groupedByShop.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var group in groupedByShop)
+        {
+            var orderedWallets = group
+                .OrderBy(x => x.CreatedAtUtc)
+                .ThenBy(x => x.Id)
+                .ToList();
+            var canonicalWallet = orderedWallets[0];
+            var totalCredits = orderedWallets.Sum(x => x.AvailableCredits);
+            var latestUpdatedAt = orderedWallets
+                .Select(x => x.UpdatedAtUtc)
+                .OrderByDescending(x => x)
+                .FirstOrDefault();
+
+            canonicalWallet.AvailableCredits = totalCredits;
+            canonicalWallet.UpdatedAtUtc = latestUpdatedAt;
+
+            foreach (var duplicateWallet in orderedWallets.Skip(1))
+            {
+                await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                    UPDATE "ai_credit_ledger"
+                    SET "WalletId" = {canonicalWallet.Id},
+                        "ShopId" = {canonicalWallet.ShopId}
+                    WHERE "WalletId" = {duplicateWallet.Id};
+                    """,
+                    cancellationToken);
+
+                var migrationReference = $"shop_wallet_migration:{group.Key:N}:{duplicateWallet.Id:N}";
+                var migrationAlreadyRecorded = await dbContext.AiCreditWalletMigrationEntries
+                    .AnyAsync(x => x.SourceWalletId == duplicateWallet.Id, cancellationToken);
+                if (!migrationAlreadyRecorded)
+                {
+                    dbContext.AiCreditWalletMigrationEntries.Add(new AiCreditWalletMigrationEntry
+                    {
+                        ShopId = duplicateWallet.ShopId,
+                        SourceUserId = duplicateWallet.UserId,
+                        SourceWalletId = duplicateWallet.Id,
+                        TargetWalletId = canonicalWallet.Id,
+                        MigratedCredits = duplicateWallet.AvailableCredits,
+                        MigrationReference = migrationReference,
+                        MetadataJson = $$"""{"source_user_id":"{{duplicateWallet.UserId}}","source_wallet_id":"{{duplicateWallet.Id}}","target_wallet_id":"{{canonicalWallet.Id}}"}""",
+                        CreatedAtUtc = DateTimeOffset.UtcNow
+                    });
+                }
+
+                dbContext.AiCreditWallets.Remove(duplicateWallet);
+            }
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task EnsureAiWalletShopScopeIndexesAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+        if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_ledger_ShopId" ON "ai_credit_ledger" ("ShopId");
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_ledger_ShopId_CreatedAtUtc" ON "ai_credit_ledger" ("ShopId", "CreatedAtUtc");
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_payments_ShopId" ON "ai_credit_payments" ("ShopId");
+                CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_credit_wallets_ShopId" ON "ai_credit_wallets" ("ShopId") WHERE "ShopId" IS NOT NULL;
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_wallet_migration_ledger_ShopId" ON "ai_credit_wallet_migration_ledger" ("ShopId");
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_wallet_migration_ledger_SourceUserId" ON "ai_credit_wallet_migration_ledger" ("SourceUserId");
+                CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_credit_wallet_migration_ledger_SourceWalletId" ON "ai_credit_wallet_migration_ledger" ("SourceWalletId");
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_wallet_migration_ledger_TargetWalletId" ON "ai_credit_wallet_migration_ledger" ("TargetWalletId");
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_wallet_migration_ledger_CreatedAtUtc" ON "ai_credit_wallet_migration_ledger" ("CreatedAtUtc");
+                """,
+                cancellationToken);
+            return;
+        }
+
+        if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_ledger_ShopId" ON ai_credit_ledger("ShopId");
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_ledger_ShopId_CreatedAtUtc" ON ai_credit_ledger("ShopId", "CreatedAtUtc");
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_payments_ShopId" ON ai_credit_payments("ShopId");
+                CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_credit_wallets_ShopId" ON ai_credit_wallets("ShopId") WHERE "ShopId" IS NOT NULL;
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_wallet_migration_ledger_ShopId" ON ai_credit_wallet_migration_ledger("ShopId");
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_wallet_migration_ledger_SourceUserId" ON ai_credit_wallet_migration_ledger("SourceUserId");
+                CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_credit_wallet_migration_ledger_SourceWalletId" ON ai_credit_wallet_migration_ledger("SourceWalletId");
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_wallet_migration_ledger_TargetWalletId" ON ai_credit_wallet_migration_ledger("TargetWalletId");
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_wallet_migration_ledger_CreatedAtUtc" ON ai_credit_wallet_migration_ledger("CreatedAtUtc");
+                """,
+                cancellationToken);
+        }
     }
 
     private static async Task EnsurePostgresRefundSchemaAsync(

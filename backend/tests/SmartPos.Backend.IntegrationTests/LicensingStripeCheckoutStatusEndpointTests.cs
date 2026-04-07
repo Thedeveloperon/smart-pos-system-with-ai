@@ -24,7 +24,9 @@ public sealed class LicensingStripeCheckoutStatusEndpointTests
             contact_email = "owner@example.com",
             plan_code = "pro",
             payment_method = "bank_deposit",
-            source = "website_pricing"
+            source = "website_pricing",
+            owner_username = "stripe_owner_001",
+            owner_password = "OwnerPass123!"
         });
 
         var invoice = createResponse["invoice"]?.AsObject()

@@ -9,22 +9,6 @@ import { trackMarketingEvent } from "@/lib/marketingAnalytics";
 
 type PlanCode = "starter" | "pro" | "business";
 type PaymentMethod = "cash" | "bank_deposit";
-type AiCreditPackageCode = "none" | "trial_credits" | "pack_100" | "pack_500" | "pack_2000";
-
-type AiCreditOrderSummary = {
-  order_id: string;
-  status: "submitted" | "pending_verification" | "verified" | "rejected" | "settled" | string;
-  requested_credits: number;
-  settled_credits: number;
-  target_username?: string | null;
-  package_code?: string | null;
-  wallet_ledger_reference?: string | null;
-  settlement_error?: string | null;
-  submitted_at: string;
-  verified_at?: string | null;
-  rejected_at?: string | null;
-  settled_at?: string | null;
-};
 
 type PaymentRequestResponse = {
   generated_at: string;
@@ -50,7 +34,8 @@ type PaymentRequestResponse = {
     message: string;
     reference_hint: string;
   };
-  ai_credit_order?: AiCreditOrderSummary | null;
+  owner_username?: string | null;
+  owner_account_state?: string | null;
 };
 
 type PaymentSubmitResponse = {
@@ -63,16 +48,6 @@ type PaymentSubmitResponse = {
   payment_status: string;
   message: string;
   next_step: string;
-  ai_credit_order?: AiCreditOrderSummary | null;
-};
-
-type AiCreditOrderStatusResponse = {
-  generated_at: string;
-  shop_code: string;
-  invoice_number?: string | null;
-  invoice_status?: string | null;
-  payment_status?: string | null;
-  order: AiCreditOrderSummary;
 };
 
 type PaymentProofUploadResponse = {
@@ -103,6 +78,8 @@ type StripeCheckoutSessionResponse = {
   checkout_session_id: string;
   checkout_url: string;
   expires_at?: string | null;
+  owner_username?: string | null;
+  owner_account_state?: string | null;
 };
 
 type StripeCheckoutStatusResponse = {
@@ -208,14 +185,12 @@ export default function StartPage() {
   const [contactPhone, setContactPhone] = useState("");
   const [notes, setNotes] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("bank_deposit");
-  const [targetUsername, setTargetUsername] = useState("");
-  const [aiPackageCode, setAiPackageCode] = useState<AiCreditPackageCode>("none");
-  const [aiCreditsRequested, setAiCreditsRequested] = useState("");
+  const [ownerUsername, setOwnerUsername] = useState("");
+  const [ownerFullName, setOwnerFullName] = useState("");
+  const [ownerPassword, setOwnerPassword] = useState("");
 
   const [requestResult, setRequestResult] = useState<PaymentRequestResponse | null>(null);
   const [submitResult, setSubmitResult] = useState<PaymentSubmitResponse | null>(null);
-  const [aiOrderStatus, setAiOrderStatus] = useState<AiCreditOrderStatusResponse | null>(null);
-  const [aiOrderStatusError, setAiOrderStatusError] = useState<string | null>(null);
   const [amountPaid, setAmountPaid] = useState("0");
   const [bankReference, setBankReference] = useState("");
   const [slipUrl, setSlipUrl] = useState("");
@@ -398,90 +373,19 @@ export default function StartPage() {
     };
   }, [checkoutReturnState, checkoutSessionId, locale]);
 
-  useEffect(() => {
-    const orderId = submitResult?.ai_credit_order?.order_id || requestResult?.ai_credit_order?.order_id;
-    const invoiceNumber = submitResult?.invoice_number || requestResult?.invoice?.invoice_number;
-    if (!orderId && !invoiceNumber) {
-      setAiOrderStatus(null);
-      setAiOrderStatusError(null);
-      return;
-    }
-
-    let active = true;
-    let pollingTimer: ReturnType<typeof setInterval> | null = null;
-
-    const fetchStatus = async () => {
-      const params = new URLSearchParams();
-      if (orderId) {
-        params.set("order_id", orderId);
-      } else if (invoiceNumber) {
-        params.set("invoice_number", invoiceNumber);
-      }
-
-      try {
-        const response = await fetch(`/api/payment/status?${params.toString()}`, {
-          method: "GET",
-          cache: "no-store",
-        });
-
-        const payload = await parseApiPayload(response);
-        if (!response.ok) {
-          throw new Error(parseErrorMessage(payload));
-        }
-
-        const data = requireObjectPayload<AiCreditOrderStatusResponse>(
-          payload,
-          "AI credit order status response was empty.",
-        );
-        if (!active) {
-          return;
-        }
-
-        setAiOrderStatus(data);
-        setAiOrderStatusError(null);
-      } catch (error) {
-        if (!active) {
-          return;
-        }
-
-        setAiOrderStatusError(error instanceof Error ? error.message : "Unable to load AI credit order status.");
-      }
-    };
-
-    void fetchStatus();
-    pollingTimer = setInterval(() => {
-      void fetchStatus();
-    }, 10000);
-
-    return () => {
-      active = false;
-      if (pollingTimer) {
-        clearInterval(pollingTimer);
-      }
-    };
-  }, [
-    requestResult?.ai_credit_order?.order_id,
-    requestResult?.invoice?.invoice_number,
-    submitResult?.ai_credit_order?.order_id,
-    submitResult?.invoice_number,
-  ]);
-
   const buildMarketingRequestPayload = () => {
     if (!contactEmail.trim() && !contactPhone.trim()) {
       throw new Error("Provide at least an email or phone number.");
     }
 
-    const normalizedTargetUsername = targetUsername.trim();
-    const normalizedPackageCode = aiPackageCode === "none" ? "" : aiPackageCode;
-    const hasRequestedCredits = aiCreditsRequested.trim().length > 0;
-    const parsedRequestedCredits = hasRequestedCredits ? Number(aiCreditsRequested) : undefined;
-    if (hasRequestedCredits && (!Number.isFinite(parsedRequestedCredits) || (parsedRequestedCredits ?? 0) <= 0)) {
-      throw new Error("AI credits requested must be a valid number greater than zero.");
+    const normalizedOwnerUsername = ownerUsername.trim().toLowerCase();
+    if (!normalizedOwnerUsername) {
+      throw new Error("Owner username is required.");
     }
 
-    const wantsAiCredits = !!normalizedPackageCode || (parsedRequestedCredits ?? 0) > 0;
-    if (wantsAiCredits && !normalizedTargetUsername) {
-      throw new Error("POS username is required when requesting AI credits.");
+    const normalizedOwnerPassword = ownerPassword.trim();
+    if (normalizedOwnerPassword.length < 8) {
+      throw new Error("Owner password must be at least 8 characters.");
     }
 
     return {
@@ -494,9 +398,9 @@ export default function StartPage() {
       locale,
       source: "website_pricing",
       notes: notes || undefined,
-      target_username: normalizedTargetUsername || undefined,
-      ai_package_code: normalizedPackageCode || undefined,
-      ai_credits_requested: parsedRequestedCredits,
+      owner_username: normalizedOwnerUsername,
+      owner_full_name: ownerFullName.trim() || contactName,
+      owner_password: normalizedOwnerPassword,
     };
   };
 
@@ -510,8 +414,6 @@ export default function StartPage() {
     setRequestError(null);
     setSubmitError(null);
     setSubmitResult(null);
-    setAiOrderStatus(null);
-    setAiOrderStatusError(null);
     setIsSubmittingRequest(true);
 
     try {
@@ -719,7 +621,7 @@ export default function StartPage() {
         <section className="glass-card p-6 md:p-8">
           <h1 className="text-2xl md:text-3xl font-bold text-foreground">Start SmartPOS</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Submit your shop details to generate a payment reference. After payment, submit proof for verification and license access.
+            Create your shop owner account, then continue with trial or complete payment for paid plans.
           </p>
 
           {checkoutReturnState === "cancel" && (
@@ -868,38 +770,35 @@ export default function StartPage() {
             </label>
 
             <label className="space-y-1">
-              <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">AI Package (optional)</span>
-              <select
+              <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Owner Username</span>
+              <input
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                value={aiPackageCode}
-                onChange={(event) => setAiPackageCode(event.target.value as AiCreditPackageCode)}
-              >
-                <option value="none">None</option>
-                <option value="trial_credits">Trial Credits (25)</option>
-                <option value="pack_100">Pack 100</option>
-                <option value="pack_500">Pack 500</option>
-                <option value="pack_2000">Pack 2000</option>
-              </select>
+                value={ownerUsername}
+                onChange={(event) => setOwnerUsername(event.target.value)}
+                placeholder="shopowner"
+                required
+              />
             </label>
 
             <label className="space-y-1">
-              <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">AI Credits Requested (optional)</span>
+              <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Owner Password</span>
               <input
+                type="password"
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                value={aiCreditsRequested}
-                onChange={(event) => setAiCreditsRequested(event.target.value)}
-                placeholder="e.g. 500"
-                inputMode="decimal"
+                value={ownerPassword}
+                onChange={(event) => setOwnerPassword(event.target.value)}
+                placeholder="At least 8 characters"
+                required
               />
             </label>
 
             <label className="space-y-1 md:col-span-2">
-              <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">POS Username for Credits (required if AI credits)</span>
+              <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Owner Full Name (optional)</span>
               <input
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                value={targetUsername}
-                onChange={(event) => setTargetUsername(event.target.value)}
-                placeholder="owner / manager / billing_admin"
+                value={ownerFullName}
+                onChange={(event) => setOwnerFullName(event.target.value)}
+                placeholder="Shop Owner"
               />
             </label>
 
@@ -959,25 +858,15 @@ export default function StartPage() {
               </div>
             </div>
 
-            {requestResult.ai_credit_order && (
-              <div className="rounded-lg border border-border p-4 space-y-1">
-                <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">AI Credit Order</p>
-                <p className="text-sm">
-                  Order ID: <span className="font-semibold">{requestResult.ai_credit_order.order_id}</span>
-                </p>
-                <p className="text-sm">
-                  Status: <span className="font-semibold">{requestResult.ai_credit_order.status}</span>
-                </p>
-                <p className="text-sm">
-                  Requested Credits: <span className="font-semibold">{requestResult.ai_credit_order.requested_credits}</span>
-                </p>
-                {requestResult.ai_credit_order.target_username && (
-                  <p className="text-sm text-muted-foreground">
-                    Target Username: {requestResult.ai_credit_order.target_username}
-                  </p>
-                )}
-              </div>
-            )}
+            <div className="rounded-lg border border-border p-4 space-y-1">
+              <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Owner Account</p>
+              <p className="text-sm">
+                Username: <span className="font-semibold">{requestResult.owner_username || ownerUsername || "-"}</span>
+              </p>
+              <p className="text-sm">
+                Status: <span className="font-semibold">{toSentence(requestResult.owner_account_state || "created")}</span>
+              </p>
+            </div>
 
             {!requestResult.requires_payment && (
               <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-200">
@@ -1091,49 +980,6 @@ export default function StartPage() {
           </section>
         )}
 
-        {aiOrderStatus && (
-          <section className="glass-card p-6 md:p-8 space-y-3">
-            <h3 className="text-lg font-semibold">AI Credit Order Status</h3>
-            <p className="text-sm">
-              Current Status: <span className="font-semibold">{aiOrderStatus.order.status}</span>
-            </p>
-            <p className="text-sm">
-              Progress: Submitted {"->"} Pending Verification {"->"} Verified {"->"} Credits Added
-            </p>
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="rounded-lg border border-border p-3">
-                <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Order</p>
-                <p className="mt-1 text-sm font-semibold">{aiOrderStatus.order.order_id}</p>
-                <p className="text-xs text-muted-foreground">
-                  Requested {aiOrderStatus.order.requested_credits} | Settled {aiOrderStatus.order.settled_credits}
-                </p>
-              </div>
-              <div className="rounded-lg border border-border p-3">
-                <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Invoice / Payment</p>
-                <p className="mt-1 text-sm">Invoice: {aiOrderStatus.invoice_number || "-"}</p>
-                <p className="text-xs text-muted-foreground">
-                  {aiOrderStatus.invoice_status || "-"} / {aiOrderStatus.payment_status || "-"}
-                </p>
-              </div>
-            </div>
-            {aiOrderStatus.order.wallet_ledger_reference && (
-              <p className="text-xs text-muted-foreground">
-                Wallet Reference: {aiOrderStatus.order.wallet_ledger_reference}
-              </p>
-            )}
-            {aiOrderStatus.order.settlement_error && (
-              <p className="text-xs text-destructive">
-                Settlement Error: {aiOrderStatus.order.settlement_error}
-              </p>
-            )}
-          </section>
-        )}
-
-        {aiOrderStatusError && (
-          <section className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
-            {aiOrderStatusError}
-          </section>
-        )}
       </div>
     </main>
   );

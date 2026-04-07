@@ -749,7 +749,7 @@ public sealed class AiInsightsCreditFlowTests(CustomWebApplicationFactory factor
         var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
         var auditRows = await dbContext.AuditLogs
             .Where(x => x.EntityName == nameof(AiCreditPayment) && x.EntityId == paymentId)
-            .OrderBy(x => x.CreatedAtUtc)
+            .OrderBy(x => x.Id)
             .ToListAsync();
 
         Assert.Contains(auditRows, x => x.Action == "ai_payment_checkout_created");
@@ -813,15 +813,22 @@ public sealed class AiInsightsCreditFlowTests(CustomWebApplicationFactory factor
         var user = await dbContext.Users
             .FirstOrDefaultAsync(x => x.Username == username)
             ?? throw new InvalidOperationException($"User '{username}' was not found.");
+        var shopId = user.StoreId
+            ?? throw new InvalidOperationException($"User '{username}' is not mapped to a shop.");
 
-        var wallet = await dbContext.AiCreditWallets
-            .FirstOrDefaultAsync(x => x.UserId == user.Id);
+        var wallets = await dbContext.AiCreditWallets
+            .Where(x => x.ShopId == shopId || x.UserId == user.Id)
+            .OrderByDescending(x => x.ShopId == shopId)
+            .ThenBy(x => x.Id)
+            .ToListAsync();
+        var wallet = wallets.FirstOrDefault();
 
         if (wallet is null)
         {
             wallet = new AiCreditWallet
             {
                 UserId = user.Id,
+                ShopId = shopId,
                 AvailableCredits = 0m,
                 CreatedAtUtc = DateTimeOffset.UtcNow,
                 UpdatedAtUtc = DateTimeOffset.UtcNow,
@@ -831,8 +838,15 @@ public sealed class AiInsightsCreditFlowTests(CustomWebApplicationFactory factor
         }
         else
         {
+            wallet.UserId = user.Id;
+            wallet.ShopId = shopId;
             wallet.AvailableCredits = 0m;
             wallet.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        }
+
+        foreach (var duplicateWallet in wallets.Skip(1))
+        {
+            dbContext.AiCreditWallets.Remove(duplicateWallet);
         }
 
         await dbContext.SaveChangesAsync();

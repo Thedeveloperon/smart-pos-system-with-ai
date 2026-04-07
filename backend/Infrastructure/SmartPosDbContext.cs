@@ -46,6 +46,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
     public DbSet<AiInsightRequest> AiInsightRequests => Set<AiInsightRequest>();
     public DbSet<AiCreditPayment> AiCreditPayments => Set<AiCreditPayment>();
     public DbSet<AiCreditPaymentWebhookEvent> AiCreditPaymentWebhookEvents => Set<AiCreditPaymentWebhookEvent>();
+    public DbSet<AiCreditWalletMigrationEntry> AiCreditWalletMigrationEntries => Set<AiCreditWalletMigrationEntry>();
     public DbSet<AiCreditOrder> AiCreditOrders => Set<AiCreditOrder>();
     public DbSet<AiConversation> AiConversations => Set<AiConversation>();
     public DbSet<AiConversationMessage> AiConversationMessages => Set<AiConversationMessage>();
@@ -629,10 +630,15 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
         {
             entity.ToTable("ai_credit_wallets");
             entity.Property(x => x.AvailableCredits).HasPrecision(18, 2);
-            entity.HasIndex(x => x.UserId).IsUnique();
+            entity.HasIndex(x => x.UserId);
+            entity.HasIndex(x => x.ShopId).IsUnique();
             entity.HasOne(x => x.User)
                 .WithMany()
                 .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Shop)
+                .WithMany(x => x.AiCreditWallets)
+                .HasForeignKey(x => x.ShopId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -646,12 +652,18 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.Description).HasMaxLength(250);
             entity.Property(x => x.MetadataJson).HasColumnType("text");
             entity.HasIndex(x => x.UserId);
+            entity.HasIndex(x => x.ShopId);
             entity.HasIndex(x => x.WalletId);
             entity.HasIndex(x => new { x.UserId, x.CreatedAtUtc });
+            entity.HasIndex(x => new { x.ShopId, x.CreatedAtUtc });
             entity.HasIndex(x => x.AiInsightRequestId);
             entity.HasOne(x => x.User)
                 .WithMany()
                 .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Shop)
+                .WithMany()
+                .HasForeignKey(x => x.ShopId)
                 .OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.Wallet)
                 .WithMany(x => x.LedgerEntries)
@@ -703,6 +715,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.FailureReason).HasMaxLength(300);
             entity.Property(x => x.MetadataJson).HasColumnType("text");
             entity.HasIndex(x => x.UserId);
+            entity.HasIndex(x => x.ShopId);
             entity.HasIndex(x => x.CreatedAtUtc);
             entity.HasIndex(x => x.Status);
             entity.HasIndex(x => x.ExternalReference).IsUnique();
@@ -710,6 +723,10 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.HasOne(x => x.User)
                 .WithMany()
                 .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Shop)
+                .WithMany(x => x.AiCreditPayments)
+                .HasForeignKey(x => x.ShopId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -731,6 +748,27 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
                 .WithMany(x => x.WebhookEvents)
                 .HasForeignKey(x => x.PaymentId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<AiCreditWalletMigrationEntry>(entity =>
+        {
+            entity.ToTable("ai_credit_wallet_migration_ledger");
+            entity.Property(x => x.MigratedCredits).HasPrecision(18, 2);
+            entity.Property(x => x.MigrationReference).HasMaxLength(160);
+            entity.Property(x => x.MetadataJson).HasColumnType("text");
+            entity.HasIndex(x => x.ShopId);
+            entity.HasIndex(x => x.SourceUserId);
+            entity.HasIndex(x => x.SourceWalletId).IsUnique();
+            entity.HasIndex(x => x.TargetWalletId);
+            entity.HasIndex(x => x.CreatedAtUtc);
+            entity.HasOne(x => x.Shop)
+                .WithMany(x => x.AiCreditWalletMigrations)
+                .HasForeignKey(x => x.ShopId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.SourceUser)
+                .WithMany()
+                .HasForeignKey(x => x.SourceUserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<AiCreditOrder>(entity =>

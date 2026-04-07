@@ -73,7 +73,14 @@ public sealed class AiInsightsFailureRefundTests(AiOpenAiFailureWebApplicationFa
         await using var scope = factory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
 
-        var completedSales = await dbContext.Sales.CountAsync(x => x.Status == SaleStatus.Completed);
+        var userShopId = await dbContext.Users
+            .Where(x => x.Username == "billing_admin")
+            .Select(x => x.StoreId)
+            .FirstOrDefaultAsync()
+            ?? throw new InvalidOperationException("billing_admin must be mapped to a shop for AI failure integration test.");
+
+        var completedSales = await dbContext.Sales
+            .CountAsync(x => x.Status == SaleStatus.Completed && x.StoreId == userShopId);
         if (completedSales >= 3)
         {
             return;
@@ -89,6 +96,7 @@ public sealed class AiInsightsFailureRefundTests(AiOpenAiFailureWebApplicationFa
             var occurredAt = DateTimeOffset.UtcNow.AddMinutes(-(index + 2) * 5);
             var sale = new Sale
             {
+                StoreId = userShopId,
                 SaleNumber = $"AIIT{Guid.NewGuid():N}"[..24],
                 Status = SaleStatus.Completed,
                 Subtotal = 100m,
@@ -127,15 +135,22 @@ public sealed class AiInsightsFailureRefundTests(AiOpenAiFailureWebApplicationFa
         var user = await dbContext.Users
             .FirstOrDefaultAsync(x => x.Username == username)
             ?? throw new InvalidOperationException($"User '{username}' was not found.");
+        var shopId = user.StoreId
+            ?? throw new InvalidOperationException($"User '{username}' is not mapped to a shop.");
 
-        var wallet = await dbContext.AiCreditWallets
-            .FirstOrDefaultAsync(x => x.UserId == user.Id);
+        var wallets = await dbContext.AiCreditWallets
+            .Where(x => x.ShopId == shopId || x.UserId == user.Id)
+            .OrderByDescending(x => x.ShopId == shopId)
+            .ThenBy(x => x.Id)
+            .ToListAsync();
+        var wallet = wallets.FirstOrDefault();
 
         if (wallet is null)
         {
             wallet = new AiCreditWallet
             {
                 UserId = user.Id,
+                ShopId = shopId,
                 AvailableCredits = 0m,
                 CreatedAtUtc = DateTimeOffset.UtcNow,
                 UpdatedAtUtc = DateTimeOffset.UtcNow,
@@ -145,8 +160,15 @@ public sealed class AiInsightsFailureRefundTests(AiOpenAiFailureWebApplicationFa
         }
         else
         {
+            wallet.UserId = user.Id;
+            wallet.ShopId = shopId;
             wallet.AvailableCredits = 0m;
             wallet.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        }
+
+        foreach (var duplicateWallet in wallets.Skip(1))
+        {
+            dbContext.AiCreditWallets.Remove(duplicateWallet);
         }
 
         await dbContext.SaveChangesAsync();
