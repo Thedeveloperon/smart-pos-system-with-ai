@@ -317,6 +317,9 @@ public sealed class AppUser
     public bool IsMfaEnabled { get; set; }
     public string? MfaSecret { get; set; }
     public DateTimeOffset? MfaConfiguredAtUtc { get; set; }
+    public int FailedLoginAttempts { get; set; }
+    public DateTimeOffset? LastFailedLoginAtUtc { get; set; }
+    public DateTimeOffset? LockoutEndAtUtc { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastLoginAtUtc { get; set; }
@@ -403,6 +406,10 @@ public sealed class Device
     public required string DeviceCode { get; set; }
     public required string Name { get; set; }
     public bool IsTrusted { get; set; } = true;
+    public int AuthSessionVersion { get; set; } = 1;
+    public DateTimeOffset? LastAuthIssuedAtUtc { get; set; }
+    public DateTimeOffset? AuthSessionRevokedAtUtc { get; set; }
+    public string? AuthSessionRevocationReason { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastSeenAtUtc { get; set; }
 
@@ -444,6 +451,7 @@ public sealed class Shop
     public ICollection<ManualBillingInvoice> ManualBillingInvoices { get; set; } = [];
     public ICollection<ManualBillingPayment> ManualBillingPayments { get; set; } = [];
     public ICollection<CustomerActivationEntitlement> CustomerActivationEntitlements { get; set; } = [];
+    public ICollection<ShopBranchSeatAllocation> BranchSeatAllocations { get; set; } = [];
     public ICollection<AiCreditWallet> AiCreditWallets { get; set; } = [];
     public ICollection<AiCreditPayment> AiCreditPayments { get; set; } = [];
     public ICollection<AiCreditWalletMigrationEntry> AiCreditWalletMigrations { get; set; } = [];
@@ -476,6 +484,7 @@ public sealed class ProvisionedDevice
     public Guid? DeviceId { get; set; }
     public required string DeviceCode { get; set; }
     public required string Name { get; set; }
+    public string? BranchCode { get; set; }
     public ProvisionedDeviceStatus Status { get; set; } = ProvisionedDeviceStatus.Active;
     public DateTimeOffset AssignedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? RevokedAtUtc { get; set; }
@@ -488,6 +497,19 @@ public sealed class ProvisionedDevice
     public required Shop Shop { get; set; }
     public ICollection<LicenseRecord> Licenses { get; set; } = [];
     public ICollection<LicenseAuditLog> AuditLogs { get; set; } = [];
+}
+
+public sealed class ShopBranchSeatAllocation
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ShopId { get; set; }
+    public required string BranchCode { get; set; }
+    public int SeatQuota { get; set; } = 1;
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public required Shop Shop { get; set; }
 }
 
 public sealed class DeviceKeyChallenge
@@ -577,6 +599,23 @@ public sealed class BillingWebhookEvent
     public DateTimeOffset? ProcessedAtUtc { get; set; }
     public DateTimeOffset? DeadLetteredAtUtc { get; set; }
     public DateTimeOffset? UpdatedAtUtc { get; set; }
+}
+
+public sealed class CloudWriteIdempotencyRecord
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public required string EndpointKey { get; set; }
+    public required string IdempotencyKey { get; set; }
+    public required string DeviceId { get; set; }
+    public required string PosVersion { get; set; }
+    public required string RequestHash { get; set; }
+    public int? ResponseStatusCode { get; set; }
+    public string? ResponseContentType { get; set; }
+    public string? ResponseBody { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset LastSeenAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset ExpiresAtUtc { get; set; } = DateTimeOffset.UtcNow.AddHours(72);
+    public DateTimeOffset? CompletedAtUtc { get; set; }
 }
 
 public sealed class ManualBillingInvoice

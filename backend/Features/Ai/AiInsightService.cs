@@ -15,6 +15,7 @@ public sealed class AiInsightService(
     HttpClient httpClient,
     SmartPosDbContext dbContext,
     AiCreditBillingService creditBillingService,
+    AiPrivacyGovernanceService aiPrivacyGovernanceService,
     IConfiguration configuration,
     IOptions<AiInsightOptions> options,
     ILogger<AiInsightService> logger)
@@ -147,6 +148,7 @@ public sealed class AiInsightService(
         }
 
         var normalizedPrompt = NormalizePrompt(prompt);
+        var sanitizedPromptForProvider = aiPrivacyGovernanceService.RedactForProvider(normalizedPrompt);
         var normalizedIdempotencyKey = NormalizeIdempotencyKey(idempotencyKey);
 
         var existingRequest = await dbContext.AiInsightRequests
@@ -184,8 +186,8 @@ public sealed class AiInsightService(
             Provider = provider,
             Model = model,
             UsageType = usagePolicy.UsageType,
-            PromptHash = ComputePromptHash(normalizedPrompt),
-            PromptCharCount = normalizedPrompt.Length,
+            PromptHash = ComputePromptHash(sanitizedPromptForProvider),
+            PromptCharCount = sanitizedPromptForProvider.Length,
             ReservedCredits = 0m,
             ChargedCredits = 0m,
             InputTokens = 0,
@@ -203,19 +205,23 @@ public sealed class AiInsightService(
         }
         catch (DbUpdateException)
         {
-            var conflicted = await dbContext.AiInsightRequests
-                .AsNoTracking()
-                .FirstOrDefaultAsync(
-                    x => x.UserId == userId &&
-                         x.IdempotencyKey == normalizedIdempotencyKey,
-                    cancellationToken);
-
-            if (conflicted is null)
+            for (var attempt = 0; attempt < 4; attempt++)
             {
-                throw;
+                var conflicted = await dbContext.AiInsightRequests
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(
+                        x => x.UserId == userId &&
+                             x.IdempotencyKey == normalizedIdempotencyKey,
+                        cancellationToken);
+                if (conflicted is not null)
+                {
+                    return await BuildReplayResponseAsync(conflicted, userId, cancellationToken);
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(25 * (attempt + 1)), cancellationToken);
             }
 
-            return await BuildReplayResponseAsync(conflicted, userId, cancellationToken);
+            throw new InvalidOperationException("This request is still processing. Please retry shortly.");
         }
 
         try
@@ -233,10 +239,15 @@ public sealed class AiInsightService(
             var posFacts = await BuildPosInsightFactsAsync(requestRecord.User, cancellationToken);
             var preferredOutputLanguage = await ResolvePreferredOutputLanguageAsync(cancellationToken);
             var preferredOutputLanguageLabel = MapOutputLanguageLabel(preferredOutputLanguage);
-            var groundedPrompt = BuildGroundedPrompt(
-                normalizedPrompt,
-                posFacts,
-                preferredOutputLanguageLabel);
+            var groundedPromptPayload = aiPrivacyGovernanceService.FilterProviderPayload(
+                new Dictionary<string, string?>
+                {
+                    ["customer_question"] = sanitizedPromptForProvider,
+                    ["verified_pos_facts_json"] = posFacts.ContextJson,
+                    ["rules"] = "Use only verified facts from the JSON block. Do not invent values.",
+                    ["output_language"] = preferredOutputLanguageLabel
+                });
+            var groundedPrompt = BuildGroundedPrompt(groundedPromptPayload);
             var providerStopwatch = Stopwatch.StartNew();
 
             AiProviderResult providerResult;
@@ -245,7 +256,7 @@ public sealed class AiInsightService(
                 providerResult = BuildInsufficientDataFallback(
                     provider,
                     model,
-                    normalizedPrompt,
+                    sanitizedPromptForProvider,
                     groundedPrompt,
                     posFacts);
             }
@@ -255,7 +266,7 @@ public sealed class AiInsightService(
                     provider,
                     model,
                     groundedPrompt,
-                    normalizedPrompt,
+                    sanitizedPromptForProvider,
                     posFacts,
                     aiOptions,
                     usagePolicy.MaxOutputTokens,
@@ -268,8 +279,9 @@ public sealed class AiInsightService(
             var normalizedInsight = NormalizeInsightText(
                 providerResult.Insight,
                 posFacts,
-                normalizedPrompt);
+                sanitizedPromptForProvider);
             await ValidateOutputGuardrailsAsync(normalizedInsight, aiOptions, cancellationToken);
+            var persistedInsight = aiPrivacyGovernanceService.RedactForStorage(normalizedInsight);
 
             var chargedCredits = CalculateCredits(
                 providerResult.InputTokens,
@@ -290,7 +302,7 @@ public sealed class AiInsightService(
             requestRecord.ChargedCredits = settled.ChargedCredits;
             requestRecord.InputTokens = providerResult.InputTokens;
             requestRecord.OutputTokens = providerResult.OutputTokens;
-            requestRecord.ResponseText = normalizedInsight;
+            requestRecord.ResponseText = persistedInsight;
             requestRecord.ErrorCode = null;
             requestRecord.ErrorMessage = null;
             requestRecord.UpdatedAtUtc = DateTimeOffset.UtcNow;
@@ -316,7 +328,7 @@ public sealed class AiInsightService(
                 Provider = requestRecord.Provider,
                 Model = requestRecord.Model,
                 PricingRulesVersion = ResolvePricingRulesVersion(aiOptions),
-                Insight = normalizedInsight,
+                Insight = persistedInsight,
                 InputTokens = providerResult.InputTokens,
                 OutputTokens = providerResult.OutputTokens,
                 ReservedCredits = requestRecord.ReservedCredits,
@@ -334,7 +346,7 @@ public sealed class AiInsightService(
                 requestRecord,
                 userId,
                 "invalid_operation",
-                NormalizeErrorMessageForPersistence(exception.Message),
+                aiPrivacyGovernanceService.RedactForStorage(NormalizeErrorMessageForPersistence(exception.Message)),
                 cancellationToken);
             throw;
         }
@@ -403,6 +415,9 @@ public sealed class AiInsightService(
         var refundedCredits = existingRequest.ReservedCredits > existingRequest.ChargedCredits
             ? RoundCredits(existingRequest.ReservedCredits - existingRequest.ChargedCredits)
             : 0m;
+        var replayInsight = string.IsNullOrWhiteSpace(existingRequest.ResponseText)
+            ? "Insight payload is no longer available due to retention policy."
+            : existingRequest.ResponseText;
 
         return new AiInsightResponse
         {
@@ -411,7 +426,7 @@ public sealed class AiInsightService(
             Provider = existingRequest.Provider,
             Model = existingRequest.Model,
             PricingRulesVersion = ResolvePricingRulesVersion(options.Value),
-            Insight = existingRequest.ResponseText ?? string.Empty,
+            Insight = replayInsight,
             InputTokens = existingRequest.InputTokens,
             OutputTokens = existingRequest.OutputTokens,
             ReservedCredits = existingRequest.ReservedCredits,
@@ -520,11 +535,11 @@ public sealed class AiInsightService(
         if (!response.IsSuccessStatusCode)
         {
             var statusCode = (int)response.StatusCode;
-            var errorMessage = BuildOpenAiFailureMessage(statusCode, raw);
+            var errorMessage = aiPrivacyGovernanceService.RedactForStorage(BuildOpenAiFailureMessage(statusCode, raw));
             logger.LogWarning(
                 "OpenAI insight request failed with status {StatusCode}. Body preview: {BodyPreview}",
                 statusCode,
-                raw.Length <= 320 ? raw : raw[..320]);
+                aiPrivacyGovernanceService.RedactForLogPreview(raw));
             throw new InvalidOperationException(errorMessage);
         }
 
@@ -826,7 +841,7 @@ public sealed class AiInsightService(
                 logger.LogWarning(
                     "OpenAI moderation request failed with status {StatusCode}. Body preview: {BodyPreview}",
                     (int)response.StatusCode,
-                    raw.Length <= 320 ? raw : raw[..320]);
+                    aiPrivacyGovernanceService.RedactForLogPreview(raw));
                 return HandleModerationFailure(aiOptions);
             }
 
@@ -839,7 +854,7 @@ public sealed class AiInsightService(
             {
                 logger.LogWarning(
                     "OpenAI moderation response was missing results array. Body preview: {BodyPreview}",
-                    raw.Length <= 320 ? raw : raw[..320]);
+                    aiPrivacyGovernanceService.RedactForLogPreview(raw));
                 return HandleModerationFailure(aiOptions);
             }
 
@@ -1294,16 +1309,19 @@ public sealed class AiInsightService(
     }
 
     private static string BuildGroundedPrompt(
-        string prompt,
-        PosInsightFacts posFacts,
-        string outputLanguageLabel)
+        IReadOnlyDictionary<string, string> payload)
     {
+        var customerQuestion = ReadPayloadValue(payload, "customer_question", fallback: "No customer question provided.");
+        var posFactsJson = ReadPayloadValue(payload, "verified_pos_facts_json", fallback: "{}");
+        var outputLanguageLabel = ReadPayloadValue(payload, "output_language", fallback: "English");
+        var customRules = ReadPayloadValue(payload, "rules", fallback: string.Empty);
+
         var builder = new StringBuilder();
         builder.AppendLine("Customer question:");
-        builder.AppendLine(prompt);
+        builder.AppendLine(customerQuestion);
         builder.AppendLine();
         builder.AppendLine("Verified POS facts (JSON):");
-        builder.AppendLine(posFacts.ContextJson);
+        builder.AppendLine(posFactsJson);
         builder.AppendLine();
         builder.AppendLine("Rules:");
         builder.AppendLine("1. Use only verified facts from the JSON block.");
@@ -1311,6 +1329,11 @@ public sealed class AiInsightService(
         builder.AppendLine("3. If data is insufficient, set insufficient_data=true and list missing_data.");
         builder.AppendLine("4. Return strictly valid JSON with this schema:");
         builder.AppendLine($"5. Write all text fields in {outputLanguageLabel}.");
+        if (!string.IsNullOrWhiteSpace(customRules))
+        {
+            builder.AppendLine("6. Additional policy:");
+            builder.AppendLine($"   {customRules}");
+        }
         builder.AppendLine("   {");
         builder.AppendLine("     \"summary\": string,");
         builder.AppendLine("     \"recommended_actions\": string[],");
@@ -1320,6 +1343,17 @@ public sealed class AiInsightService(
         builder.AppendLine("     \"confidence\": \"low\" | \"medium\" | \"high\"");
         builder.AppendLine("   }");
         return builder.ToString();
+    }
+
+    private static string ReadPayloadValue(
+        IReadOnlyDictionary<string, string> payload,
+        string key,
+        string fallback)
+    {
+        return payload.TryGetValue(key, out var value) &&
+               !string.IsNullOrWhiteSpace(value)
+            ? value
+            : fallback;
     }
 
     private static StructuredInsightPayload BuildLocalStructuredInsight(string prompt, PosInsightFacts posFacts)

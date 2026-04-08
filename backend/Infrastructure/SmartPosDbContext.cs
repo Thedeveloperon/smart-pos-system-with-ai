@@ -37,7 +37,9 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
     public DbSet<LicenseRecord> Licenses => Set<LicenseRecord>();
     public DbSet<LicenseTokenSession> LicenseTokenSessions => Set<LicenseTokenSession>();
     public DbSet<LicenseAuditLog> LicenseAuditLogs => Set<LicenseAuditLog>();
+    public DbSet<ShopBranchSeatAllocation> ShopBranchSeatAllocations => Set<ShopBranchSeatAllocation>();
     public DbSet<BillingWebhookEvent> BillingWebhookEvents => Set<BillingWebhookEvent>();
+    public DbSet<CloudWriteIdempotencyRecord> CloudWriteIdempotencyRecords => Set<CloudWriteIdempotencyRecord>();
     public DbSet<ManualBillingInvoice> ManualBillingInvoices => Set<ManualBillingInvoice>();
     public DbSet<ManualBillingPayment> ManualBillingPayments => Set<ManualBillingPayment>();
     public DbSet<CustomerActivationEntitlement> CustomerActivationEntitlements => Set<CustomerActivationEntitlement>();
@@ -328,6 +330,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.FullName).HasMaxLength(120);
             entity.Property(x => x.PasswordHash).HasMaxLength(512);
             entity.Property(x => x.MfaSecret).HasMaxLength(256);
+            entity.HasIndex(x => x.LockoutEndAtUtc);
             entity.HasIndex(x => x.Username).IsUnique();
         });
 
@@ -387,7 +390,11 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.ToTable("devices");
             entity.Property(x => x.DeviceCode).HasMaxLength(64);
             entity.Property(x => x.Name).HasMaxLength(120);
+            entity.Property(x => x.AuthSessionVersion).HasDefaultValue(1);
+            entity.Property(x => x.AuthSessionRevocationReason).HasMaxLength(250);
             entity.HasIndex(x => x.DeviceCode).IsUnique();
+            entity.HasIndex(x => x.AuthSessionRevokedAtUtc);
+            entity.HasIndex(x => new { x.AppUserId, x.AuthSessionVersion });
             entity.HasOne(x => x.User)
                 .WithMany(x => x.Devices)
                 .HasForeignKey(x => x.AppUserId)
@@ -437,11 +444,13 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.ToTable("provisioned_devices");
             entity.Property(x => x.DeviceCode).HasMaxLength(64);
             entity.Property(x => x.Name).HasMaxLength(120);
+            entity.Property(x => x.BranchCode).HasMaxLength(64);
             entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(32);
             entity.Property(x => x.DeviceKeyFingerprint).HasMaxLength(128);
             entity.Property(x => x.DeviceKeyAlgorithm).HasMaxLength(64);
             entity.Property(x => x.DevicePublicKeySpki).HasColumnType("text");
             entity.HasIndex(x => x.ShopId);
+            entity.HasIndex(x => new { x.ShopId, x.BranchCode, x.Status });
             entity.HasIndex(x => x.DeviceId);
             entity.HasIndex(x => x.Status);
             entity.HasIndex(x => x.DeviceCode).IsUnique();
@@ -559,6 +568,21 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
                 .OnDelete(DeleteBehavior.SetNull);
         });
 
+        modelBuilder.Entity<CloudWriteIdempotencyRecord>(entity =>
+        {
+            entity.ToTable("cloud_write_idempotency");
+            entity.Property(x => x.EndpointKey).HasMaxLength(180);
+            entity.Property(x => x.IdempotencyKey).HasMaxLength(128);
+            entity.Property(x => x.DeviceId).HasMaxLength(128);
+            entity.Property(x => x.PosVersion).HasMaxLength(64);
+            entity.Property(x => x.RequestHash).HasMaxLength(128);
+            entity.Property(x => x.ResponseContentType).HasMaxLength(120);
+            entity.Property(x => x.ResponseBody).HasColumnType("text");
+            entity.HasIndex(x => new { x.EndpointKey, x.DeviceId, x.IdempotencyKey, x.RequestHash }).IsUnique();
+            entity.HasIndex(x => x.ExpiresAtUtc);
+            entity.HasIndex(x => x.CreatedAtUtc);
+        });
+
         modelBuilder.Entity<ManualBillingInvoice>(entity =>
         {
             entity.ToTable("manual_billing_invoices");
@@ -638,6 +662,18 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
                 .OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.Shop)
                 .WithMany(x => x.AiCreditWallets)
+                .HasForeignKey(x => x.ShopId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ShopBranchSeatAllocation>(entity =>
+        {
+            entity.ToTable("shop_branch_seat_allocations");
+            entity.Property(x => x.BranchCode).HasMaxLength(64);
+            entity.HasIndex(x => x.ShopId);
+            entity.HasIndex(x => new { x.ShopId, x.BranchCode }).IsUnique();
+            entity.HasOne(x => x.Shop)
+                .WithMany(x => x.BranchSeatAllocations)
                 .HasForeignKey(x => x.ShopId)
                 .OnDelete(DeleteBehavior.Cascade);
         });

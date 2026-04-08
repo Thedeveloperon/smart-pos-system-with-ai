@@ -622,6 +622,65 @@ public static class DbSchemaUpdater
                     cancellationToken);
             }
 
+            if (!await ColumnExistsAsync(dbContext, "users", "FailedLoginAttempts", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "users" ADD COLUMN "FailedLoginAttempts" INTEGER NOT NULL DEFAULT 0;""",
+                    cancellationToken);
+            }
+
+            if (!await ColumnExistsAsync(dbContext, "users", "LastFailedLoginAtUtc", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "users" ADD COLUMN "LastFailedLoginAtUtc" TEXT NULL;""",
+                    cancellationToken);
+            }
+
+            if (!await ColumnExistsAsync(dbContext, "users", "LockoutEndAtUtc", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "users" ADD COLUMN "LockoutEndAtUtc" TEXT NULL;""",
+                    cancellationToken);
+            }
+
+            if (!await ColumnExistsAsync(dbContext, "devices", "AuthSessionVersion", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "devices" ADD COLUMN "AuthSessionVersion" INTEGER NOT NULL DEFAULT 1;""",
+                    cancellationToken);
+            }
+
+            if (!await ColumnExistsAsync(dbContext, "devices", "LastAuthIssuedAtUtc", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "devices" ADD COLUMN "LastAuthIssuedAtUtc" TEXT NULL;""",
+                    cancellationToken);
+            }
+
+            if (!await ColumnExistsAsync(dbContext, "devices", "AuthSessionRevokedAtUtc", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "devices" ADD COLUMN "AuthSessionRevokedAtUtc" TEXT NULL;""",
+                    cancellationToken);
+            }
+
+            if (!await ColumnExistsAsync(dbContext, "devices", "AuthSessionRevocationReason", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "devices" ADD COLUMN "AuthSessionRevocationReason" TEXT NULL;""",
+                    cancellationToken);
+            }
+
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE INDEX IF NOT EXISTS "IX_users_LockoutEndAtUtc" ON "users" ("LockoutEndAtUtc");""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE INDEX IF NOT EXISTS "IX_devices_AuthSessionRevokedAtUtc" ON "devices" ("AuthSessionRevokedAtUtc");""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE INDEX IF NOT EXISTS "IX_devices_AppUserId_AuthSessionVersion" ON "devices" ("AppUserId", "AuthSessionVersion");""",
+                cancellationToken);
+
             return;
         }
 
@@ -636,6 +695,36 @@ public static class DbSchemaUpdater
             await dbContext.Database.ExecuteSqlRawAsync(
                 """ALTER TABLE users ADD COLUMN IF NOT EXISTS "MfaConfiguredAtUtc" timestamptz NULL;""",
                 cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE users ADD COLUMN IF NOT EXISTS "FailedLoginAttempts" integer NOT NULL DEFAULT 0;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE users ADD COLUMN IF NOT EXISTS "LastFailedLoginAtUtc" timestamptz NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE users ADD COLUMN IF NOT EXISTS "LockoutEndAtUtc" timestamptz NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE devices ADD COLUMN IF NOT EXISTS "AuthSessionVersion" integer NOT NULL DEFAULT 1;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE devices ADD COLUMN IF NOT EXISTS "LastAuthIssuedAtUtc" timestamptz NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE devices ADD COLUMN IF NOT EXISTS "AuthSessionRevokedAtUtc" timestamptz NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE devices ADD COLUMN IF NOT EXISTS "AuthSessionRevocationReason" varchar(250) NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE INDEX IF NOT EXISTS "IX_users_LockoutEndAtUtc" ON users("LockoutEndAtUtc");""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE INDEX IF NOT EXISTS "IX_devices_AuthSessionRevokedAtUtc" ON devices("AuthSessionRevokedAtUtc");""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE INDEX IF NOT EXISTS "IX_devices_AppUserId_AuthSessionVersion" ON devices("AppUserId", "AuthSessionVersion");""",
+                cancellationToken);
         }
     }
 
@@ -648,15 +737,99 @@ public static class DbSchemaUpdater
         if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
         {
             await EnsureSqliteAiInsightsSchemaAsync(dbContext, cancellationToken);
+            await EnsureAiWalletShopScopeMigrationAsync(dbContext, cancellationToken);
             return;
         }
 
         if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
         {
             await EnsurePostgresAiInsightsSchemaAsync(dbContext, cancellationToken);
+            await EnsureAiWalletShopScopeMigrationAsync(dbContext, cancellationToken);
+        }
+    }
+
+    public static async Task EnsureCloudApiReliabilitySchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken = default)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+
+        if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            await EnsureSqliteCloudApiReliabilitySchemaAsync(dbContext, cancellationToken);
+            return;
         }
 
-        await EnsureAiWalletShopScopeMigrationAsync(dbContext, cancellationToken);
+        if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            await EnsurePostgresCloudApiReliabilitySchemaAsync(dbContext, cancellationToken);
+        }
+    }
+
+    private static async Task EnsureSqliteCloudApiReliabilitySchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var sql = """
+            CREATE TABLE IF NOT EXISTS "cloud_write_idempotency" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_cloud_write_idempotency" PRIMARY KEY,
+              "EndpointKey" TEXT NOT NULL,
+              "IdempotencyKey" TEXT NOT NULL,
+              "DeviceId" TEXT NOT NULL,
+              "PosVersion" TEXT NOT NULL,
+              "RequestHash" TEXT NOT NULL,
+              "ResponseStatusCode" INTEGER NULL,
+              "ResponseContentType" TEXT NULL,
+              "ResponseBody" TEXT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "LastSeenAtUtc" TEXT NOT NULL,
+              "ExpiresAtUtc" TEXT NOT NULL,
+              "CompletedAtUtc" TEXT NULL
+            );
+
+            DROP INDEX IF EXISTS "IX_cloud_write_idempotency_Endpoint_Device_Idempotency";
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_cloud_write_idempotency_Endpoint_Device_Idempotency_RequestHash"
+              ON "cloud_write_idempotency" ("EndpointKey", "DeviceId", "IdempotencyKey", "RequestHash");
+            CREATE INDEX IF NOT EXISTS "IX_cloud_write_idempotency_ExpiresAtUtc"
+              ON "cloud_write_idempotency" ("ExpiresAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_cloud_write_idempotency_CreatedAtUtc"
+              ON "cloud_write_idempotency" ("CreatedAtUtc");
+            """;
+
+        await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+    }
+
+    private static async Task EnsurePostgresCloudApiReliabilitySchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var sql = """
+            CREATE TABLE IF NOT EXISTS cloud_write_idempotency (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "EndpointKey" varchar(180) NOT NULL,
+              "IdempotencyKey" varchar(128) NOT NULL,
+              "DeviceId" varchar(128) NOT NULL,
+              "PosVersion" varchar(64) NOT NULL,
+              "RequestHash" varchar(128) NOT NULL,
+              "ResponseStatusCode" integer NULL,
+              "ResponseContentType" varchar(120) NULL,
+              "ResponseBody" text NULL,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "LastSeenAtUtc" timestamptz NOT NULL,
+              "ExpiresAtUtc" timestamptz NOT NULL,
+              "CompletedAtUtc" timestamptz NULL
+            );
+
+            DROP INDEX IF EXISTS "IX_cloud_write_idempotency_Endpoint_Device_Idempotency";
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_cloud_write_idempotency_Endpoint_Device_Idempotency_RequestHash"
+              ON cloud_write_idempotency("EndpointKey", "DeviceId", "IdempotencyKey", "RequestHash");
+            CREATE INDEX IF NOT EXISTS "IX_cloud_write_idempotency_ExpiresAtUtc"
+              ON cloud_write_idempotency("ExpiresAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_cloud_write_idempotency_CreatedAtUtc"
+              ON cloud_write_idempotency("CreatedAtUtc");
+            """;
+
+        await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
     }
 
     private static async Task EnsureSqliteRefundSchemaAsync(
@@ -1010,10 +1183,23 @@ public static class DbSchemaUpdater
         SmartPosDbContext dbContext,
         CancellationToken cancellationToken)
     {
-        var wallets = await dbContext.AiCreditWallets
-            .Where(x => x.ShopId.HasValue)
-            .OrderBy(x => x.CreatedAtUtc)
-            .ToListAsync(cancellationToken);
+        List<AiCreditWallet> wallets;
+        if (dbContext.Database.IsSqlite())
+        {
+            wallets = (await dbContext.AiCreditWallets
+                    .Where(x => x.ShopId.HasValue)
+                    .ToListAsync(cancellationToken))
+                .OrderBy(x => x.CreatedAtUtc)
+                .ToList();
+        }
+        else
+        {
+            wallets = await dbContext.AiCreditWallets
+                .Where(x => x.ShopId.HasValue)
+                .OrderBy(x => x.CreatedAtUtc)
+                .ToListAsync(cancellationToken);
+        }
+
         if (wallets.Count == 0)
         {
             return;
@@ -1527,6 +1713,37 @@ public static class DbSchemaUpdater
                 cancellationToken);
         }
 
+        if (!await ColumnExistsAsync(dbContext, "provisioned_devices", "BranchCode", cancellationToken))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "provisioned_devices" ADD COLUMN "BranchCode" TEXT NULL;""",
+                cancellationToken);
+        }
+
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """
+            CREATE TABLE IF NOT EXISTS "shop_branch_seat_allocations" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_shop_branch_seat_allocations" PRIMARY KEY,
+              "ShopId" TEXT NOT NULL,
+              "BranchCode" TEXT NOT NULL,
+              "SeatQuota" INTEGER NOT NULL,
+              "IsActive" INTEGER NOT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "UpdatedAtUtc" TEXT NULL,
+              CONSTRAINT "FK_shop_branch_seat_allocations_shops_ShopId" FOREIGN KEY ("ShopId") REFERENCES "shops" ("Id") ON DELETE CASCADE
+            );
+            """,
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE INDEX IF NOT EXISTS "IX_shop_branch_seat_allocations_ShopId" ON "shop_branch_seat_allocations" ("ShopId");""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE UNIQUE INDEX IF NOT EXISTS "IX_shop_branch_seat_allocations_ShopId_BranchCode" ON "shop_branch_seat_allocations" ("ShopId", "BranchCode");""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE INDEX IF NOT EXISTS "IX_provisioned_devices_ShopId_BranchCode_Status" ON "provisioned_devices" ("ShopId", "BranchCode", "Status");""",
+            cancellationToken);
+
         if (!await ColumnExistsAsync(dbContext, "license_audit_logs", "IsManualOverride", cancellationToken))
         {
             await dbContext.Database.ExecuteSqlRawAsync(
@@ -2008,6 +2225,9 @@ public static class DbSchemaUpdater
             """ALTER TABLE provisioned_devices ADD COLUMN IF NOT EXISTS "DeviceKeyRegisteredAtUtc" timestamptz NULL;""",
             cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE provisioned_devices ADD COLUMN IF NOT EXISTS "BranchCode" varchar(64) NULL;""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
             """ALTER TABLE billing_webhook_events ADD COLUMN IF NOT EXISTS "FailureCount" integer NOT NULL DEFAULT 0;""",
             cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(
@@ -2051,6 +2271,19 @@ public static class DbSchemaUpdater
               "RevokedAtUtc" timestamptz NULL,
               "ReplacedByJti" varchar(120) NULL,
               "LastValidatedAtUtc" timestamptz NULL
+            );
+            """,
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """
+            CREATE TABLE IF NOT EXISTS shop_branch_seat_allocations (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "ShopId" uuid NOT NULL REFERENCES shops("Id") ON DELETE CASCADE,
+              "BranchCode" varchar(64) NOT NULL,
+              "SeatQuota" integer NOT NULL,
+              "IsActive" boolean NOT NULL,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "UpdatedAtUtc" timestamptz NULL
             );
             """,
             cancellationToken);
@@ -2113,6 +2346,15 @@ public static class DbSchemaUpdater
             cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(
             """CREATE INDEX IF NOT EXISTS "IX_license_token_sessions_RevokedAtUtc" ON license_token_sessions("RevokedAtUtc");""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE INDEX IF NOT EXISTS "IX_shop_branch_seat_allocations_ShopId" ON shop_branch_seat_allocations("ShopId");""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE UNIQUE INDEX IF NOT EXISTS "IX_shop_branch_seat_allocations_ShopId_BranchCode" ON shop_branch_seat_allocations("ShopId", "BranchCode");""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE INDEX IF NOT EXISTS "IX_provisioned_devices_ShopId_BranchCode_Status" ON provisioned_devices("ShopId", "BranchCode", "Status");""",
             cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(
             """CREATE INDEX IF NOT EXISTS "IX_offline_events_OfflineGrantId" ON offline_events("OfflineGrantId");""",

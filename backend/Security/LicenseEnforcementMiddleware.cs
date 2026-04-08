@@ -39,13 +39,17 @@ public sealed class LicenseEnforcementMiddleware(RequestDelegate next)
 
         var deviceCode = licenseService.ResolveDeviceCode(null, httpContext);
         var licenseToken = licenseService.ResolveLicenseToken(httpContext);
+        var policySnapshotToken = licenseService.ResolvePolicySnapshotToken(httpContext);
+        var policySnapshotClientTime = licenseService.ResolvePolicySnapshotClientTime(httpContext);
 
         var decision = await licenseService.EvaluateRequestAsync(
             deviceCode,
             licenseToken,
             httpContext.Request.Path,
             httpContext.Request.Method,
-            httpContext.RequestAborted);
+            httpContext.RequestAborted,
+            policySnapshotToken,
+            policySnapshotClientTime);
 
         if (decision.AllowRequest)
         {

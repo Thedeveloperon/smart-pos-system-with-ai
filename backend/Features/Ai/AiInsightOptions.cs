@@ -45,10 +45,80 @@ public sealed class AiInsightOptions
     public bool CanaryOnlyEnabled { get; set; } = false;
     public string[] CanaryAllowedUsers { get; set; } = [];
     public bool UseIntentPipelineForChatbot { get; set; } = true;
+    public bool AuthorizationReconciliationEnabled { get; set; } = true;
+    public int AuthorizationReconciliationIntervalSeconds { get; set; } = 300;
+    public int AuthorizationPendingTimeoutSeconds { get; set; } = 900;
+    public int AuthorizationReconciliationBatchSize { get; set; } = 100;
+    public AiPrivacyOptions Privacy { get; set; } = new();
     public string PaymentProvider { get; set; } = "mockpay";
     public string CheckoutBaseUrl { get; set; } = string.Empty;
     public List<AiCreditPackOption> CreditPacks { get; set; } = [];
     public AiCreditPaymentWebhookOptions PaymentWebhook { get; set; } = new();
+}
+
+public sealed class AiPrivacyOptions
+{
+    public bool EnablePayloadRedaction { get; set; } = true;
+    public string RedactionPlaceholder { get; set; } = "[redacted]";
+    public int LogPreviewMaxChars { get; set; } = 160;
+    public string[] ProviderPayloadAllowlist { get; set; } =
+    [
+        "customer_question",
+        "verified_pos_facts_json",
+        "rules",
+        "output_language"
+    ];
+    public List<AiPrivacyRedactionRuleOptions> RedactionRules { get; set; } =
+    [
+        new()
+        {
+            Name = "email",
+            Pattern = @"(?i)\b[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}\b",
+            Replacement = "[redacted_email]",
+            Enabled = true
+        },
+        new()
+        {
+            Name = "phone",
+            Pattern = @"(?<!\d)(?:\+?\d[\d\-\s().]{7,}\d)(?!\d)",
+            Replacement = "[redacted_phone]",
+            Enabled = true
+        },
+        new()
+        {
+            Name = "card_with_separator",
+            Pattern = @"(?<!\d)(?:\d[ -]){12,18}\d(?!\d)",
+            Replacement = "[redacted_card]",
+            Enabled = true
+        },
+        new()
+        {
+            Name = "api_key_assignment",
+            Pattern = @"(?i)\b(api[_-]?key|token|secret)\s*[:=]\s*[A-Za-z0-9_\-]{8,}",
+            Replacement = "[redacted_secret]",
+            Enabled = true
+        }
+    ];
+    public AiPrivacyRetentionOptions Retention { get; set; } = new();
+}
+
+public sealed class AiPrivacyRetentionOptions
+{
+    public bool Enabled { get; set; } = true;
+    public bool RunOnStartup { get; set; } = false;
+    public int CleanupIntervalSeconds { get; set; } = 3600;
+    public int ChatMessageRetentionDays { get; set; } = 30;
+    public int ConversationRetentionDays { get; set; } = 30;
+    public int InsightSucceededRetentionDays { get; set; } = 30;
+    public int InsightFailedRetentionDays { get; set; } = 14;
+}
+
+public sealed class AiPrivacyRedactionRuleOptions
+{
+    public string Name { get; set; } = string.Empty;
+    public string Pattern { get; set; } = string.Empty;
+    public string Replacement { get; set; } = string.Empty;
+    public bool Enabled { get; set; } = true;
 }
 
 public sealed class AiCreditPackOption

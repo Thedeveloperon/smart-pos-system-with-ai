@@ -145,4 +145,18 @@ public sealed class AiChatFlowTests(CustomWebApplicationFactory factory)
         Assert.NotNull(forecastPayload!["items"]?.AsArray());
         Assert.False(string.IsNullOrWhiteSpace(forecastPayload["confidence"]?.GetValue<string>()));
     }
+
+    [Fact]
+    public async Task ChatSession_WithCashierRole_ShouldReturnForbidden()
+    {
+        await TestAuth.SignInAsCashierAsync(client);
+
+        var response = await client.PostAsJsonAsync("/api/ai/chat/sessions", new
+        {
+            title = "Cashier should not access AI",
+            usage_type = "quick_insights"
+        });
+
+        Assert.Equal(System.Net.HttpStatusCode.Forbidden, response.StatusCode);
+    }
 }

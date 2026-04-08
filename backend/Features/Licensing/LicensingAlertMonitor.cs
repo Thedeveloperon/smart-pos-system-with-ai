@@ -32,7 +32,8 @@ public sealed class LicensingAlertBreakdownItem
 
 public sealed class LicensingAlertMonitor(
     IOptions<LicenseOptions> optionsAccessor,
-    ILogger<LicensingAlertMonitor> logger)
+    ILogger<LicensingAlertMonitor> logger,
+    IOpsAlertPublisher? opsAlertPublisher = null)
     : BackgroundService, ILicensingAlertMonitor
 {
     private static readonly HashSet<string> TrackedValidationCodes =
@@ -50,6 +51,7 @@ public sealed class LicensingAlertMonitor(
     private readonly List<AlertEvent> webhookFailures = [];
     private readonly List<AlertEvent> securityAnomalies = [];
     private readonly LicenseAlertOptions alertOptions = optionsAccessor.Value.Alerts;
+    private readonly IOpsAlertPublisher opsAlertPublisher = opsAlertPublisher ?? NoOpOpsAlertPublisher.Instance;
     private readonly TimeSpan maxRetention = TimeSpan.FromHours(3);
 
     private DateTimeOffset lastValidationAlertAtUtc = DateTimeOffset.MinValue;
@@ -190,6 +192,21 @@ public sealed class LicensingAlertMonitor(
                 snapshot.ValidationFailureCount,
                 alertOptions.WindowMinutes,
                 FormatTopEntries(snapshot.TopValidationFailures));
+
+            _ = this.opsAlertPublisher.PublishAsync(new OpsAlertMessage
+            {
+                Category = "licensing.validation_spike",
+                Severity = "warning",
+                Summary = $"License validation failures spiked to {snapshot.ValidationFailureCount} in {alertOptions.WindowMinutes} minutes.",
+                Details = new Dictionary<string, object?>
+                {
+                    ["window_minutes"] = alertOptions.WindowMinutes,
+                    ["failure_count"] = snapshot.ValidationFailureCount,
+                    ["top_failures"] = snapshot.TopValidationFailures
+                        .Select(x => new { reason = x.Reason, count = x.Count })
+                        .ToList()
+                }
+            }, CancellationToken.None);
         }
 
         if (shouldAlertWebhook)
@@ -199,6 +216,21 @@ public sealed class LicensingAlertMonitor(
                 snapshot.WebhookFailureCount,
                 alertOptions.WindowMinutes,
                 FormatTopEntries(snapshot.TopWebhookFailures));
+
+            _ = this.opsAlertPublisher.PublishAsync(new OpsAlertMessage
+            {
+                Category = "licensing.webhook_failure_spike",
+                Severity = "warning",
+                Summary = $"Billing webhook failures spiked to {snapshot.WebhookFailureCount} in {alertOptions.WindowMinutes} minutes.",
+                Details = new Dictionary<string, object?>
+                {
+                    ["window_minutes"] = alertOptions.WindowMinutes,
+                    ["failure_count"] = snapshot.WebhookFailureCount,
+                    ["top_failures"] = snapshot.TopWebhookFailures
+                        .Select(x => new { reason = x.Reason, count = x.Count })
+                        .ToList()
+                }
+            }, CancellationToken.None);
         }
 
         if (shouldAlertSecurity)
@@ -208,6 +240,21 @@ public sealed class LicensingAlertMonitor(
                 snapshot.SecurityAnomalyCount,
                 alertOptions.WindowMinutes,
                 FormatTopEntries(snapshot.TopSecurityAnomalies));
+
+            _ = this.opsAlertPublisher.PublishAsync(new OpsAlertMessage
+            {
+                Category = "licensing.security_anomaly_spike",
+                Severity = "critical",
+                Summary = $"Security anomalies spiked to {snapshot.SecurityAnomalyCount} in {alertOptions.WindowMinutes} minutes.",
+                Details = new Dictionary<string, object?>
+                {
+                    ["window_minutes"] = alertOptions.WindowMinutes,
+                    ["anomaly_count"] = snapshot.SecurityAnomalyCount,
+                    ["top_anomalies"] = snapshot.TopSecurityAnomalies
+                        .Select(x => new { reason = x.Reason, count = x.Count })
+                        .ToList()
+                }
+            }, CancellationToken.None);
         }
     }
 

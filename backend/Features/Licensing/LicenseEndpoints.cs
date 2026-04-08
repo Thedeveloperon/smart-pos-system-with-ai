@@ -589,6 +589,81 @@ public static class LicenseEndpoints
         .WithName("AdminGetLicensingShops")
         .WithOpenApi();
 
+        admin.MapGet("/shops/{shop_code}/branch-allocations", async (
+            string shop_code,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var response = await licenseService.GetBranchSeatAllocationsAsAdminAsync(shop_code, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .WithName("AdminGetShopBranchSeatAllocations")
+        .WithOpenApi();
+
+        admin.MapPut("/shops/{shop_code}/branch-allocations/{branch_code}", async (
+            string shop_code,
+            string branch_code,
+            AdminBranchSeatAllocationUpsertRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.UpsertBranchSeatAllocationAsAdminAsync(
+                    shop_code,
+                    branch_code,
+                    request,
+                    cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .WithName("AdminUpsertShopBranchSeatAllocation")
+        .WithOpenApi();
+
+        admin.MapPost("/migration/ai-wallets/dry-run", async (
+            AiWalletMigrationDryRunRequest request,
+            LicensingMigrationDryRunService migrationDryRunService,
+            CancellationToken cancellationToken) =>
+        {
+            var response = await migrationDryRunService.RunAiWalletDryRunAsync(request, cancellationToken);
+            return Results.Ok(response);
+        })
+        .WithName("AdminRunAiWalletMigrationDryRun")
+        .WithOpenApi();
+
+        admin.MapPost("/migration/owner-mapping/remediate", async (
+            AiOwnerMappingRemediationRequest request,
+            HttpContext httpContext,
+            LicensingMigrationDryRunService migrationDryRunService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await migrationDryRunService.RemediateOwnerMappingAsync(request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .WithName("AdminRemediateOwnerMapping")
+        .WithOpenApi();
+
         admin.MapGet("/audit-logs", async (
             string? search,
             string? action,

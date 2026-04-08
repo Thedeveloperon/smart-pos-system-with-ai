@@ -107,6 +107,15 @@ Purpose: track the security hardening roadmap for device identity, license bindi
 - [x] Document optional desktop hardening track (Tauri/Electron + OS keychain/TPM-backed keys).
 - [x] Define migration plan from browser PWA key storage to desktop key storage.
 
+## Phase 7: Portal Session Security Hardening
+
+- [x] Add login failure lockout policy with configurable thresholds/window/duration.
+- [x] Add throttled failed login handling and audit events for unknown-user and lockout paths.
+- [x] Add per-device auth session versioning and session revocation metadata.
+- [x] Add auth session middleware to reject revoked or stale session versions.
+- [x] Add authenticated session management APIs for listing and revoking sessions/devices.
+- [x] Publish suspicious-login and email-change verification runbook.
+
 ## Verification Checklist
 
 - [x] Backend tests pass (`dotnet test`).
@@ -140,3 +149,4 @@ Purpose: track the security hardening roadmap for device identity, license bindi
 - 2026-04-01: Added manual QA evidence document (`SECURITY_MANUAL_QA_2026-04-01.md`) and validated activation/heartbeat/revoke-reactivate/offline-recovery plus tamper/replay/clock-rollback scenarios.
 - 2026-04-01: Hardened production secrets by resolving JWT, license encryption, and webhook signing secrets from environment variables first; production config now ships with blank secret values.
 - 2026-04-01: Closed final tracker item by accepting/deferring Edge-host WebCrypto persistence validation follow-up (Chrome desktop/mobile validation already complete).
+- 2026-04-08: Added portal session-security hardening baseline (lockout policy, auth session revocation APIs + middleware enforcement, and suspicious-login/email-change runbook).

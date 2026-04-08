@@ -53,6 +53,7 @@ public sealed class LicenseService(
     private const string MarketingPaymentSubmissionMetadataPrefix = "MARKETING_PAYMENT_SUBMISSION:";
     private const string AiCreditOrderSettlementReferencePrefix = "ai_order";
     private const int MarketingBankReferenceMaxLength = 128;
+    private static readonly char[] AllowedBranchCodeCharacters = "abcdefghijklmnopqrstuvwxyz0123456789-_".ToCharArray();
     private static readonly HashSet<string> EmergencyActions = new(StringComparer.OrdinalIgnoreCase)
     {
         EmergencyActionLockDevice,
@@ -119,6 +120,10 @@ public sealed class LicenseService(
         decimal AmountDue,
         string Currency,
         bool RequiresPayment);
+    private readonly record struct BranchSeatPolicy(
+        string BranchCode,
+        int SeatQuota,
+        int TotalAllocatedSeats);
     private readonly record struct StripeCheckoutSessionResult(
         string SessionId,
         string CheckoutUrl,
@@ -244,11 +249,28 @@ public sealed class LicenseService(
             cancellationToken);
 
         var seatLimit = ResolveSeatLimit(subscription);
+        var branchCode = ResolveBranchCode(request.BranchCode, existingDevice?.BranchCode);
+        BranchSeatPolicy? branchPolicy = null;
+        if (options.AutoProvisionBranchAllocations || options.EnforceBranchSeatAllocation)
+        {
+            branchPolicy = await EnsureBranchSeatPolicyAsync(
+                shop,
+                seatLimit,
+                branchCode,
+                now,
+                cancellationToken);
+        }
+
         var activeSeats = await dbContext.ProvisionedDevices
             .CountAsync(
                 x => x.ShopId == shop.Id && x.Status == ProvisionedDeviceStatus.Active &&
                      (existingDevice == null || x.Id != existingDevice.Id),
                 cancellationToken);
+        var activeBranchSeats = await CountActiveSeatsByBranchAsync(
+            shop.Id,
+            branchCode,
+            existingDevice?.Id,
+            cancellationToken);
 
         var requiresSeat = existingDevice is null || existingDevice.Status != ProvisionedDeviceStatus.Active;
         if (requiresSeat && activeSeats >= seatLimit)
@@ -256,6 +278,17 @@ public sealed class LicenseService(
             throw new LicenseException(
                 LicenseErrorCodes.SeatLimitExceeded,
                 "Device activation failed because seat limit has been reached.",
+                StatusCodes.Status409Conflict);
+        }
+
+        var branchSeatLimit = branchPolicy?.SeatQuota ?? seatLimit;
+        if (requiresSeat &&
+            options.EnforceBranchSeatAllocation &&
+            activeBranchSeats >= branchSeatLimit)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.SeatLimitExceeded,
+                $"Branch '{branchCode}' seat quota has been reached.",
                 StatusCodes.Status409Conflict);
         }
 
@@ -276,6 +309,7 @@ public sealed class LicenseService(
                 DeviceCode = deviceCode,
                 DeviceId = appDevice?.Id,
                 Name = ResolveDeviceName(request.DeviceName),
+                BranchCode = branchCode,
                 Status = ProvisionedDeviceStatus.Active,
                 AssignedAtUtc = now,
                 LastHeartbeatAtUtc = now,
@@ -291,6 +325,7 @@ public sealed class LicenseService(
         {
             existingDevice.Name = ResolveDeviceName(request.DeviceName, existingDevice.Name);
             existingDevice.DeviceId = appDevice?.Id ?? existingDevice.DeviceId;
+            existingDevice.BranchCode = branchCode;
             existingDevice.Status = ProvisionedDeviceStatus.Active;
             existingDevice.AssignedAtUtc = now;
             existingDevice.RevokedAtUtc = null;
@@ -342,6 +377,10 @@ public sealed class LicenseService(
             MetadataJson = JsonSerializer.Serialize(new
             {
                 device_code = deviceCode,
+                branch_code = branchCode,
+                branch_seat_quota = branchSeatLimit,
+                branch_active_seats = activeBranchSeats + (requiresSeat ? 1 : 0),
+                branch_total_allocated_seats = branchPolicy?.TotalAllocatedSeats,
                 seat_limit = seatLimit,
                 active_seats = activeSeats + (requiresSeat ? 1 : 0),
                 subscription_status = subscription.Status.ToString().ToLowerInvariant(),
@@ -1532,6 +1571,7 @@ public sealed class LicenseService(
                         ProvisionedDeviceId = device.Id,
                         DeviceCode = device.DeviceCode,
                         DeviceName = device.Name,
+                        BranchCode = ResolveBranchCode(device.BranchCode),
                         DeviceStatus = device.Status.ToString().ToLowerInvariant(),
                         LicenseState = licenseState.ToString().ToLowerInvariant(),
                         AssignedAt = device.AssignedAtUtc,
@@ -1758,6 +1798,7 @@ public sealed class LicenseService(
                     ProvisionedDeviceId = device.Id,
                     DeviceCode = device.DeviceCode,
                     DeviceName = device.Name,
+                    BranchCode = ResolveBranchCode(device.BranchCode),
                     DeviceStatus = device.Status.ToString().ToLowerInvariant(),
                     LicenseState = licenseState.ToString().ToLowerInvariant(),
                     ValidUntil = latestLicense?.ValidUntil,
@@ -1788,6 +1829,209 @@ public sealed class LicenseService(
         {
             GeneratedAt = now,
             Items = rows
+        };
+    }
+
+    public async Task<AdminBranchSeatAllocationListResponse> GetBranchSeatAllocationsAsAdminAsync(
+        string shopCode,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var shop = await ResolveExistingShopByCodeAsync(shopCode, cancellationToken);
+        var subscription = await GetOrCreateSubscriptionAsync(shop, now, cancellationToken);
+        var seatLimit = ResolveSeatLimit(subscription);
+
+        if (options.AutoProvisionBranchAllocations)
+        {
+            _ = await EnsureBranchSeatPolicyAsync(
+                shop,
+                seatLimit,
+                ResolveBranchCode(null),
+                now,
+                cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        var allocations = await dbContext.ShopBranchSeatAllocations
+            .AsNoTracking()
+            .Where(x => x.ShopId == shop.Id)
+            .ToListAsync(cancellationToken);
+        var activeSeatsByBranch = await GetActiveSeatCountsByBranchAsync(shop.Id, cancellationToken);
+        var activeSeatTotal = activeSeatsByBranch.Values.Sum();
+        var totalAllocatedSeats = allocations
+            .Where(x => x.IsActive)
+            .Sum(x => Math.Max(0, x.SeatQuota));
+        var defaultBranchCode = ResolveBranchCode(null);
+
+        var rows = allocations
+            .OrderBy(x => x.BranchCode, StringComparer.OrdinalIgnoreCase)
+            .Select(x =>
+            {
+                var branchCode = ResolveBranchCode(x.BranchCode);
+                var activeSeats = activeSeatsByBranch.TryGetValue(branchCode, out var count) ? count : 0;
+                var quota = Math.Max(0, x.SeatQuota);
+                return new AdminBranchSeatAllocationRow
+                {
+                    BranchCode = branchCode,
+                    SeatQuota = quota,
+                    IsActive = x.IsActive,
+                    ActiveSeats = activeSeats,
+                    AvailableSeats = x.IsActive ? Math.Max(0, quota - activeSeats) : 0,
+                    IsDefaultBranch = string.Equals(branchCode, defaultBranchCode, StringComparison.Ordinal),
+                    UpdatedAt = x.UpdatedAtUtc ?? x.CreatedAtUtc
+                };
+            })
+            .ToList();
+
+        return new AdminBranchSeatAllocationListResponse
+        {
+            GeneratedAt = now,
+            ShopId = shop.Id,
+            ShopCode = shop.Code,
+            SeatLimit = seatLimit,
+            ActiveSeats = activeSeatTotal,
+            TotalAllocatedSeats = totalAllocatedSeats,
+            Items = rows
+        };
+    }
+
+    public async Task<AdminBranchSeatAllocationUpsertResponse> UpsertBranchSeatAllocationAsAdminAsync(
+        string shopCode,
+        string branchCode,
+        AdminBranchSeatAllocationUpsertRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var now = DateTimeOffset.UtcNow;
+        var shop = await ResolveExistingShopByCodeAsync(shopCode, cancellationToken);
+        var normalizedBranchCode = ResolveBranchCode(branchCode);
+        var subscription = await GetOrCreateSubscriptionAsync(shop, now, cancellationToken);
+        var seatLimit = ResolveSeatLimit(subscription);
+        var normalizedSeatQuota = Math.Max(0, request.SeatQuota);
+        var requestedActive = request.IsActive;
+        if (requestedActive && normalizedSeatQuota <= 0)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "seat_quota must be greater than zero when the allocation is active.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var allocations = await dbContext.ShopBranchSeatAllocations
+            .Where(x => x.ShopId == shop.Id)
+            .ToListAsync(cancellationToken);
+        var existing = allocations.FirstOrDefault(x =>
+            string.Equals(ResolveBranchCode(x.BranchCode), normalizedBranchCode, StringComparison.Ordinal));
+
+        var otherAllocatedSeats = allocations
+            .Where(x => x.Id != existing?.Id && x.IsActive)
+            .Sum(x => Math.Max(0, x.SeatQuota));
+        var effectiveSeatQuota = requestedActive ? normalizedSeatQuota : 0;
+        if (otherAllocatedSeats + effectiveSeatQuota > seatLimit)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                $"seat_quota would exceed seat_limit ({seatLimit}) for shop '{shop.Code}'.",
+                StatusCodes.Status409Conflict);
+        }
+
+        var branchActiveSeats = await CountActiveSeatsByBranchAsync(
+            shop.Id,
+            normalizedBranchCode,
+            excludedProvisionedDeviceId: null,
+            cancellationToken);
+        if (requestedActive && normalizedSeatQuota < branchActiveSeats)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                $"seat_quota ({normalizedSeatQuota}) cannot be lower than active seats ({branchActiveSeats}) in branch '{normalizedBranchCode}'.",
+                StatusCodes.Status409Conflict);
+        }
+
+        if (existing is null)
+        {
+            existing = new ShopBranchSeatAllocation
+            {
+                ShopId = shop.Id,
+                Shop = shop,
+                BranchCode = normalizedBranchCode,
+                SeatQuota = normalizedSeatQuota,
+                IsActive = requestedActive,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            };
+            dbContext.ShopBranchSeatAllocations.Add(existing);
+        }
+        else
+        {
+            existing.BranchCode = normalizedBranchCode;
+            existing.SeatQuota = normalizedSeatQuota;
+            existing.IsActive = requestedActive;
+            existing.UpdatedAtUtc = now;
+        }
+
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Reason,
+            defaultActor: "support-admin",
+            defaultReasonCode: "branch_seat_allocation_update");
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = shop.Id,
+            Action = "branch_seat_allocation_upsert",
+            Actor = overrideContext.Actor,
+            Reason = overrideContext.AuditReason,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                branch_code = normalizedBranchCode,
+                seat_quota = normalizedSeatQuota,
+                is_active = requestedActive,
+                seat_limit = seatLimit,
+                active_seats_in_branch = branchActiveSeats,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            }),
+            IsManualOverride = true,
+            CreatedAtUtc = now
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var refreshedAllocations = await dbContext.ShopBranchSeatAllocations
+            .AsNoTracking()
+            .Where(x => x.ShopId == shop.Id)
+            .ToListAsync(cancellationToken);
+        var totalAllocatedSeats = refreshedAllocations
+            .Where(x => x.IsActive)
+            .Sum(x => Math.Max(0, x.SeatQuota));
+        var activeSeatsByBranch = await GetActiveSeatCountsByBranchAsync(shop.Id, cancellationToken);
+        var activeSeats = activeSeatsByBranch.Values.Sum();
+        var defaultBranchCode = ResolveBranchCode(null);
+
+        var responseRow = new AdminBranchSeatAllocationRow
+        {
+            BranchCode = normalizedBranchCode,
+            SeatQuota = Math.Max(0, existing.SeatQuota),
+            IsActive = existing.IsActive,
+            ActiveSeats = activeSeatsByBranch.TryGetValue(normalizedBranchCode, out var count) ? count : 0,
+            AvailableSeats = existing.IsActive
+                ? Math.Max(0, existing.SeatQuota - (activeSeatsByBranch.TryGetValue(normalizedBranchCode, out var used) ? used : 0))
+                : 0,
+            IsDefaultBranch = string.Equals(normalizedBranchCode, defaultBranchCode, StringComparison.Ordinal),
+            UpdatedAt = existing.UpdatedAtUtc ?? existing.CreatedAtUtc
+        };
+
+        return new AdminBranchSeatAllocationUpsertResponse
+        {
+            ShopId = shop.Id,
+            ShopCode = shop.Code,
+            SeatLimit = seatLimit,
+            TotalAllocatedSeats = totalAllocatedSeats,
+            ActiveSeats = activeSeats,
+            Item = responseRow,
+            ProcessedAt = now
         };
     }
 
@@ -2183,7 +2427,8 @@ public sealed class LicenseService(
                 StatusCodes.Status400BadRequest);
         }
 
-        var normalizedTargetShopCode = ResolveShopCode(request.TargetShopCode);
+        var normalizedTargetShopCode = NormalizeOptionalValue(request.TargetShopCode);
+        var targetBranchCode = ResolveBranchCode(request.TargetBranchCode);
         var overrideContext = ResolveManualOverrideContext(
             request.Actor,
             request.ReasonCode,
@@ -2213,14 +2458,25 @@ public sealed class LicenseService(
                 LicenseErrorCodes.InvalidAdminRequest,
                 "Device is linked to an unknown source shop.",
                 StatusCodes.Status409Conflict);
+        var sourceBranchCode = ResolveBranchCode(provisionedDevice.BranchCode);
         var sourceSubscription = await GetOrCreateSubscriptionAsync(sourceShop, now, cancellationToken);
 
-        var targetShop = await GetOrCreateShopAsync(normalizedTargetShopCode, now, cancellationToken);
-        if (targetShop.Id == sourceShop.Id)
+        Shop targetShop;
+        if (string.IsNullOrWhiteSpace(normalizedTargetShopCode))
+        {
+            targetShop = sourceShop;
+        }
+        else
+        {
+            targetShop = await GetOrCreateShopAsync(normalizedTargetShopCode, now, cancellationToken);
+        }
+
+        if (targetShop.Id == sourceShop.Id &&
+            string.Equals(sourceBranchCode, targetBranchCode, StringComparison.OrdinalIgnoreCase))
         {
             throw new LicenseException(
                 LicenseErrorCodes.InvalidAdminRequest,
-                "target_shop_code must be different from the current shop.",
+                "target_branch_code must be different when target_shop_code is the same as the current shop.",
                 StatusCodes.Status409Conflict);
         }
 
@@ -2234,6 +2490,12 @@ public sealed class LicenseService(
         }
 
         var targetSeatLimit = ResolveSeatLimit(targetSubscription);
+        var targetBranchPolicy = await EnsureBranchSeatPolicyAsync(
+            targetShop,
+            targetSeatLimit,
+            targetBranchCode,
+            now,
+            cancellationToken);
         var targetActiveSeats = await dbContext.ProvisionedDevices
             .CountAsync(
                 x => x.ShopId == targetShop.Id &&
@@ -2247,11 +2509,24 @@ public sealed class LicenseService(
                 "Target shop seat limit has been reached.",
                 StatusCodes.Status409Conflict);
         }
+        var targetBranchActiveSeats = await CountActiveSeatsByBranchAsync(
+            targetShop.Id,
+            targetBranchCode,
+            provisionedDevice.Id,
+            cancellationToken);
+        if (targetBranchActiveSeats >= targetBranchPolicy.SeatQuota)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.SeatLimitExceeded,
+                $"Target branch '{targetBranchCode}' seat quota has been reached.",
+                StatusCodes.Status409Conflict);
+        }
 
         var sourceShopId = sourceShop.Id;
         var sourceShopCode = sourceShop.Code;
         provisionedDevice.ShopId = targetShop.Id;
         provisionedDevice.Shop = targetShop;
+        provisionedDevice.BranchCode = targetBranchCode;
         provisionedDevice.AssignedAtUtc = now;
         provisionedDevice.LastHeartbeatAtUtc = now;
 
@@ -2263,22 +2538,36 @@ public sealed class LicenseService(
             TokenRotationMode.Immediate,
             cancellationToken);
 
-        await ForceReissueLicensesForShopAsync(
-            sourceShop,
-            sourceSubscription,
-            now,
-            overrideContext.Actor,
-            "seat_transfer",
-            excludedProvisionedDeviceId: null,
-            cancellationToken);
-        await ForceReissueLicensesForShopAsync(
-            targetShop,
-            targetSubscription,
-            now,
-            overrideContext.Actor,
-            "seat_transfer",
-            excludedProvisionedDeviceId: provisionedDevice.Id,
-            cancellationToken);
+        if (sourceShopId == targetShop.Id)
+        {
+            await ForceReissueLicensesForShopAsync(
+                targetShop,
+                targetSubscription,
+                now,
+                overrideContext.Actor,
+                "seat_transfer",
+                excludedProvisionedDeviceId: provisionedDevice.Id,
+                cancellationToken);
+        }
+        else
+        {
+            await ForceReissueLicensesForShopAsync(
+                sourceShop,
+                sourceSubscription,
+                now,
+                overrideContext.Actor,
+                "seat_transfer",
+                excludedProvisionedDeviceId: null,
+                cancellationToken);
+            await ForceReissueLicensesForShopAsync(
+                targetShop,
+                targetSubscription,
+                now,
+                overrideContext.Actor,
+                "seat_transfer",
+                excludedProvisionedDeviceId: provisionedDevice.Id,
+                cancellationToken);
+        }
 
         dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
         {
@@ -2292,10 +2581,14 @@ public sealed class LicenseService(
                 device_code = normalizedDeviceCode,
                 source_shop_id = sourceShopId,
                 source_shop_code = sourceShopCode,
+                source_branch_code = sourceBranchCode,
                 target_shop_id = targetShop.Id,
                 target_shop_code = targetShop.Code,
+                target_branch_code = targetBranchCode,
                 target_seat_limit = targetSeatLimit,
                 target_active_seats_after_transfer = targetActiveSeats + 1,
+                target_branch_seat_quota = targetBranchPolicy.SeatQuota,
+                target_branch_active_seats_after_transfer = targetBranchActiveSeats + 1,
                 moved_device_license_id = movedDeviceLicense.Record.Id,
                 reason_code = overrideContext.ReasonCode,
                 actor_note = overrideContext.ActorNote
@@ -2313,8 +2606,10 @@ public sealed class LicenseService(
                 device_code = normalizedDeviceCode,
                 source_shop_id = sourceShopId,
                 source_shop_code = sourceShopCode,
+                source_branch_code = sourceBranchCode,
                 target_shop_id = targetShop.Id,
                 target_shop_code = targetShop.Code,
+                target_branch_code = targetBranchCode,
                 reason_code = overrideContext.ReasonCode,
                 actor_note = overrideContext.ActorNote
             },
@@ -2335,8 +2630,10 @@ public sealed class LicenseService(
             Action = "transfer_seat",
             SourceShopId = sourceShopId,
             SourceShopCode = sourceShopCode,
+            SourceBranchCode = sourceBranchCode,
             TargetShopId = targetShop.Id,
             TargetShopCode = targetShop.Code,
+            TargetBranchCode = targetBranchCode,
             Status = provisionedDevice.Status.ToString().ToLowerInvariant(),
             LicenseState = status.State.ToString().ToLowerInvariant(),
             ValidUntil = status.ValidUntil,
@@ -5165,7 +5462,9 @@ public sealed class LicenseService(
         string? licenseToken,
         PathString requestPath,
         string method,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? policySnapshotToken = null,
+        string? policySnapshotClientTime = null)
     {
         var normalizedDeviceCode = NormalizeDeviceCode(deviceCode);
         if (string.IsNullOrWhiteSpace(normalizedDeviceCode))
@@ -5214,6 +5513,20 @@ public sealed class LicenseService(
                 status.State);
         }
 
+        if (ShouldEnforcePolicySnapshot(requestPath, method))
+        {
+            var snapshotDecision = ValidatePolicySnapshotForRequest(
+                normalizedDeviceCode,
+                status,
+                policySnapshotToken,
+                policySnapshotClientTime,
+                DateTimeOffset.UtcNow);
+            if (!snapshotDecision.AllowRequest)
+            {
+                return snapshotDecision;
+            }
+        }
+
         return LicenseGuardDecision.Allow(status.State);
     }
 
@@ -5251,6 +5564,28 @@ public sealed class LicenseService(
         {
             var token = cookieToken?.Trim();
             return string.IsNullOrWhiteSpace(token) ? null : token;
+        }
+
+        return null;
+    }
+
+    public string? ResolvePolicySnapshotToken(HttpContext httpContext)
+    {
+        if (httpContext.Request.Headers.TryGetValue("X-License-Policy-Snapshot", out var snapshotToken))
+        {
+            var token = snapshotToken.FirstOrDefault()?.Trim();
+            return string.IsNullOrWhiteSpace(token) ? null : token;
+        }
+
+        return null;
+    }
+
+    public string? ResolvePolicySnapshotClientTime(HttpContext httpContext)
+    {
+        if (httpContext.Request.Headers.TryGetValue("X-License-Policy-Client-Time", out var clientTime))
+        {
+            var value = clientTime.FirstOrDefault()?.Trim();
+            return string.IsNullOrWhiteSpace(value) ? null : value;
         }
 
         return null;
@@ -5421,7 +5756,169 @@ public sealed class LicenseService(
             requestPath.StartsWithSegments(prefix, StringComparison.OrdinalIgnoreCase));
     }
 
+    public bool ShouldEnforcePolicySnapshot(PathString requestPath, string method)
+    {
+        if (!options.OfflinePolicySnapshotEnforcementEnabled)
+        {
+            return false;
+        }
+
+        if (HttpMethods.IsGet(method) || HttpMethods.IsHead(method) || HttpMethods.IsOptions(method))
+        {
+            return false;
+        }
+
+        return options.OfflinePolicySnapshotProtectedPathPrefixes.Any(prefix =>
+            requestPath.StartsWithSegments(prefix, StringComparison.OrdinalIgnoreCase));
+    }
+
     public bool IsEnforcementEnabled() => options.EnforceProtectedRoutes;
+
+    private LicenseGuardDecision ValidatePolicySnapshotForRequest(
+        string deviceCode,
+        LicenseStatusSnapshot status,
+        string? policySnapshotToken,
+        string? policySnapshotClientTime,
+        DateTimeOffset now)
+    {
+        var rawToken = NormalizeOptionalValue(policySnapshotToken);
+        if (string.IsNullOrWhiteSpace(rawToken))
+        {
+            return LicenseGuardDecision.Deny(
+                LicenseErrorCodes.PolicySnapshotRequired,
+                "license_policy_snapshot is required for protected feature access.",
+                StatusCodes.Status403Forbidden,
+                status.State);
+        }
+
+        PolicySnapshotTokenPayload payload;
+        try
+        {
+            payload = ParseAndValidatePolicySnapshotToken(rawToken);
+        }
+        catch (LicenseException ex)
+        {
+            var code = ex.Code == LicenseErrorCodes.InvalidToken
+                ? LicenseErrorCodes.PolicySnapshotInvalid
+                : ex.Code;
+            return LicenseGuardDecision.Deny(
+                code,
+                ex.Message,
+                ex.StatusCode,
+                status.State);
+        }
+
+        if (!string.Equals(payload.Type, "policy_snapshot", StringComparison.OrdinalIgnoreCase))
+        {
+            return LicenseGuardDecision.Deny(
+                LicenseErrorCodes.PolicySnapshotInvalid,
+                "license_policy_snapshot payload type is invalid.",
+                StatusCodes.Status403Forbidden,
+                status.State);
+        }
+
+        var skewToleranceSeconds = Math.Max(30, options.OfflinePolicySnapshotClockSkewToleranceSeconds);
+        if (payload.ExpiresAt < now)
+        {
+            return LicenseGuardDecision.Deny(
+                LicenseErrorCodes.PolicySnapshotExpired,
+                "license_policy_snapshot has expired.",
+                StatusCodes.Status403Forbidden,
+                status.State);
+        }
+
+        if (payload.IssuedAt > now.AddSeconds(skewToleranceSeconds))
+        {
+            return LicenseGuardDecision.Deny(
+                LicenseErrorCodes.PolicySnapshotClockSkew,
+                "license_policy_snapshot issued_at is outside allowed clock skew.",
+                StatusCodes.Status403Forbidden,
+                status.State);
+        }
+
+        if (!string.Equals(payload.DeviceCode, deviceCode, StringComparison.Ordinal))
+        {
+            return LicenseGuardDecision.Deny(
+                LicenseErrorCodes.DeviceMismatch,
+                "license_policy_snapshot does not belong to the current device.",
+                StatusCodes.Status403Forbidden,
+                status.State);
+        }
+
+        if (!string.IsNullOrWhiteSpace(status.BranchCode) &&
+            !string.Equals(
+                ResolveBranchCode(payload.BranchCode),
+                ResolveBranchCode(status.BranchCode),
+                StringComparison.Ordinal))
+        {
+            return LicenseGuardDecision.Deny(
+                LicenseErrorCodes.PolicySnapshotStale,
+                "license_policy_snapshot branch binding is stale.",
+                StatusCodes.Status403Forbidden,
+                status.State);
+        }
+
+        if (status.ShopId.HasValue && payload.ShopId != status.ShopId.Value)
+        {
+            return LicenseGuardDecision.Deny(
+                LicenseErrorCodes.PolicySnapshotStale,
+                "license_policy_snapshot shop binding is stale.",
+                StatusCodes.Status403Forbidden,
+                status.State);
+        }
+
+        var currentState = status.State.ToString().ToLowerInvariant();
+        if (!string.Equals(payload.State, currentState, StringComparison.OrdinalIgnoreCase) ||
+            !HaveEquivalentBlockedActions(payload.BlockedActions, status.BlockedActions))
+        {
+            return LicenseGuardDecision.Deny(
+                LicenseErrorCodes.PolicySnapshotStale,
+                "license_policy_snapshot no longer matches current policy state.",
+                StatusCodes.Status403Forbidden,
+                status.State);
+        }
+
+        var rawClientTime = NormalizeOptionalValue(policySnapshotClientTime);
+        if (string.IsNullOrWhiteSpace(rawClientTime))
+        {
+            return LicenseGuardDecision.Allow(status.State);
+        }
+
+        if (!DateTimeOffset.TryParse(rawClientTime, out var clientTime))
+        {
+            return LicenseGuardDecision.Deny(
+                LicenseErrorCodes.PolicySnapshotInvalid,
+                "license_policy_snapshot client time is invalid.",
+                StatusCodes.Status403Forbidden,
+                status.State);
+        }
+
+        if (Math.Abs((now - clientTime).TotalSeconds) > skewToleranceSeconds)
+        {
+            return LicenseGuardDecision.Deny(
+                LicenseErrorCodes.PolicySnapshotClockSkew,
+                "client clock skew exceeds tolerance for protected feature access.",
+                StatusCodes.Status403Forbidden,
+                status.State);
+        }
+
+        return LicenseGuardDecision.Allow(status.State);
+    }
+
+    private static bool HaveEquivalentBlockedActions(IReadOnlyCollection<string>? left, IReadOnlyCollection<string>? right)
+    {
+        static HashSet<string> NormalizeSet(IReadOnlyCollection<string>? values)
+        {
+            return values?
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value.Trim().ToLowerInvariant())
+                .ToHashSet(StringComparer.Ordinal) ?? [];
+        }
+
+        var leftSet = NormalizeSet(left);
+        var rightSet = NormalizeSet(right);
+        return leftSet.SetEquals(rightSet);
+    }
 
     private async Task<DeviceKeyBindingProof?> ResolveAndValidateDeviceKeyProofAsync(
         ProvisionActivateRequest request,
@@ -5584,6 +6081,7 @@ public sealed class LicenseService(
             return LicenseStatusSnapshot.Unprovisioned(normalizedDeviceCode, now) with
             {
                 ShopId = provisionedDevice.ShopId,
+                BranchCode = ResolveBranchCode(provisionedDevice.BranchCode),
                 SubscriptionStatus = subscription?.Status,
                 Plan = subscription?.Plan,
                 SeatLimit = subscription is null ? null : ResolveSeatLimit(subscription),
@@ -5605,6 +6103,7 @@ public sealed class LicenseService(
             State = state,
             ShopId = provisionedDevice.ShopId,
             DeviceCode = normalizedDeviceCode,
+            BranchCode = ResolveBranchCode(provisionedDevice.BranchCode),
             SubscriptionStatus = subscription?.Status,
             Plan = subscription?.Plan,
             SeatLimit = subscription is null ? null : ResolveSeatLimit(subscription),
@@ -5798,6 +6297,24 @@ public sealed class LicenseService(
 
         dbContext.Shops.Add(shop);
         return shop;
+    }
+
+    private async Task<Shop> ResolveExistingShopByCodeAsync(
+        string? shopCode,
+        CancellationToken cancellationToken)
+    {
+        var resolvedShopCode = ResolveShopCode(shopCode);
+        var shop = await dbContext.Shops
+            .FirstOrDefaultAsync(x => x.Code == resolvedShopCode, cancellationToken);
+        if (shop is not null)
+        {
+            return shop;
+        }
+
+        throw new LicenseException(
+            LicenseErrorCodes.InvalidAdminRequest,
+            $"Shop '{resolvedShopCode}' was not found.",
+            StatusCodes.Status404NotFound);
     }
 
     private async Task<Subscription> GetOrCreateSubscriptionAsync(
@@ -6332,6 +6849,126 @@ public sealed class LicenseService(
     {
         return await dbContext.ProvisionedDevices
             .CountAsync(x => x.ShopId == shopId && x.Status == ProvisionedDeviceStatus.Active, cancellationToken);
+    }
+
+    private async Task<int> CountActiveSeatsByBranchAsync(
+        Guid shopId,
+        string branchCode,
+        Guid? excludedProvisionedDeviceId,
+        CancellationToken cancellationToken)
+    {
+        var normalizedBranchCode = ResolveBranchCode(branchCode);
+        var defaultBranchCode = ResolveBranchCode(null);
+
+        return await dbContext.ProvisionedDevices
+            .CountAsync(
+                x => x.ShopId == shopId &&
+                     x.Status == ProvisionedDeviceStatus.Active &&
+                     (!excludedProvisionedDeviceId.HasValue || x.Id != excludedProvisionedDeviceId.Value) &&
+                     (x.BranchCode ?? defaultBranchCode) == normalizedBranchCode,
+                cancellationToken);
+    }
+
+    private async Task<Dictionary<string, int>> GetActiveSeatCountsByBranchAsync(
+        Guid shopId,
+        CancellationToken cancellationToken)
+    {
+        var defaultBranchCode = ResolveBranchCode(null);
+        var activeDevices = await dbContext.ProvisionedDevices
+            .AsNoTracking()
+            .Where(x => x.ShopId == shopId && x.Status == ProvisionedDeviceStatus.Active)
+            .ToListAsync(cancellationToken);
+
+        return activeDevices
+            .GroupBy(device => ResolveBranchCode(device.BranchCode, defaultBranchCode), StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Count(),
+                StringComparer.Ordinal);
+    }
+
+    private async Task<BranchSeatPolicy> EnsureBranchSeatPolicyAsync(
+        Shop shop,
+        int seatLimit,
+        string branchCode,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var normalizedBranchCode = ResolveBranchCode(branchCode);
+        var defaultBranchCode = ResolveBranchCode(null);
+        var allocations = await dbContext.ShopBranchSeatAllocations
+            .Where(x => x.ShopId == shop.Id)
+            .ToListAsync(cancellationToken);
+
+        if (allocations.Count == 0 && options.AutoProvisionBranchAllocations)
+        {
+            var defaultAllocation = new ShopBranchSeatAllocation
+            {
+                ShopId = shop.Id,
+                Shop = shop,
+                BranchCode = defaultBranchCode,
+                SeatQuota = seatLimit,
+                IsActive = true,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            };
+            dbContext.ShopBranchSeatAllocations.Add(defaultAllocation);
+            allocations.Add(defaultAllocation);
+        }
+
+        var activeAllocations = allocations.Where(x => x.IsActive).ToList();
+        var targetAllocation = activeAllocations.FirstOrDefault(x =>
+            string.Equals(ResolveBranchCode(x.BranchCode), normalizedBranchCode, StringComparison.Ordinal));
+
+        if (targetAllocation is null)
+        {
+            if (!options.AutoProvisionBranchAllocations)
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.SeatLimitExceeded,
+                    $"Branch '{normalizedBranchCode}' has no active seat allocation.",
+                    StatusCodes.Status409Conflict);
+            }
+
+            var totalAllocatedSeats = activeAllocations.Sum(x => Math.Max(0, x.SeatQuota));
+            var remainingSeats = Math.Max(0, seatLimit - totalAllocatedSeats);
+            if (remainingSeats <= 0)
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.SeatLimitExceeded,
+                    $"No branch seat quota is available for branch '{normalizedBranchCode}'.",
+                    StatusCodes.Status409Conflict);
+            }
+
+            targetAllocation = new ShopBranchSeatAllocation
+            {
+                ShopId = shop.Id,
+                Shop = shop,
+                BranchCode = normalizedBranchCode,
+                SeatQuota = remainingSeats,
+                IsActive = true,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            };
+            dbContext.ShopBranchSeatAllocations.Add(targetAllocation);
+            allocations.Add(targetAllocation);
+            activeAllocations.Add(targetAllocation);
+        }
+
+        var targetSeatQuota = Math.Max(0, targetAllocation.SeatQuota);
+        if (options.EnforceBranchSeatAllocation && (!targetAllocation.IsActive || targetSeatQuota <= 0))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.SeatLimitExceeded,
+                $"Branch '{normalizedBranchCode}' is not eligible for seat activation.",
+                StatusCodes.Status409Conflict);
+        }
+
+        var totalActiveAllocatedSeats = activeAllocations.Sum(x => Math.Max(0, x.SeatQuota));
+        return new BranchSeatPolicy(
+            normalizedBranchCode,
+            targetSeatQuota <= 0 ? seatLimit : targetSeatQuota,
+            totalActiveAllocatedSeats);
     }
 
     private async Task RevokeTokenSessionsForLicensesAsync(
@@ -8641,6 +9278,62 @@ public sealed class LicenseService(
         return payload;
     }
 
+    private PolicySnapshotTokenPayload ParseAndValidatePolicySnapshotToken(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.PolicySnapshotRequired,
+                "license_policy_snapshot is empty.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        var parts = token.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length != 2)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.PolicySnapshotInvalid,
+                "license_policy_snapshot format is invalid.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        var payloadSegment = parts[0];
+        var signatureSegment = parts[1];
+        PolicySnapshotTokenPayload? payload;
+        byte[] providedSignatureBytes;
+        try
+        {
+            var payloadBytes = Base64UrlDecode(payloadSegment);
+            payload = JsonSerializer.Deserialize<PolicySnapshotTokenPayload>(payloadBytes, TokenSerializerOptions);
+            providedSignatureBytes = Base64UrlDecode(signatureSegment);
+        }
+        catch (Exception ex) when (ex is FormatException or JsonException)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.PolicySnapshotInvalid,
+                "license_policy_snapshot payload is invalid.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        if (payload is null)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.PolicySnapshotInvalid,
+                "license_policy_snapshot payload is invalid.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        if (!VerifySignature(payloadSegment, providedSignatureBytes, payload.KeyId))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.PolicySnapshotInvalid,
+                "license_policy_snapshot signature validation failed.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        return payload;
+    }
+
     private string SignToken(LicenseTokenPayload payload, ResolvedSigningKey signingKey)
     {
         var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(payload, TokenSerializerOptions);
@@ -10043,6 +10736,36 @@ public sealed class LicenseService(
         return string.IsNullOrWhiteSpace(defaultCode) ? "default" : defaultCode;
     }
 
+    private string ResolveBranchCode(string? branchCode, string? fallbackBranchCode = null)
+    {
+        var requested = NormalizeOptionalValue(branchCode);
+        var fallback = NormalizeOptionalValue(fallbackBranchCode);
+        var configuredDefault = NormalizeOptionalValue(options.DefaultBranchCode);
+
+        var resolved = requested ??
+                       fallback ??
+                       configuredDefault ??
+                       "main";
+        var normalized = resolved.Trim().ToLowerInvariant();
+        if (normalized.Length is < 1 or > 64)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "branch_code must be between 1 and 64 characters.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        if (normalized.Any(ch => !AllowedBranchCodeCharacters.Contains(ch)))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "branch_code may only contain lowercase letters, numbers, '-' or '_'.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        return normalized;
+    }
+
     private static string? ExtractStripeErrorMessage(string? payload)
     {
         var raw = NormalizeOptionalValue(payload);
@@ -10259,6 +10982,7 @@ public sealed class LicenseService(
             State = snapshot.State.ToString().ToLowerInvariant(),
             ShopId = snapshot.ShopId,
             DeviceCode = snapshot.DeviceCode,
+            BranchCode = snapshot.BranchCode,
             SubscriptionStatus = snapshot.SubscriptionStatus?.ToString().ToLowerInvariant(),
             Plan = snapshot.Plan,
             SeatLimit = snapshot.SeatLimit,
@@ -10278,6 +11002,13 @@ public sealed class LicenseService(
             response.OfflineGrantExpiresAt = offlineGrant.ExpiresAt;
             response.OfflineMaxCheckoutOperations = offlineGrant.MaxCheckoutOperations;
             response.OfflineMaxRefundOperations = offlineGrant.MaxRefundOperations;
+        }
+
+        var policySnapshot = CreatePolicySnapshot(response, snapshot.ServerTime);
+        if (policySnapshot is not null)
+        {
+            response.PolicySnapshotToken = policySnapshot.Token;
+            response.PolicySnapshotExpiresAt = policySnapshot.ExpiresAt;
         }
 
         return response;
@@ -10318,7 +11049,46 @@ public sealed class LicenseService(
         return new OfflineGrantResult(SignOfflineGrantToken(payload, key), expiresAt, payload.MaxCheckoutOperations, payload.MaxRefundOperations);
     }
 
+    private PolicySnapshotResult? CreatePolicySnapshot(LicenseStatusResponse response, DateTimeOffset now)
+    {
+        if (!response.ShopId.HasValue || string.IsNullOrWhiteSpace(response.DeviceCode))
+        {
+            return null;
+        }
+
+        var configuredTtlMinutes = options.OfflinePolicySnapshotTtlMinutes;
+        var ttlMinutes = Math.Clamp(configuredTtlMinutes, 0, 1440);
+        var expiresAt = now.AddMinutes(ttlMinutes);
+        var key = ResolveActiveSigningKey();
+        var payload = new PolicySnapshotTokenPayload
+        {
+            Type = "policy_snapshot",
+            ShopId = response.ShopId.Value,
+            DeviceCode = response.DeviceCode,
+            BranchCode = response.BranchCode,
+            State = response.State,
+            BlockedActions = response.BlockedActions
+                .Where(action => !string.IsNullOrWhiteSpace(action))
+                .Select(action => action.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            IssuedAt = now,
+            ExpiresAt = expiresAt,
+            KeyId = key.KeyId
+        };
+
+        return new PolicySnapshotResult(SignPolicySnapshotToken(payload, key), expiresAt);
+    }
+
     private string SignOfflineGrantToken(OfflineGrantTokenPayload payload, ResolvedSigningKey signingKey)
+    {
+        var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(payload, TokenSerializerOptions);
+        var payloadSegment = Base64UrlEncode(payloadBytes);
+        var signatureSegment = Base64UrlEncode(SignPayload(payloadSegment, signingKey.PrivateKeyPem));
+        return $"{payloadSegment}.{signatureSegment}";
+    }
+
+    private string SignPolicySnapshotToken(PolicySnapshotTokenPayload payload, ResolvedSigningKey signingKey)
     {
         var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(payload, TokenSerializerOptions);
         var payloadSegment = Base64UrlEncode(payloadBytes);
@@ -10355,6 +11125,19 @@ public sealed class LicenseService(
         public int MaxRefundOperations { get; set; }
     }
 
+    private sealed class PolicySnapshotTokenPayload
+    {
+        public string Type { get; set; } = "policy_snapshot";
+        public Guid ShopId { get; set; }
+        public string DeviceCode { get; set; } = string.Empty;
+        public string? BranchCode { get; set; }
+        public string State { get; set; } = string.Empty;
+        public List<string> BlockedActions { get; set; } = [];
+        public DateTimeOffset IssuedAt { get; set; }
+        public DateTimeOffset ExpiresAt { get; set; }
+        public string KeyId { get; set; } = string.Empty;
+    }
+
     private sealed class EmergencyCommandEnvelopePayload
     {
         public Guid CommandId { get; set; }
@@ -10378,6 +11161,9 @@ public sealed class LicenseService(
         DateTimeOffset ExpiresAt,
         int MaxCheckoutOperations,
         int MaxRefundOperations);
+    private sealed record PolicySnapshotResult(
+        string Token,
+        DateTimeOffset ExpiresAt);
     private sealed record ResolvedCurrentShopContext(
         Shop Shop,
         string CurrentDeviceCode);
@@ -10427,6 +11213,7 @@ internal sealed record LicenseStatusSnapshot
     public LicenseState State { get; init; } = LicenseState.Unprovisioned;
     public Guid? ShopId { get; init; }
     public string DeviceCode { get; init; } = string.Empty;
+    public string? BranchCode { get; init; }
     public SubscriptionStatus? SubscriptionStatus { get; init; }
     public string? Plan { get; init; }
     public int? SeatLimit { get; init; }

@@ -6,6 +6,9 @@ public sealed class LicenseOptions
 
     public string DefaultShopCode { get; set; } = "default";
     public string DefaultShopName { get; set; } = "Default SmartPOS Shop";
+    public string DefaultBranchCode { get; set; } = "main";
+    public bool AutoProvisionBranchAllocations { get; set; } = true;
+    public bool EnforceBranchSeatAllocation { get; set; } = true;
     public string DefaultPlan { get; set; } = "trial";
     public int GracePeriodDays { get; set; } = 7;
     public int TrialPeriodDays { get; set; } = 14;
@@ -19,6 +22,10 @@ public sealed class LicenseOptions
     public int OfflineGrantMaxHours { get; set; } = 72;
     public int OfflineMaxCheckoutOperations { get; set; } = 200;
     public int OfflineMaxRefundOperations { get; set; } = 40;
+    public bool OfflinePolicySnapshotEnforcementEnabled { get; set; }
+    public int OfflinePolicySnapshotTtlMinutes { get; set; } = 240;
+    public int OfflinePolicySnapshotClockSkewToleranceSeconds { get; set; } = 300;
+    public string[] OfflinePolicySnapshotProtectedPathPrefixes { get; set; } = ["/api/checkout", "/api/refunds", "/api/ai"];
     public int ActivationEntitlementTtlDays { get; set; } = 90;
     public string ActivationEntitlementKeyPrefix { get; set; } = "SPK";
     public bool DisallowInlinePrivateKey { get; set; }
@@ -120,6 +127,7 @@ public sealed class LicenseOptions
     ];
     public BillingWebhookSecurityOptions WebhookSecurity { get; set; } = new();
     public LicenseAlertOptions Alerts { get; set; } = new();
+    public OpsAlertDeliveryOptions OpsAlerts { get; set; } = new();
 }
 
 public sealed class LicensePlanDefinition
@@ -145,6 +153,19 @@ public sealed class LicenseAlertOptions
     public int LicenseValidationSpikeThreshold { get; set; } = 20;
     public int WebhookFailureThreshold { get; set; } = 5;
     public int SecurityAnomalyThreshold { get; set; } = 8;
+}
+
+public sealed class OpsAlertDeliveryOptions
+{
+    public bool Enabled { get; set; }
+    public string WebhookUrl { get; set; } = string.Empty;
+    public string Channel { get; set; } = "platform-ops";
+    public string SourceSystem { get; set; } = "smartpos-backend";
+    public string AuthHeaderName { get; set; } = "Authorization";
+    public string AuthScheme { get; set; } = "Bearer";
+    public string AuthTokenEnvironmentVariable { get; set; } = "SMARTPOS_OPS_ALERT_TOKEN";
+    public string AuthToken { get; set; } = string.Empty;
+    public int TimeoutSeconds { get; set; } = 10;
 }
 
 public sealed class BillingWebhookSecurityOptions

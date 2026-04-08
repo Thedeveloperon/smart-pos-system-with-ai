@@ -67,3 +67,42 @@ Escalate to engineering if:
 - Multiple shops fail login/activation within 15 minutes.
 - Rate limit errors persist for valid usage.
 - Signed installer links fail with valid non-expired token.
+
+## E) Recovery Drill Diagnostics (W6)
+
+Use support triage endpoint:
+- `GET /api/reports/support-triage?window_minutes=30`
+- `GET /api/reports/support-alert-catalog`
+
+Recovery panel fields:
+- `recovery_drill.status`: `healthy` or `degraded`
+- `recovery_drill.issues`: current drill health issues (`restore_drill_stale`, `restore_drill_rto_breach`, etc.)
+- `alerts.recovery_drill_alerts_in_window`: count of routed recovery drill alerts in selected window
+- `alerts.top_recovery_drill_issues`: most frequent recovery drill issue reasons
+
+Audit signal:
+- `recovery_drill_alert_raised` events are written to license audit logs when drill monitor raises an alert.
+
+Triage action:
+1. If `restore_drill_stale`, schedule and run restore smoke immediately.
+2. If `restore_drill_rto_breach` or `restore_drill_rpo_breach`, open reliability incident and attach latest metrics.
+3. If `restore_drill_failed`, run restore smoke against latest valid backup and collect script output tail.
+
+Alert taxonomy reference:
+- `OPS_ALERT_EVENT_CATALOG_2026-04-08.md`
+
+## F) Ops Channel Delivery Configuration
+
+Webhook bridge is controlled by `Licensing:OpsAlerts`:
+- `Enabled`
+- `WebhookUrl`
+- `Channel`
+- `SourceSystem`
+- `AuthHeaderName`
+- `AuthScheme`
+- `AuthTokenEnvironmentVariable` (preferred)
+- `TimeoutSeconds`
+
+Notes:
+- Keep `AuthToken` empty in config and provide token via environment variable.
+- When enabled, security and recovery alert spikes are pushed to the configured webhook in addition to API diagnostics and audit logs.
