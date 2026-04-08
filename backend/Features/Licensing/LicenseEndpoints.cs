@@ -324,11 +324,16 @@ public static class LicenseEndpoints
             catch (LicenseException ex)
             {
                 alertMonitor.RecordWebhookFailure(request?.EventType, ex.Code);
+                if (ex.Code is LicenseErrorCodes.InvalidWebhook or LicenseErrorCodes.InvalidWebhookSignature)
+                {
+                    alertMonitor.RecordSecurityAnomaly("billing_webhook_malformed_payload");
+                }
                 return ToErrorResult(ex);
             }
             catch (Exception ex)
             {
                 alertMonitor.RecordWebhookFailure(request?.EventType, ex.GetType().Name);
+                alertMonitor.RecordSecurityAnomaly("billing_webhook_malformed_payload");
                 return Results.BadRequest(new LicenseErrorPayload
                 {
                     Error = new LicenseErrorItem
@@ -341,6 +346,62 @@ public static class LicenseEndpoints
         })
         .AllowAnonymous()
         .WithName("HandleBillingWebhook")
+        .WithOpenApi();
+
+        license.MapPost("/webhooks/stripe", async (
+            HttpContext httpContext,
+            LicenseService licenseService,
+            ILicensingAlertMonitor alertMonitor,
+            CancellationToken cancellationToken) =>
+        {
+            BillingWebhookEventRequest? mappedRequest = null;
+            try
+            {
+                string rawBody;
+                using (var reader = new StreamReader(httpContext.Request.Body, Encoding.UTF8))
+                {
+                    rawBody = await reader.ReadToEndAsync();
+                }
+
+                if (string.IsNullOrWhiteSpace(rawBody))
+                {
+                    throw new LicenseException(
+                        LicenseErrorCodes.InvalidWebhook,
+                        "Webhook payload is empty.",
+                        StatusCodes.Status400BadRequest);
+                }
+
+                licenseService.VerifyBillingWebhookSignature(rawBody, httpContext.Request.Headers);
+                mappedRequest = licenseService.MapStripeWebhookEvent(rawBody);
+
+                var response = await licenseService.HandleBillingWebhookAsync(mappedRequest, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                alertMonitor.RecordWebhookFailure(mappedRequest?.EventType, ex.Code);
+                if (ex.Code is LicenseErrorCodes.InvalidWebhook or LicenseErrorCodes.InvalidWebhookSignature)
+                {
+                    alertMonitor.RecordSecurityAnomaly("billing_webhook_malformed_payload");
+                }
+                return ToErrorResult(ex);
+            }
+            catch (Exception ex)
+            {
+                alertMonitor.RecordWebhookFailure(mappedRequest?.EventType, ex.GetType().Name);
+                alertMonitor.RecordSecurityAnomaly("billing_webhook_malformed_payload");
+                return Results.BadRequest(new LicenseErrorPayload
+                {
+                    Error = new LicenseErrorItem
+                    {
+                        Code = LicenseErrorCodes.InvalidWebhook,
+                        Message = ex.Message
+                    }
+                });
+            }
+        })
+        .AllowAnonymous()
+        .WithName("HandleStripeBillingWebhook")
         .WithOpenApi();
 
         var publicBilling = app.MapGroup("/api/license/public")
@@ -365,6 +426,46 @@ public static class LicenseEndpoints
         })
         .AllowAnonymous()
         .WithName("CreateMarketingPaymentRequest")
+        .WithOpenApi();
+
+        publicBilling.MapPost("/stripe/checkout-session", async (
+            MarketingPaymentRequestCreateRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.CreateMarketingStripeCheckoutSessionAsync(request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .AllowAnonymous()
+        .WithName("CreateMarketingStripeCheckoutSession")
+        .WithOpenApi();
+
+        publicBilling.MapGet("/stripe/checkout-session-status", async (
+            string session_id,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var response = await licenseService.GetMarketingStripeCheckoutSessionStatusAsync(session_id, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .AllowAnonymous()
+        .WithName("GetMarketingStripeCheckoutSessionStatus")
         .WithOpenApi();
 
         publicBilling.MapPost("/payment-proof-upload", async (
@@ -486,6 +587,81 @@ public static class LicenseEndpoints
             return Results.Ok(response);
         })
         .WithName("AdminGetLicensingShops")
+        .WithOpenApi();
+
+        admin.MapGet("/shops/{shop_code}/branch-allocations", async (
+            string shop_code,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var response = await licenseService.GetBranchSeatAllocationsAsAdminAsync(shop_code, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .WithName("AdminGetShopBranchSeatAllocations")
+        .WithOpenApi();
+
+        admin.MapPut("/shops/{shop_code}/branch-allocations/{branch_code}", async (
+            string shop_code,
+            string branch_code,
+            AdminBranchSeatAllocationUpsertRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.UpsertBranchSeatAllocationAsAdminAsync(
+                    shop_code,
+                    branch_code,
+                    request,
+                    cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .WithName("AdminUpsertShopBranchSeatAllocation")
+        .WithOpenApi();
+
+        admin.MapPost("/migration/ai-wallets/dry-run", async (
+            AiWalletMigrationDryRunRequest request,
+            LicensingMigrationDryRunService migrationDryRunService,
+            CancellationToken cancellationToken) =>
+        {
+            var response = await migrationDryRunService.RunAiWalletDryRunAsync(request, cancellationToken);
+            return Results.Ok(response);
+        })
+        .WithName("AdminRunAiWalletMigrationDryRun")
+        .WithOpenApi();
+
+        admin.MapPost("/migration/owner-mapping/remediate", async (
+            AiOwnerMappingRemediationRequest request,
+            HttpContext httpContext,
+            LicensingMigrationDryRunService migrationDryRunService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await migrationDryRunService.RemediateOwnerMappingAsync(request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .WithName("AdminRemediateOwnerMapping")
         .WithOpenApi();
 
         admin.MapGet("/audit-logs", async (

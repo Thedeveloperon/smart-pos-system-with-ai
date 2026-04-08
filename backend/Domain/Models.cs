@@ -317,6 +317,9 @@ public sealed class AppUser
     public bool IsMfaEnabled { get; set; }
     public string? MfaSecret { get; set; }
     public DateTimeOffset? MfaConfiguredAtUtc { get; set; }
+    public int FailedLoginAttempts { get; set; }
+    public DateTimeOffset? LastFailedLoginAtUtc { get; set; }
+    public DateTimeOffset? LockoutEndAtUtc { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastLoginAtUtc { get; set; }
@@ -403,6 +406,10 @@ public sealed class Device
     public required string DeviceCode { get; set; }
     public required string Name { get; set; }
     public bool IsTrusted { get; set; } = true;
+    public int AuthSessionVersion { get; set; } = 1;
+    public DateTimeOffset? LastAuthIssuedAtUtc { get; set; }
+    public DateTimeOffset? AuthSessionRevokedAtUtc { get; set; }
+    public string? AuthSessionRevocationReason { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastSeenAtUtc { get; set; }
 
@@ -444,6 +451,10 @@ public sealed class Shop
     public ICollection<ManualBillingInvoice> ManualBillingInvoices { get; set; } = [];
     public ICollection<ManualBillingPayment> ManualBillingPayments { get; set; } = [];
     public ICollection<CustomerActivationEntitlement> CustomerActivationEntitlements { get; set; } = [];
+    public ICollection<ShopBranchSeatAllocation> BranchSeatAllocations { get; set; } = [];
+    public ICollection<AiCreditWallet> AiCreditWallets { get; set; } = [];
+    public ICollection<AiCreditPayment> AiCreditPayments { get; set; } = [];
+    public ICollection<AiCreditWalletMigrationEntry> AiCreditWalletMigrations { get; set; } = [];
     public ICollection<AiCreditOrder> AiCreditOrders { get; set; } = [];
 }
 
@@ -473,6 +484,7 @@ public sealed class ProvisionedDevice
     public Guid? DeviceId { get; set; }
     public required string DeviceCode { get; set; }
     public required string Name { get; set; }
+    public string? BranchCode { get; set; }
     public ProvisionedDeviceStatus Status { get; set; } = ProvisionedDeviceStatus.Active;
     public DateTimeOffset AssignedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? RevokedAtUtc { get; set; }
@@ -485,6 +497,19 @@ public sealed class ProvisionedDevice
     public required Shop Shop { get; set; }
     public ICollection<LicenseRecord> Licenses { get; set; } = [];
     public ICollection<LicenseAuditLog> AuditLogs { get; set; } = [];
+}
+
+public sealed class ShopBranchSeatAllocation
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ShopId { get; set; }
+    public required string BranchCode { get; set; }
+    public int SeatQuota { get; set; } = 1;
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public required Shop Shop { get; set; }
 }
 
 public sealed class DeviceKeyChallenge
@@ -569,9 +594,28 @@ public sealed class BillingWebhookEvent
     public Guid? ShopId { get; set; }
     public string? BillingSubscriptionId { get; set; }
     public string? LastErrorCode { get; set; }
+    public int FailureCount { get; set; }
     public DateTimeOffset ReceivedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? ProcessedAtUtc { get; set; }
+    public DateTimeOffset? DeadLetteredAtUtc { get; set; }
     public DateTimeOffset? UpdatedAtUtc { get; set; }
+}
+
+public sealed class CloudWriteIdempotencyRecord
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public required string EndpointKey { get; set; }
+    public required string IdempotencyKey { get; set; }
+    public required string DeviceId { get; set; }
+    public required string PosVersion { get; set; }
+    public required string RequestHash { get; set; }
+    public int? ResponseStatusCode { get; set; }
+    public string? ResponseContentType { get; set; }
+    public string? ResponseBody { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset LastSeenAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset ExpiresAtUtc { get; set; } = DateTimeOffset.UtcNow.AddHours(72);
+    public DateTimeOffset? CompletedAtUtc { get; set; }
 }
 
 public sealed class ManualBillingInvoice
@@ -643,11 +687,13 @@ public sealed class AiCreditWallet
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid UserId { get; set; }
+    public Guid? ShopId { get; set; }
     public decimal AvailableCredits { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 
     public required AppUser User { get; set; }
+    public Shop? Shop { get; set; }
     public ICollection<AiCreditLedgerEntry> LedgerEntries { get; set; } = [];
 }
 
@@ -655,6 +701,7 @@ public sealed class AiCreditLedgerEntry
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid UserId { get; set; }
+    public Guid? ShopId { get; set; }
     public Guid WalletId { get; set; }
     public Guid? AiInsightRequestId { get; set; }
     public AiCreditLedgerEntryType EntryType { get; set; } = AiCreditLedgerEntryType.Adjustment;
@@ -666,6 +713,7 @@ public sealed class AiCreditLedgerEntry
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 
     public required AppUser User { get; set; }
+    public Shop? Shop { get; set; }
     public required AiCreditWallet Wallet { get; set; }
     public AiInsightRequest? AiInsightRequest { get; set; }
 }
@@ -700,6 +748,7 @@ public sealed class AiCreditPayment
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid UserId { get; set; }
+    public Guid? ShopId { get; set; }
     public AiCreditPaymentStatus Status { get; set; } = AiCreditPaymentStatus.Pending;
     public string Provider { get; set; } = "mockpay";
     public string? ProviderPaymentId { get; set; }
@@ -718,6 +767,7 @@ public sealed class AiCreditPayment
     public DateTimeOffset? CompletedAtUtc { get; set; }
 
     public required AppUser User { get; set; }
+    public Shop? Shop { get; set; }
     public ICollection<AiCreditPaymentWebhookEvent> WebhookEvents { get; set; } = [];
 }
 
@@ -736,6 +786,22 @@ public sealed class AiCreditPaymentWebhookEvent
     public DateTimeOffset? UpdatedAtUtc { get; set; }
 
     public AiCreditPayment? Payment { get; set; }
+}
+
+public sealed class AiCreditWalletMigrationEntry
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? ShopId { get; set; }
+    public Guid SourceUserId { get; set; }
+    public Guid SourceWalletId { get; set; }
+    public Guid TargetWalletId { get; set; }
+    public decimal MigratedCredits { get; set; }
+    public required string MigrationReference { get; set; }
+    public string? MetadataJson { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+
+    public Shop? Shop { get; set; }
+    public AppUser? SourceUser { get; set; }
 }
 
 public sealed class AiCreditOrder

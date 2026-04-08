@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using SmartPos.Backend.Domain;
 
 namespace SmartPos.Backend.Infrastructure;
 
@@ -621,6 +622,65 @@ public static class DbSchemaUpdater
                     cancellationToken);
             }
 
+            if (!await ColumnExistsAsync(dbContext, "users", "FailedLoginAttempts", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "users" ADD COLUMN "FailedLoginAttempts" INTEGER NOT NULL DEFAULT 0;""",
+                    cancellationToken);
+            }
+
+            if (!await ColumnExistsAsync(dbContext, "users", "LastFailedLoginAtUtc", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "users" ADD COLUMN "LastFailedLoginAtUtc" TEXT NULL;""",
+                    cancellationToken);
+            }
+
+            if (!await ColumnExistsAsync(dbContext, "users", "LockoutEndAtUtc", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "users" ADD COLUMN "LockoutEndAtUtc" TEXT NULL;""",
+                    cancellationToken);
+            }
+
+            if (!await ColumnExistsAsync(dbContext, "devices", "AuthSessionVersion", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "devices" ADD COLUMN "AuthSessionVersion" INTEGER NOT NULL DEFAULT 1;""",
+                    cancellationToken);
+            }
+
+            if (!await ColumnExistsAsync(dbContext, "devices", "LastAuthIssuedAtUtc", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "devices" ADD COLUMN "LastAuthIssuedAtUtc" TEXT NULL;""",
+                    cancellationToken);
+            }
+
+            if (!await ColumnExistsAsync(dbContext, "devices", "AuthSessionRevokedAtUtc", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "devices" ADD COLUMN "AuthSessionRevokedAtUtc" TEXT NULL;""",
+                    cancellationToken);
+            }
+
+            if (!await ColumnExistsAsync(dbContext, "devices", "AuthSessionRevocationReason", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "devices" ADD COLUMN "AuthSessionRevocationReason" TEXT NULL;""",
+                    cancellationToken);
+            }
+
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE INDEX IF NOT EXISTS "IX_users_LockoutEndAtUtc" ON "users" ("LockoutEndAtUtc");""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE INDEX IF NOT EXISTS "IX_devices_AuthSessionRevokedAtUtc" ON "devices" ("AuthSessionRevokedAtUtc");""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE INDEX IF NOT EXISTS "IX_devices_AppUserId_AuthSessionVersion" ON "devices" ("AppUserId", "AuthSessionVersion");""",
+                cancellationToken);
+
             return;
         }
 
@@ -635,6 +695,36 @@ public static class DbSchemaUpdater
             await dbContext.Database.ExecuteSqlRawAsync(
                 """ALTER TABLE users ADD COLUMN IF NOT EXISTS "MfaConfiguredAtUtc" timestamptz NULL;""",
                 cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE users ADD COLUMN IF NOT EXISTS "FailedLoginAttempts" integer NOT NULL DEFAULT 0;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE users ADD COLUMN IF NOT EXISTS "LastFailedLoginAtUtc" timestamptz NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE users ADD COLUMN IF NOT EXISTS "LockoutEndAtUtc" timestamptz NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE devices ADD COLUMN IF NOT EXISTS "AuthSessionVersion" integer NOT NULL DEFAULT 1;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE devices ADD COLUMN IF NOT EXISTS "LastAuthIssuedAtUtc" timestamptz NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE devices ADD COLUMN IF NOT EXISTS "AuthSessionRevokedAtUtc" timestamptz NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE devices ADD COLUMN IF NOT EXISTS "AuthSessionRevocationReason" varchar(250) NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE INDEX IF NOT EXISTS "IX_users_LockoutEndAtUtc" ON users("LockoutEndAtUtc");""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE INDEX IF NOT EXISTS "IX_devices_AuthSessionRevokedAtUtc" ON devices("AuthSessionRevokedAtUtc");""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE INDEX IF NOT EXISTS "IX_devices_AppUserId_AuthSessionVersion" ON devices("AppUserId", "AuthSessionVersion");""",
+                cancellationToken);
         }
     }
 
@@ -647,13 +737,99 @@ public static class DbSchemaUpdater
         if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
         {
             await EnsureSqliteAiInsightsSchemaAsync(dbContext, cancellationToken);
+            await EnsureAiWalletShopScopeMigrationAsync(dbContext, cancellationToken);
             return;
         }
 
         if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
         {
             await EnsurePostgresAiInsightsSchemaAsync(dbContext, cancellationToken);
+            await EnsureAiWalletShopScopeMigrationAsync(dbContext, cancellationToken);
         }
+    }
+
+    public static async Task EnsureCloudApiReliabilitySchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken = default)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+
+        if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            await EnsureSqliteCloudApiReliabilitySchemaAsync(dbContext, cancellationToken);
+            return;
+        }
+
+        if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            await EnsurePostgresCloudApiReliabilitySchemaAsync(dbContext, cancellationToken);
+        }
+    }
+
+    private static async Task EnsureSqliteCloudApiReliabilitySchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var sql = """
+            CREATE TABLE IF NOT EXISTS "cloud_write_idempotency" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_cloud_write_idempotency" PRIMARY KEY,
+              "EndpointKey" TEXT NOT NULL,
+              "IdempotencyKey" TEXT NOT NULL,
+              "DeviceId" TEXT NOT NULL,
+              "PosVersion" TEXT NOT NULL,
+              "RequestHash" TEXT NOT NULL,
+              "ResponseStatusCode" INTEGER NULL,
+              "ResponseContentType" TEXT NULL,
+              "ResponseBody" TEXT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "LastSeenAtUtc" TEXT NOT NULL,
+              "ExpiresAtUtc" TEXT NOT NULL,
+              "CompletedAtUtc" TEXT NULL
+            );
+
+            DROP INDEX IF EXISTS "IX_cloud_write_idempotency_Endpoint_Device_Idempotency";
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_cloud_write_idempotency_Endpoint_Device_Idempotency_RequestHash"
+              ON "cloud_write_idempotency" ("EndpointKey", "DeviceId", "IdempotencyKey", "RequestHash");
+            CREATE INDEX IF NOT EXISTS "IX_cloud_write_idempotency_ExpiresAtUtc"
+              ON "cloud_write_idempotency" ("ExpiresAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_cloud_write_idempotency_CreatedAtUtc"
+              ON "cloud_write_idempotency" ("CreatedAtUtc");
+            """;
+
+        await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+    }
+
+    private static async Task EnsurePostgresCloudApiReliabilitySchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var sql = """
+            CREATE TABLE IF NOT EXISTS cloud_write_idempotency (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "EndpointKey" varchar(180) NOT NULL,
+              "IdempotencyKey" varchar(128) NOT NULL,
+              "DeviceId" varchar(128) NOT NULL,
+              "PosVersion" varchar(64) NOT NULL,
+              "RequestHash" varchar(128) NOT NULL,
+              "ResponseStatusCode" integer NULL,
+              "ResponseContentType" varchar(120) NULL,
+              "ResponseBody" text NULL,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "LastSeenAtUtc" timestamptz NOT NULL,
+              "ExpiresAtUtc" timestamptz NOT NULL,
+              "CompletedAtUtc" timestamptz NULL
+            );
+
+            DROP INDEX IF EXISTS "IX_cloud_write_idempotency_Endpoint_Device_Idempotency";
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_cloud_write_idempotency_Endpoint_Device_Idempotency_RequestHash"
+              ON cloud_write_idempotency("EndpointKey", "DeviceId", "IdempotencyKey", "RequestHash");
+            CREATE INDEX IF NOT EXISTS "IX_cloud_write_idempotency_ExpiresAtUtc"
+              ON cloud_write_idempotency("ExpiresAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_cloud_write_idempotency_CreatedAtUtc"
+              ON cloud_write_idempotency("CreatedAtUtc");
+            """;
+
+        await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
     }
 
     private static async Task EnsureSqliteRefundSchemaAsync(
@@ -775,6 +951,360 @@ public static class DbSchemaUpdater
         command.CommandText = $"""SELECT 1 FROM "{tableName}" LIMIT 1;""";
         var result = await command.ExecuteScalarAsync(cancellationToken);
         return result is not null && result is not DBNull;
+    }
+
+    private static async Task EnsureAiWalletShopScopeMigrationAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+
+        if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "ai_credit_wallets",
+                "ShopId",
+                """ALTER TABLE "ai_credit_wallets" ADD COLUMN "ShopId" TEXT NULL;""",
+                cancellationToken);
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "ai_credit_ledger",
+                "ShopId",
+                """ALTER TABLE "ai_credit_ledger" ADD COLUMN "ShopId" TEXT NULL;""",
+                cancellationToken);
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "ai_credit_payments",
+                "ShopId",
+                """ALTER TABLE "ai_credit_payments" ADD COLUMN "ShopId" TEXT NULL;""",
+                cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                CREATE TABLE IF NOT EXISTS "ai_credit_wallet_migration_ledger" (
+                  "Id" TEXT NOT NULL CONSTRAINT "PK_ai_credit_wallet_migration_ledger" PRIMARY KEY,
+                  "ShopId" TEXT NULL,
+                  "SourceUserId" TEXT NOT NULL,
+                  "SourceWalletId" TEXT NOT NULL,
+                  "TargetWalletId" TEXT NOT NULL,
+                  "MigratedCredits" TEXT NOT NULL,
+                  "MigrationReference" TEXT NOT NULL,
+                  "MetadataJson" TEXT NULL,
+                  "CreatedAtUtc" TEXT NOT NULL,
+                  CONSTRAINT "FK_ai_credit_wallet_migration_ledger_users_SourceUserId" FOREIGN KEY ("SourceUserId") REFERENCES "users" ("Id") ON DELETE CASCADE,
+                  CONSTRAINT "FK_ai_credit_wallet_migration_ledger_shops_ShopId" FOREIGN KEY ("ShopId") REFERENCES "shops" ("Id") ON DELETE CASCADE
+                );
+                """,
+                cancellationToken);
+        }
+        else if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE ai_credit_wallets ADD COLUMN IF NOT EXISTS "ShopId" uuid NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE ai_credit_ledger ADD COLUMN IF NOT EXISTS "ShopId" uuid NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE ai_credit_payments ADD COLUMN IF NOT EXISTS "ShopId" uuid NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                DO $$
+                BEGIN
+                  IF NOT EXISTS (
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conname = 'FK_ai_credit_wallets_shops_ShopId'
+                  ) THEN
+                    ALTER TABLE ai_credit_wallets
+                    ADD CONSTRAINT "FK_ai_credit_wallets_shops_ShopId"
+                    FOREIGN KEY ("ShopId") REFERENCES shops("Id") ON DELETE CASCADE;
+                  END IF;
+                END
+                $$;
+                """,
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                DO $$
+                BEGIN
+                  IF NOT EXISTS (
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conname = 'FK_ai_credit_ledger_shops_ShopId'
+                  ) THEN
+                    ALTER TABLE ai_credit_ledger
+                    ADD CONSTRAINT "FK_ai_credit_ledger_shops_ShopId"
+                    FOREIGN KEY ("ShopId") REFERENCES shops("Id") ON DELETE CASCADE;
+                  END IF;
+                END
+                $$;
+                """,
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                DO $$
+                BEGIN
+                  IF NOT EXISTS (
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conname = 'FK_ai_credit_payments_shops_ShopId'
+                  ) THEN
+                    ALTER TABLE ai_credit_payments
+                    ADD CONSTRAINT "FK_ai_credit_payments_shops_ShopId"
+                    FOREIGN KEY ("ShopId") REFERENCES shops("Id") ON DELETE CASCADE;
+                  END IF;
+                END
+                $$;
+                """,
+                cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                CREATE TABLE IF NOT EXISTS ai_credit_wallet_migration_ledger (
+                  "Id" uuid NOT NULL PRIMARY KEY,
+                  "ShopId" uuid NULL REFERENCES shops("Id") ON DELETE CASCADE,
+                  "SourceUserId" uuid NOT NULL REFERENCES users("Id") ON DELETE CASCADE,
+                  "SourceWalletId" uuid NOT NULL,
+                  "TargetWalletId" uuid NOT NULL,
+                  "MigratedCredits" numeric(18,2) NOT NULL,
+                  "MigrationReference" varchar(160) NOT NULL,
+                  "MetadataJson" text NULL,
+                  "CreatedAtUtc" timestamptz NOT NULL
+                );
+                """,
+                cancellationToken);
+        }
+
+        await PopulateAiBillingShopIdsAsync(dbContext, cancellationToken);
+        await ConsolidateAiWalletsByShopAsync(dbContext, cancellationToken);
+        await PopulateAiBillingShopIdsAsync(dbContext, cancellationToken);
+        await EnsureAiWalletShopScopeIndexesAsync(dbContext, cancellationToken);
+    }
+
+    private static async Task PopulateAiBillingShopIdsAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+        if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                UPDATE "ai_credit_wallets"
+                SET "ShopId" = (
+                    SELECT "StoreId"
+                    FROM "users"
+                    WHERE "users"."Id" = "ai_credit_wallets"."UserId"
+                )
+                WHERE "ShopId" IS NULL;
+                """,
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                UPDATE "ai_credit_ledger"
+                SET "ShopId" = (
+                    SELECT "ShopId"
+                    FROM "ai_credit_wallets"
+                    WHERE "ai_credit_wallets"."Id" = "ai_credit_ledger"."WalletId"
+                )
+                WHERE "ShopId" IS NULL;
+                """,
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                UPDATE "ai_credit_ledger"
+                SET "ShopId" = (
+                    SELECT "StoreId"
+                    FROM "users"
+                    WHERE "users"."Id" = "ai_credit_ledger"."UserId"
+                )
+                WHERE "ShopId" IS NULL;
+                """,
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                UPDATE "ai_credit_payments"
+                SET "ShopId" = (
+                    SELECT "StoreId"
+                    FROM "users"
+                    WHERE "users"."Id" = "ai_credit_payments"."UserId"
+                )
+                WHERE "ShopId" IS NULL;
+                """,
+                cancellationToken);
+            return;
+        }
+
+        if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                UPDATE ai_credit_wallets w
+                SET "ShopId" = u."StoreId"
+                FROM users u
+                WHERE w."ShopId" IS NULL
+                  AND u."Id" = w."UserId";
+                """,
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                UPDATE ai_credit_ledger l
+                SET "ShopId" = w."ShopId"
+                FROM ai_credit_wallets w
+                WHERE l."ShopId" IS NULL
+                  AND w."Id" = l."WalletId";
+                """,
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                UPDATE ai_credit_ledger l
+                SET "ShopId" = u."StoreId"
+                FROM users u
+                WHERE l."ShopId" IS NULL
+                  AND u."Id" = l."UserId";
+                """,
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                UPDATE ai_credit_payments p
+                SET "ShopId" = u."StoreId"
+                FROM users u
+                WHERE p."ShopId" IS NULL
+                  AND u."Id" = p."UserId";
+                """,
+                cancellationToken);
+        }
+    }
+
+    private static async Task ConsolidateAiWalletsByShopAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        List<AiCreditWallet> wallets;
+        if (dbContext.Database.IsSqlite())
+        {
+            wallets = (await dbContext.AiCreditWallets
+                    .Where(x => x.ShopId.HasValue)
+                    .ToListAsync(cancellationToken))
+                .OrderBy(x => x.CreatedAtUtc)
+                .ToList();
+        }
+        else
+        {
+            wallets = await dbContext.AiCreditWallets
+                .Where(x => x.ShopId.HasValue)
+                .OrderBy(x => x.CreatedAtUtc)
+                .ToListAsync(cancellationToken);
+        }
+
+        if (wallets.Count == 0)
+        {
+            return;
+        }
+
+        var groupedByShop = wallets
+            .GroupBy(x => x.ShopId!.Value)
+            .Where(group => group.Count() > 1)
+            .ToList();
+        if (groupedByShop.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var group in groupedByShop)
+        {
+            var orderedWallets = group
+                .OrderBy(x => x.CreatedAtUtc)
+                .ThenBy(x => x.Id)
+                .ToList();
+            var canonicalWallet = orderedWallets[0];
+            var totalCredits = orderedWallets.Sum(x => x.AvailableCredits);
+            var latestUpdatedAt = orderedWallets
+                .Select(x => x.UpdatedAtUtc)
+                .OrderByDescending(x => x)
+                .FirstOrDefault();
+
+            canonicalWallet.AvailableCredits = totalCredits;
+            canonicalWallet.UpdatedAtUtc = latestUpdatedAt;
+
+            foreach (var duplicateWallet in orderedWallets.Skip(1))
+            {
+                await dbContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                    UPDATE "ai_credit_ledger"
+                    SET "WalletId" = {canonicalWallet.Id},
+                        "ShopId" = {canonicalWallet.ShopId}
+                    WHERE "WalletId" = {duplicateWallet.Id};
+                    """,
+                    cancellationToken);
+
+                var migrationReference = $"shop_wallet_migration:{group.Key:N}:{duplicateWallet.Id:N}";
+                var migrationAlreadyRecorded = await dbContext.AiCreditWalletMigrationEntries
+                    .AnyAsync(x => x.SourceWalletId == duplicateWallet.Id, cancellationToken);
+                if (!migrationAlreadyRecorded)
+                {
+                    dbContext.AiCreditWalletMigrationEntries.Add(new AiCreditWalletMigrationEntry
+                    {
+                        ShopId = duplicateWallet.ShopId,
+                        SourceUserId = duplicateWallet.UserId,
+                        SourceWalletId = duplicateWallet.Id,
+                        TargetWalletId = canonicalWallet.Id,
+                        MigratedCredits = duplicateWallet.AvailableCredits,
+                        MigrationReference = migrationReference,
+                        MetadataJson = $$"""{"source_user_id":"{{duplicateWallet.UserId}}","source_wallet_id":"{{duplicateWallet.Id}}","target_wallet_id":"{{canonicalWallet.Id}}"}""",
+                        CreatedAtUtc = DateTimeOffset.UtcNow
+                    });
+                }
+
+                dbContext.AiCreditWallets.Remove(duplicateWallet);
+            }
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task EnsureAiWalletShopScopeIndexesAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+        if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_ledger_ShopId" ON "ai_credit_ledger" ("ShopId");
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_ledger_ShopId_CreatedAtUtc" ON "ai_credit_ledger" ("ShopId", "CreatedAtUtc");
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_payments_ShopId" ON "ai_credit_payments" ("ShopId");
+                CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_credit_wallets_ShopId" ON "ai_credit_wallets" ("ShopId") WHERE "ShopId" IS NOT NULL;
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_wallet_migration_ledger_ShopId" ON "ai_credit_wallet_migration_ledger" ("ShopId");
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_wallet_migration_ledger_SourceUserId" ON "ai_credit_wallet_migration_ledger" ("SourceUserId");
+                CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_credit_wallet_migration_ledger_SourceWalletId" ON "ai_credit_wallet_migration_ledger" ("SourceWalletId");
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_wallet_migration_ledger_TargetWalletId" ON "ai_credit_wallet_migration_ledger" ("TargetWalletId");
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_wallet_migration_ledger_CreatedAtUtc" ON "ai_credit_wallet_migration_ledger" ("CreatedAtUtc");
+                """,
+                cancellationToken);
+            return;
+        }
+
+        if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_ledger_ShopId" ON ai_credit_ledger("ShopId");
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_ledger_ShopId_CreatedAtUtc" ON ai_credit_ledger("ShopId", "CreatedAtUtc");
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_payments_ShopId" ON ai_credit_payments("ShopId");
+                CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_credit_wallets_ShopId" ON ai_credit_wallets("ShopId") WHERE "ShopId" IS NOT NULL;
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_wallet_migration_ledger_ShopId" ON ai_credit_wallet_migration_ledger("ShopId");
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_wallet_migration_ledger_SourceUserId" ON ai_credit_wallet_migration_ledger("SourceUserId");
+                CREATE UNIQUE INDEX IF NOT EXISTS "IX_ai_credit_wallet_migration_ledger_SourceWalletId" ON ai_credit_wallet_migration_ledger("SourceWalletId");
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_wallet_migration_ledger_TargetWalletId" ON ai_credit_wallet_migration_ledger("TargetWalletId");
+                CREATE INDEX IF NOT EXISTS "IX_ai_credit_wallet_migration_ledger_CreatedAtUtc" ON ai_credit_wallet_migration_ledger("CreatedAtUtc");
+                """,
+                cancellationToken);
+        }
     }
 
     private static async Task EnsurePostgresRefundSchemaAsync(
@@ -1041,8 +1571,10 @@ public static class DbSchemaUpdater
               "ShopId" TEXT NULL,
               "BillingSubscriptionId" TEXT NULL,
               "LastErrorCode" TEXT NULL,
+              "FailureCount" INTEGER NOT NULL DEFAULT 0,
               "ReceivedAtUtc" TEXT NOT NULL,
               "ProcessedAtUtc" TEXT NULL,
+              "DeadLetteredAtUtc" TEXT NULL,
               "UpdatedAtUtc" TEXT NULL,
               CONSTRAINT "FK_billing_webhook_events_shops_ShopId" FOREIGN KEY ("ShopId") REFERENCES "shops" ("Id") ON DELETE SET NULL
             );
@@ -1136,6 +1668,7 @@ public static class DbSchemaUpdater
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_billing_webhook_events_ProviderEventId" ON "billing_webhook_events" ("ProviderEventId");
             CREATE INDEX IF NOT EXISTS "IX_billing_webhook_events_EventType" ON "billing_webhook_events" ("EventType");
             CREATE INDEX IF NOT EXISTS "IX_billing_webhook_events_ShopId" ON "billing_webhook_events" ("ShopId");
+            CREATE INDEX IF NOT EXISTS "IX_billing_webhook_events_DeadLetteredAtUtc" ON "billing_webhook_events" ("DeadLetteredAtUtc");
             CREATE INDEX IF NOT EXISTS "IX_manual_billing_invoices_ShopId" ON "manual_billing_invoices" ("ShopId");
             CREATE INDEX IF NOT EXISTS "IX_manual_billing_invoices_Status" ON "manual_billing_invoices" ("Status");
             CREATE INDEX IF NOT EXISTS "IX_manual_billing_invoices_DueAtUtc" ON "manual_billing_invoices" ("DueAtUtc");
@@ -1180,6 +1713,37 @@ public static class DbSchemaUpdater
                 cancellationToken);
         }
 
+        if (!await ColumnExistsAsync(dbContext, "provisioned_devices", "BranchCode", cancellationToken))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "provisioned_devices" ADD COLUMN "BranchCode" TEXT NULL;""",
+                cancellationToken);
+        }
+
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """
+            CREATE TABLE IF NOT EXISTS "shop_branch_seat_allocations" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_shop_branch_seat_allocations" PRIMARY KEY,
+              "ShopId" TEXT NOT NULL,
+              "BranchCode" TEXT NOT NULL,
+              "SeatQuota" INTEGER NOT NULL,
+              "IsActive" INTEGER NOT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "UpdatedAtUtc" TEXT NULL,
+              CONSTRAINT "FK_shop_branch_seat_allocations_shops_ShopId" FOREIGN KEY ("ShopId") REFERENCES "shops" ("Id") ON DELETE CASCADE
+            );
+            """,
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE INDEX IF NOT EXISTS "IX_shop_branch_seat_allocations_ShopId" ON "shop_branch_seat_allocations" ("ShopId");""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE UNIQUE INDEX IF NOT EXISTS "IX_shop_branch_seat_allocations_ShopId_BranchCode" ON "shop_branch_seat_allocations" ("ShopId", "BranchCode");""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE INDEX IF NOT EXISTS "IX_provisioned_devices_ShopId_BranchCode_Status" ON "provisioned_devices" ("ShopId", "BranchCode", "Status");""",
+            cancellationToken);
+
         if (!await ColumnExistsAsync(dbContext, "license_audit_logs", "IsManualOverride", cancellationToken))
         {
             await dbContext.Database.ExecuteSqlRawAsync(
@@ -1198,6 +1762,20 @@ public static class DbSchemaUpdater
         {
             await dbContext.Database.ExecuteSqlRawAsync(
                 """ALTER TABLE "license_audit_logs" ADD COLUMN "ImmutablePreviousHash" TEXT NULL;""",
+                cancellationToken);
+        }
+
+        if (!await ColumnExistsAsync(dbContext, "billing_webhook_events", "FailureCount", cancellationToken))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "billing_webhook_events" ADD COLUMN "FailureCount" INTEGER NOT NULL DEFAULT 0;""",
+                cancellationToken);
+        }
+
+        if (!await ColumnExistsAsync(dbContext, "billing_webhook_events", "DeadLetteredAtUtc", cancellationToken))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "billing_webhook_events" ADD COLUMN "DeadLetteredAtUtc" TEXT NULL;""",
                 cancellationToken);
         }
 
@@ -1310,6 +1888,9 @@ public static class DbSchemaUpdater
             cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(
             """CREATE INDEX IF NOT EXISTS "IX_license_audit_logs_IsManualOverride" ON "license_audit_logs" ("IsManualOverride");""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE INDEX IF NOT EXISTS "IX_billing_webhook_events_DeadLetteredAtUtc" ON "billing_webhook_events" ("DeadLetteredAtUtc");""",
             cancellationToken);
     }
 
@@ -1523,8 +2104,10 @@ public static class DbSchemaUpdater
               "ShopId" uuid NULL REFERENCES shops("Id") ON DELETE SET NULL,
               "BillingSubscriptionId" varchar(120) NULL,
               "LastErrorCode" varchar(120) NULL,
+              "FailureCount" integer NOT NULL DEFAULT 0,
               "ReceivedAtUtc" timestamptz NOT NULL,
               "ProcessedAtUtc" timestamptz NULL,
+              "DeadLetteredAtUtc" timestamptz NULL,
               "UpdatedAtUtc" timestamptz NULL
             );
 
@@ -1613,6 +2196,7 @@ public static class DbSchemaUpdater
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_billing_webhook_events_ProviderEventId" ON billing_webhook_events("ProviderEventId");
             CREATE INDEX IF NOT EXISTS "IX_billing_webhook_events_EventType" ON billing_webhook_events("EventType");
             CREATE INDEX IF NOT EXISTS "IX_billing_webhook_events_ShopId" ON billing_webhook_events("ShopId");
+            CREATE INDEX IF NOT EXISTS "IX_billing_webhook_events_DeadLetteredAtUtc" ON billing_webhook_events("DeadLetteredAtUtc");
             CREATE INDEX IF NOT EXISTS "IX_manual_billing_invoices_ShopId" ON manual_billing_invoices("ShopId");
             CREATE INDEX IF NOT EXISTS "IX_manual_billing_invoices_Status" ON manual_billing_invoices("Status");
             CREATE INDEX IF NOT EXISTS "IX_manual_billing_invoices_DueAtUtc" ON manual_billing_invoices("DueAtUtc");
@@ -1639,6 +2223,15 @@ public static class DbSchemaUpdater
             cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(
             """ALTER TABLE provisioned_devices ADD COLUMN IF NOT EXISTS "DeviceKeyRegisteredAtUtc" timestamptz NULL;""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE provisioned_devices ADD COLUMN IF NOT EXISTS "BranchCode" varchar(64) NULL;""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE billing_webhook_events ADD COLUMN IF NOT EXISTS "FailureCount" integer NOT NULL DEFAULT 0;""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE billing_webhook_events ADD COLUMN IF NOT EXISTS "DeadLetteredAtUtc" timestamptz NULL;""",
             cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(
             """
@@ -1678,6 +2271,19 @@ public static class DbSchemaUpdater
               "RevokedAtUtc" timestamptz NULL,
               "ReplacedByJti" varchar(120) NULL,
               "LastValidatedAtUtc" timestamptz NULL
+            );
+            """,
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """
+            CREATE TABLE IF NOT EXISTS shop_branch_seat_allocations (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "ShopId" uuid NOT NULL REFERENCES shops("Id") ON DELETE CASCADE,
+              "BranchCode" varchar(64) NOT NULL,
+              "SeatQuota" integer NOT NULL,
+              "IsActive" boolean NOT NULL,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "UpdatedAtUtc" timestamptz NULL
             );
             """,
             cancellationToken);
@@ -1740,6 +2346,15 @@ public static class DbSchemaUpdater
             cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(
             """CREATE INDEX IF NOT EXISTS "IX_license_token_sessions_RevokedAtUtc" ON license_token_sessions("RevokedAtUtc");""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE INDEX IF NOT EXISTS "IX_shop_branch_seat_allocations_ShopId" ON shop_branch_seat_allocations("ShopId");""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE UNIQUE INDEX IF NOT EXISTS "IX_shop_branch_seat_allocations_ShopId_BranchCode" ON shop_branch_seat_allocations("ShopId", "BranchCode");""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE INDEX IF NOT EXISTS "IX_provisioned_devices_ShopId_BranchCode_Status" ON provisioned_devices("ShopId", "BranchCode", "Status");""",
             cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(
             """CREATE INDEX IF NOT EXISTS "IX_offline_events_OfflineGrantId" ON offline_events("OfflineGrantId");""",

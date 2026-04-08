@@ -2,13 +2,15 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Features.Licensing;
+using SmartPos.Backend.Features.Recovery;
 using SmartPos.Backend.Infrastructure;
 
 namespace SmartPos.Backend.Features.Reports;
 
 public sealed class ReportService(
     SmartPosDbContext dbContext,
-    ILicensingAlertMonitor alertMonitor)
+    ILicensingAlertMonitor alertMonitor,
+    RecoveryDrillAlertService recoveryDrillAlertService)
 {
     public async Task<DailySalesReportResponse> GetDailySalesReportAsync(
         DateOnly? fromDate,
@@ -1026,6 +1028,10 @@ public sealed class ReportService(
             .Count(x => x.Action == "auth_anomaly_impossible_travel");
         var authConcurrentDeviceSignals = authSecurityLogsInWindow
             .Count(x => x.Action == "auth_anomaly_concurrent_devices");
+        var recoveryDrillHealth = await recoveryDrillAlertService.EvaluateOnceAsync(cancellationToken);
+        var recoveryDrillAlertLogsInWindow = activityLogs
+            .Where(x => string.Equals(x.Action, "recovery_drill_alert_raised", StringComparison.Ordinal))
+            .ToList();
 
         return new SupportTriageReportResponse
         {
@@ -1043,6 +1049,7 @@ public sealed class ReportService(
                 AuthConcurrentDeviceSignalsInWindow = authConcurrentDeviceSignals,
                 SensitiveActionProofFailuresInWindow = sensitiveActionProofFailureLogs.Count,
                 DevicesWithUnusualSourceChangesInWindow = devicesWithUnusualSourceChanges,
+                RecoveryDrillAlertsInWindow = recoveryDrillAlertLogsInWindow.Count,
                 TopValidationFailures = alertSnapshot.TopValidationFailures
                     .Select(x => new SupportAlertBreakdownRow
                     {
@@ -1065,9 +1072,25 @@ public sealed class ReportService(
                     })
                     .ToList(),
                 TopSensitiveActionFailureSources = BuildTopSensitiveActionFailureSources(sensitiveActionProofFailureLogs),
+                TopRecoveryDrillIssues = BuildTopRecoveryDrillIssues(recoveryDrillAlertLogsInWindow),
                 LastValidationAlertAt = alertSnapshot.LastValidationAlertAtUtc,
                 LastWebhookAlertAt = alertSnapshot.LastWebhookAlertAtUtc,
                 LastSecurityAlertAt = alertSnapshot.LastSecurityAlertAtUtc
+            },
+            RecoveryDrill = new SupportRecoveryDrillSummary
+            {
+                Status = recoveryDrillHealth.Status,
+                MonitoringEnabled = recoveryDrillHealth.MonitoringEnabled,
+                MetricsFilePath = recoveryDrillHealth.MetricsFilePath,
+                MetricsFileExists = recoveryDrillHealth.MetricsFileExists,
+                Issues = recoveryDrillHealth.Issues,
+                MaxRestoreDrillAgeHours = recoveryDrillHealth.MaxRestoreDrillAgeHours,
+                TargetRtoSeconds = recoveryDrillHealth.TargetRtoSeconds,
+                TargetRpoSeconds = recoveryDrillHealth.TargetRpoSeconds,
+                LastDrillAt = recoveryDrillHealth.LastRestoreMetric?.TimestampUtc,
+                LastDrillStatus = recoveryDrillHealth.LastRestoreMetric?.Status,
+                LastRtoSeconds = recoveryDrillHealth.LastRestoreMetric?.RtoSeconds,
+                LastRpoSeconds = recoveryDrillHealth.LastRestoreMetric?.RpoSeconds
             },
             RecentAuditEvents = recentAuditLogs
                 .Select(x => new SupportLicenseAuditEventRow
@@ -1084,6 +1107,90 @@ public sealed class ReportService(
                 })
                 .ToList()
         };
+    }
+
+    public Task<SupportAlertCatalogResponse> GetSupportAlertCatalogAsync(
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(new SupportAlertCatalogResponse
+        {
+            GeneratedAt = DateTimeOffset.UtcNow,
+            CatalogVersion = "w6-alert-catalog-v1-2026-04-08",
+            Items =
+            [
+                new SupportAlertCatalogItem
+                {
+                    Code = "licensing.validation_spike",
+                    Category = "licensing",
+                    Severity = "warning",
+                    Source = "LicensingAlertMonitor",
+                    Description = "Validation failures crossed configured threshold in alert window.",
+                    Surfaces = ["ops_webhook", "support_triage.alerts.top_validation_failures"],
+                    TriageHint = "Check token/device mismatch rates and recent provisioning events."
+                },
+                new SupportAlertCatalogItem
+                {
+                    Code = "licensing.webhook_failure_spike",
+                    Category = "billing",
+                    Severity = "warning",
+                    Source = "LicensingAlertMonitor",
+                    Description = "Billing webhook failure volume crossed threshold in alert window.",
+                    Surfaces = ["ops_webhook", "support_triage.alerts.top_webhook_failures"],
+                    TriageHint = "Inspect webhook signature errors and provider event retry backlog."
+                },
+                new SupportAlertCatalogItem
+                {
+                    Code = "licensing.security_anomaly_spike",
+                    Category = "security",
+                    Severity = "critical",
+                    Source = "LicensingAlertMonitor",
+                    Description = "Security anomaly events crossed configured threshold.",
+                    Surfaces = ["ops_webhook", "support_triage.alerts.top_security_anomalies"],
+                    TriageHint = "Review anomaly reasons and compare source fingerprints/device behavior."
+                },
+                new SupportAlertCatalogItem
+                {
+                    Code = "recovery.drill_degraded",
+                    Category = "recovery",
+                    Severity = "critical",
+                    Source = "RecoveryDrillAlertService",
+                    Description = "Restore drill health is degraded due to stale, failed, or SLA-breaching metrics.",
+                    Surfaces = ["ops_webhook", "support_triage.recovery_drill"],
+                    TriageHint = "Run restore smoke test and verify latest RTO/RPO against configured targets."
+                },
+                new SupportAlertCatalogItem
+                {
+                    Code = "recovery_drill_alert_raised",
+                    Category = "recovery",
+                    Severity = "warning",
+                    Source = "RecoveryDrillAlertService",
+                    Description = "Recovery drill issue persisted into license audit stream for diagnostics.",
+                    Surfaces = ["license_audit_logs", "support_triage.recent_audit_events"],
+                    TriageHint = "Correlate with recovery drill panel and review issue-specific remediation."
+                },
+                new SupportAlertCatalogItem
+                {
+                    Code = "billing_webhook_malformed_payload",
+                    Category = "security",
+                    Severity = "critical",
+                    Source = "LicenseEndpoints",
+                    Description = "Billing webhook payload failed validation/signature checks.",
+                    Surfaces = ["support_triage.alerts.top_security_anomalies", "license_audit_logs"],
+                    TriageHint = "Confirm provider secret configuration and verify webhook signing algorithm."
+                },
+                new SupportAlertCatalogItem
+                {
+                    Code = "provisioning_rate_limit_exceeded",
+                    Category = "security",
+                    Severity = "warning",
+                    Source = "ProvisioningRateLimitMiddleware",
+                    Description = "Provisioning actions exceeded request rate policy.",
+                    Surfaces = ["support_triage.alerts.top_security_anomalies"],
+                    TriageHint = "Validate traffic source and distinguish abuse from expected onboarding burst."
+                }
+            ]
+        });
     }
 
     private static List<ReportPaymentBreakdownRow> BuildPaymentBreakdown(IEnumerable<PaymentSnapshot> payments)
@@ -1379,6 +1486,23 @@ public sealed class ReportService(
         return failureLogs
             .Select(log => ResolveSourceDisplayLabel(log))
             .GroupBy(label => label, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new SupportAlertBreakdownRow
+            {
+                Reason = group.Key,
+                Count = group.Count()
+            })
+            .OrderByDescending(x => x.Count)
+            .ThenBy(x => x.Reason)
+            .Take(5)
+            .ToList();
+    }
+
+    private static List<SupportAlertBreakdownRow> BuildTopRecoveryDrillIssues(
+        IEnumerable<LicenseAuditLog> recoveryDrillLogs)
+    {
+        return recoveryDrillLogs
+            .Where(log => !string.IsNullOrWhiteSpace(log.Reason))
+            .GroupBy(log => log.Reason!, StringComparer.OrdinalIgnoreCase)
             .Select(group => new SupportAlertBreakdownRow
             {
                 Reason = group.Key,

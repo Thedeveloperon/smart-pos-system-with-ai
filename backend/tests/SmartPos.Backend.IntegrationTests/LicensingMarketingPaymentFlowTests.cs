@@ -27,7 +27,9 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
             contact_phone = "+94770000000",
             plan_code = "pro",
             payment_method = "bank_deposit",
-            source = "website_pricing"
+            source = "website_pricing",
+            owner_username = "nelu_owner_001",
+            owner_password = "OwnerPass123!"
         });
 
         Assert.True(createResponse["requires_payment"]?.GetValue<bool>() ?? false);
@@ -88,7 +90,9 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
             contact_phone = "+94771111111",
             plan_code = "starter",
             payment_method = "cash",
-            source = "website_pricing"
+            source = "website_pricing",
+            owner_username = "starter_owner_001",
+            owner_password = "OwnerPass123!"
         });
 
         Assert.False(createResponse["requires_payment"]?.GetValue<bool>() ?? true);
@@ -99,7 +103,7 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
     }
 
     [Fact]
-    public async Task MarketingPaymentFlow_WithAiCredits_ShouldSettleWalletOnVerification()
+    public async Task MarketingPaymentFlow_WithLegacyAiCreditFields_ShouldIgnoreAiOrderFromStart()
     {
         var createResponse = await PostJsonAsync("/api/license/public/payment-request", new
         {
@@ -109,18 +113,15 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
             plan_code = "pro",
             payment_method = "bank_deposit",
             source = "website_pricing",
+            owner_username = "ai_owner_001",
+            owner_password = "OwnerPass123!",
             target_username = "owner",
             ai_package_code = "pack_100"
         });
 
         var invoiceId = createResponse["invoice"]?["invoice_id"]?.GetValue<Guid>()
             ?? throw new InvalidOperationException("Missing invoice_id.");
-        var aiOrder = createResponse["ai_credit_order"]?.AsObject()
-            ?? throw new InvalidOperationException("Missing ai_credit_order on create response.");
-        var orderId = aiOrder["order_id"]?.GetValue<Guid>()
-            ?? throw new InvalidOperationException("Missing order_id.");
-        Assert.Equal("submitted", aiOrder["status"]?.GetValue<string>());
-        Assert.Equal(100m, aiOrder["requested_credits"]?.GetValue<decimal>());
+        Assert.Null(createResponse["ai_credit_order"]);
 
         var submitResponse = await PostJsonAsync("/api/license/public/payment-submit", new
         {
@@ -135,9 +136,6 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
         });
 
         Assert.Equal("pending_verification", TestJson.GetString(submitResponse, "payment_status"));
-        Assert.Equal(
-            "pending_verification",
-            submitResponse["ai_credit_order"]?["status"]?.GetValue<string>());
 
         var paymentId = submitResponse["payment_id"]?.GetValue<Guid>()
             ?? throw new InvalidOperationException("Missing payment_id.");
@@ -155,33 +153,14 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
                 actor = "billing_admin"
             });
 
-        Assert.Equal("settled", verifyResponse["ai_credit_order"]?["status"]?.GetValue<string>());
-        Assert.Equal(100m, verifyResponse["ai_credit_order"]?["settled_credits"]?.GetValue<decimal>());
-        Assert.False(string.IsNullOrWhiteSpace(
-            verifyResponse["ai_credit_order"]?["wallet_ledger_reference"]?.GetValue<string>()));
-
-        var statusResponse = await TestJson.ReadObjectAsync(
-            await client.GetAsync($"/api/license/public/ai-credit-order-status?order_id={orderId}"));
-        Assert.Equal("settled", statusResponse["order"]?["status"]?.GetValue<string>());
-        Assert.Equal("verified", statusResponse["payment_status"]?.GetValue<string>());
+        Assert.Null(verifyResponse["ai_credit_order"]);
 
         await using var scope = appFactory.Services.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
-        var orderRecord = await dbContext.AiCreditOrders
+        var orderCount = await dbContext.AiCreditOrders
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == orderId);
-        Assert.NotNull(orderRecord);
-        Assert.Equal(AiCreditOrderStatus.Settled, orderRecord!.Status);
-        Assert.Equal(100m, orderRecord.SettledCredits);
-
-        var ledgerReference = orderRecord.WalletLedgerReference;
-        Assert.False(string.IsNullOrWhiteSpace(ledgerReference));
-        var settlementLedger = await dbContext.AiCreditLedgerEntries
-            .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Reference == ledgerReference);
-        Assert.NotNull(settlementLedger);
-        Assert.Equal(AiCreditLedgerEntryType.Purchase, settlementLedger!.EntryType);
-        Assert.Equal(100m, settlementLedger.DeltaCredits);
+            .CountAsync(x => x.InvoiceId == invoiceId);
+        Assert.Equal(0, orderCount);
     }
 
     [Fact]
@@ -194,7 +173,9 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
             contact_email = "owner+dup@example.com",
             plan_code = "pro",
             payment_method = "bank_deposit",
-            source = "website_pricing"
+            source = "website_pricing",
+            owner_username = "dup_owner_001",
+            owner_password = "OwnerPass123!"
         });
 
         var invoiceId = createResponse["invoice"]?["invoice_id"]?.GetValue<Guid>()
@@ -270,7 +251,9 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
             contact_email = "tracker@example.com",
             plan_code = "pro",
             payment_method = "bank_deposit",
-            source = "website_pricing"
+            source = "website_pricing",
+            owner_username = "tracker_owner_001",
+            owner_password = "OwnerPass123!"
         });
 
         var invoiceId = createResponse["invoice"]?["invoice_id"]?.GetValue<Guid>()

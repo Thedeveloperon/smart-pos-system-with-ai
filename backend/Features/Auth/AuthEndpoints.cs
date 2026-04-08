@@ -31,10 +31,29 @@ public static class AuthEndpoints
         .WithName("Login")
         .WithOpenApi();
 
-        group.MapPost("/logout", [Authorize] (
+        group.MapPost("/logout", [Authorize] async (
             HttpContext httpContext,
-            JwtCookieOptions jwtOptions) =>
+            AuthService authService,
+            JwtCookieOptions jwtOptions,
+            CancellationToken cancellationToken) =>
         {
+            try
+            {
+                var revokeRequest = new AuthSessionRevokeRequest
+                {
+                    Reason = "logout"
+                };
+                _ = authService.RevokeSessionAsync(
+                    httpContext.User,
+                    httpContext.User.FindFirst("device_code")?.Value ?? string.Empty,
+                    revokeRequest,
+                    cancellationToken);
+            }
+            catch
+            {
+                // Logout should still clear local auth cookie even if revocation persistence fails.
+            }
+
             DeleteAuthCookie(httpContext, jwtOptions);
             return Results.Ok(new { message = "Logged out." });
         })
@@ -52,6 +71,76 @@ public static class AuthEndpoints
             return session is null ? Results.Unauthorized() : Results.Ok(session);
         })
         .WithName("GetSession")
+        .WithOpenApi();
+
+        group.MapGet("/sessions", [Authorize] async (
+            HttpContext httpContext,
+            AuthService authService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var response = await authService.GetSessionDevicesAsync(httpContext.User, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .WithName("GetAuthSessions")
+        .WithOpenApi();
+
+        group.MapPost("/sessions/{device_code}/revoke", [Authorize] async (
+            string device_code,
+            AuthSessionRevokeRequest request,
+            HttpContext httpContext,
+            AuthService authService,
+            JwtCookieOptions jwtOptions,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var response = await authService.RevokeSessionAsync(
+                    httpContext.User,
+                    device_code,
+                    request,
+                    cancellationToken);
+                if (response.CurrentSessionRevoked)
+                {
+                    DeleteAuthCookie(httpContext, jwtOptions);
+                }
+
+                return Results.Ok(response);
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .WithName("RevokeAuthSession")
+        .WithOpenApi();
+
+        group.MapPost("/sessions/revoke-others", [Authorize] async (
+            AuthSessionRevokeRequest request,
+            HttpContext httpContext,
+            AuthService authService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var response = await authService.RevokeOtherSessionsAsync(
+                    httpContext.User,
+                    request,
+                    cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .WithName("RevokeOtherAuthSessions")
         .WithOpenApi();
 
         return app;

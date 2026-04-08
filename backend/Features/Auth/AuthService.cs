@@ -26,6 +26,8 @@ public sealed class AuthService(
         LoginRequest request,
         CancellationToken cancellationToken)
     {
+        var source = RequestSourceContext.FromHttpContext(httpContextAccessor.HttpContext);
+        var now = DateTimeOffset.UtcNow;
         var username = request.Username?.Trim() ?? string.Empty;
         var password = request.Password ?? string.Empty;
         var deviceCode = request.DeviceCode?.Trim() ?? string.Empty;
@@ -45,17 +47,48 @@ public sealed class AuthService(
             .ThenInclude(x => x.Role)
             .FirstOrDefaultAsync(
                 x => x.IsActive && x.Username.ToLower() == normalizedUsername,
-                cancellationToken)
-            ?? throw new InvalidOperationException("Invalid username or password.");
+                cancellationToken);
+
+        if (user is null)
+        {
+            await RecordUnknownUserFailureAsync(normalizedUsername, source, now, cancellationToken);
+            await ApplyFailureThrottleDelayAsync(cancellationToken);
+            throw new InvalidOperationException("Invalid username or password.");
+        }
+
+        if (IsLockoutActive(user, now))
+        {
+            await RecordLockoutBlockedAttemptAsync(user, source, now, cancellationToken);
+            await ApplyFailureThrottleDelayAsync(cancellationToken);
+            throw new InvalidOperationException("Account is temporarily locked due to repeated failures. Please try again later.");
+        }
 
         if (!PasswordHashing.VerifyPassword(user, user.PasswordHash, password))
         {
+            await RegisterFailedLoginAttemptAsync(user, source, now, "invalid_password", cancellationToken);
+            await ApplyFailureThrottleDelayAsync(cancellationToken);
             throw new InvalidOperationException("Invalid username or password.");
         }
 
         var (role, superAdminScope) = ResolveRoleAndScope(user);
-        var mfaVerified = ValidateMfa(user, role, request.MfaCode);
-        var now = DateTimeOffset.UtcNow;
+        bool mfaVerified;
+        try
+        {
+            mfaVerified = ValidateMfa(user, role, request.MfaCode);
+        }
+        catch (InvalidOperationException exception)
+        {
+            if (!exception.Message.Contains("not configured for MFA", StringComparison.OrdinalIgnoreCase))
+            {
+                await RegisterFailedLoginAttemptAsync(user, source, now, "invalid_mfa", cancellationToken);
+                await ApplyFailureThrottleDelayAsync(cancellationToken);
+            }
+
+            throw;
+        }
+
+        ResetFailedLoginState(user);
+
         var expiresAt = now.AddMinutes(Math.Max(15, jwtOptions.ExpiryMinutes));
 
         var device = await dbContext.Devices
@@ -71,7 +104,9 @@ public sealed class AuthService(
                     ? "POS Browser"
                     : request.DeviceName.Trim(),
                 IsTrusted = true,
+                AuthSessionVersion = 1,
                 CreatedAtUtc = now,
+                LastAuthIssuedAtUtc = now,
                 LastSeenAtUtc = now
             };
             dbContext.Devices.Add(device);
@@ -83,10 +118,13 @@ public sealed class AuthService(
                 ? device.Name
                 : request.DeviceName.Trim();
             device.IsTrusted = true;
+            device.AuthSessionVersion = Math.Max(1, device.AuthSessionVersion);
+            device.AuthSessionRevokedAtUtc = null;
+            device.AuthSessionRevocationReason = null;
+            device.LastAuthIssuedAtUtc = now;
             device.LastSeenAtUtc = now;
         }
 
-        var source = RequestSourceContext.FromHttpContext(httpContextAccessor.HttpContext);
         var anomalies = await DetectAuthAnomaliesAsync(
             user.Id,
             device.Id,
@@ -111,7 +149,8 @@ public sealed class AuthService(
                 source_forwarded_for = source.ForwardedFor,
                 source_user_agent = source.UserAgent,
                 source_user_agent_family = source.UserAgentFamily,
-                source_fingerprint = source.SourceFingerprint
+                source_fingerprint = source.SourceFingerprint,
+                auth_session_version = device.AuthSessionVersion
             }),
             CreatedAtUtc = now
         });
@@ -143,7 +182,8 @@ public sealed class AuthService(
             DeviceId = device.Id,
             DeviceCode = device.DeviceCode,
             ExpiresAt = expiresAt,
-            MfaVerified = mfaVerified
+            MfaVerified = mfaVerified,
+            AuthSessionVersion = Math.Max(1, device.AuthSessionVersion)
         };
 
         return (token, session);
@@ -202,7 +242,141 @@ public sealed class AuthService(
             DeviceId = device.Id,
             DeviceCode = device.DeviceCode,
             ExpiresAt = expiresAt,
-            MfaVerified = mfaVerified
+            MfaVerified = mfaVerified,
+            AuthSessionVersion = Math.Max(1, device.AuthSessionVersion)
+        };
+    }
+
+    public async Task<AuthSessionsResponse> GetSessionDevicesAsync(
+        ClaimsPrincipal principal,
+        CancellationToken cancellationToken)
+    {
+        var context = ResolveAuthContext(principal)
+                      ?? throw new InvalidOperationException("Authenticated session context is invalid.");
+        var rows = await dbContext.Devices
+            .AsNoTracking()
+            .Where(x => x.AppUserId == context.UserId)
+            .OrderByDescending(x => x.LastSeenAtUtc ?? x.CreatedAtUtc)
+            .ThenByDescending(x => x.CreatedAtUtc)
+            .ToListAsync(cancellationToken);
+
+        return new AuthSessionsResponse
+        {
+            GeneratedAt = DateTimeOffset.UtcNow,
+            CurrentDeviceCode = rows.FirstOrDefault(x => x.Id == context.DeviceId)?.DeviceCode,
+            Items = rows.Select(x => new AuthSessionDeviceRow
+            {
+                DeviceId = x.Id,
+                DeviceCode = x.DeviceCode,
+                DeviceName = x.Name,
+                IsCurrent = x.Id == context.DeviceId,
+                IsRevoked = x.AuthSessionRevokedAtUtc.HasValue,
+                AuthSessionVersion = Math.Max(1, x.AuthSessionVersion),
+                CreatedAt = x.CreatedAtUtc,
+                LastSeenAt = x.LastSeenAtUtc,
+                LastAuthIssuedAt = x.LastAuthIssuedAtUtc,
+                RevokedAt = x.AuthSessionRevokedAtUtc
+            }).ToList()
+        };
+    }
+
+    public async Task<AuthSessionRevokeResponse> RevokeSessionAsync(
+        ClaimsPrincipal principal,
+        string targetDeviceCode,
+        AuthSessionRevokeRequest request,
+        CancellationToken cancellationToken)
+    {
+        var context = ResolveAuthContext(principal)
+                      ?? throw new InvalidOperationException("Authenticated session context is invalid.");
+        var normalizedTarget = NormalizeOptionalValue(targetDeviceCode);
+        if (string.IsNullOrWhiteSpace(normalizedTarget))
+        {
+            throw new InvalidOperationException("target device_code is required.");
+        }
+
+        var targetDevice = await dbContext.Devices
+            .FirstOrDefaultAsync(
+                x => x.AppUserId == context.UserId &&
+                     x.DeviceCode.ToLower() == normalizedTarget.ToLower(),
+                cancellationToken)
+            ?? throw new InvalidOperationException("Session device not found.");
+
+        var now = DateTimeOffset.UtcNow;
+        targetDevice.AuthSessionVersion = Math.Max(1, targetDevice.AuthSessionVersion) + 1;
+        targetDevice.AuthSessionRevokedAtUtc = now;
+        targetDevice.AuthSessionRevocationReason = NormalizeOptionalValue(request.Reason) ?? "manual_device_session_revoke";
+
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            UserId = context.UserId,
+            DeviceId = context.DeviceId,
+            Action = "auth_session_revoked",
+            EntityName = "auth_session",
+            EntityId = targetDevice.Id.ToString(),
+            AfterJson = JsonSerializer.Serialize(new
+            {
+                revoked_device_id = targetDevice.Id,
+                revoked_device_code = targetDevice.DeviceCode,
+                revoked_device_session_version = targetDevice.AuthSessionVersion,
+                reason = targetDevice.AuthSessionRevocationReason
+            }),
+            CreatedAtUtc = now
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new AuthSessionRevokeResponse
+        {
+            ProcessedAt = now,
+            RevokedCount = 1,
+            TargetDeviceCode = targetDevice.DeviceCode,
+            CurrentSessionRevoked = targetDevice.Id == context.DeviceId
+        };
+    }
+
+    public async Task<AuthSessionRevokeResponse> RevokeOtherSessionsAsync(
+        ClaimsPrincipal principal,
+        AuthSessionRevokeRequest request,
+        CancellationToken cancellationToken)
+    {
+        var context = ResolveAuthContext(principal)
+                      ?? throw new InvalidOperationException("Authenticated session context is invalid.");
+        var now = DateTimeOffset.UtcNow;
+        var reason = NormalizeOptionalValue(request.Reason) ?? "manual_revoke_other_sessions";
+        var otherDevices = await dbContext.Devices
+            .Where(x => x.AppUserId == context.UserId && x.Id != context.DeviceId)
+            .ToListAsync(cancellationToken);
+
+        foreach (var device in otherDevices)
+        {
+            device.AuthSessionVersion = Math.Max(1, device.AuthSessionVersion) + 1;
+            device.AuthSessionRevokedAtUtc = now;
+            device.AuthSessionRevocationReason = reason;
+        }
+
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            UserId = context.UserId,
+            DeviceId = context.DeviceId,
+            Action = "auth_session_revoke_others",
+            EntityName = "auth_session",
+            EntityId = context.DeviceId.ToString(),
+            AfterJson = JsonSerializer.Serialize(new
+            {
+                revoked_count = otherDevices.Count,
+                reason
+            }),
+            CreatedAtUtc = now
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new AuthSessionRevokeResponse
+        {
+            ProcessedAt = now,
+            RevokedCount = otherDevices.Count,
+            TargetDeviceCode = null,
+            CurrentSessionRevoked = false
         };
     }
 
@@ -226,7 +400,8 @@ public sealed class AuthService(
             new(ClaimTypes.Role, role),
             new("device_id", device.Id.ToString()),
             new("device_code", device.DeviceCode),
-            new("mfa_verified", mfaVerified.ToString().ToLowerInvariant())
+            new("mfa_verified", mfaVerified.ToString().ToLowerInvariant()),
+            new("auth_session_version", Math.Max(1, device.AuthSessionVersion).ToString())
         };
         if (!string.IsNullOrWhiteSpace(superAdminScope))
         {
@@ -324,6 +499,160 @@ public sealed class AuthService(
         }
 
         return true;
+    }
+
+    private bool IsLockoutActive(AppUser user, DateTimeOffset now)
+    {
+        if (!authSecurityOptions.EnableLoginLockout)
+        {
+            return false;
+        }
+
+        return user.LockoutEndAtUtc.HasValue &&
+               user.LockoutEndAtUtc.Value > now;
+    }
+
+    private void ResetFailedLoginState(AppUser user)
+    {
+        user.FailedLoginAttempts = 0;
+        user.LastFailedLoginAtUtc = null;
+        user.LockoutEndAtUtc = null;
+    }
+
+    private async Task RegisterFailedLoginAttemptAsync(
+        AppUser user,
+        RequestSourceContext source,
+        DateTimeOffset now,
+        string failureReason,
+        CancellationToken cancellationToken)
+    {
+        var failureWindowMinutes = Math.Clamp(authSecurityOptions.FailedLoginAttemptWindowMinutes, 1, 1440);
+        if (!user.LastFailedLoginAtUtc.HasValue ||
+            user.LastFailedLoginAtUtc.Value < now.AddMinutes(-failureWindowMinutes))
+        {
+            user.FailedLoginAttempts = 0;
+        }
+
+        user.FailedLoginAttempts += 1;
+        user.LastFailedLoginAtUtc = now;
+        var maxFailures = Math.Max(2, authSecurityOptions.MaxFailedLoginAttempts);
+        var lockoutTriggered = authSecurityOptions.EnableLoginLockout &&
+                               user.FailedLoginAttempts >= maxFailures;
+        if (lockoutTriggered)
+        {
+            var lockoutDurationMinutes = Math.Clamp(authSecurityOptions.LockoutDurationMinutes, 1, 1440);
+            user.LockoutEndAtUtc = now.AddMinutes(lockoutDurationMinutes);
+            user.FailedLoginAttempts = 0;
+        }
+
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            UserId = user.Id,
+            Action = "auth_login_failed",
+            EntityName = "auth_security",
+            EntityId = user.Id.ToString(),
+            AfterJson = JsonSerializer.Serialize(new
+            {
+                failure_reason = failureReason,
+                source_ip = source.SourceIp,
+                source_ip_prefix = source.SourceIpPrefix,
+                source_forwarded_for = source.ForwardedFor,
+                source_user_agent = source.UserAgent,
+                source_user_agent_family = source.UserAgentFamily,
+                source_fingerprint = source.SourceFingerprint,
+                failed_login_attempts = user.FailedLoginAttempts,
+                max_failed_login_attempts = maxFailures,
+                lockout_end_at = user.LockoutEndAtUtc
+            }),
+            CreatedAtUtc = now
+        });
+
+        if (lockoutTriggered)
+        {
+            dbContext.AuditLogs.Add(new AuditLog
+            {
+                UserId = user.Id,
+                Action = "auth_login_lockout_triggered",
+                EntityName = "auth_security",
+                EntityId = user.Id.ToString(),
+                AfterJson = JsonSerializer.Serialize(new
+                {
+                    lockout_end_at = user.LockoutEndAtUtc,
+                    failure_reason = failureReason
+                }),
+                CreatedAtUtc = now
+            });
+            licensingAlertMonitor.RecordSecurityAnomaly("auth_lockout_triggered");
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task RecordUnknownUserFailureAsync(
+        string normalizedUsername,
+        RequestSourceContext source,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var entityId = normalizedUsername.Length <= 64
+            ? normalizedUsername
+            : normalizedUsername[..64];
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            Action = "auth_login_failed_unknown_user",
+            EntityName = "auth_security",
+            EntityId = entityId,
+            AfterJson = JsonSerializer.Serialize(new
+            {
+                attempted_username = normalizedUsername,
+                source_ip = source.SourceIp,
+                source_ip_prefix = source.SourceIpPrefix,
+                source_forwarded_for = source.ForwardedFor,
+                source_user_agent = source.UserAgent,
+                source_user_agent_family = source.UserAgentFamily,
+                source_fingerprint = source.SourceFingerprint
+            }),
+            CreatedAtUtc = now
+        });
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task RecordLockoutBlockedAttemptAsync(
+        AppUser user,
+        RequestSourceContext source,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            UserId = user.Id,
+            Action = "auth_login_blocked_lockout",
+            EntityName = "auth_security",
+            EntityId = user.Id.ToString(),
+            AfterJson = JsonSerializer.Serialize(new
+            {
+                lockout_end_at = user.LockoutEndAtUtc,
+                source_ip = source.SourceIp,
+                source_ip_prefix = source.SourceIpPrefix,
+                source_forwarded_for = source.ForwardedFor,
+                source_user_agent = source.UserAgent,
+                source_user_agent_family = source.UserAgentFamily,
+                source_fingerprint = source.SourceFingerprint
+            }),
+            CreatedAtUtc = now
+        });
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task ApplyFailureThrottleDelayAsync(CancellationToken cancellationToken)
+    {
+        var delayMs = Math.Clamp(authSecurityOptions.FailureThrottleDelayMilliseconds, 0, 5000);
+        if (delayMs <= 0)
+        {
+            return;
+        }
+
+        await Task.Delay(delayMs, cancellationToken);
     }
 
     private async Task<List<AuthAnomalySignal>> DetectAuthAnomaliesAsync(
@@ -485,6 +814,30 @@ public sealed class AuthService(
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 
+    private static AuthContext? ResolveAuthContext(ClaimsPrincipal principal)
+    {
+        var userId = ParseGuid(
+            principal.FindFirstValue(ClaimTypes.NameIdentifier) ??
+            principal.FindFirstValue(JwtRegisteredClaimNames.Sub));
+        var deviceId = ParseGuid(principal.FindFirstValue("device_id"));
+        var deviceCode = NormalizeOptionalValue(principal.FindFirstValue("device_code"));
+        var versionClaim = principal.FindFirstValue("auth_session_version");
+        var sessionVersion = int.TryParse(versionClaim, out var parsedVersion)
+            ? Math.Max(1, parsedVersion)
+            : 0;
+
+        if (!userId.HasValue || !deviceId.HasValue || string.IsNullOrWhiteSpace(deviceCode))
+        {
+            return null;
+        }
+
+        return new AuthContext(
+            userId.Value,
+            deviceId.Value,
+            deviceCode,
+            sessionVersion);
+    }
+
     private static Guid? ParseGuid(string? value)
     {
         return Guid.TryParse(value, out var parsed) ? parsed : null;
@@ -497,6 +850,12 @@ public sealed class AuthService(
         public string? SourceIpPrefix { get; set; }
         public string? SourceFingerprint { get; set; }
     }
+
+    private sealed record AuthContext(
+        Guid UserId,
+        Guid DeviceId,
+        string DeviceCode,
+        int SessionVersion);
 
     private sealed record AuthAnomalySignal(
         string Action,

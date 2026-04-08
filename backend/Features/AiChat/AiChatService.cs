@@ -14,6 +14,7 @@ public sealed class AiChatService(
     SmartPosDbContext dbContext,
     AiInsightService aiInsightService,
     AiCreditBillingService creditBillingService,
+    AiPrivacyGovernanceService aiPrivacyGovernanceService,
     IOptions<AiInsightOptions> aiInsightOptions,
     AiChatGroundingOrchestrator groundingOrchestrator,
     AiChatStructuredResponseBuilder structuredResponseBuilder,
@@ -159,6 +160,8 @@ public sealed class AiChatService(
             ?? throw new InvalidOperationException("Chat session was not found.");
 
         var normalizedMessage = NormalizeMessage(request.Message);
+        var sanitizedMessageForStorage = aiPrivacyGovernanceService.RedactForStorage(normalizedMessage);
+        var sanitizedMessageForProvider = aiPrivacyGovernanceService.RedactForProvider(normalizedMessage);
         var normalizedIdempotencyKey = NormalizeOptionalIdempotencyKey(request.IdempotencyKey)
                                      ?? NormalizeOptionalIdempotencyKey(idempotencyKey)
                                      ?? $"chat-{Guid.NewGuid():N}";
@@ -210,7 +213,7 @@ public sealed class AiChatService(
             {
                 Session = MapSessionSummary(conversation, messageCount),
                 UserMessage = existingUserMessage is null
-                    ? BuildSyntheticUserReplayMessage(normalizedMessage)
+                    ? BuildSyntheticUserReplayMessage(sanitizedMessageForStorage)
                     : MapMessageResponse(existingUserMessage),
                 AssistantMessage = MapMessageResponse(existingAssistantMessage),
                 RemainingCredits = wallet.AvailableCredits
@@ -227,7 +230,7 @@ public sealed class AiChatService(
             Role = AiConversationMessageRole.User,
             Status = AiConversationMessageStatus.Succeeded,
             UsageType = usageType,
-            Content = normalizedMessage,
+            Content = sanitizedMessageForStorage,
             IdempotencyKey = normalizedIdempotencyKey,
             Confidence = null,
             CitationsJson = null,
@@ -251,10 +254,10 @@ public sealed class AiChatService(
         {
             var grounding = await BuildGroundingSnapshotAsync(normalizedMessage, cancellationToken);
             var structuredResponse = await structuredResponseBuilder.BuildAsync(
-                normalizedMessage,
+                sanitizedMessageForProvider,
                 grounding,
                 cancellationToken);
-            var aiPrompt = BuildAiPrompt(normalizedMessage, grounding);
+            var aiPrompt = BuildAiPrompt(sanitizedMessageForProvider, grounding);
             var aiIdempotencyKey = BuildAiInsightIdempotencyKey(conversation.Id, normalizedIdempotencyKey);
             var insight = await aiInsightService.GenerateInsightAsync(
                 userId,
@@ -270,10 +273,11 @@ public sealed class AiChatService(
                 Role = AiConversationMessageRole.Assistant,
                 Status = AiConversationMessageStatus.Succeeded,
                 UsageType = usageType,
-                Content = ResolveAssistantContent(
-                    grounding,
-                    insight.Insight,
-                    structuredResponse.CompanionContent),
+                Content = aiPrivacyGovernanceService.RedactForStorage(
+                    ResolveAssistantContent(
+                        grounding,
+                        insight.Insight,
+                        structuredResponse.CompanionContent)),
                 IdempotencyKey = normalizedIdempotencyKey,
                 Confidence = grounding.Confidence,
                 CitationsJson = SerializeCitations(grounding.Citations),
@@ -332,7 +336,7 @@ public sealed class AiChatService(
                 CreatedAtUtc = DateTimeOffset.UtcNow,
                 CompletedAtUtc = DateTimeOffset.UtcNow,
                 ErrorCode = "invalid_operation",
-                ErrorMessage = exception.Message,
+                ErrorMessage = aiPrivacyGovernanceService.RedactForStorage(exception.Message),
                 Conversation = conversation,
                 User = userMessage.User
             };

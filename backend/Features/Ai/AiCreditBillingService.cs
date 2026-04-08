@@ -12,9 +12,10 @@ public sealed class AiCreditBillingService(
 {
     public async Task<AiWalletResponse> GetWalletAsync(Guid userId, CancellationToken cancellationToken)
     {
+        var context = await ResolveUserShopContextAsync(userId, cancellationToken);
         var wallet = await dbContext.AiCreditWallets
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken);
+            .FirstOrDefaultAsync(x => x.ShopId == context.ShopId, cancellationToken);
 
         if (wallet is null)
         {
@@ -39,6 +40,24 @@ public sealed class AiCreditBillingService(
         string? description,
         CancellationToken cancellationToken)
     {
+        var context = await ResolveUserShopContextAsync(userId, cancellationToken);
+        return await AddCreditsToShopAsync(
+            context.ShopId,
+            context.User.Id,
+            credits,
+            reference,
+            description,
+            cancellationToken);
+    }
+
+    public async Task<AiWalletResponse> AddCreditsToShopAsync(
+        Guid shopId,
+        Guid initiatedByUserId,
+        decimal credits,
+        string reference,
+        string? description,
+        CancellationToken cancellationToken)
+    {
         var normalizedCredits = RoundCredits(credits);
         if (normalizedCredits <= 0m)
         {
@@ -55,11 +74,14 @@ public sealed class AiCreditBillingService(
             IsolationLevel.Serializable,
             cancellationToken);
         var now = DateTimeOffset.UtcNow;
-        var wallet = await GetOrCreateWalletForUpdateAsync(userId, cancellationToken);
+        var wallet = await GetOrCreateWalletForShopForUpdateAsync(
+            shopId,
+            initiatedByUserId,
+            cancellationToken);
 
         var duplicateReferenceExists = await dbContext.AiCreditLedgerEntries
             .AnyAsync(
-                x => x.UserId == userId &&
+                x => x.ShopId == shopId &&
                      x.EntryType == AiCreditLedgerEntryType.Purchase &&
                      x.Reference == normalizedReference,
                 cancellationToken);
@@ -83,7 +105,8 @@ public sealed class AiCreditBillingService(
 
         dbContext.AiCreditLedgerEntries.Add(new AiCreditLedgerEntry
         {
-            UserId = userId,
+            UserId = initiatedByUserId,
+            ShopId = shopId,
             WalletId = wallet.Id,
             EntryType = AiCreditLedgerEntryType.Purchase,
             DeltaCredits = normalizedCredits,
@@ -92,7 +115,7 @@ public sealed class AiCreditBillingService(
             Description = descriptionValue,
             CreatedAtUtc = now,
             Wallet = wallet,
-            User = await GetUserForEntryAsync(userId, cancellationToken)
+            User = await GetUserAsync(initiatedByUserId, cancellationToken)
         });
         auditLogService.Queue(
             action: "ai_wallet_top_up",
@@ -101,6 +124,8 @@ public sealed class AiCreditBillingService(
             before: new { available_credits = beforeBalance },
             after: new
             {
+                shop_id = shopId,
+                initiated_by_user_id = initiatedByUserId,
                 available_credits = wallet.AvailableCredits,
                 delta_credits = normalizedCredits,
                 reference = normalizedReference,
@@ -123,6 +148,7 @@ public sealed class AiCreditBillingService(
         decimal reserveCredits,
         CancellationToken cancellationToken)
     {
+        var context = await ResolveUserShopContextAsync(userId, cancellationToken);
         var normalizedReserve = RoundCredits(reserveCredits);
         if (normalizedReserve <= 0m)
         {
@@ -133,7 +159,10 @@ public sealed class AiCreditBillingService(
             IsolationLevel.Serializable,
             cancellationToken);
         var now = DateTimeOffset.UtcNow;
-        var wallet = await GetOrCreateWalletForUpdateAsync(userId, cancellationToken);
+        var wallet = await GetOrCreateWalletForShopForUpdateAsync(
+            context.ShopId,
+            context.User.Id,
+            cancellationToken);
 
         AiCreditLedgerEntry? existingReserveEntry;
         if (dbContext.Database.IsSqlite())
@@ -173,7 +202,8 @@ public sealed class AiCreditBillingService(
         wallet.UpdatedAtUtc = now;
         dbContext.AiCreditLedgerEntries.Add(new AiCreditLedgerEntry
         {
-            UserId = userId,
+            UserId = context.User.Id,
+            ShopId = context.ShopId,
             WalletId = wallet.Id,
             AiInsightRequestId = requestId,
             EntryType = AiCreditLedgerEntryType.Reserve,
@@ -182,7 +212,7 @@ public sealed class AiCreditBillingService(
             Description = "ai_reserve",
             CreatedAtUtc = now,
             Wallet = wallet,
-            User = await GetUserForEntryAsync(userId, cancellationToken)
+            User = context.User
         });
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -198,6 +228,7 @@ public sealed class AiCreditBillingService(
         decimal chargedCredits,
         CancellationToken cancellationToken)
     {
+        var context = await ResolveUserShopContextAsync(userId, cancellationToken);
         var normalizedReserved = Math.Max(0m, RoundCredits(reservedCredits));
         var normalizedCharge = Math.Max(0m, RoundCredits(chargedCredits));
         var normalizedRefund = normalizedReserved > normalizedCharge
@@ -211,7 +242,10 @@ public sealed class AiCreditBillingService(
             IsolationLevel.Serializable,
             cancellationToken);
         var now = DateTimeOffset.UtcNow;
-        var wallet = await GetOrCreateWalletForUpdateAsync(userId, cancellationToken);
+        var wallet = await GetOrCreateWalletForShopForUpdateAsync(
+            context.ShopId,
+            context.User.Id,
+            cancellationToken);
 
         var existingCharge = await dbContext.AiCreditLedgerEntries
             .AnyAsync(
@@ -241,14 +275,14 @@ public sealed class AiCreditBillingService(
         }
 
         var runningBalance = wallet.AvailableCredits;
-        var user = await GetUserForEntryAsync(userId, cancellationToken);
 
         if (normalizedRefund > 0m)
         {
             runningBalance = RoundCredits(runningBalance + normalizedRefund);
             dbContext.AiCreditLedgerEntries.Add(new AiCreditLedgerEntry
             {
-                UserId = userId,
+                UserId = context.User.Id,
+                ShopId = context.ShopId,
                 WalletId = wallet.Id,
                 AiInsightRequestId = requestId,
                 EntryType = AiCreditLedgerEntryType.Refund,
@@ -257,7 +291,7 @@ public sealed class AiCreditBillingService(
                 Description = "ai_reserve_refund",
                 CreatedAtUtc = now,
                 Wallet = wallet,
-                User = user
+                User = context.User
             });
         }
 
@@ -270,7 +304,8 @@ public sealed class AiCreditBillingService(
 
             dbContext.AiCreditLedgerEntries.Add(new AiCreditLedgerEntry
             {
-                UserId = userId,
+                UserId = context.User.Id,
+                ShopId = context.ShopId,
                 WalletId = wallet.Id,
                 AiInsightRequestId = requestId,
                 EntryType = AiCreditLedgerEntryType.Charge,
@@ -280,7 +315,7 @@ public sealed class AiCreditBillingService(
                 MetadataJson = $$"""{"charged_credits":{{normalizedCharge}},"overage_credits":{{overageCharge}}}""",
                 CreatedAtUtc = now,
                 Wallet = wallet,
-                User = user
+                User = context.User
             });
         }
 
@@ -303,6 +338,7 @@ public sealed class AiCreditBillingService(
         string reason,
         CancellationToken cancellationToken)
     {
+        var context = await ResolveUserShopContextAsync(userId, cancellationToken);
         var normalizedReserve = Math.Max(0m, RoundCredits(reservedCredits));
         if (normalizedReserve <= 0m)
         {
@@ -313,7 +349,10 @@ public sealed class AiCreditBillingService(
             IsolationLevel.Serializable,
             cancellationToken);
         var now = DateTimeOffset.UtcNow;
-        var wallet = await GetOrCreateWalletForUpdateAsync(userId, cancellationToken);
+        var wallet = await GetOrCreateWalletForShopForUpdateAsync(
+            context.ShopId,
+            context.User.Id,
+            cancellationToken);
 
         var existingRefund = await dbContext.AiCreditLedgerEntries
             .AnyAsync(
@@ -328,7 +367,8 @@ public sealed class AiCreditBillingService(
 
             dbContext.AiCreditLedgerEntries.Add(new AiCreditLedgerEntry
             {
-                UserId = userId,
+                UserId = context.User.Id,
+                ShopId = context.ShopId,
                 WalletId = wallet.Id,
                 AiInsightRequestId = requestId,
                 EntryType = AiCreditLedgerEntryType.Refund,
@@ -337,7 +377,7 @@ public sealed class AiCreditBillingService(
                 Description = string.IsNullOrWhiteSpace(reason) ? "ai_refund" : reason.Trim(),
                 CreatedAtUtc = now,
                 Wallet = wallet,
-                User = await GetUserForEntryAsync(userId, cancellationToken)
+                User = context.User
             });
         }
 
@@ -353,6 +393,24 @@ public sealed class AiCreditBillingService(
 
     public async Task<AiWalletAdjustmentResult> AdjustCreditsAsync(
         Guid userId,
+        decimal deltaCredits,
+        string reference,
+        string? reason,
+        CancellationToken cancellationToken)
+    {
+        var context = await ResolveUserShopContextAsync(userId, cancellationToken);
+        return await AdjustCreditsForShopAsync(
+            context.ShopId,
+            context.User.Id,
+            deltaCredits,
+            reference,
+            reason,
+            cancellationToken);
+    }
+
+    public async Task<AiWalletAdjustmentResult> AdjustCreditsForShopAsync(
+        Guid shopId,
+        Guid initiatedByUserId,
         decimal deltaCredits,
         string reference,
         string? reason,
@@ -374,11 +432,14 @@ public sealed class AiCreditBillingService(
             IsolationLevel.Serializable,
             cancellationToken);
         var now = DateTimeOffset.UtcNow;
-        var wallet = await GetOrCreateWalletForUpdateAsync(userId, cancellationToken);
+        var wallet = await GetOrCreateWalletForShopForUpdateAsync(
+            shopId,
+            initiatedByUserId,
+            cancellationToken);
 
         var duplicateReferenceExists = await dbContext.AiCreditLedgerEntries
             .AnyAsync(
-                x => x.UserId == userId &&
+                x => x.ShopId == shopId &&
                      x.EntryType == AiCreditLedgerEntryType.Adjustment &&
                      x.Reference == normalizedReference,
                 cancellationToken);
@@ -408,7 +469,8 @@ public sealed class AiCreditBillingService(
 
         dbContext.AiCreditLedgerEntries.Add(new AiCreditLedgerEntry
         {
-            UserId = userId,
+            UserId = initiatedByUserId,
+            ShopId = shopId,
             WalletId = wallet.Id,
             EntryType = AiCreditLedgerEntryType.Adjustment,
             DeltaCredits = normalizedDelta,
@@ -417,7 +479,7 @@ public sealed class AiCreditBillingService(
             Description = descriptionValue,
             CreatedAtUtc = now,
             Wallet = wallet,
-            User = await GetUserForEntryAsync(userId, cancellationToken)
+            User = await GetUserAsync(initiatedByUserId, cancellationToken)
         });
         auditLogService.Queue(
             action: "ai_wallet_adjustment",
@@ -426,6 +488,8 @@ public sealed class AiCreditBillingService(
             before: new { available_credits = beforeBalance },
             after: new
             {
+                shop_id = shopId,
+                initiated_by_user_id = initiatedByUserId,
                 available_credits = wallet.AvailableCredits,
                 delta_credits = normalizedDelta,
                 reference = normalizedReference,
@@ -442,10 +506,13 @@ public sealed class AiCreditBillingService(
             wallet.UpdatedAtUtc);
     }
 
-    private async Task<AiCreditWallet> GetOrCreateWalletForUpdateAsync(Guid userId, CancellationToken cancellationToken)
+    private async Task<AiCreditWallet> GetOrCreateWalletForShopForUpdateAsync(
+        Guid shopId,
+        Guid defaultUserId,
+        CancellationToken cancellationToken)
     {
         var wallet = await dbContext.AiCreditWallets
-            .FirstOrDefaultAsync(x => x.UserId == userId, cancellationToken);
+            .FirstOrDefaultAsync(x => x.ShopId == shopId, cancellationToken);
 
         if (wallet is not null)
         {
@@ -453,13 +520,12 @@ public sealed class AiCreditBillingService(
             return wallet;
         }
 
-        var user = await dbContext.Users
-            .FirstOrDefaultAsync(x => x.Id == userId, cancellationToken)
-            ?? throw new InvalidOperationException("User account was not found.");
+        var user = await GetUserAsync(defaultUserId, cancellationToken);
 
         wallet = new AiCreditWallet
         {
-            UserId = userId,
+            UserId = defaultUserId,
+            ShopId = shopId,
             AvailableCredits = 0m,
             CreatedAtUtc = DateTimeOffset.UtcNow,
             UpdatedAtUtc = DateTimeOffset.UtcNow,
@@ -470,6 +536,30 @@ public sealed class AiCreditBillingService(
         await dbContext.SaveChangesAsync(cancellationToken);
         await LockWalletRowAsync(wallet.Id, cancellationToken);
         return wallet;
+    }
+
+    private async Task<ShopActorContext> ResolveUserShopContextAsync(
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var user = await dbContext.Users
+            .FirstOrDefaultAsync(x => x.Id == userId, cancellationToken)
+            ?? throw new InvalidOperationException("User account was not found.");
+
+        if (!user.StoreId.HasValue || user.StoreId == Guid.Empty)
+        {
+            throw new InvalidOperationException(
+                "AI billing is unavailable because this account is not mapped to a shop. Contact support.");
+        }
+
+        return new ShopActorContext(user, user.StoreId.Value);
+    }
+
+    private async Task<AppUser> GetUserAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        return await dbContext.Users
+            .FirstOrDefaultAsync(x => x.Id == userId, cancellationToken)
+            ?? throw new InvalidOperationException("User account was not found.");
     }
 
     private async Task LockWalletRowAsync(Guid walletId, CancellationToken cancellationToken)
@@ -485,17 +575,14 @@ public sealed class AiCreditBillingService(
             cancellationToken);
     }
 
-    private async Task<AppUser> GetUserForEntryAsync(Guid userId, CancellationToken cancellationToken)
-    {
-        return await dbContext.Users
-            .FirstOrDefaultAsync(x => x.Id == userId, cancellationToken)
-            ?? throw new InvalidOperationException("User account was not found.");
-    }
-
     private static decimal RoundCredits(decimal credits)
     {
         return decimal.Round(credits, 2, MidpointRounding.AwayFromZero);
     }
+
+    private readonly record struct ShopActorContext(
+        AppUser User,
+        Guid ShopId);
 }
 
 public readonly record struct AiCreditReservationResult(

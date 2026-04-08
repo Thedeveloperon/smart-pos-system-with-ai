@@ -12,6 +12,7 @@ using SmartPos.Backend.Features.Licensing;
 using SmartPos.Backend.Features.Products;
 using SmartPos.Backend.Features.Purchases;
 using SmartPos.Backend.Features.Reports;
+using SmartPos.Backend.Features.Recovery;
 using SmartPos.Backend.Features.Reminders;
 using SmartPos.Backend.Features.Receipts;
 using SmartPos.Backend.Features.Refunds;
@@ -57,6 +58,10 @@ builder.Services.Configure<LicenseOptions>(
     builder.Configuration.GetSection(LicenseOptions.SectionName));
 builder.Services.Configure<AuthSecurityOptions>(
     builder.Configuration.GetSection(AuthSecurityOptions.SectionName));
+builder.Services.Configure<RecoveryOpsOptions>(
+    builder.Configuration.GetSection(RecoveryOpsOptions.SectionName));
+builder.Services.Configure<CloudApiCompatibilityOptions>(
+    builder.Configuration.GetSection(CloudApiCompatibilityOptions.SectionName));
 
 ValidateAiProviderPolicy(builder.Configuration, builder.Environment);
 
@@ -156,6 +161,7 @@ static bool IsOpenAiProvider(string provider)
 }
 
 builder.Services.AddSingleton(jwtOptions);
+builder.Services.AddSingleton<IOpsAlertPublisher, WebhookOpsAlertPublisher>();
 builder.Services.AddSingleton<LicensingMetrics>();
 builder.Services.AddSingleton<LicensingAlertMonitor>();
 builder.Services.AddSingleton<ILicensingAlertMonitor>(
@@ -164,7 +170,19 @@ builder.Services.AddHostedService(
     serviceProvider => serviceProvider.GetRequiredService<LicensingAlertMonitor>());
 builder.Services.AddHostedService<LicenseTokenSessionCleanupService>();
 builder.Services.AddHostedService<BillingStateReconciliationService>();
+builder.Services.AddSingleton<AiAuthorizationReconciliationService>();
+builder.Services.AddHostedService(
+    serviceProvider => serviceProvider.GetRequiredService<AiAuthorizationReconciliationService>());
+builder.Services.AddSingleton<AiPrivacyRetentionCleanupService>();
+builder.Services.AddHostedService(
+    serviceProvider => serviceProvider.GetRequiredService<AiPrivacyRetentionCleanupService>());
 builder.Services.AddHostedService<ReminderSchedulerService>();
+builder.Services.AddSingleton<RecoverySchedulerService>();
+builder.Services.AddHostedService(
+    serviceProvider => serviceProvider.GetRequiredService<RecoverySchedulerService>());
+builder.Services.AddSingleton<RecoveryDrillAlertService>();
+builder.Services.AddHostedService(
+    serviceProvider => serviceProvider.GetRequiredService<RecoveryDrillAlertService>());
 builder.Services.AddHttpContextAccessor();
 var corsFromArray = builder.Configuration
     .GetSection("Cors:AllowedOrigins")
@@ -290,9 +308,12 @@ builder.Services.AddScoped<SyncEventsProcessor>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<AuditLogService>();
 builder.Services.AddScoped<LicenseService>();
+builder.Services.AddScoped<LicensingMigrationDryRunService>();
+builder.Services.AddScoped<RecoveryOpsService>();
 builder.Services.AddScoped<DeviceActionProofService>();
 builder.Services.AddScoped<AiCreditBillingService>();
 builder.Services.AddScoped<AiCreditPaymentService>();
+builder.Services.AddScoped<AiPrivacyGovernanceService>();
 builder.Services.AddScoped<AiChatIntentClassifier>();
 builder.Services.AddScoped<AiChatEntityResolver>();
 builder.Services.AddScoped<AiChatUnsupportedResponseBuilder>();
@@ -309,6 +330,8 @@ builder.Services.AddScoped<ReminderService>();
 builder.Services.AddHttpClient<AiSuggestionService>();
 builder.Services.AddHttpClient<AiInsightService>();
 builder.Services.AddHttpClient("openai-ocr");
+builder.Services.AddHttpClient("stripe-billing");
+builder.Services.AddHttpClient("ops-alert-delivery");
 builder.Services.AddSingleton<BasicTextOcrProvider>();
 builder.Services.AddSingleton<TesseractOcrProvider>();
 builder.Services.AddSingleton<OpenAiVisionOcrProvider>();
@@ -486,6 +509,7 @@ using (var scope = app.Services.CreateScope())
     await DbSchemaUpdater.EnsureLicensingSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureAuthSecuritySchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureAiInsightsSchemaAsync(dbContext);
+    await DbSchemaUpdater.EnsureCloudApiReliabilitySchemaAsync(dbContext);
     await DbSeeder.SeedAsync(dbContext);
 }
 
@@ -497,7 +521,11 @@ if (staticFilesAvailable)
 
 app.UseCors("frontend");
 app.UseMiddleware<ProvisioningRateLimitMiddleware>();
+app.UseMiddleware<CloudApiVersionCompatibilityMiddleware>();
+app.UseMiddleware<CloudWriteReliabilityMiddleware>();
+app.UseMiddleware<CloudLegacyApiDeprecationMiddleware>();
 app.UseAuthentication();
+app.UseMiddleware<AuthSessionRevocationMiddleware>();
 app.UseMiddleware<LicenseEnforcementMiddleware>();
 app.UseMiddleware<DeviceActionProofMiddleware>();
 app.UseAuthorization();
@@ -532,6 +560,8 @@ if (!staticIndexFileAvailable)
 
 app.MapAuthEndpoints();
 app.MapLicensingEndpoints();
+app.MapCloudV1Endpoints();
+app.MapRecoveryEndpoints();
 app.MapDeviceActionProofEndpoints();
 app.MapAiSuggestionEndpoints();
 app.MapAiChatEndpoints();

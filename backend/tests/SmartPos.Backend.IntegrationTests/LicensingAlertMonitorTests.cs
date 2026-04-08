@@ -97,6 +97,41 @@ public sealed class LicensingAlertMonitorTests
             message => message.Contains("Security anomaly spike detected", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task EvaluateAndEmitAlerts_WhenSpikeDetected_ShouldPublishOpsAlert()
+    {
+        var sink = new LogSink();
+        using var loggerFactory = LoggerFactory.Create(builder => builder.AddProvider(new SinkLoggerProvider(sink)));
+        var publisher = new CapturingOpsAlertPublisher();
+
+        var monitor = new LicensingAlertMonitor(
+            Options.Create(new LicenseOptions
+            {
+                Alerts = new LicenseAlertOptions
+                {
+                    Enabled = true,
+                    LicenseValidationSpikeThreshold = 2,
+                    WebhookFailureThreshold = 99,
+                    SecurityAnomalyThreshold = 99,
+                    WindowMinutes = 10,
+                    CooldownMinutes = 1,
+                    EvaluationIntervalSeconds = 30
+                }
+            }),
+            loggerFactory.CreateLogger<LicensingAlertMonitor>(),
+            publisher);
+
+        monitor.RecordLicenseValidationFailure("INVALID_LICENSE_TOKEN");
+        monitor.RecordLicenseValidationFailure("DEVICE_MISMATCH");
+        monitor.EvaluateAndEmitAlerts();
+
+        await Task.Delay(50);
+
+        Assert.Contains(
+            publisher.Messages,
+            message => string.Equals(message.Category, "licensing.validation_spike", StringComparison.Ordinal));
+    }
+
     private sealed class LogSink
     {
         private readonly List<string> warningMessages = [];
@@ -156,6 +191,21 @@ public sealed class LicensingAlertMonitorTests
 
         public void Dispose()
         {
+        }
+    }
+
+    private sealed class CapturingOpsAlertPublisher : IOpsAlertPublisher
+    {
+        private readonly List<OpsAlertMessage> messages = [];
+
+        public bool IsEnabled => true;
+
+        public IReadOnlyList<OpsAlertMessage> Messages => messages;
+
+        public Task PublishAsync(OpsAlertMessage message, CancellationToken cancellationToken)
+        {
+            messages.Add(message);
+            return Task.CompletedTask;
         }
     }
 }

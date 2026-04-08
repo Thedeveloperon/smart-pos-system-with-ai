@@ -10,6 +10,9 @@ public sealed class ProvisionActivateRequest
     [JsonPropertyName("device_name")]
     public string? DeviceName { get; set; }
 
+    [JsonPropertyName("branch_code")]
+    public string? BranchCode { get; set; }
+
     [JsonPropertyName("actor")]
     public string? Actor { get; set; }
 
@@ -409,6 +412,9 @@ public sealed class LicenseStatusResponse
     [JsonPropertyName("device_code")]
     public string DeviceCode { get; set; } = string.Empty;
 
+    [JsonPropertyName("branch_code")]
+    public string? BranchCode { get; set; }
+
     [JsonPropertyName("subscription_status")]
     public string? SubscriptionStatus { get; set; }
 
@@ -441,6 +447,12 @@ public sealed class LicenseStatusResponse
 
     [JsonPropertyName("offline_max_refund_operations")]
     public int? OfflineMaxRefundOperations { get; set; }
+
+    [JsonPropertyName("policy_snapshot_token")]
+    public string? PolicySnapshotToken { get; set; }
+
+    [JsonPropertyName("policy_snapshot_expires_at")]
+    public DateTimeOffset? PolicySnapshotExpiresAt { get; set; }
 
     [JsonPropertyName("device_key_fingerprint")]
     public string? DeviceKeyFingerprint { get; set; }
@@ -507,6 +519,9 @@ public sealed class CustomerLicensePortalDeviceRow
 
     [JsonPropertyName("device_name")]
     public string DeviceName { get; set; } = string.Empty;
+
+    [JsonPropertyName("branch_code")]
+    public string BranchCode { get; set; } = string.Empty;
 
     [JsonPropertyName("device_status")]
     public string DeviceStatus { get; set; } = "active";
@@ -619,6 +634,9 @@ public sealed class AdminDeviceSeatRow
     [JsonPropertyName("device_name")]
     public string DeviceName { get; set; } = string.Empty;
 
+    [JsonPropertyName("branch_code")]
+    public string BranchCode { get; set; } = string.Empty;
+
     [JsonPropertyName("device_status")]
     public string DeviceStatus { get; set; } = "active";
 
@@ -679,6 +697,9 @@ public sealed class AdminDeviceSeatTransferRequest
     [JsonPropertyName("target_shop_code")]
     public string? TargetShopCode { get; set; }
 
+    [JsonPropertyName("target_branch_code")]
+    public string? TargetBranchCode { get; set; }
+
     [JsonPropertyName("actor")]
     public string? Actor { get; set; }
 
@@ -733,11 +754,17 @@ public sealed class AdminDeviceSeatTransferResponse
     [JsonPropertyName("source_shop_code")]
     public string SourceShopCode { get; set; } = string.Empty;
 
+    [JsonPropertyName("source_branch_code")]
+    public string SourceBranchCode { get; set; } = string.Empty;
+
     [JsonPropertyName("target_shop_id")]
     public Guid TargetShopId { get; set; }
 
     [JsonPropertyName("target_shop_code")]
     public string TargetShopCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("target_branch_code")]
+    public string TargetBranchCode { get; set; } = string.Empty;
 
     [JsonPropertyName("status")]
     public string Status { get; set; } = "active";
@@ -750,6 +777,99 @@ public sealed class AdminDeviceSeatTransferResponse
 
     [JsonPropertyName("grace_until")]
     public DateTimeOffset? GraceUntil { get; set; }
+
+    [JsonPropertyName("processed_at")]
+    public DateTimeOffset ProcessedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class AdminBranchSeatAllocationListResponse
+{
+    [JsonPropertyName("generated_at")]
+    public DateTimeOffset GeneratedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("shop_id")]
+    public Guid ShopId { get; set; }
+
+    [JsonPropertyName("shop_code")]
+    public string ShopCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("seat_limit")]
+    public int SeatLimit { get; set; }
+
+    [JsonPropertyName("active_seats")]
+    public int ActiveSeats { get; set; }
+
+    [JsonPropertyName("total_allocated_seats")]
+    public int TotalAllocatedSeats { get; set; }
+
+    [JsonPropertyName("items")]
+    public List<AdminBranchSeatAllocationRow> Items { get; set; } = [];
+}
+
+public sealed class AdminBranchSeatAllocationRow
+{
+    [JsonPropertyName("branch_code")]
+    public string BranchCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("seat_quota")]
+    public int SeatQuota { get; set; }
+
+    [JsonPropertyName("is_active")]
+    public bool IsActive { get; set; } = true;
+
+    [JsonPropertyName("active_seats")]
+    public int ActiveSeats { get; set; }
+
+    [JsonPropertyName("available_seats")]
+    public int AvailableSeats { get; set; }
+
+    [JsonPropertyName("is_default_branch")]
+    public bool IsDefaultBranch { get; set; }
+
+    [JsonPropertyName("updated_at")]
+    public DateTimeOffset? UpdatedAt { get; set; }
+}
+
+public sealed class AdminBranchSeatAllocationUpsertRequest
+{
+    [JsonPropertyName("seat_quota")]
+    public int SeatQuota { get; set; }
+
+    [JsonPropertyName("is_active")]
+    public bool IsActive { get; set; } = true;
+
+    [JsonPropertyName("actor")]
+    public string? Actor { get; set; }
+
+    [JsonPropertyName("reason_code")]
+    public string? ReasonCode { get; set; }
+
+    [JsonPropertyName("actor_note")]
+    public string? ActorNote { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+}
+
+public sealed class AdminBranchSeatAllocationUpsertResponse
+{
+    [JsonPropertyName("shop_id")]
+    public Guid ShopId { get; set; }
+
+    [JsonPropertyName("shop_code")]
+    public string ShopCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("seat_limit")]
+    public int SeatLimit { get; set; }
+
+    [JsonPropertyName("total_allocated_seats")]
+    public int TotalAllocatedSeats { get; set; }
+
+    [JsonPropertyName("active_seats")]
+    public int ActiveSeats { get; set; }
+
+    [JsonPropertyName("item")]
+    public AdminBranchSeatAllocationRow Item { get; set; } = new();
 
     [JsonPropertyName("processed_at")]
     public DateTimeOffset ProcessedAt { get; set; } = DateTimeOffset.UtcNow;
@@ -988,14 +1108,14 @@ public sealed class MarketingPaymentRequestCreateRequest
     [JsonPropertyName("notes")]
     public string? Notes { get; set; }
 
-    [JsonPropertyName("target_username")]
-    public string? TargetUsername { get; set; }
+    [JsonPropertyName("owner_username")]
+    public string? OwnerUsername { get; set; }
 
-    [JsonPropertyName("ai_package_code")]
-    public string? AiPackageCode { get; set; }
+    [JsonPropertyName("owner_full_name")]
+    public string? OwnerFullName { get; set; }
 
-    [JsonPropertyName("ai_credits_requested")]
-    public decimal? AiCreditsRequested { get; set; }
+    [JsonPropertyName("owner_password")]
+    public string? OwnerPassword { get; set; }
 }
 
 public sealed class MarketingPaymentInstructionsResponse
@@ -1069,8 +1189,98 @@ public sealed class MarketingPaymentRequestCreateResponse
     [JsonPropertyName("next_step")]
     public string NextStep { get; set; } = "await_customer_payment";
 
+    [JsonPropertyName("owner_username")]
+    public string? OwnerUsername { get; set; }
+
+    [JsonPropertyName("owner_account_state")]
+    public string? OwnerAccountState { get; set; }
+
     [JsonPropertyName("ai_credit_order")]
     public MarketingAiCreditOrderSummaryResponse? AiCreditOrder { get; set; }
+}
+
+public sealed class MarketingStripeCheckoutSessionResponse
+{
+    [JsonPropertyName("created_at")]
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("shop_code")]
+    public string ShopCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("shop_name")]
+    public string ShopName { get; set; } = string.Empty;
+
+    [JsonPropertyName("marketing_plan_code")]
+    public string MarketingPlanCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("internal_plan_code")]
+    public string InternalPlanCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("amount_due")]
+    public decimal AmountDue { get; set; }
+
+    [JsonPropertyName("currency")]
+    public string Currency { get; set; } = "USD";
+
+    [JsonPropertyName("invoice")]
+    public MarketingPaymentInvoiceResponse Invoice { get; set; } = new();
+
+    [JsonPropertyName("owner_username")]
+    public string? OwnerUsername { get; set; }
+
+    [JsonPropertyName("owner_account_state")]
+    public string? OwnerAccountState { get; set; }
+
+    [JsonPropertyName("checkout_session_id")]
+    public string CheckoutSessionId { get; set; } = string.Empty;
+
+    [JsonPropertyName("checkout_url")]
+    public string CheckoutUrl { get; set; } = string.Empty;
+
+    [JsonPropertyName("expires_at")]
+    public DateTimeOffset? ExpiresAt { get; set; }
+}
+
+public sealed class MarketingStripeCheckoutSessionStatusResponse
+{
+    [JsonPropertyName("generated_at")]
+    public DateTimeOffset GeneratedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("checkout_session_id")]
+    public string CheckoutSessionId { get; set; } = string.Empty;
+
+    [JsonPropertyName("checkout_status")]
+    public string CheckoutStatus { get; set; } = "open";
+
+    [JsonPropertyName("checkout_payment_status")]
+    public string CheckoutPaymentStatus { get; set; } = "unpaid";
+
+    [JsonPropertyName("shop_code")]
+    public string? ShopCode { get; set; }
+
+    [JsonPropertyName("shop_name")]
+    public string? ShopName { get; set; }
+
+    [JsonPropertyName("invoice")]
+    public MarketingPaymentInvoiceResponse? Invoice { get; set; }
+
+    [JsonPropertyName("payment_status")]
+    public string? PaymentStatus { get; set; }
+
+    [JsonPropertyName("subscription_id")]
+    public string? SubscriptionId { get; set; }
+
+    [JsonPropertyName("subscription_status")]
+    public string? SubscriptionStatus { get; set; }
+
+    [JsonPropertyName("plan")]
+    public string? Plan { get; set; }
+
+    [JsonPropertyName("access_ready")]
+    public bool AccessReady { get; set; }
+
+    [JsonPropertyName("stripe_event_hint")]
+    public string? StripeEventHint { get; set; }
 }
 
 public sealed class MarketingPaymentSubmissionRequest
@@ -1777,8 +1987,14 @@ public sealed class AdminBillingStateReconciliationWebhookFailureRow
     [JsonPropertyName("last_error_code")]
     public string? LastErrorCode { get; set; }
 
+    [JsonPropertyName("failure_count")]
+    public int FailureCount { get; set; }
+
     [JsonPropertyName("received_at")]
     public DateTimeOffset ReceivedAt { get; set; }
+
+    [JsonPropertyName("dead_lettered_at")]
+    public DateTimeOffset? DeadLetteredAt { get; set; }
 
     [JsonPropertyName("updated_at")]
     public DateTimeOffset? UpdatedAt { get; set; }
@@ -1827,6 +2043,11 @@ internal static class LicenseErrorCodes
     public const string OfflineGrantRequired = "OFFLINE_GRANT_REQUIRED";
     public const string OfflineGrantExpired = "OFFLINE_GRANT_EXPIRED";
     public const string OfflineGrantLimitExceeded = "OFFLINE_GRANT_LIMIT_EXCEEDED";
+    public const string PolicySnapshotRequired = "POLICY_SNAPSHOT_REQUIRED";
+    public const string PolicySnapshotInvalid = "POLICY_SNAPSHOT_INVALID";
+    public const string PolicySnapshotExpired = "POLICY_SNAPSHOT_EXPIRED";
+    public const string PolicySnapshotClockSkew = "POLICY_SNAPSHOT_CLOCK_SKEW";
+    public const string PolicySnapshotStale = "POLICY_SNAPSHOT_STALE";
     public const string ActivationEntitlementNotFound = "ACTIVATION_ENTITLEMENT_NOT_FOUND";
     public const string InvalidActivationEntitlement = "INVALID_ACTIVATION_ENTITLEMENT";
     public const string ActivationEntitlementExpired = "ACTIVATION_ENTITLEMENT_EXPIRED";

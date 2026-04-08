@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Features.Licensing;
+using SmartPos.Backend.Features.Recovery;
 using SmartPos.Backend.Features.Reports;
 using SmartPos.Backend.Infrastructure;
 
@@ -36,6 +37,10 @@ public sealed class SupportTriageReportTests(CustomWebApplicationFactory factory
         Assert.True(report.Alerts.ValidationFailuresInWindow >= 0);
         Assert.True(report.Alerts.WebhookFailuresInWindow >= 0);
         Assert.True(report.Alerts.SecurityAnomaliesInWindow >= 0);
+        Assert.True(report.Alerts.RecoveryDrillAlertsInWindow >= 0);
+        Assert.NotNull(report.Alerts.TopRecoveryDrillIssues);
+        Assert.NotNull(report.RecoveryDrill);
+        Assert.False(string.IsNullOrWhiteSpace(report.RecoveryDrill.Status));
         Assert.NotNull(report.RecentAuditEvents);
     }
 
@@ -113,5 +118,64 @@ public sealed class SupportTriageReportTests(CustomWebApplicationFactory factory
             report.RecentAuditEvents,
             x => x.Action == "sensitive_action_proof_failed" &&
                  string.Equals(x.SourceFingerprint, "fp-alpha", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task SupportTriageReport_Service_ShouldIncludeRecoveryDrillAlertsAndPanel()
+    {
+        var metricsFilePath = CreateMetricsFile(new
+        {
+            timestamp_utc = DateTimeOffset.UtcNow.AddDays(-10),
+            status = "success",
+            mode = "sqlite",
+            backup_file = "backups/daily/backup.tar.gz",
+            rto_seconds = 7200,
+            rpo_seconds = 43200
+        });
+
+        using var customFactory = new SupportTriageRecoveryFactory(metricsFilePath);
+        await using var scope = customFactory.Services.CreateAsyncScope();
+        var reportService = scope.ServiceProvider.GetRequiredService<ReportService>();
+        var recoveryDrillAlertService = scope.ServiceProvider.GetRequiredService<RecoveryDrillAlertService>();
+
+        await recoveryDrillAlertService.RunCheckAndAlertAsync(CancellationToken.None, forceAlertEmit: true);
+
+        var report = await reportService.GetSupportTriageReportAsync(30, CancellationToken.None);
+
+        Assert.Equal("degraded", report.RecoveryDrill.Status);
+        Assert.Contains("restore_drill_stale", report.RecoveryDrill.Issues);
+        Assert.True(report.Alerts.RecoveryDrillAlertsInWindow >= 1);
+        Assert.Contains(
+            report.Alerts.TopRecoveryDrillIssues,
+            x => string.Equals(x.Reason, "restore_drill_stale", StringComparison.Ordinal));
+        Assert.Contains(
+            report.RecentAuditEvents,
+            x => x.Action == "recovery_drill_alert_raised");
+    }
+
+    private static string CreateMetricsFile(object record)
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"smartpos-support-triage-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var metricsFilePath = Path.Combine(root, "restore_metrics.jsonl");
+        var line = JsonSerializer.Serialize(record);
+        File.WriteAllText(metricsFilePath, line + Environment.NewLine);
+        return metricsFilePath;
+    }
+
+    private sealed class SupportTriageRecoveryFactory(string metricsFilePath) : CustomWebApplicationFactory
+    {
+        protected override IReadOnlyDictionary<string, string?> GetAdditionalConfigurationOverrides()
+        {
+            return new Dictionary<string, string?>
+            {
+                ["RecoveryOps:MetricsFilePath"] = metricsFilePath,
+                ["RecoveryOps:MetricsAlertingEnabled"] = "false",
+                ["RecoveryOps:MetricsAlertCooldownMinutes"] = "1",
+                ["RecoveryOps:MaxRestoreDrillAgeHours"] = "168",
+                ["RecoveryOps:RestoreDrillTargetRtoSeconds"] = "3600",
+                ["RecoveryOps:RestoreDrillTargetRpoSeconds"] = "21600"
+            };
+        }
     }
 }

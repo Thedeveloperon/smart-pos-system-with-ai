@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo } from "react";
+import React, { createContext, useContext, useEffect, useMemo } from "react";
 import type { Locale } from "@/i18n/config";
 import type { MessageDictionary } from "@/i18n/messages";
 

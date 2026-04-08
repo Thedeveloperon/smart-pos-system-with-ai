@@ -184,6 +184,16 @@ public static class ReportEndpoints
         .WithName("GetSupportTriageReport")
         .WithOpenApi();
 
+        group.MapGet("/support-alert-catalog", async (
+            ReportService reportService,
+            CancellationToken cancellationToken) =>
+        {
+            var result = await reportService.GetSupportAlertCatalogAsync(cancellationToken);
+            return Results.Ok(result);
+        })
+        .WithName("GetSupportAlertCatalog")
+        .WithOpenApi();
+
         return app;
     }
 }

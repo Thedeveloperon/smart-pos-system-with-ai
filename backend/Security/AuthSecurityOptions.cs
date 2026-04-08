@@ -11,4 +11,10 @@ public sealed class AuthSecurityOptions
     public int ConcurrentDeviceWindowMinutes { get; set; } = 15;
     public int ConcurrentDeviceThreshold { get; set; } = 3;
     public int ConcurrentSourceThreshold { get; set; } = 2;
+    public bool EnableLoginLockout { get; set; } = true;
+    public int MaxFailedLoginAttempts { get; set; } = 5;
+    public int FailedLoginAttemptWindowMinutes { get; set; } = 15;
+    public int LockoutDurationMinutes { get; set; } = 15;
+    public int FailureThrottleDelayMilliseconds { get; set; } = 300;
+    public bool EnforceSessionRevocation { get; set; } = true;
 }

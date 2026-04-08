@@ -178,6 +178,23 @@ public static class DbSeeder
         var roleByCode = await dbContext.Roles
             .ToDictionaryAsync(x => x.Code.ToLowerInvariant(), cancellationToken);
 
+        var seedShop = await dbContext.Shops
+            .FirstOrDefaultAsync(
+                x => x.Code.ToLower() == "default",
+                cancellationToken);
+        if (seedShop is null)
+        {
+            seedShop = new Shop
+            {
+                Code = "default",
+                Name = "Default Shop",
+                IsActive = true,
+                CreatedAtUtc = DateTimeOffset.UtcNow
+            };
+            dbContext.Shops.Add(seedShop);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
         await EnsureSeedUserAsync(
             dbContext,
             roleByCode,
@@ -186,6 +203,7 @@ public static class DbSeeder
             password: "owner123",
             roleCode: SmartPosRoles.Owner,
             mfaSecret: null,
+            storeId: seedShop.Id,
             cancellationToken);
         await EnsureSeedUserAsync(
             dbContext,
@@ -195,6 +213,7 @@ public static class DbSeeder
             password: "manager123",
             roleCode: SmartPosRoles.Manager,
             mfaSecret: null,
+            storeId: seedShop.Id,
             cancellationToken);
         await EnsureSeedUserAsync(
             dbContext,
@@ -204,6 +223,7 @@ public static class DbSeeder
             password: "cashier123",
             roleCode: SmartPosRoles.Cashier,
             mfaSecret: null,
+            storeId: seedShop.Id,
             cancellationToken);
         await EnsureSeedUserAsync(
             dbContext,
@@ -213,6 +233,7 @@ public static class DbSeeder
             password: "support123",
             roleCode: SmartPosRoles.Support,
             mfaSecret: "support-admin-mfa-secret-2026",
+            storeId: seedShop.Id,
             cancellationToken);
         await EnsureSeedUserAsync(
             dbContext,
@@ -222,6 +243,7 @@ public static class DbSeeder
             password: "billing123",
             roleCode: SmartPosRoles.BillingAdmin,
             mfaSecret: "billing-admin-mfa-secret-2026",
+            storeId: seedShop.Id,
             cancellationToken);
         await EnsureSeedUserAsync(
             dbContext,
@@ -231,6 +253,7 @@ public static class DbSeeder
             password: "security123",
             roleCode: SmartPosRoles.SecurityAdmin,
             mfaSecret: "security-admin-mfa-secret-2026",
+            storeId: seedShop.Id,
             cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -244,6 +267,7 @@ public static class DbSeeder
         string password,
         string roleCode,
         string? mfaSecret,
+        Guid? storeId,
         CancellationToken cancellationToken)
     {
         var normalizedUsername = username.Trim().ToLowerInvariant();
@@ -258,6 +282,7 @@ public static class DbSeeder
                 FullName = fullName,
                 PasswordHash = string.Empty,
                 IsActive = true,
+                StoreId = storeId,
                 IsMfaEnabled = !string.IsNullOrWhiteSpace(mfaSecret),
                 MfaSecret = mfaSecret,
                 MfaConfiguredAtUtc = string.IsNullOrWhiteSpace(mfaSecret) ? null : DateTimeOffset.UtcNow
@@ -268,6 +293,11 @@ public static class DbSeeder
         }
         else
         {
+            if (storeId.HasValue && storeId.Value != Guid.Empty)
+            {
+                user.StoreId = storeId.Value;
+            }
+
             user.IsMfaEnabled = !string.IsNullOrWhiteSpace(mfaSecret);
             user.MfaSecret = mfaSecret;
             user.MfaConfiguredAtUtc = user.IsMfaEnabled

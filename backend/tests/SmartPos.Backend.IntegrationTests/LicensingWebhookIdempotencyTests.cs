@@ -83,4 +83,41 @@ public sealed class LicensingWebhookIdempotencyTests(CustomWebApplicationFactory
 
         Assert.Contains("event_id is required", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task HandleBillingWebhookAsync_ShouldDeadLetterEventAfterMaxFailures()
+    {
+        await using var scope = appFactory.Services.CreateAsyncScope();
+        var licenseService = scope.ServiceProvider.GetRequiredService<LicenseService>();
+        var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+
+        var eventId = $"evt-dead-letter-{Guid.NewGuid():N}";
+        var request = new BillingWebhookEventRequest
+        {
+            EventId = eventId,
+            EventType = "invoice.payment_failed",
+            Actor = "integration-tests"
+        };
+
+        await Assert.ThrowsAnyAsync<Exception>(
+            async () => await licenseService.HandleBillingWebhookAsync(request, CancellationToken.None));
+        await Assert.ThrowsAnyAsync<Exception>(
+            async () => await licenseService.HandleBillingWebhookAsync(request, CancellationToken.None));
+
+        var deadLetterResult = await licenseService.HandleBillingWebhookAsync(request, CancellationToken.None);
+        Assert.False(deadLetterResult.Handled);
+        Assert.Equal("dead_letter_event", deadLetterResult.Reason);
+
+        var persisted = await dbContext.BillingWebhookEvents
+            .AsNoTracking()
+            .SingleAsync(x => x.ProviderEventId == eventId);
+        Assert.Equal("dead_letter", persisted.Status);
+        Assert.Equal(3, persisted.FailureCount);
+        Assert.NotNull(persisted.DeadLetteredAtUtc);
+        Assert.Equal(LicenseErrorCodes.InvalidWebhook, persisted.LastErrorCode);
+
+        var retryAfterDeadLetter = await licenseService.HandleBillingWebhookAsync(request, CancellationToken.None);
+        Assert.False(retryAfterDeadLetter.Handled);
+        Assert.Equal("dead_letter_event", retryAfterDeadLetter.Reason);
+    }
 }

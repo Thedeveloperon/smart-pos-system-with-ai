@@ -31,6 +31,23 @@ const readKeyFromUrl = () => {
   return (params.get("activation_entitlement_key") || params.get("key") || "").trim();
 };
 
+const clearKeyFromUrl = () => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  if (!params.has("activation_entitlement_key") && !params.has("key")) {
+    return;
+  }
+
+  params.delete("activation_entitlement_key");
+  params.delete("key");
+  const nextQuery = params.toString();
+  const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}`;
+  window.history.replaceState({}, "", nextUrl);
+};
+
 const formatDateTime = (value?: string | null) => {
   if (!value) {
     return "-";
@@ -99,6 +116,10 @@ const LicenseAccessSuccess = () => {
 
     void load(activationKey);
   }, [activationKey, canLoad]);
+
+  useEffect(() => {
+    clearKeyFromUrl();
+  }, []);
 
   const copyActivationKey = async () => {
     const key = data?.activation_entitlement?.activation_entitlement_key?.trim() || activationKey.trim();

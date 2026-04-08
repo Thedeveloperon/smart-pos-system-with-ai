@@ -4,11 +4,19 @@ param(
     [string]$PackageOutputDir = "release/lanka-pos-win-x64",
     [string]$InstallerOutputDir = "release/installer",
     [string]$AppVersion = "1.0.0",
+    [string]$ReleaseChannel = "stable",
+    [string]$ReleaseNotesUrl = "",
+    [string]$ExpectedInstallerSha256 = "",
+    [string]$TrustManifestPath = "",
+    [string[]]$AllowedSignerThumbprints = @(),
     [string]$IsccPath,
+    [string]$SignTool,
     [switch]$SkipPackaging,
     [switch]$SkipNpmCi,
     [switch]$FrameworkDependent,
-    [switch]$NoZipPackage
+    [switch]$NoZipPackage,
+    [switch]$VerifyTrustChain,
+    [switch]$RequireAuthenticodeSignature
 )
 
 $ErrorActionPreference = "Stop"
@@ -70,6 +78,7 @@ function Resolve-IsccPath {
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $packageScript = Join-Path $repoRoot "scripts/package-client.ps1"
+$trustVerificationScript = Join-Path $repoRoot "scripts/verify-installer-trust-chain.ps1"
 $issFile = Join-Path $repoRoot "installer/SmartPOS.iss"
 $packageDir = Join-Path $repoRoot $PackageOutputDir
 $installerOutDir = Join-Path $repoRoot $InstallerOutputDir
@@ -117,8 +126,67 @@ $isccArgs = @(
     "/DInstallerOutputDir=$installerOutDir",
     $issFile
 )
+if (-not [string]::IsNullOrWhiteSpace($SignTool)) {
+    $isccArgs = @(
+        "/DSignTool=$SignTool"
+    ) + $isccArgs
+}
 
 Invoke-External -Label "Compiling Inno Setup installer" -Command $resolvedIscc -Arguments $isccArgs -WorkingDirectory $repoRoot
+
+if ($VerifyTrustChain) {
+    if (-not (Test-Path -LiteralPath $trustVerificationScript)) {
+        throw "Trust verification script not found: $trustVerificationScript"
+    }
+
+    $installerPath = Join-Path $installerOutDir "Lanka POS-Setup-$AppVersion.exe"
+    if (-not (Test-Path -LiteralPath $installerPath)) {
+        $latestInstaller = Get-ChildItem -Path $installerOutDir -Filter "*.exe" -File |
+            Sort-Object LastWriteTimeUtc -Descending |
+            Select-Object -First 1
+        if (-not $latestInstaller) {
+            throw "No installer executable was found in: $installerOutDir"
+        }
+
+        $installerPath = $latestInstaller.FullName
+    }
+
+    $resolvedChannel = if ([string]::IsNullOrWhiteSpace($ReleaseChannel)) { "stable" } else { $ReleaseChannel.Trim().ToLowerInvariant() }
+    $manifestPath = if ([string]::IsNullOrWhiteSpace($TrustManifestPath)) {
+        Join-Path $installerOutDir "release-manifest-$resolvedChannel.json"
+    }
+    else {
+        if ([System.IO.Path]::IsPathRooted($TrustManifestPath)) {
+            $TrustManifestPath
+        }
+        else {
+            Join-Path $repoRoot $TrustManifestPath
+        }
+    }
+
+    $verifyArgs = @{
+        InstallerPath = $installerPath
+        AppVersion = $AppVersion
+        Channel = $resolvedChannel
+        ExpectedSha256 = $ExpectedInstallerSha256
+        ManifestOutputPath = $manifestPath
+        ReleaseNotesUrl = $ReleaseNotesUrl
+    }
+
+    if ($RequireAuthenticodeSignature) {
+        $verifyArgs["RequireAuthenticodeSignature"] = $true
+    }
+
+    if ($AllowedSignerThumbprints -and $AllowedSignerThumbprints.Count -gt 0) {
+        $verifyArgs["AllowedSignerThumbprints"] = $AllowedSignerThumbprints
+    }
+
+    Write-Host "`n==> Verifying installer trust chain" -ForegroundColor Cyan
+    & $trustVerificationScript @verifyArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "Installer trust-chain verification failed with exit code $LASTEXITCODE"
+    }
+}
 
 Write-Host "`nInstaller build complete." -ForegroundColor Green
 Write-Host "Output folder: $installerOutDir" -ForegroundColor Green

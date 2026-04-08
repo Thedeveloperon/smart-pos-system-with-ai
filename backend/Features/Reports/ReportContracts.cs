@@ -421,6 +421,9 @@ public sealed class SupportTriageReportResponse
     [JsonPropertyName("alerts")]
     public SupportLicenseAlertSummary Alerts { get; set; } = new();
 
+    [JsonPropertyName("recovery_drill")]
+    public SupportRecoveryDrillSummary RecoveryDrill { get; set; } = new();
+
     [JsonPropertyName("recent_audit_events")]
     public List<SupportLicenseAuditEventRow> RecentAuditEvents { get; set; } = [];
 }
@@ -496,6 +499,9 @@ public sealed class SupportLicenseAlertSummary
     [JsonPropertyName("devices_with_unusual_source_changes_in_window")]
     public int DevicesWithUnusualSourceChangesInWindow { get; set; }
 
+    [JsonPropertyName("recovery_drill_alerts_in_window")]
+    public int RecoveryDrillAlertsInWindow { get; set; }
+
     [JsonPropertyName("top_validation_failures")]
     public List<SupportAlertBreakdownRow> TopValidationFailures { get; set; } = [];
 
@@ -508,6 +514,9 @@ public sealed class SupportLicenseAlertSummary
     [JsonPropertyName("top_sensitive_action_failure_sources")]
     public List<SupportAlertBreakdownRow> TopSensitiveActionFailureSources { get; set; } = [];
 
+    [JsonPropertyName("top_recovery_drill_issues")]
+    public List<SupportAlertBreakdownRow> TopRecoveryDrillIssues { get; set; } = [];
+
     [JsonPropertyName("last_validation_alert_at")]
     public DateTimeOffset? LastValidationAlertAt { get; set; }
 
@@ -516,6 +525,45 @@ public sealed class SupportLicenseAlertSummary
 
     [JsonPropertyName("last_security_alert_at")]
     public DateTimeOffset? LastSecurityAlertAt { get; set; }
+}
+
+public sealed class SupportRecoveryDrillSummary
+{
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "unknown";
+
+    [JsonPropertyName("monitoring_enabled")]
+    public bool MonitoringEnabled { get; set; }
+
+    [JsonPropertyName("metrics_file_path")]
+    public string MetricsFilePath { get; set; } = string.Empty;
+
+    [JsonPropertyName("metrics_file_exists")]
+    public bool MetricsFileExists { get; set; }
+
+    [JsonPropertyName("issues")]
+    public List<string> Issues { get; set; } = [];
+
+    [JsonPropertyName("max_restore_drill_age_hours")]
+    public int MaxRestoreDrillAgeHours { get; set; }
+
+    [JsonPropertyName("target_rto_seconds")]
+    public int TargetRtoSeconds { get; set; }
+
+    [JsonPropertyName("target_rpo_seconds")]
+    public int TargetRpoSeconds { get; set; }
+
+    [JsonPropertyName("last_drill_at")]
+    public DateTimeOffset? LastDrillAt { get; set; }
+
+    [JsonPropertyName("last_drill_status")]
+    public string? LastDrillStatus { get; set; }
+
+    [JsonPropertyName("last_rto_seconds")]
+    public long? LastRtoSeconds { get; set; }
+
+    [JsonPropertyName("last_rpo_seconds")]
+    public long? LastRpoSeconds { get; set; }
 }
 
 public sealed class SupportAlertBreakdownRow
@@ -555,4 +603,40 @@ public sealed class SupportLicenseAuditEventRow
 
     [JsonPropertyName("source_fingerprint")]
     public string? SourceFingerprint { get; set; }
+}
+
+public sealed class SupportAlertCatalogResponse
+{
+    [JsonPropertyName("generated_at")]
+    public DateTimeOffset GeneratedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("catalog_version")]
+    public string CatalogVersion { get; set; } = "w6-alert-catalog-v1-2026-04-08";
+
+    [JsonPropertyName("items")]
+    public List<SupportAlertCatalogItem> Items { get; set; } = [];
+}
+
+public sealed class SupportAlertCatalogItem
+{
+    [JsonPropertyName("code")]
+    public string Code { get; set; } = string.Empty;
+
+    [JsonPropertyName("category")]
+    public string Category { get; set; } = string.Empty;
+
+    [JsonPropertyName("severity")]
+    public string Severity { get; set; } = "warning";
+
+    [JsonPropertyName("source")]
+    public string Source { get; set; } = string.Empty;
+
+    [JsonPropertyName("description")]
+    public string Description { get; set; } = string.Empty;
+
+    [JsonPropertyName("surfaces")]
+    public List<string> Surfaces { get; set; } = [];
+
+    [JsonPropertyName("triage_hint")]
+    public string TriageHint { get; set; } = string.Empty;
 }
