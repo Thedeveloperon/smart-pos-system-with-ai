@@ -23,7 +23,7 @@ Use lowercase kebab-case names.
 
 - Primary: `mp4` (H.264 video + AAC audio)
 - Optional fallback: `webm`
-- Include a poster image (in `website/public/images/marketing/...`) for faster perceived loading.
+- Include a poster image (in `apps/cloud-portal/public/images/marketing/...`) for faster perceived loading.
 
 ## How to reference in code
 

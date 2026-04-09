@@ -1,10 +1,10 @@
-# Render Deploy (Backend + POS Frontend + Marketing Website)
+# Render Deploy (Backend API + POS App + Cloud Portal)
 
 This deployment path hosts all three apps on Render using `render.yaml`:
 
 - ASP.NET backend API
-- POS frontend (with `/api/*` proxy to backend)
-- Next.js marketing website
+- POS app (local runtime UI)
+- Next.js cloud portal (marketing + super admin)
 
 ## 1. Deploy from blueprint
 
@@ -16,7 +16,7 @@ In Render:
 4. Create all services:
    - `smartpos-backend`
    - `smartpos-pos-frontend`
-   - `smartpos-marketing-website`
+  - `smartpos-marketing-website` (cloud portal)
 
 ## 2. Set backend secrets
 
@@ -42,14 +42,14 @@ Database configuration is already wired in `render.yaml`:
 - Backend receives `ConnectionStrings__Postgres` from that database
 - Backend uses `Database__Provider=Postgres`
 
-## 3. Configure POS frontend upstream
+## 3. Configure POS app upstream
 
 The frontend `BACKEND_UPSTREAM` is wired in `render.yaml` from backend
 `RENDER_EXTERNAL_URL`, so no manual URL hardcoding is required.
 
-## 4. Configure marketing website env
+## 4. Configure cloud portal env
 
-Open `smartpos-marketing-website` and set:
+Open `smartpos-marketing-website` (cloud portal) and set:
 
 - `SMARTPOS_BACKEND_API_URL=https://<your-backend>.onrender.com`
 - `NEXT_PUBLIC_SITE_URL=https://<your-marketing-website>.onrender.com`
@@ -60,7 +60,7 @@ Backend health:
 
 - `https://<your-backend>.onrender.com/health`
 
-Frontend health:
+POS app health:
 
 - `https://<your-pos-frontend>.onrender.com/health`
 
@@ -70,9 +70,9 @@ POS app:
 
 Super admin login:
 
-- `https://<your-pos-frontend>.onrender.com/admin/login`
+- `https://<your-marketing-website>.onrender.com/admin/login`
 
-Marketing website:
+Cloud portal:
 
 - `https://<your-marketing-website>.onrender.com/`
 

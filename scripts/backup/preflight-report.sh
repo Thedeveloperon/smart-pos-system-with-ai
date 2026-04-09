@@ -262,8 +262,8 @@ if [ "$resolved_mode" = "sqlite" ]; then
     check_sqlite_candidate "$SQLITE_DB_PATH" "Configured SQLITE_DB_PATH" "strict"
   else
     candidates=(
-      "$REPO_ROOT/backend/smartpos.db"
-      "$REPO_ROOT/backend/smartpos-dev.db"
+      "$REPO_ROOT/services/backend-api/smartpos.db"
+      "$REPO_ROOT/services/backend-api/smartpos-dev.db"
       "$REPO_ROOT/smartpos.db"
       "$REPO_ROOT/smartpos-dev.db"
     )

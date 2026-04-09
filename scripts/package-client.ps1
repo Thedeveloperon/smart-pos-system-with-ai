@@ -39,8 +39,8 @@ function Invoke-External {
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$frontendDir = Join-Path $repoRoot "frontend"
-$backendProject = Join-Path $repoRoot "backend/backend.csproj"
+$frontendDir = Join-Path $repoRoot "apps/pos-app"
+$backendProject = Join-Path $repoRoot "services/backend-api/backend.csproj"
 $frontendDistDir = Join-Path $frontendDir "dist"
 $outputRoot = Join-Path $repoRoot $OutputDir
 $appDir = Join-Path $outputRoot "app"

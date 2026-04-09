@@ -209,8 +209,8 @@ resolve_sqlite_path() {
   fi
 
   local candidates=(
-    "$REPO_ROOT/backend/smartpos.db"
-    "$REPO_ROOT/backend/smartpos-dev.db"
+    "$REPO_ROOT/services/backend-api/smartpos.db"
+    "$REPO_ROOT/services/backend-api/smartpos-dev.db"
     "$REPO_ROOT/smartpos.db"
     "$REPO_ROOT/smartpos-dev.db"
   )
