@@ -106,8 +106,8 @@ const isManualBillingFallbackEnabled = (() => {
   }
 
   // Keep frontend default aligned with backend defaults:
-  // production -> disabled, non-production -> enabled.
-  return process.env.NODE_ENV !== "production";
+  // enabled unless explicitly disabled via env.
+  return true;
 })();
 
 function normalizePlanCode(rawValue: string | null): PlanCode {

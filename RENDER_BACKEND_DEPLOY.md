@@ -27,7 +27,7 @@ Open the `smartpos-backend` service and set:
 - `SMARTPOS_LICENSE_DATA_ENCRYPTION_KEY`
 - `Licensing__VerificationPublicKeyPem`
 - `Licensing__AccessSuccessPageBaseUrl`
-- `Licensing__MarketingManualBillingFallbackEnabled` (recommended production default: `false`)
+- `Licensing__MarketingManualBillingFallbackEnabled` (set `true` to enable manual + card options)
 
 Recommended value for `Licensing__AccessSuccessPageBaseUrl` while using Render URLs:
 
@@ -54,13 +54,13 @@ Open `smartpos-marketing-website` (cloud portal) and set:
 
 - `SMARTPOS_BACKEND_API_URL=https://<your-backend>.onrender.com`
 - `NEXT_PUBLIC_SITE_URL=https://<your-marketing-website>.onrender.com`
-- `NEXT_PUBLIC_MARKETING_MANUAL_BILLING_FALLBACK_ENABLED=false`
+- `NEXT_PUBLIC_MARKETING_MANUAL_BILLING_FALLBACK_ENABLED=true`
 
 Important:
 - Keep `Licensing__MarketingManualBillingFallbackEnabled` (backend) and
   `NEXT_PUBLIC_MARKETING_MANUAL_BILLING_FALLBACK_ENABLED` (website) in sync.
-- If you want to allow bank/cash manual payment submission, set both values to `true`
-  and redeploy both services.
+- Set both values to `true` to show and process manual bank/cash payment submissions
+  alongside Stripe card checkout.
 
 ## 5. Verify services
 
