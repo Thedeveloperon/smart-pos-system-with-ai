@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
+using SmartPos.Backend.Domain;
 using SmartPos.Backend.Features.Licensing;
 
 namespace SmartPos.Backend.Security;
@@ -9,6 +10,7 @@ public sealed class LicenseEnforcementMiddleware(RequestDelegate next)
     public async Task InvokeAsync(
         HttpContext httpContext,
         LicenseService licenseService,
+        LicenseCloudRelayService cloudRelayService,
         ILicensingAlertMonitor alertMonitor)
     {
         if (!licenseService.IsEnforcementEnabled() || ShouldSkipPath(httpContext.Request.Path))
@@ -42,14 +44,21 @@ public sealed class LicenseEnforcementMiddleware(RequestDelegate next)
         var policySnapshotToken = licenseService.ResolvePolicySnapshotToken(httpContext);
         var policySnapshotClientTime = licenseService.ResolvePolicySnapshotClientTime(httpContext);
 
-        var decision = await licenseService.EvaluateRequestAsync(
-            deviceCode,
-            licenseToken,
-            httpContext.Request.Path,
-            httpContext.Request.Method,
-            httpContext.RequestAborted,
-            policySnapshotToken,
-            policySnapshotClientTime);
+        var decision = cloudRelayService.IsEnabled
+            ? await EvaluateRequestWithRelayAsync(
+                httpContext,
+                licenseService,
+                cloudRelayService,
+                deviceCode,
+                licenseToken)
+            : await licenseService.EvaluateRequestAsync(
+                deviceCode,
+                licenseToken,
+                httpContext.Request.Path,
+                httpContext.Request.Method,
+                httpContext.RequestAborted,
+                policySnapshotToken,
+                policySnapshotClientTime);
 
         if (decision.AllowRequest)
         {
@@ -75,6 +84,65 @@ public sealed class LicenseEnforcementMiddleware(RequestDelegate next)
                 Message = message
             }
         });
+    }
+
+    private static async Task<LicenseGuardDecision> EvaluateRequestWithRelayAsync(
+        HttpContext httpContext,
+        LicenseService licenseService,
+        LicenseCloudRelayService cloudRelayService,
+        string deviceCode,
+        string? licenseToken)
+    {
+        try
+        {
+            var status = await cloudRelayService.GetStatusAsync(
+                deviceCode,
+                licenseToken,
+                httpContext,
+                httpContext.RequestAborted);
+
+            var state = ParseLicenseState(status.State);
+            if (state == LicenseState.Unprovisioned)
+            {
+                return LicenseGuardDecision.Deny(
+                    LicenseErrorCodes.Unprovisioned,
+                    "Device is not provisioned.",
+                    StatusCodes.Status403Forbidden,
+                    state);
+            }
+
+            if (state == LicenseState.Revoked)
+            {
+                return LicenseGuardDecision.Deny(
+                    LicenseErrorCodes.Revoked,
+                    "License is revoked.",
+                    StatusCodes.Status403Forbidden,
+                    state);
+            }
+
+            if (state == LicenseState.Suspended &&
+                licenseService.IsBlockedWhenSuspended(httpContext.Request.Path, httpContext.Request.Method))
+            {
+                return LicenseGuardDecision.Deny(
+                    LicenseErrorCodes.LicenseExpired,
+                    "License is suspended for checkout/refund operations.",
+                    StatusCodes.Status403Forbidden,
+                    state);
+            }
+
+            return LicenseGuardDecision.Allow(state);
+        }
+        catch (LicenseException ex)
+        {
+            return LicenseGuardDecision.Deny(ex.Code, ex.Message, ex.StatusCode);
+        }
+    }
+
+    private static LicenseState ParseLicenseState(string? state)
+    {
+        return Enum.TryParse<LicenseState>(state, ignoreCase: true, out var parsed)
+            ? parsed
+            : LicenseState.Unprovisioned;
     }
 
     private static bool ShouldSkipPath(PathString path)

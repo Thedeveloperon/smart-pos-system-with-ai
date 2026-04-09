@@ -16,6 +16,7 @@ public static class LicenseEndpoints
             ProvisionChallengeRequest request,
             HttpContext httpContext,
             LicenseService licenseService,
+            LicenseCloudRelayService cloudRelayService,
             CancellationToken cancellationToken) =>
         {
             request.DeviceCode = string.IsNullOrWhiteSpace(request.DeviceCode)
@@ -25,7 +26,9 @@ public static class LicenseEndpoints
             try
             {
                 ValidateIdempotencyKey(httpContext);
-                var response = await licenseService.CreateActivationChallengeAsync(request, cancellationToken);
+                var response = cloudRelayService.IsEnabled
+                    ? await cloudRelayService.CreateActivationChallengeAsync(request, httpContext, cancellationToken)
+                    : await licenseService.CreateActivationChallengeAsync(request, cancellationToken);
                 return Results.Ok(response);
             }
             catch (LicenseException ex)
@@ -41,6 +44,7 @@ public static class LicenseEndpoints
             ProvisionActivateRequest request,
             HttpContext httpContext,
             LicenseService licenseService,
+            LicenseCloudRelayService cloudRelayService,
             CancellationToken cancellationToken) =>
         {
             request.DeviceCode = string.IsNullOrWhiteSpace(request.DeviceCode)
@@ -50,7 +54,9 @@ public static class LicenseEndpoints
             try
             {
                 ValidateIdempotencyKey(httpContext);
-                var response = await licenseService.ActivateAsync(request, cancellationToken);
+                var response = cloudRelayService.IsEnabled
+                    ? await cloudRelayService.ActivateAsync(request, httpContext, cancellationToken)
+                    : await licenseService.ActivateAsync(request, cancellationToken);
                 SyncLicenseTokenCookie(httpContext, licenseService, response);
                 return Results.Ok(response);
             }
@@ -100,6 +106,7 @@ public static class LicenseEndpoints
             string? device_code,
             HttpContext httpContext,
             LicenseService licenseService,
+            LicenseCloudRelayService cloudRelayService,
             ILicensingAlertMonitor alertMonitor,
             CancellationToken cancellationToken) =>
         {
@@ -109,7 +116,9 @@ public static class LicenseEndpoints
                 var token = string.IsNullOrWhiteSpace(device_code)
                     ? licenseService.ResolveLicenseToken(httpContext)
                     : licenseService.ResolveLicenseToken(httpContext, includeCookie: false);
-                var response = await licenseService.GetStatusAsync(deviceCode, token, cancellationToken);
+                var response = cloudRelayService.IsEnabled
+                    ? await cloudRelayService.GetStatusAsync(deviceCode, token, httpContext, cancellationToken)
+                    : await licenseService.GetStatusAsync(deviceCode, token, cancellationToken);
                 SyncLicenseTokenCookie(httpContext, licenseService, response);
                 return Results.Ok(response);
             }
@@ -132,6 +141,7 @@ public static class LicenseEndpoints
             LicenseHeartbeatRequest request,
             HttpContext httpContext,
             LicenseService licenseService,
+            LicenseCloudRelayService cloudRelayService,
             LicensingMetrics licensingMetrics,
             ILicensingAlertMonitor alertMonitor,
             CancellationToken cancellationToken) =>
@@ -148,7 +158,9 @@ public static class LicenseEndpoints
             try
             {
                 ValidateIdempotencyKey(httpContext);
-                var response = await licenseService.HeartbeatAsync(request, cancellationToken);
+                var response = cloudRelayService.IsEnabled
+                    ? await cloudRelayService.HeartbeatAsync(request, httpContext, cancellationToken)
+                    : await licenseService.HeartbeatAsync(request, cancellationToken);
                 SyncLicenseTokenCookie(httpContext, licenseService, response);
                 return Results.Ok(response);
             }

@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LicensingProvider, useLicensing } from "./LicensingContext";
-import type { LicenseStatus } from "@/lib/api";
+import { ApiError, type LicenseStatus } from "@/lib/api";
 
 const apiMocks = vi.hoisted(() => ({
   fetchLicenseStatus: vi.fn(),
@@ -59,6 +59,16 @@ const Probe = () => {
   );
 };
 
+const ActivateProbe = () => {
+  const { activate, error } = useLicensing();
+  return (
+    <>
+      <button onClick={() => void activate({ activationEntitlementKey: "SPK-TEST" })}>activate</button>
+      <div data-testid="activation-error">{error || ""}</div>
+    </>
+  );
+};
+
 describe("LicensingContext", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -108,6 +118,24 @@ describe("LicensingContext", () => {
 
     await waitFor(() => {
       expect(apiMocks.heartbeatLicense).toHaveBeenCalled();
+    });
+  });
+
+  it("maps cloud relay outage code to actionable license message", async () => {
+    apiMocks.activateLicense.mockRejectedValueOnce(
+      new ApiError("Cloud licensing service is temporarily unreachable.", 503, "CLOUD_LICENSE_UNREACHABLE")
+    );
+
+    render(
+      <LicensingProvider>
+        <ActivateProbe />
+      </LicensingProvider>
+    );
+
+    screen.getByRole("button", { name: /activate/i }).click();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("activation-error").textContent).toMatch(/temporarily unreachable/i);
     });
   });
 });

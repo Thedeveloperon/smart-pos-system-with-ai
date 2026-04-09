@@ -29,6 +29,14 @@ const isBlockedState = (status: LicenseStatus | null) => status?.state === "susp
 
 function toErrorMessage(error: unknown) {
   if (error instanceof ApiError) {
+    if (error.code === "CLOUD_LICENSE_UNREACHABLE") {
+      return "Cloud licensing service is temporarily unreachable. Check internet and try again.";
+    }
+
+    if (error.code === "ACTIVATION_ENTITLEMENT_NOT_FOUND") {
+      return "Activation key was not found. Use the latest key generated in the cloud admin portal.";
+    }
+
     return error.message;
   }
 
