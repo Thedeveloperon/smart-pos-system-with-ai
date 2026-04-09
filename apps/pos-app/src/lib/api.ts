@@ -1216,6 +1216,21 @@ export type AdminManualBillingPaymentVerificationResponse = {
   processed_at: string;
 };
 
+export type GenerateAdminManualBillingLicenseCodeRequest = {
+  actor?: string;
+  reason?: string;
+  reason_code: string;
+  actor_note: string;
+};
+
+export type AdminManualBillingPaymentLicenseCodeGenerateResponse = {
+  payment: AdminManualBillingPaymentRow;
+  invoice: AdminManualBillingInvoiceRow;
+  activation_entitlement: ActivationEntitlement;
+  revoked_entitlements_count: number;
+  processed_at: string;
+};
+
 export type ActivationEntitlement = {
   entitlement_id: string;
   shop_id: string;
@@ -3975,6 +3990,19 @@ export async function rejectAdminManualBillingPayment(
 ) {
   return request<AdminManualBillingPaymentRow>(
     `/api/admin/licensing/billing/payments/${encodeURIComponent(paymentId)}/reject`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
+export async function generateAdminManualBillingLicenseCode(
+  paymentId: string,
+  payload: GenerateAdminManualBillingLicenseCodeRequest
+) {
+  return request<AdminManualBillingPaymentLicenseCodeGenerateResponse>(
+    `/api/admin/licensing/billing/payments/${encodeURIComponent(paymentId)}/license-code/generate`,
     {
       method: "POST",
       body: JSON.stringify(payload),
