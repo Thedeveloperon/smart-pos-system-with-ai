@@ -69,15 +69,6 @@ const promptOptional = (title: string, defaultValue = "") => {
   return normalized || "";
 };
 
-const isHttpUrl = (value: string) => {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === "http:" || parsed.protocol === "https:";
-  } catch {
-    return false;
-  }
-};
-
 const BillingAdminWorkspace = ({ username, onSignOut }: BillingAdminWorkspaceProps) => {
   const [loading, setLoading] = useState(false);
   const [auditLoading, setAuditLoading] = useState(false);
@@ -229,21 +220,6 @@ const BillingAdminWorkspace = ({ username, onSignOut }: BillingAdminWorkspacePro
       return;
     }
 
-    let depositSlipUrl: string | undefined;
-    if (method !== "cash") {
-      const slip = promptRequired("Deposit slip URL (required for bank methods)");
-      if (!slip) {
-        return;
-      }
-
-      if (!isHttpUrl(slip)) {
-        toast.error("Deposit slip URL must be a valid http/https URL.");
-        return;
-      }
-
-      depositSlipUrl = slip;
-    }
-
     const notes = promptOptional("Notes (optional)");
     if (notes === null) {
       return;
@@ -261,7 +237,6 @@ const BillingAdminWorkspace = ({ username, onSignOut }: BillingAdminWorkspacePro
         amount,
         currency: "LKR",
         bank_reference: reference,
-        deposit_slip_url: depositSlipUrl,
         notes: notes || undefined,
         actor: "billing-ui",
         reason_code: "manual_payment_pending_verification",
@@ -635,11 +610,10 @@ const BillingAdminWorkspace = ({ username, onSignOut }: BillingAdminWorkspacePro
                         <TableCell>{payment.invoice_number}</TableCell>
                         <TableCell className="capitalize">{payment.method.replaceAll("_", " ")}</TableCell>
                         <TableCell>
-                          <div className="space-y-1 text-xs">
-                            <p>Ref: {payment.bank_reference || "-"}</p>
-                            <p>Slip: {payment.deposit_slip_url ? "yes" : "no"}</p>
-                          </div>
-                        </TableCell>
+                              <div className="space-y-1 text-xs">
+                                <p>Ref: {payment.bank_reference || "-"}</p>
+                              </div>
+                            </TableCell>
                         <TableCell className="text-right font-semibold">{money(payment.amount)}</TableCell>
                         <TableCell className="capitalize">{payment.status.replaceAll("_", " ")}</TableCell>
                         <TableCell className="text-right">

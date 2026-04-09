@@ -155,7 +155,6 @@ public static class AiSuggestionEndpoints
                     idempotencyKey,
                     request.PaymentMethod,
                     request.BankReference,
-                    request.DepositSlipUrl,
                     cancellationToken);
                 return Results.Ok(result);
             }

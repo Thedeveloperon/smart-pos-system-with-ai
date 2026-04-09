@@ -25,14 +25,6 @@ public sealed class AiCreditPaymentService(
     private const string PaymentMethodCash = "cash";
     private const string PaymentMethodBankDeposit = "bank_deposit";
     private const string ManualPaymentProvider = "manual";
-    private static readonly HashSet<string> AllowedDepositSlipFileExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".jpg",
-        ".jpeg",
-        ".png",
-        ".webp",
-        ".pdf"
-    };
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> SupportedWebhookEvents = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -68,7 +60,6 @@ public sealed class AiCreditPaymentService(
         string idempotencyKey,
         string? paymentMethod,
         string? bankReference,
-        string? depositSlipUrl,
         CancellationToken cancellationToken)
     {
         var aiOptions = options.Value;
@@ -79,11 +70,9 @@ public sealed class AiCreditPaymentService(
             paymentMethod,
             aiOptions.EnableManualPaymentFallback);
         var normalizedBankReference = NormalizeBankReference(bankReference);
-        var normalizedDepositSlipUrl = ValidateDepositSlipUrl(depositSlipUrl);
         ValidateManualPaymentEvidence(
             normalizedPaymentMethod,
-            normalizedBankReference,
-            normalizedDepositSlipUrl);
+            normalizedBankReference);
         var externalReference = BuildExternalReference(context.ShopId, normalizedIdempotencyKey);
 
         var existingPayment = await dbContext.AiCreditPayments
@@ -146,7 +135,7 @@ public sealed class AiCreditPaymentService(
                 idempotency_key_hash = ComputeSha256Hex(normalizedIdempotencyKey),
                 payment_method = normalizedPaymentMethod,
                 bank_reference = normalizedBankReference,
-                deposit_slip_url = normalizedDepositSlipUrl,
+                proof_mode = "reference_only",
                 shop_id = context.ShopId,
                 shop_name = shopNameSnapshot
             }, JsonOptions),
@@ -983,38 +972,9 @@ public sealed class AiCreditPaymentService(
         return normalized;
     }
 
-    private static string? ValidateDepositSlipUrl(string? depositSlipUrl)
-    {
-        var normalized = NormalizeOptional(depositSlipUrl);
-        if (string.IsNullOrWhiteSpace(normalized))
-        {
-            return null;
-        }
-
-        if (normalized.Length > 500)
-        {
-            throw new InvalidOperationException("deposit_slip_url must be 500 characters or less.");
-        }
-
-        if (!Uri.TryCreate(normalized, UriKind.Absolute, out var uri) ||
-            !(uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
-        {
-            throw new InvalidOperationException("deposit_slip_url must be a valid absolute HTTP/HTTPS URL.");
-        }
-
-        var extension = Path.GetExtension(uri.AbsolutePath);
-        if (!string.IsNullOrWhiteSpace(extension) && !AllowedDepositSlipFileExtensions.Contains(extension))
-        {
-            throw new InvalidOperationException("deposit_slip_url file type must be one of: .jpg, .jpeg, .png, .webp, .pdf.");
-        }
-
-        return normalized;
-    }
-
     private static void ValidateManualPaymentEvidence(
         string paymentMethod,
-        string? bankReference,
-        string? depositSlipUrl)
+        string? bankReference)
     {
         if (!IsManualPaymentMethod(paymentMethod))
         {
@@ -1022,24 +982,12 @@ public sealed class AiCreditPaymentService(
         }
 
         var hasReference = !string.IsNullOrWhiteSpace(bankReference);
-        var hasDepositSlipUrl = !string.IsNullOrWhiteSpace(depositSlipUrl);
-
-        if (string.Equals(paymentMethod, PaymentMethodCash, StringComparison.OrdinalIgnoreCase))
-        {
-            if (hasReference)
-            {
-                return;
-            }
-
-            throw new InvalidOperationException("bank_reference is required for cash payments.");
-        }
-
-        if (hasReference && hasDepositSlipUrl)
+        if (hasReference)
         {
             return;
         }
 
-        throw new InvalidOperationException("bank_reference and deposit_slip_url are required for bank_deposit payments.");
+        throw new InvalidOperationException($"bank_reference is required for {paymentMethod} payments.");
     }
 
     private static string ResolvePaymentMethodForPayment(AiCreditPayment payment, string fallbackPaymentMethod)

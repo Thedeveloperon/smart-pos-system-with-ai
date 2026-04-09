@@ -468,25 +468,21 @@ public static class LicenseEndpoints
         .WithName("GetMarketingStripeCheckoutSessionStatus")
         .WithOpenApi();
 
-        publicBilling.MapPost("/payment-proof-upload", async (
-            IFormFile? file,
-            HttpContext httpContext,
-            LicenseService licenseService,
-            CancellationToken cancellationToken) =>
+        publicBilling.MapPost("/payment-proof-upload", (HttpContext httpContext) =>
         {
-            try
-            {
-                ValidateIdempotencyKey(httpContext);
-                var response = await licenseService.UploadMarketingPaymentProofAsync(file, cancellationToken);
-                return Results.Ok(response);
-            }
-            catch (LicenseException ex)
-            {
-                return ToErrorResult(ex);
-            }
+            ValidateIdempotencyKey(httpContext);
+            return Results.Json(
+                new
+                {
+                    error = new
+                    {
+                        code = "PAYMENT_PROOF_UPLOAD_DISABLED",
+                        message = "Payment slip uploads are disabled. Submit manual payments with reference number only."
+                    }
+                },
+                statusCode: StatusCodes.Status410Gone);
         })
         .AllowAnonymous()
-        .DisableAntiforgery()
         .WithName("UploadMarketingPaymentProof")
         .WithOpenApi();
 
@@ -580,13 +576,244 @@ public static class LicenseEndpoints
 
         admin.MapGet("/shops", async (
             string? search,
+            bool? include_inactive,
+            int? take,
             LicenseService licenseService,
             CancellationToken cancellationToken) =>
         {
-            var response = await licenseService.GetAdminShopsSnapshotAsync(search, cancellationToken);
+            var response = await licenseService.GetAdminShopsSnapshotAsync(
+                search,
+                include_inactive ?? false,
+                take ?? 100,
+                cancellationToken);
             return Results.Ok(response);
         })
         .WithName("AdminGetLicensingShops")
+        .WithOpenApi();
+
+        admin.MapPost("/shops", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+            AdminShopCreateRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.CreateAdminShopAsync(request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .WithName("AdminCreateShop")
+        .WithOpenApi();
+
+        admin.MapPut("/shops/{shop_id:guid}", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+            Guid shop_id,
+            AdminShopUpdateRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.UpdateAdminShopAsync(shop_id, request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .WithName("AdminUpdateShop")
+        .WithOpenApi();
+
+        admin.MapDelete("/shops/{shop_id:guid}", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+            Guid shop_id,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var request = await httpContext.Request.ReadFromJsonAsync<AdminShopDeactivateRequest>(cancellationToken)
+                    ?? new AdminShopDeactivateRequest();
+                var response = await licenseService.DeactivateAdminShopAsync(shop_id, request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .WithName("AdminDeactivateShop")
+        .WithOpenApi();
+
+        admin.MapPost("/shops/{shop_id:guid}/reactivate", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+            Guid shop_id,
+            AdminShopReactivateRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.ReactivateAdminShopAsync(shop_id, request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .WithName("AdminReactivateShop")
+        .WithOpenApi();
+
+        admin.MapGet("/users", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+            string? shop_code,
+            string? search,
+            bool? include_inactive,
+            int? take,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var response = await licenseService.GetAdminShopUsersAsync(
+                    shop_code,
+                    search,
+                    include_inactive ?? false,
+                    take ?? 50,
+                    cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .WithName("AdminGetShopUsers")
+        .WithOpenApi();
+
+        admin.MapPost("/users", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+            AdminShopUserCreateRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.CreateAdminShopUserAsync(request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .WithName("AdminCreateShopUser")
+        .WithOpenApi();
+
+        admin.MapPut("/users/{user_id:guid}", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+            Guid user_id,
+            AdminShopUserUpdateRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.UpdateAdminShopUserAsync(user_id, request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .WithName("AdminUpdateShopUser")
+        .WithOpenApi();
+
+        admin.MapDelete("/users/{user_id:guid}", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+            Guid user_id,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var request = await httpContext.Request.ReadFromJsonAsync<AdminShopUserDeactivateRequest>(cancellationToken)
+                    ?? new AdminShopUserDeactivateRequest();
+                var response = await licenseService.DeactivateAdminShopUserAsync(user_id, request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .WithName("AdminDeactivateShopUser")
+        .WithOpenApi();
+
+        admin.MapPost("/users/{user_id:guid}/reactivate", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+            Guid user_id,
+            AdminShopUserReactivateRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.ReactivateAdminShopUserAsync(user_id, request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .WithName("AdminReactivateShopUser")
+        .WithOpenApi();
+
+        admin.MapPost("/users/{user_id:guid}/reset-password", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+            Guid user_id,
+            AdminShopUserPasswordResetRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.ResetAdminShopUserPasswordAsync(user_id, request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .WithName("AdminResetShopUserPassword")
         .WithOpenApi();
 
         admin.MapGet("/shops/{shop_code}/branch-allocations", async (
@@ -1110,6 +1337,56 @@ public static class LicenseEndpoints
             }
         })
         .WithName("AdminExtendDeviceGrace")
+        .WithOpenApi();
+
+        admin.MapPost("/shops/{shop_code}/ai-wallet/correct", [Authorize(Policy = SmartPosPolicies.SupportOrBilling)] async (
+            string shop_code,
+            AdminAiWalletCorrectionRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.CorrectAiWalletBalanceAsAdminAsync(
+                    shop_code,
+                    request,
+                    cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.SupportOrBilling)
+        .WithName("AdminCorrectAiWalletBalance")
+        .WithOpenApi();
+
+        admin.MapPost("/devices/{device_code}/fraud-lock", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+            string device_code,
+            AdminDeviceFraudLockRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.ApplyFraudLockToDeviceAsAdminAsync(
+                    device_code,
+                    request,
+                    cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .WithName("AdminApplyDeviceFraudLock")
         .WithOpenApi();
 
         admin.MapPost("/resync", [Authorize(Policy = SmartPosPolicies.SuperAdmin)] async (

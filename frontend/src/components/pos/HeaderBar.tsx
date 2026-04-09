@@ -98,9 +98,12 @@ const HeaderBar = ({
   const allowCashier = (visible?: boolean) => !isCashier || visible !== false;
 
   return (
-    <header className="bg-pos-header text-pos-header-foreground h-14 flex items-center justify-between px-4 gap-3 shrink-0">
-      <div className="flex items-center">
+    <header className="mx-2 mt-2 flex h-14 shrink-0 items-center justify-between gap-3 rounded-2xl border border-border/60 bg-pos-header/95 px-4 text-pos-header-foreground backdrop-blur-sm">
+      <div className="flex items-center gap-2">
         <img src="/logo.png" alt="SmartPOS Lanka logo" className="h-10 w-auto object-contain" />
+        <span className="hidden text-xs font-semibold uppercase tracking-[0.14em] text-pos-header-foreground/70 md:inline">
+          POS Runtime
+        </span>
       </div>
 
       <div className="hidden xl:flex items-center gap-2">
@@ -322,7 +325,7 @@ const HeaderBar = ({
               <Menu className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-72 p-2">
+          <DropdownMenuContent align="end" className="w-72 rounded-xl border-border/70 bg-surface-elevated p-2">
             {allowCashier(cashierToolbarVisibility?.heldBills) && (
               <DropdownMenuItem onSelect={() => onHeldBills()} className="min-h-11 px-3 py-2 text-base">
                 <PauseCircle className="mr-3 h-5 w-5" />

@@ -88,6 +88,11 @@ Staging dry-run acceptance criteria:
 - device registration and seat counts reconcile with source
 - mismatch report has no unresolved critical items
 
+Latest dry-run evidence:
+- batch: `staging-dryrun-22e8830543b9458badca7e2043c2d604`
+- outcome: `is_ready_for_cutover=true`
+- artifacts: `artifacts/migration/staging-dryrun-22e8830543b9458badca7e2043c2d604/`
+
 ## 5. Backup and Recovery (Local POS)
 
 Backup policy:
@@ -111,6 +116,13 @@ Device replacement workflow:
 Recovery targets:
 - RPO default <= 6 hours
 - RTO default <= 60 minutes
+
+Latest restore drill evidence:
+- run: `W2 staging-style recovery drill` (2026-04-08)
+- API flow: `/api/admin/recovery/preflight/run` -> `/backup/run` -> `/restore-smoke/run`
+- result: restore status `completed`, post-drill health `healthy`
+- measured: `rto_seconds=1`, `rpo_seconds=2`
+- evidence: `W2_STAGING_RESTORE_DRILL_EVIDENCE_2026-04-08.md`
 
 ## 6. API Reliability Contract
 
@@ -161,6 +173,9 @@ Enforcement rules:
 - Local manager: consume AI features, run local operations, no cloud billing admin actions
 - Cashier: local operations only, no AI usage, no cloud wallet/device management
 - Cloud support or billing admin: manual adjustments and overrides under audit
+
+Reference artifact:
+- `ROLE_AUTHORITY_MATRIX_2026-04-08.md`
 
 ### 8.2 Observability and Audit
 
@@ -218,6 +233,12 @@ Implemented baseline:
 - emergency device reset and fraud lock workflow
 - every override must emit audit event with actor, reason, and before/after state
 
+Implemented override APIs:
+- `POST /api/admin/licensing/devices/{device_code}/extend-grace`
+- `POST /api/admin/licensing/shops/{shop_code}/ai-wallet/correct`
+- `POST /api/admin/licensing/devices/{device_code}/fraud-lock`
+- `POST /api/admin/licensing/resync`
+
 ### 8.7 Runtime Support Matrix
 
 - Installer: full production support and security hardening baseline
@@ -259,6 +280,10 @@ POS cloud-client obligations:
 W8 branch-commercial policy endpoints:
 - `GET /api/admin/licensing/shops/{shop_code}/branch-allocations`
 - `PUT /api/admin/licensing/shops/{shop_code}/branch-allocations/{branch_code}`
+
+W12 support override endpoints:
+- `POST /api/admin/licensing/shops/{shop_code}/ai-wallet/correct`
+- `POST /api/admin/licensing/devices/{device_code}/fraud-lock`
 - `POST /api/admin/licensing/devices/{device_code}/transfer-seat` with optional `target_shop_code` and required `target_branch_code` for same-shop branch moves
 
 W8 enforcement semantics:
@@ -297,6 +322,11 @@ Readiness gates:
 - Gate B: reliability and security baseline pass
 - Gate C: pilot readiness pass
 - Gate D: production readiness pass
+
+Latest gate outcomes:
+- 2026-04-08: Gate A passed (`staging-dryrun-22e8830543b9458badca7e2043c2d604`, `is_ready_for_cutover=true`)
+- 2026-04-08: Gate B passed (`29` targeted reliability/security integration tests passed; see `GATE_B_RELIABILITY_SECURITY_BASELINE_SIGNOFF_2026-04-08.md`)
+- 2026-04-08: Frontend kickoff contract freeze completed; see `BACKEND_CONTRACT_FREEZE_REVIEW_2026-04-08.md`
 
 ## 11. Test and Acceptance Criteria
 

@@ -17,6 +17,28 @@ RCLONE_REMOTE="${RCLONE_REMOTE:-}"
 RESTORE_MODE="${RESTORE_MODE:-auto}"
 POSTGRES_RESTORE_URL="${POSTGRES_RESTORE_URL:-}"
 
+is_windows_path() {
+  [[ "$1" =~ ^[A-Za-z]:[\\/].* ]]
+}
+
+normalize_path_for_shell() {
+  local path="$1"
+  if [ -z "$path" ]; then
+    printf '%s\n' ""
+    return
+  fi
+
+  if command -v cygpath >/dev/null 2>&1 && is_windows_path "$path"; then
+    cygpath -u "$path"
+    return
+  fi
+
+  printf '%s\n' "$path"
+}
+
+BACKUP_ROOT="$(normalize_path_for_shell "$BACKUP_ROOT")"
+SQLITE_DB_PATH="$(normalize_path_for_shell "$SQLITE_DB_PATH")"
+
 PASS_COUNT=0
 WARN_COUNT=0
 FAIL_COUNT=0
@@ -40,6 +62,30 @@ has_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
 
+find_python_cmd() {
+  if has_cmd python && python --version >/dev/null 2>&1; then
+    printf '%s\n' "python"
+    return
+  fi
+
+  if has_cmd python3 && python3 --version >/dev/null 2>&1; then
+    printf '%s\n' "python3"
+    return
+  fi
+
+  printf '%s\n' ""
+}
+
+to_python_path() {
+  local path="$1"
+  if has_cmd cygpath; then
+    cygpath -w "$path"
+    return
+  fi
+
+  printf '%s\n' "$path"
+}
+
 validate_bool_flag() {
   case "$1" in
     true|false)
@@ -53,12 +99,52 @@ validate_bool_flag() {
 
 sqlite_app_table_count() {
   local path="$1"
-  sqlite3 "$path" "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
+  if has_cmd sqlite3; then
+    sqlite3 "$path" "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
+    return
+  fi
+
+  local python_cmd
+  python_cmd="$(find_python_cmd)"
+  [ -n "$python_cmd" ] || return 1
+  local python_path
+  python_path="$(to_python_path "$path")"
+
+  "$python_cmd" - "$python_path" <<'PY' | tr -d '\r'
+import sqlite3
+import sys
+
+db_path = sys.argv[1]
+with sqlite3.connect(db_path) as conn:
+    value = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
+    ).fetchone()[0]
+print(value)
+PY
 }
 
 sqlite_integrity_check() {
   local path="$1"
-  sqlite3 "$path" "PRAGMA integrity_check;"
+  if has_cmd sqlite3; then
+    sqlite3 "$path" "PRAGMA integrity_check;"
+    return
+  fi
+
+  local python_cmd
+  python_cmd="$(find_python_cmd)"
+  [ -n "$python_cmd" ] || return 1
+  local python_path
+  python_path="$(to_python_path "$path")"
+
+  "$python_cmd" - "$python_path" <<'PY' | tr -d '\r'
+import sqlite3
+import sys
+
+db_path = sys.argv[1]
+with sqlite3.connect(db_path) as conn:
+    value = conn.execute("PRAGMA integrity_check;").fetchone()[0]
+print(value)
+PY
 }
 
 check_sqlite_candidate() {
@@ -76,17 +162,24 @@ check_sqlite_candidate() {
   fi
 
   if ! has_cmd sqlite3; then
-    if [ "$SQLITE_REQUIRE_APP_TABLES" = "true" ] || [ "$SQLITE_REQUIRE_INTEGRITY_CHECK" = "true" ]; then
+    local python_cmd
+    python_cmd="$(find_python_cmd)"
+    if [ -z "$python_cmd" ] && { [ "$SQLITE_REQUIRE_APP_TABLES" = "true" ] || [ "$SQLITE_REQUIRE_INTEGRITY_CHECK" = "true" ]; }; then
       if [ "$mode" = "candidate" ]; then
-        report_warn "sqlite3 not found while SQLite validation guards are enabled."
+        report_warn "sqlite3 and python are unavailable while SQLite validation guards are enabled."
       else
-        report_fail "sqlite3 not found while SQLite validation guards are enabled."
+        report_fail "sqlite3 and python are unavailable while SQLite validation guards are enabled."
       fi
       return 1
     fi
-    report_warn "sqlite3 not found; backup will fall back to file copy for SQLite."
-    report_pass "$label exists: $path"
-    return 0
+
+    if [ -n "$python_cmd" ]; then
+      report_warn "sqlite3 not found; using Python sqlite fallback for validation."
+    else
+      report_warn "sqlite3 not found; backup will fall back to file copy for SQLite."
+      report_pass "$label exists: $path"
+      return 0
+    fi
   fi
 
   if [ "$SQLITE_REQUIRE_APP_TABLES" = "true" ]; then
@@ -264,12 +357,16 @@ if [ "$resolved_restore_mode" = "auto" ]; then
   fi
 fi
 
-case "$resolved_restore_mode" in
+  case "$resolved_restore_mode" in
   sqlite)
-    if has_cmd sqlite3; then
-      report_pass "sqlite3 is available for restore smoke tests."
+    if has_cmd sqlite3 || [ -n "$(find_python_cmd)" ]; then
+      if has_cmd sqlite3; then
+        report_pass "sqlite3 is available for restore smoke tests."
+      else
+        report_warn "sqlite3 not found; restore smoke test will use Python sqlite fallback."
+      fi
     else
-      report_fail "sqlite3 is required for SQLite restore smoke tests."
+      report_fail "sqlite3 or python is required for SQLite restore smoke tests."
     fi
     ;;
   postgres)

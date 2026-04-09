@@ -11,6 +11,11 @@ type LoginScreenProps = {
 };
 
 const STATIC_SUPER_ADMIN_MFA_CODE = "123456";
+const MARKETING_WEBSITE_BASE_URL = (import.meta.env.VITE_MARKETING_WEBSITE_URL || "http://localhost:3000").replace(
+  /\/+$/,
+  "",
+);
+const MARKETING_ADMIN_LOGIN_URL = `${MARKETING_WEBSITE_BASE_URL}/admin/login`;
 
 const LoginScreen = ({ mode = "pos" }: LoginScreenProps) => {
   const { login } = useAuth();
@@ -131,13 +136,14 @@ const LoginScreen = ({ mode = "pos" }: LoginScreenProps) => {
             <code className="font-medium"> billing_admin / billing123</code>,
             <code className="font-medium"> security_admin / security123</code>.
             Static MFA code: <code className="font-medium">{STATIC_SUPER_ADMIN_MFA_CODE}</code>.
+            Primary portal: <code className="font-medium"> {MARKETING_ADMIN_LOGIN_URL}</code>.
           </p>
         ) : (
           <p className="text-center text-xs text-muted-foreground">
             Passwords are the seeded values: <code className="font-medium">owner123</code>,{" "}
             <code className="font-medium">manager123</code>, and{" "}
-            <code className="font-medium">cashier123</code>. Super admin login is at{" "}
-            <code className="font-medium">/admin/login</code>.
+            <code className="font-medium">cashier123</code>. Super admin portal is on the website:{" "}
+            <code className="font-medium">{MARKETING_ADMIN_LOGIN_URL}</code>.
           </p>
         )}
       </div>

@@ -42,10 +42,11 @@ public sealed class RecoveryOpsService(
         CancellationToken cancellationToken)
     {
         var normalizedRequest = request ?? new RecoveryRunPreflightRequest();
+        var resolvedBackupRoot = ResolveBackupRootPath(normalizedRequest.BackupRoot);
         var environmentOverrides = BuildCommonOverrides(
             normalizedRequest.BackupMode,
             normalizedRequest.SqliteDbPath,
-            normalizedRequest.BackupRoot,
+            resolvedBackupRoot,
             normalizedRequest.RestoreMode,
             metricsFile: null);
 
@@ -63,10 +64,11 @@ public sealed class RecoveryOpsService(
         CancellationToken cancellationToken)
     {
         var normalizedRequest = request ?? new RecoveryRunBackupRequest();
+        var resolvedBackupRoot = ResolveBackupRootPath(normalizedRequest.BackupRoot);
         var environmentOverrides = BuildCommonOverrides(
             normalizedRequest.BackupMode,
             normalizedRequest.SqliteDbPath,
-            normalizedRequest.BackupRoot,
+            resolvedBackupRoot,
             restoreMode: null,
             metricsFile: null);
         if (!string.IsNullOrWhiteSpace(normalizedRequest.BackupTier))
@@ -89,13 +91,14 @@ public sealed class RecoveryOpsService(
     {
         var normalizedRequest = request ?? new RecoveryRunRestoreSmokeRequest();
         var backupRoot = ResolveBackupRootPath(normalizedRequest.BackupRoot);
+        var metricsFilePath = ResolveMetricsFilePath(normalizedRequest.MetricsFile);
         var resolvedBackupFile = ResolveRestoreBackupFile(normalizedRequest.BackupFilePath, backupRoot);
         var environmentOverrides = BuildCommonOverrides(
             backupMode: null,
             sqliteDbPath: null,
             backupRoot: backupRoot,
             restoreMode: normalizedRequest.RestoreMode,
-            metricsFile: normalizedRequest.MetricsFile);
+            metricsFile: metricsFilePath);
 
         return RunScriptAsync(
             operation: "restore_smoke",

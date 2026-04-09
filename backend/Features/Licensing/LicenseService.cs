@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SmartPos.Backend.Domain;
+using SmartPos.Backend.Features.Ai;
 using SmartPos.Backend.Features.Purchases;
 using SmartPos.Backend.Infrastructure;
 using SmartPos.Backend.Security;
@@ -19,11 +20,11 @@ namespace SmartPos.Backend.Features.Licensing;
 
 public sealed class LicenseService(
     SmartPosDbContext dbContext,
+    AiCreditBillingService aiCreditBillingService,
     IOptions<LicenseOptions> optionsAccessor,
     LicensingMetrics metrics,
     IHttpContextAccessor httpContextAccessor,
     ILicensingAlertMonitor licensingAlertMonitor,
-    IBillMalwareScanner billMalwareScanner,
     IWebHostEnvironment webHostEnvironment,
     IHttpClientFactory httpClientFactory)
 {
@@ -80,6 +81,18 @@ public sealed class LicenseService(
         ["pack_100"] = 100m,
         ["pack_500"] = 500m,
         ["pack_2000"] = 2000m
+    };
+    private static readonly string[] ManagedShopRolePriority =
+    [
+        SmartPosRoles.Owner,
+        SmartPosRoles.Manager,
+        SmartPosRoles.Cashier
+    ];
+    private static readonly HashSet<string> ManagedShopRoleCodes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        SmartPosRoles.Owner,
+        SmartPosRoles.Manager,
+        SmartPosRoles.Cashier
     };
 
     private enum TokenRotationMode
@@ -146,6 +159,22 @@ public sealed class LicenseService(
     private readonly record struct OwnerAccountProvisioningResult(
         AppUser User,
         string AccountState);
+    private readonly record struct ShopDeactivationDependencySnapshot(
+        int ActiveDevices,
+        int NonTerminalSubscriptions,
+        int OpenOrPendingInvoices,
+        int PendingManualPayments,
+        int PendingAiOrders,
+        int PendingAiPayments)
+    {
+        public bool HasBlockingDependencies =>
+            ActiveDevices > 0 ||
+            NonTerminalSubscriptions > 0 ||
+            OpenOrPendingInvoices > 0 ||
+            PendingManualPayments > 0 ||
+            PendingAiOrders > 0 ||
+            PendingAiPayments > 0;
+    }
 
     private static readonly JsonSerializerOptions TokenSerializerOptions = new()
     {
@@ -1702,12 +1731,20 @@ public sealed class LicenseService(
 
     public async Task<AdminShopsLicensingSnapshotResponse> GetAdminShopsSnapshotAsync(
         string? search,
+        bool includeInactive,
+        int take,
         CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
+        var normalizedTake = Math.Clamp(take, 1, 500);
         var normalizedSearch = NormalizeOptionalValue(search)?.ToLowerInvariant();
 
         var shopsQuery = dbContext.Shops.AsNoTracking();
+        if (!includeInactive)
+        {
+            shopsQuery = shopsQuery.Where(x => x.IsActive);
+        }
+
         if (!string.IsNullOrWhiteSpace(normalizedSearch))
         {
             shopsQuery = shopsQuery.Where(x =>
@@ -1717,6 +1754,7 @@ public sealed class LicenseService(
 
         var shops = await shopsQuery
             .OrderBy(x => x.Code)
+            .Take(normalizedTake)
             .ToListAsync(cancellationToken);
 
         if (shops.Count == 0)
@@ -1813,6 +1851,7 @@ public sealed class LicenseService(
                 ShopId = shop.Id,
                 ShopCode = shop.Code,
                 ShopName = shop.Name,
+                IsActive = shop.IsActive,
                 SubscriptionStatus = (subscription?.Status ?? SubscriptionStatus.Trialing).ToString().ToLowerInvariant(),
                 Plan = subscription?.Plan ?? ResolvePlanCode(options.DefaultPlan),
                 SeatLimit = seatLimit,
@@ -1829,6 +1868,367 @@ public sealed class LicenseService(
         {
             GeneratedAt = now,
             Items = rows
+        };
+    }
+
+    public async Task<AdminShopMutationResponse> CreateAdminShopAsync(
+        AdminShopCreateRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var now = DateTimeOffset.UtcNow;
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Reason,
+            defaultActor: "support-admin",
+            defaultReasonCode: "manual_shop_create");
+        var shopCode = NormalizeMarketingShopCode(request.ShopCode);
+        var shopName = ResolveManagedShopName(request.ShopName, "shop_name");
+        var ownerUsername = ResolveMarketingOwnerUsername(request.OwnerUsername);
+        var ownerPassword = ResolveMarketingOwnerPassword(request.OwnerPassword);
+        var ownerFullName = ResolveMarketingOwnerFullName(request.OwnerFullName, shopName);
+
+        var shopExists = await dbContext.Shops
+            .AsNoTracking()
+            .AnyAsync(x => x.Code.ToLower() == shopCode.ToLower(), cancellationToken);
+        if (shopExists)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.DuplicateSubmission,
+                "shop_code already exists.",
+                StatusCodes.Status409Conflict);
+        }
+
+        var ownerUsernameExists = await dbContext.Users
+            .AsNoTracking()
+            .AnyAsync(x => x.Username.ToLower() == ownerUsername, cancellationToken);
+        if (ownerUsernameExists)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.DuplicateSubmission,
+                "owner_username is already in use.",
+                StatusCodes.Status409Conflict);
+        }
+
+        var ownerRole = await ResolveManagedShopRoleEntityAsync(SmartPosRoles.Owner, cancellationToken);
+        var shop = new Shop
+        {
+            Code = shopCode,
+            Name = shopName,
+            IsActive = true,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = null
+        };
+
+        var ownerUser = new AppUser
+        {
+            StoreId = shop.Id,
+            Username = ownerUsername,
+            FullName = ownerFullName,
+            PasswordHash = string.Empty,
+            IsActive = true,
+            CreatedAtUtc = now,
+            LastLoginAtUtc = null
+        };
+        ownerUser.PasswordHash = PasswordHashing.HashPassword(ownerUser, ownerPassword);
+
+        dbContext.Shops.Add(shop);
+        dbContext.Users.Add(ownerUser);
+        dbContext.UserRoles.Add(new UserRole
+        {
+            UserId = ownerUser.Id,
+            RoleId = ownerRole.Id,
+            AssignedAtUtc = now,
+            User = ownerUser,
+            Role = ownerRole
+        });
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = shop.Id,
+            Action = "shop_created",
+            Actor = overrideContext.Actor,
+            Reason = overrideContext.AuditReason,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                shop_id = shop.Id,
+                shop_code = shop.Code,
+                shop_name = shop.Name,
+                is_active = shop.IsActive,
+                owner_user_id = ownerUser.Id,
+                owner_username = ownerUser.Username,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            }),
+            CreatedAtUtc = now
+        });
+
+        await AddManualOverrideAuditLogAsync(
+            shop.Id,
+            null,
+            "manual_override_shop_create",
+            overrideContext.Actor,
+            overrideContext.AuditReason,
+            new
+            {
+                shop_id = shop.Id,
+                shop_code = shop.Code,
+                shop_name = shop.Name,
+                is_active = shop.IsActive,
+                owner_user_id = ownerUser.Id,
+                owner_username = ownerUser.Username,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            },
+            now,
+            cancellationToken);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new AdminShopMutationResponse
+        {
+            Action = "create",
+            Shop = MapAdminShopMutationRow(shop),
+            Owner = MapAdminShopOwnerSummary(ownerUser),
+            ProcessedAt = now
+        };
+    }
+
+    public async Task<AdminShopMutationResponse> UpdateAdminShopAsync(
+        Guid shopId,
+        AdminShopUpdateRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var now = DateTimeOffset.UtcNow;
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Reason,
+            defaultActor: "support-admin",
+            defaultReasonCode: "manual_shop_update");
+        var shop = await ResolveExistingShopByIdAsync(shopId, cancellationToken);
+        var changed = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(NormalizeOptionalValue(request.ShopCode)))
+        {
+            var normalizedRequestedCode = NormalizeMarketingShopCode(request.ShopCode);
+            if (!string.Equals(shop.Code, normalizedRequestedCode, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.InvalidAdminRequest,
+                    "shop_code is immutable and cannot be changed.",
+                    StatusCodes.Status409Conflict);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(NormalizeOptionalValue(request.ShopName)))
+        {
+            var nextShopName = ResolveManagedShopName(request.ShopName, "shop_name");
+            if (!string.Equals(shop.Name, nextShopName, StringComparison.Ordinal))
+            {
+                shop.Name = nextShopName;
+                shop.UpdatedAtUtc = now;
+                changed.Add("shop_name");
+            }
+        }
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = shop.Id,
+            Action = "shop_updated",
+            Actor = overrideContext.Actor,
+            Reason = overrideContext.AuditReason,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                shop_id = shop.Id,
+                shop_code = shop.Code,
+                shop_name = shop.Name,
+                is_active = shop.IsActive,
+                changed,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            }),
+            CreatedAtUtc = now
+        });
+
+        await AddManualOverrideAuditLogAsync(
+            shop.Id,
+            null,
+            "manual_override_shop_update",
+            overrideContext.Actor,
+            overrideContext.AuditReason,
+            new
+            {
+                shop_id = shop.Id,
+                shop_code = shop.Code,
+                shop_name = shop.Name,
+                is_active = shop.IsActive,
+                changed,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            },
+            now,
+            cancellationToken);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new AdminShopMutationResponse
+        {
+            Action = "update",
+            Shop = MapAdminShopMutationRow(shop),
+            ProcessedAt = now
+        };
+    }
+
+    public async Task<AdminShopMutationResponse> DeactivateAdminShopAsync(
+        Guid shopId,
+        AdminShopDeactivateRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var now = DateTimeOffset.UtcNow;
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Reason,
+            defaultActor: "support-admin",
+            defaultReasonCode: "manual_shop_deactivate");
+        var shop = await ResolveExistingShopByIdAsync(shopId, cancellationToken);
+        var dependencySnapshot = await BuildShopDeactivationDependencySnapshotAsync(shop.Id, cancellationToken);
+
+        if (dependencySnapshot.HasBlockingDependencies)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                $"Shop cannot be deactivated while active dependents exist (active_devices={dependencySnapshot.ActiveDevices}, non_terminal_subscriptions={dependencySnapshot.NonTerminalSubscriptions}, open_or_pending_invoices={dependencySnapshot.OpenOrPendingInvoices}, pending_manual_payments={dependencySnapshot.PendingManualPayments}, pending_ai_orders={dependencySnapshot.PendingAiOrders}, pending_ai_payments={dependencySnapshot.PendingAiPayments}).",
+                StatusCodes.Status409Conflict);
+        }
+
+        var wasActive = shop.IsActive;
+        shop.IsActive = false;
+        shop.UpdatedAtUtc = now;
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = shop.Id,
+            Action = "shop_deactivated",
+            Actor = overrideContext.Actor,
+            Reason = overrideContext.AuditReason,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                shop_id = shop.Id,
+                shop_code = shop.Code,
+                was_active = wasActive,
+                is_active = shop.IsActive,
+                active_devices = dependencySnapshot.ActiveDevices,
+                non_terminal_subscriptions = dependencySnapshot.NonTerminalSubscriptions,
+                open_or_pending_invoices = dependencySnapshot.OpenOrPendingInvoices,
+                pending_manual_payments = dependencySnapshot.PendingManualPayments,
+                pending_ai_orders = dependencySnapshot.PendingAiOrders,
+                pending_ai_payments = dependencySnapshot.PendingAiPayments,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            }),
+            CreatedAtUtc = now
+        });
+
+        await AddManualOverrideAuditLogAsync(
+            shop.Id,
+            null,
+            "manual_override_shop_deactivate",
+            overrideContext.Actor,
+            overrideContext.AuditReason,
+            new
+            {
+                shop_id = shop.Id,
+                shop_code = shop.Code,
+                was_active = wasActive,
+                is_active = shop.IsActive,
+                active_devices = dependencySnapshot.ActiveDevices,
+                non_terminal_subscriptions = dependencySnapshot.NonTerminalSubscriptions,
+                open_or_pending_invoices = dependencySnapshot.OpenOrPendingInvoices,
+                pending_manual_payments = dependencySnapshot.PendingManualPayments,
+                pending_ai_orders = dependencySnapshot.PendingAiOrders,
+                pending_ai_payments = dependencySnapshot.PendingAiPayments,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            },
+            now,
+            cancellationToken);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new AdminShopMutationResponse
+        {
+            Action = "deactivate",
+            Shop = MapAdminShopMutationRow(shop),
+            ProcessedAt = now
+        };
+    }
+
+    public async Task<AdminShopMutationResponse> ReactivateAdminShopAsync(
+        Guid shopId,
+        AdminShopReactivateRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var now = DateTimeOffset.UtcNow;
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Reason,
+            defaultActor: "support-admin",
+            defaultReasonCode: "manual_shop_reactivate");
+        var shop = await ResolveExistingShopByIdAsync(shopId, cancellationToken);
+        var wasActive = shop.IsActive;
+        shop.IsActive = true;
+        shop.UpdatedAtUtc = now;
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = shop.Id,
+            Action = "shop_reactivated",
+            Actor = overrideContext.Actor,
+            Reason = overrideContext.AuditReason,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                shop_id = shop.Id,
+                shop_code = shop.Code,
+                was_active = wasActive,
+                is_active = shop.IsActive,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            }),
+            CreatedAtUtc = now
+        });
+
+        await AddManualOverrideAuditLogAsync(
+            shop.Id,
+            null,
+            "manual_override_shop_reactivate",
+            overrideContext.Actor,
+            overrideContext.AuditReason,
+            new
+            {
+                shop_id = shop.Id,
+                shop_code = shop.Code,
+                was_active = wasActive,
+                is_active = shop.IsActive,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            },
+            now,
+            cancellationToken);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new AdminShopMutationResponse
+        {
+            Action = "reactivate",
+            Shop = MapAdminShopMutationRow(shop),
+            ProcessedAt = now
         };
     }
 
@@ -2031,6 +2431,546 @@ public sealed class LicenseService(
             TotalAllocatedSeats = totalAllocatedSeats,
             ActiveSeats = activeSeats,
             Item = responseRow,
+            ProcessedAt = now
+        };
+    }
+
+    public async Task<AdminShopUsersResponse> GetAdminShopUsersAsync(
+        string? shopCode,
+        string? search,
+        bool includeInactive,
+        int take,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var normalizedTake = Math.Clamp(take, 1, 200);
+        var normalizedSearch = NormalizeOptionalValue(search)?.ToLowerInvariant();
+
+        Shop? targetShop = null;
+        if (!string.IsNullOrWhiteSpace(NormalizeOptionalValue(shopCode)))
+        {
+            targetShop = await ResolveExistingShopByCodeAsync(shopCode, cancellationToken);
+        }
+
+        var usersQuery = dbContext.Users
+            .AsNoTracking()
+            .Where(x => x.StoreId.HasValue && x.StoreId.Value != Guid.Empty);
+        if (targetShop is not null)
+        {
+            usersQuery = usersQuery.Where(x => x.StoreId == targetShop.Id);
+        }
+
+        if (!includeInactive)
+        {
+            usersQuery = usersQuery.Where(x => x.IsActive);
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedSearch))
+        {
+            usersQuery = usersQuery.Where(x =>
+                x.Username.ToLower().Contains(normalizedSearch) ||
+                x.FullName.ToLower().Contains(normalizedSearch));
+        }
+
+        var candidates = await usersQuery
+            .OrderBy(x => x.Username)
+            .Take(1000)
+            .ToListAsync(cancellationToken);
+        if (candidates.Count == 0)
+        {
+            return new AdminShopUsersResponse
+            {
+                GeneratedAt = now,
+                Count = 0,
+                Items = []
+            };
+        }
+
+        var candidateUserIds = candidates.Select(x => x.Id).ToList();
+        var roleAssignments = await (
+            from userRole in dbContext.UserRoles.AsNoTracking()
+            join role in dbContext.Roles.AsNoTracking() on userRole.RoleId equals role.Id
+            where candidateUserIds.Contains(userRole.UserId)
+            select new
+            {
+                userRole.UserId,
+                RoleCode = role.Code.ToLower()
+            })
+            .ToListAsync(cancellationToken);
+
+        var roleCodeByUserId = roleAssignments
+            .Where(x => ManagedShopRoleCodes.Contains(x.RoleCode))
+            .GroupBy(x => x.UserId)
+            .ToDictionary(
+                x => x.Key,
+                x => ResolveManagedRoleCodeFromCandidates(x.Select(item => item.RoleCode)));
+
+        var userStoreIds = candidates
+            .Where(x => roleCodeByUserId.ContainsKey(x.Id) && x.StoreId.HasValue)
+            .Select(x => x.StoreId!.Value)
+            .Distinct()
+            .ToList();
+        var shopsById = userStoreIds.Count == 0
+            ? new Dictionary<Guid, Shop>()
+            : await dbContext.Shops
+                .AsNoTracking()
+                .Where(x => userStoreIds.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+        var rows = new List<AdminShopUserRow>(candidates.Count);
+        foreach (var user in candidates)
+        {
+            if (!roleCodeByUserId.TryGetValue(user.Id, out var managedRoleCode))
+            {
+                continue;
+            }
+
+            if (!user.StoreId.HasValue || !shopsById.TryGetValue(user.StoreId.Value, out var shop))
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(normalizedSearch) &&
+                !user.Username.ToLower().Contains(normalizedSearch) &&
+                !user.FullName.ToLower().Contains(normalizedSearch) &&
+                !managedRoleCode.Contains(normalizedSearch) &&
+                !shop.Code.ToLower().Contains(normalizedSearch) &&
+                !shop.Name.ToLower().Contains(normalizedSearch))
+            {
+                continue;
+            }
+
+            rows.Add(MapAdminShopUserRow(user, shop, managedRoleCode));
+        }
+
+        var orderedRows = rows
+            .OrderBy(x => x.ShopCode, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(x => x.Username, StringComparer.OrdinalIgnoreCase)
+            .Take(normalizedTake)
+            .ToList();
+
+        return new AdminShopUsersResponse
+        {
+            GeneratedAt = now,
+            Count = orderedRows.Count,
+            Items = orderedRows
+        };
+    }
+
+    public async Task<AdminShopUserMutationResponse> CreateAdminShopUserAsync(
+        AdminShopUserCreateRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var now = DateTimeOffset.UtcNow;
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Reason,
+            defaultActor: "support-admin",
+            defaultReasonCode: "manual_shop_user_create");
+        var shop = await ResolveExistingShopByCodeAsync(request.ShopCode, cancellationToken);
+        var username = ResolveManagedShopUsername(request.Username, "username");
+        var fullName = ResolveManagedShopFullName(request.FullName);
+        var roleCode = ResolveManagedShopRoleCode(request.RoleCode);
+        var password = ResolveManagedShopPassword(request.Password, "password");
+
+        var usernameTaken = await dbContext.Users
+            .AsNoTracking()
+            .AnyAsync(x => x.Username.ToLower() == username, cancellationToken);
+        if (usernameTaken)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.DuplicateSubmission,
+                "username is already in use.",
+                StatusCodes.Status409Conflict);
+        }
+
+        var role = await ResolveManagedShopRoleEntityAsync(roleCode, cancellationToken);
+        var user = new AppUser
+        {
+            StoreId = shop.Id,
+            Username = username,
+            FullName = fullName,
+            PasswordHash = string.Empty,
+            IsActive = true,
+            CreatedAtUtc = now,
+            LastLoginAtUtc = null
+        };
+        user.PasswordHash = PasswordHashing.HashPassword(user, password);
+
+        dbContext.Users.Add(user);
+        dbContext.UserRoles.Add(new UserRole
+        {
+            UserId = user.Id,
+            RoleId = role.Id,
+            AssignedAtUtc = now,
+            User = user,
+            Role = role
+        });
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = shop.Id,
+            Action = "shop_user_created",
+            Actor = overrideContext.Actor,
+            Reason = overrideContext.AuditReason,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                user_id = user.Id,
+                username,
+                role_code = roleCode,
+                is_active = true,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            }),
+            CreatedAtUtc = now
+        });
+
+        await AddManualOverrideAuditLogAsync(
+            shop.Id,
+            null,
+            "manual_override_shop_user_create",
+            overrideContext.Actor,
+            overrideContext.AuditReason,
+            new
+            {
+                user_id = user.Id,
+                username,
+                role_code = roleCode,
+                is_active = true,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            },
+            now,
+            cancellationToken);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new AdminShopUserMutationResponse
+        {
+            Action = "create",
+            User = MapAdminShopUserRow(user, shop, roleCode),
+            ProcessedAt = now
+        };
+    }
+
+    public async Task<AdminShopUserMutationResponse> UpdateAdminShopUserAsync(
+        Guid userId,
+        AdminShopUserUpdateRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var now = DateTimeOffset.UtcNow;
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Reason,
+            defaultActor: "support-admin",
+            defaultReasonCode: "manual_shop_user_update");
+        var (user, shop, currentRoleCode) = await ResolveManagedShopUserContextAsync(userId, cancellationToken);
+
+        var nextUsername = user.Username;
+        var nextFullName = user.FullName;
+        var nextRoleCode = currentRoleCode;
+        var changeFlags = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(NormalizeOptionalValue(request.Username)))
+        {
+            var normalizedUsername = ResolveManagedShopUsername(request.Username, "username");
+            if (!string.Equals(user.Username, normalizedUsername, StringComparison.OrdinalIgnoreCase))
+            {
+                var usernameTaken = await dbContext.Users
+                    .AsNoTracking()
+                    .AnyAsync(x => x.Id != user.Id && x.Username.ToLower() == normalizedUsername, cancellationToken);
+                if (usernameTaken)
+                {
+                    throw new LicenseException(
+                        LicenseErrorCodes.DuplicateSubmission,
+                        "username is already in use.",
+                        StatusCodes.Status409Conflict);
+                }
+
+                user.Username = normalizedUsername;
+                nextUsername = normalizedUsername;
+                changeFlags.Add("username");
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(NormalizeOptionalValue(request.FullName)))
+        {
+            var normalizedFullName = ResolveManagedShopFullName(request.FullName);
+            if (!string.Equals(user.FullName, normalizedFullName, StringComparison.Ordinal))
+            {
+                user.FullName = normalizedFullName;
+                nextFullName = normalizedFullName;
+                changeFlags.Add("full_name");
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(NormalizeOptionalValue(request.RoleCode)))
+        {
+            var normalizedRoleCode = ResolveManagedShopRoleCode(request.RoleCode);
+            if (!string.Equals(currentRoleCode, normalizedRoleCode, StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.Equals(currentRoleCode, SmartPosRoles.Owner, StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(normalizedRoleCode, SmartPosRoles.Owner, StringComparison.OrdinalIgnoreCase))
+                {
+                    await EnsureShopHasAnotherActiveOwnerAsync(shop.Id, user.Id, cancellationToken);
+                }
+
+                await ReplaceManagedRoleForUserAsync(user, normalizedRoleCode, now, cancellationToken);
+                nextRoleCode = normalizedRoleCode;
+                changeFlags.Add("role_code");
+            }
+        }
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = shop.Id,
+            Action = "shop_user_updated",
+            Actor = overrideContext.Actor,
+            Reason = overrideContext.AuditReason,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                user_id = user.Id,
+                username = nextUsername,
+                full_name = nextFullName,
+                role_code = nextRoleCode,
+                changed = changeFlags,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            }),
+            CreatedAtUtc = now
+        });
+
+        await AddManualOverrideAuditLogAsync(
+            shop.Id,
+            null,
+            "manual_override_shop_user_update",
+            overrideContext.Actor,
+            overrideContext.AuditReason,
+            new
+            {
+                user_id = user.Id,
+                username = nextUsername,
+                full_name = nextFullName,
+                role_code = nextRoleCode,
+                changed = changeFlags,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            },
+            now,
+            cancellationToken);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new AdminShopUserMutationResponse
+        {
+            Action = "update",
+            User = MapAdminShopUserRow(user, shop, nextRoleCode),
+            ProcessedAt = now
+        };
+    }
+
+    public async Task<AdminShopUserMutationResponse> DeactivateAdminShopUserAsync(
+        Guid userId,
+        AdminShopUserDeactivateRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var now = DateTimeOffset.UtcNow;
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Reason,
+            defaultActor: "support-admin",
+            defaultReasonCode: "manual_shop_user_deactivate");
+        var (user, shop, roleCode) = await ResolveManagedShopUserContextAsync(userId, cancellationToken);
+
+        if (string.Equals(roleCode, SmartPosRoles.Owner, StringComparison.OrdinalIgnoreCase))
+        {
+            await EnsureShopHasAnotherActiveOwnerAsync(shop.Id, user.Id, cancellationToken);
+        }
+
+        user.IsActive = false;
+        var revokedSessions = await RevokeAuthSessionsForUserAsync(
+            user.Id,
+            now,
+            "admin_user_deactivated",
+            cancellationToken);
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = shop.Id,
+            Action = "shop_user_deactivated",
+            Actor = overrideContext.Actor,
+            Reason = overrideContext.AuditReason,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                user_id = user.Id,
+                username = user.Username,
+                role_code = roleCode,
+                revoked_sessions = revokedSessions,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            }),
+            CreatedAtUtc = now
+        });
+
+        await AddManualOverrideAuditLogAsync(
+            shop.Id,
+            null,
+            "manual_override_shop_user_deactivate",
+            overrideContext.Actor,
+            overrideContext.AuditReason,
+            new
+            {
+                user_id = user.Id,
+                username = user.Username,
+                role_code = roleCode,
+                revoked_sessions = revokedSessions,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            },
+            now,
+            cancellationToken);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new AdminShopUserMutationResponse
+        {
+            Action = "deactivate",
+            User = MapAdminShopUserRow(user, shop, roleCode),
+            ProcessedAt = now
+        };
+    }
+
+    public async Task<AdminShopUserMutationResponse> ReactivateAdminShopUserAsync(
+        Guid userId,
+        AdminShopUserReactivateRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var now = DateTimeOffset.UtcNow;
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Reason,
+            defaultActor: "support-admin",
+            defaultReasonCode: "manual_shop_user_reactivate");
+        var (user, shop, roleCode) = await ResolveManagedShopUserContextAsync(userId, cancellationToken);
+        user.IsActive = true;
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = shop.Id,
+            Action = "shop_user_reactivated",
+            Actor = overrideContext.Actor,
+            Reason = overrideContext.AuditReason,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                user_id = user.Id,
+                username = user.Username,
+                role_code = roleCode,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            }),
+            CreatedAtUtc = now
+        });
+
+        await AddManualOverrideAuditLogAsync(
+            shop.Id,
+            null,
+            "manual_override_shop_user_reactivate",
+            overrideContext.Actor,
+            overrideContext.AuditReason,
+            new
+            {
+                user_id = user.Id,
+                username = user.Username,
+                role_code = roleCode,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            },
+            now,
+            cancellationToken);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new AdminShopUserMutationResponse
+        {
+            Action = "reactivate",
+            User = MapAdminShopUserRow(user, shop, roleCode),
+            ProcessedAt = now
+        };
+    }
+
+    public async Task<AdminShopUserMutationResponse> ResetAdminShopUserPasswordAsync(
+        Guid userId,
+        AdminShopUserPasswordResetRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var now = DateTimeOffset.UtcNow;
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Reason,
+            defaultActor: "support-admin",
+            defaultReasonCode: "manual_shop_user_password_reset");
+        var (user, shop, roleCode) = await ResolveManagedShopUserContextAsync(userId, cancellationToken);
+        var newPassword = ResolveManagedShopPassword(request.NewPassword, "new_password");
+        user.PasswordHash = PasswordHashing.HashPassword(user, newPassword);
+
+        var revokedSessions = await RevokeAuthSessionsForUserAsync(
+            user.Id,
+            now,
+            "admin_password_reset",
+            cancellationToken);
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = shop.Id,
+            Action = "shop_user_password_reset",
+            Actor = overrideContext.Actor,
+            Reason = overrideContext.AuditReason,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                user_id = user.Id,
+                username = user.Username,
+                role_code = roleCode,
+                revoked_sessions = revokedSessions,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            }),
+            CreatedAtUtc = now
+        });
+
+        await AddManualOverrideAuditLogAsync(
+            shop.Id,
+            null,
+            "manual_override_shop_user_password_reset",
+            overrideContext.Actor,
+            overrideContext.AuditReason,
+            new
+            {
+                user_id = user.Id,
+                username = user.Username,
+                role_code = roleCode,
+                revoked_sessions = revokedSessions,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            },
+            now,
+            cancellationToken);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new AdminShopUserMutationResponse
+        {
+            Action = "reset_password",
+            User = MapAdminShopUserRow(user, shop, roleCode),
             ProcessedAt = now
         };
     }
@@ -3187,6 +4127,229 @@ public sealed class LicenseService(
         };
     }
 
+    public async Task<AdminAiWalletCorrectionResponse> CorrectAiWalletBalanceAsAdminAsync(
+        string shopCode,
+        AdminAiWalletCorrectionRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var normalizedShopCode = ResolveShopCode(shopCode);
+        var normalizedReference = NormalizeOptionalValue(request.Reference);
+        if (string.IsNullOrWhiteSpace(normalizedReference))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "reference is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Reason,
+            defaultActor: "billing-admin",
+            defaultReasonCode: "manual_wallet_correction");
+        var now = DateTimeOffset.UtcNow;
+        var shop = await ResolveExistingShopByCodeAsync(normalizedShopCode, cancellationToken);
+        var actorUser = await ResolveAdminActorUserAsync(overrideContext.Actor, cancellationToken);
+
+        var previousBalance = await dbContext.AiCreditWallets
+            .AsNoTracking()
+            .Where(x => x.ShopId == shop.Id)
+            .Select(x => x.AvailableCredits)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        AiWalletAdjustmentResult adjustmentResult;
+        try
+        {
+            adjustmentResult = await aiCreditBillingService.AdjustCreditsForShopAsync(
+                shop.Id,
+                actorUser.Id,
+                request.DeltaCredits,
+                normalizedReference,
+                overrideContext.ActorNote,
+                cancellationToken);
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                exception.Message,
+                StatusCodes.Status400BadRequest);
+        }
+
+        var status = adjustmentResult.AppliedDelta == 0m ? "duplicate_reference_noop" : "applied";
+        if (adjustmentResult.AppliedDelta != 0m)
+        {
+            dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+            {
+                ShopId = shop.Id,
+                Action = "ai_wallet_corrected",
+                Actor = overrideContext.Actor,
+                Reason = overrideContext.AuditReason,
+                MetadataJson = JsonSerializer.Serialize(new
+                {
+                    shop_code = shop.Code,
+                    reference = normalizedReference,
+                    previous_balance = previousBalance,
+                    applied_delta = adjustmentResult.AppliedDelta,
+                    updated_balance = adjustmentResult.AvailableCredits,
+                    reason_code = overrideContext.ReasonCode,
+                    actor_note = overrideContext.ActorNote
+                }),
+                CreatedAtUtc = now
+            });
+
+            await AddManualOverrideAuditLogAsync(
+                shop.Id,
+                null,
+                "manual_override_ai_wallet_correction",
+                overrideContext.Actor,
+                overrideContext.AuditReason,
+                new
+                {
+                    shop_code = shop.Code,
+                    reference = normalizedReference,
+                    previous_balance = previousBalance,
+                    applied_delta = adjustmentResult.AppliedDelta,
+                    updated_balance = adjustmentResult.AvailableCredits,
+                    reason_code = overrideContext.ReasonCode,
+                    actor_note = overrideContext.ActorNote
+                },
+                now,
+                cancellationToken);
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        return new AdminAiWalletCorrectionResponse
+        {
+            ShopId = shop.Id,
+            ShopCode = shop.Code,
+            Status = status,
+            Reference = normalizedReference,
+            PreviousBalance = previousBalance,
+            UpdatedBalance = adjustmentResult.AvailableCredits,
+            AppliedDelta = adjustmentResult.AppliedDelta,
+            ProcessedAt = now
+        };
+    }
+
+    public async Task<AdminDeviceFraudLockResponse> ApplyFraudLockToDeviceAsAdminAsync(
+        string deviceCode,
+        AdminDeviceFraudLockRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var normalizedDeviceCode = NormalizeDeviceCode(deviceCode);
+        if (string.IsNullOrWhiteSpace(normalizedDeviceCode))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "device_code is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Reason,
+            defaultActor: "security-admin",
+            defaultReasonCode: "fraud_lock_device");
+        var requiresStepUp = options.RequireStepUpApprovalForHighRiskAdminActions;
+        var stepUpApproval = ResolveStepUpApproval(
+            requiresStepUp,
+            request.StepUpApprovedBy,
+            request.StepUpApprovalNote,
+            "fraud_lock_device");
+        var now = DateTimeOffset.UtcNow;
+
+        var deactivation = await DeactivateDeviceAsAdminAsync(
+            normalizedDeviceCode,
+            new AdminDeviceActionRequest
+            {
+                Actor = overrideContext.Actor,
+                ReasonCode = overrideContext.ReasonCode,
+                ActorNote = overrideContext.ActorNote
+            },
+            cancellationToken);
+
+        var revokedTokenSessions = await RevokeDeviceTokenSessionsAsAdminAsync(
+            normalizedDeviceCode,
+            overrideContext.Actor,
+            overrideContext.ReasonCode,
+            overrideContext.ActorNote,
+            "manual_override_fraud_lock_revoke_tokens",
+            "device_fraud_lock_tokens_revoked",
+            now,
+            cancellationToken);
+
+        var provisionedDevice = await dbContext.ProvisionedDevices
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.DeviceCode == normalizedDeviceCode, cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.Unprovisioned,
+                "Device is not provisioned.",
+                StatusCodes.Status404NotFound);
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = provisionedDevice.ShopId,
+            ProvisionedDeviceId = provisionedDevice.Id,
+            Action = "device_fraud_lock_applied",
+            Actor = overrideContext.Actor,
+            Reason = overrideContext.AuditReason,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                device_code = normalizedDeviceCode,
+                revoked_token_sessions = revokedTokenSessions,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote,
+                step_up_required = requiresStepUp,
+                step_up_applied = stepUpApproval.Applied,
+                step_up_approved_by = stepUpApproval.Applied ? stepUpApproval.ApprovedBy : null
+            }),
+            CreatedAtUtc = now
+        });
+
+        await AddManualOverrideAuditLogAsync(
+            provisionedDevice.ShopId,
+            provisionedDevice.Id,
+            "manual_override_fraud_lock_device",
+            overrideContext.Actor,
+            overrideContext.AuditReason,
+            new
+            {
+                device_code = normalizedDeviceCode,
+                revoked_token_sessions = revokedTokenSessions,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote,
+                step_up_required = requiresStepUp,
+                step_up_applied = stepUpApproval.Applied,
+                step_up_approved_by = stepUpApproval.Applied ? stepUpApproval.ApprovedBy : null
+            },
+            now,
+            cancellationToken);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new AdminDeviceFraudLockResponse
+        {
+            ShopId = deactivation.ShopId,
+            DeviceCode = normalizedDeviceCode,
+            Action = "fraud_lock",
+            Status = deactivation.Status,
+            LicenseState = deactivation.LicenseState,
+            RevokedTokenSessions = revokedTokenSessions,
+            StepUpRequired = requiresStepUp,
+            StepUpApplied = stepUpApproval.Applied,
+            StepUpApprovedBy = stepUpApproval.Applied ? stepUpApproval.ApprovedBy : null,
+            ProcessedAt = now
+        };
+    }
+
     public async Task<MarketingPaymentRequestCreateResponse> CreateMarketingPaymentRequestAsync(
         MarketingPaymentRequestCreateRequest request,
         CancellationToken cancellationToken)
@@ -3635,14 +4798,12 @@ public sealed class LicenseService(
         var contactPhone = NormalizeOptionalValue(request.ContactPhone);
         var normalizedNotes = NormalizeOptionalValue(request.Notes);
         var normalizedBankReference = NormalizeMarketingBankReference(request.BankReference);
-        var normalizedDepositSlipUrl = ValidateDepositSlipUrl(request.DepositSlipUrl);
         var manualPaymentMethod = ParseManualBillingPaymentMethod(paymentMethod);
         var actorNote = "customer submitted payment details via marketing website";
 
         ValidateManualPaymentEvidence(
             manualPaymentMethod,
             normalizedBankReference,
-            normalizedDepositSlipUrl,
             "submit");
 
         var invoice = await ResolveManualBillingInvoiceForPaymentAsync(
@@ -3698,7 +4859,6 @@ public sealed class LicenseService(
                 Amount = decimal.Round(request.Amount, 2),
                 Currency = ResolveCurrency(request.Currency),
                 BankReference = normalizedBankReference,
-                DepositSlipUrl = normalizedDepositSlipUrl,
                 ReceivedAt = request.PaidAt ?? now,
                 Notes = paymentNotes,
                 Actor = "marketing-customer",
@@ -3856,70 +5016,17 @@ public sealed class LicenseService(
         };
     }
 
-    public async Task<MarketingPaymentProofUploadResponse> UploadMarketingPaymentProofAsync(
+    public Task<MarketingPaymentProofUploadResponse> UploadMarketingPaymentProofAsync(
         IFormFile? file,
         CancellationToken cancellationToken)
     {
-        EnsureMarketingManualBillingFallbackEnabled("payment_proof_upload");
-        var validated = await ValidateAndReadMarketingProofFileAsync(file, cancellationToken);
-        var scanResult = await billMalwareScanner.ScanAsync(validated.FileData, cancellationToken);
-        if (!scanResult.IsClean)
-        {
-            licensingAlertMonitor.RecordSecurityAnomaly("marketing_payment_proof_scan_rejected");
-            throw new LicenseException(
+        _ = file;
+        _ = cancellationToken;
+        return Task.FromException<MarketingPaymentProofUploadResponse>(
+            new LicenseException(
                 LicenseErrorCodes.InvalidAdminRequest,
-                scanResult.Message ?? "Payment proof file was rejected by malware scan.",
-                StatusCodes.Status400BadRequest);
-        }
-
-        var now = DateTimeOffset.UtcNow;
-        var publicRootPath = EnsureMarketingProofStorageRoot();
-        var folderPath = Path.Combine(
-            publicRootPath,
-            now.ToString("yyyy", CultureInfo.InvariantCulture),
-            now.ToString("MM", CultureInfo.InvariantCulture));
-        Directory.CreateDirectory(folderPath);
-
-        var storedFileName = $"{now:yyyyMMddHHmmss}-{Guid.NewGuid():N}{validated.Extension}";
-        var fullPath = Path.Combine(folderPath, storedFileName);
-        await File.WriteAllBytesAsync(fullPath, validated.FileData.Bytes, cancellationToken);
-
-        var relativePath = Path.GetRelativePath(publicRootPath, fullPath)
-            .Replace('\\', '/');
-        var relativeUrl = $"/payment-proofs/{relativePath}";
-        var proofUrl = BuildPublicAssetUrl(relativeUrl);
-        var sha256 = Convert.ToHexString(SHA256.HashData(validated.FileData.Bytes)).ToLowerInvariant();
-
-        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
-        {
-            ShopId = null,
-            Action = "marketing_payment_proof_uploaded",
-            Actor = "marketing-customer",
-            Reason = "proof_uploaded",
-            MetadataJson = JsonSerializer.Serialize(new
-            {
-                proof_url = proofUrl,
-                file_name = validated.FileData.FileName,
-                content_type = validated.FileData.ContentType,
-                size_bytes = validated.SizeBytes,
-                sha256,
-                scan_status = scanResult.Status
-            }),
-            CreatedAtUtc = now
-        });
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return new MarketingPaymentProofUploadResponse
-        {
-            UploadedAt = now,
-            ProofUrl = proofUrl,
-            FileName = validated.FileData.FileName,
-            ContentType = validated.FileData.ContentType,
-            SizeBytes = validated.SizeBytes,
-            Sha256 = sha256,
-            ScanStatus = scanResult.Status,
-            ScanMessage = NormalizeOptionalValue(scanResult.Message)
-        };
+                "Payment slip uploads are disabled. Submit manual payments with reference number only.",
+                StatusCodes.Status410Gone));
     }
 
     public async Task<MarketingLicenseDownloadTrackResponse> TrackMarketingLicenseDownloadAsync(
@@ -4170,10 +5277,7 @@ public sealed class LicenseService(
         var actor = overrideContext.Actor;
         var shop = await GetOrCreateShopAsync(request.ShopCode, now, cancellationToken);
         var invoiceNumber = await ResolveManualBillingInvoiceNumberAsync(
-            shop.Id,
-            shop.Code,
             request.InvoiceNumber,
-            now,
             cancellationToken);
         var dueAt = request.DueAt ?? now.AddDays(7);
         var normalizedCurrency = ResolveCurrency(request.Currency);
@@ -4337,12 +5441,10 @@ public sealed class LicenseService(
             defaultReasonCode: "manual_payment_pending_verification");
         var actor = overrideContext.Actor;
         var normalizedBankReference = NormalizeMarketingBankReference(request.BankReference);
-        var normalizedDepositSlipUrl = ValidateDepositSlipUrl(request.DepositSlipUrl);
         var paymentMethod = ParseManualBillingPaymentMethod(request.Method);
         ValidateManualPaymentEvidence(
             paymentMethod,
             normalizedBankReference,
-            normalizedDepositSlipUrl,
             "record");
         var invoice = await ResolveManualBillingInvoiceForPaymentAsync(request, cancellationToken);
         if (invoice.Status is ManualBillingInvoiceStatus.Paid or ManualBillingInvoiceStatus.Canceled)
@@ -4364,7 +5466,7 @@ public sealed class LicenseService(
             Currency = ResolveCurrency(request.Currency ?? invoice.Currency),
             Status = ManualBillingPaymentStatus.PendingVerification,
             BankReference = normalizedBankReference,
-            DepositSlipUrl = normalizedDepositSlipUrl,
+            DepositSlipUrl = null,
             ReceivedAtUtc = request.ReceivedAt ?? now,
             Notes = NormalizeOptionalValue(request.Notes),
             RecordedBy = actor,
@@ -4390,6 +5492,7 @@ public sealed class LicenseService(
                 amount = payment.Amount,
                 currency = payment.Currency,
                 bank_reference = payment.BankReference,
+                proof_mode = "reference_only",
                 reason_code = overrideContext.ReasonCode,
                 actor_note = overrideContext.ActorNote
             })
@@ -4408,6 +5511,7 @@ public sealed class LicenseService(
                 invoice_number = invoice.InvoiceNumber,
                 amount = payment.Amount,
                 currency = payment.Currency,
+                proof_mode = "reference_only",
                 reason_code = overrideContext.ReasonCode,
                 actor_note = overrideContext.ActorNote
             },
@@ -4460,7 +5564,6 @@ public sealed class LicenseService(
         ValidateManualPaymentEvidence(
             payment.Method,
             payment.BankReference,
-            payment.DepositSlipUrl,
             "verify");
 
         var invoice = payment.Invoice;
@@ -7242,10 +8345,7 @@ public sealed class LicenseService(
     }
 
     private async Task<string> ResolveManualBillingInvoiceNumberAsync(
-        Guid shopId,
-        string shopCode,
         string? requestedInvoiceNumber,
-        DateTimeOffset now,
         CancellationToken cancellationToken)
     {
         var normalizedInvoiceNumber = NormalizeOptionalValue(requestedInvoiceNumber);
@@ -7253,14 +8353,13 @@ public sealed class LicenseService(
         {
             var exists = await dbContext.ManualBillingInvoices
                 .AnyAsync(
-                    x => x.ShopId == shopId &&
-                         x.InvoiceNumber.ToLower() == normalizedInvoiceNumber.ToLower(),
+                    x => x.InvoiceNumber.ToLower() == normalizedInvoiceNumber.ToLower(),
                     cancellationToken);
             if (exists)
             {
                 throw new LicenseException(
                     LicenseErrorCodes.InvalidAdminRequest,
-                    "invoice_number already exists for this shop.",
+                    "invoice_number already exists.",
                     StatusCodes.Status409Conflict);
             }
 
@@ -7269,18 +8368,36 @@ public sealed class LicenseService(
 
         while (true)
         {
-            var suffix = Guid.NewGuid().ToString("N")[..6].ToUpperInvariant();
-            var generated = $"LIC-{shopCode.ToUpperInvariant()}-{now:yyyyMMddHHmmss}-{suffix}";
+            var generated = GenerateCompactInvoiceNumber();
             var exists = await dbContext.ManualBillingInvoices
                 .AnyAsync(
-                    x => x.ShopId == shopId &&
-                         x.InvoiceNumber.ToLower() == generated.ToLower(),
+                    x => x.InvoiceNumber.ToLower() == generated.ToLower(),
                     cancellationToken);
             if (!exists)
             {
                 return generated;
             }
         }
+    }
+
+    private static string GenerateCompactInvoiceNumber()
+    {
+        var bytes = Guid.NewGuid().ToByteArray();
+        Span<char> chars = stackalloc char[6];
+        chars[0] = (char)('A' + (bytes[0] % 26));
+        chars[1] = (char)('A' + (bytes[1] % 26));
+
+        var number = ((bytes[2] << 8) | bytes[3]) % 10000;
+        var d1 = number / 1000;
+        var d2 = (number / 100) % 10;
+        var d3 = (number / 10) % 10;
+        var d4 = number % 10;
+        chars[2] = (char)('0' + d1);
+        chars[3] = (char)('0' + d2);
+        chars[4] = (char)('0' + d3);
+        chars[5] = (char)('0' + d4);
+
+        return new string(chars);
     }
 
     private static MarketingPlanQuote ResolveMarketingPlanQuote(string? planCode)
@@ -8101,66 +9218,21 @@ public sealed class LicenseService(
         return normalized;
     }
 
-    private static string? ValidateDepositSlipUrl(string? depositSlipUrl)
-    {
-        var normalized = NormalizeOptionalValue(depositSlipUrl);
-        if (string.IsNullOrWhiteSpace(normalized))
-        {
-            return null;
-        }
-
-        if (!Uri.TryCreate(normalized, UriKind.Absolute, out var uri) ||
-            !(uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
-        {
-            throw new LicenseException(
-                LicenseErrorCodes.InvalidAdminRequest,
-                "deposit_slip_url must be a valid absolute HTTP/HTTPS URL.",
-                StatusCodes.Status400BadRequest);
-        }
-
-        var extension = Path.GetExtension(uri.AbsolutePath);
-        if (!string.IsNullOrWhiteSpace(extension) && !AllowedDepositSlipFileExtensions.Contains(extension))
-        {
-            throw new LicenseException(
-                LicenseErrorCodes.InvalidAdminRequest,
-                "deposit_slip_url file type must be one of: .jpg, .jpeg, .png, .webp, .pdf.",
-                StatusCodes.Status400BadRequest);
-        }
-
-        return normalized;
-    }
-
     private static void ValidateManualPaymentEvidence(
         ManualBillingPaymentMethod method,
         string? bankReference,
-        string? depositSlipUrl,
         string operation)
     {
         var normalizedOperation = NormalizeOptionalValue(operation) ?? "process";
         var hasReference = !string.IsNullOrWhiteSpace(NormalizeOptionalValue(bankReference));
-        var hasDepositSlipUrl = !string.IsNullOrWhiteSpace(NormalizeOptionalValue(depositSlipUrl));
-
-        if (method == ManualBillingPaymentMethod.Cash)
-        {
-            if (hasReference)
-            {
-                return;
-            }
-
-            throw new LicenseException(
-                LicenseErrorCodes.InvalidAdminRequest,
-                $"bank_reference is required for cash payments during {normalizedOperation}.",
-                StatusCodes.Status400BadRequest);
-        }
-
-        if (hasReference && hasDepositSlipUrl)
+        if (hasReference)
         {
             return;
         }
 
         throw new LicenseException(
             LicenseErrorCodes.InvalidAdminRequest,
-            $"bank_reference and deposit_slip_url are both required for {MapManualBillingPaymentMethodValue(method)} payments during {normalizedOperation}.",
+            $"bank_reference is required for {MapManualBillingPaymentMethodValue(method)} payments during {normalizedOperation}.",
             StatusCodes.Status400BadRequest);
     }
 
@@ -8757,6 +9829,42 @@ public sealed class LicenseService(
         return string.IsNullOrWhiteSpace(actor) ? "super-admin" : actor;
     }
 
+    private async Task<AppUser> ResolveAdminActorUserAsync(
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        var principal = httpContextAccessor.HttpContext?.User;
+        var actorFromClaim = principal?.FindFirstValue(ClaimTypes.NameIdentifier) ??
+                             principal?.FindFirstValue("sub");
+        if (Guid.TryParse(actorFromClaim, out var actorUserId))
+        {
+            var actorUserById = await dbContext.Users
+                .FirstOrDefaultAsync(x => x.Id == actorUserId, cancellationToken);
+            if (actorUserById is not null)
+            {
+                return actorUserById;
+            }
+        }
+
+        var normalizedActor = NormalizeOptionalValue(actor);
+        if (!string.IsNullOrWhiteSpace(normalizedActor))
+        {
+            var actorUserByUsername = await dbContext.Users
+                .FirstOrDefaultAsync(
+                    x => x.Username.ToLower() == normalizedActor.ToLower(),
+                    cancellationToken);
+            if (actorUserByUsername is not null)
+            {
+                return actorUserByUsername;
+            }
+        }
+
+        throw new LicenseException(
+            LicenseErrorCodes.InvalidAdminRequest,
+            "Unable to resolve admin actor user for wallet correction.",
+            StatusCodes.Status400BadRequest);
+    }
+
     private async Task<int> CountSelfServiceDeactivationsUsedTodayAsync(
         Guid shopId,
         DateTimeOffset now,
@@ -8867,7 +9975,6 @@ public sealed class LicenseService(
             Currency = payment.Currency,
             Status = MapManualBillingPaymentStatusValue(payment.Status),
             BankReference = payment.BankReference,
-            DepositSlipUrl = payment.DepositSlipUrl,
             ReceivedAt = payment.ReceivedAtUtc,
             Notes = payment.Notes,
             RecordedBy = payment.RecordedBy,
@@ -8913,6 +10020,388 @@ public sealed class LicenseService(
             ManualBillingPaymentMethod.BankDeposit => "bank_deposit",
             ManualBillingPaymentMethod.BankTransfer => "bank_transfer",
             _ => "bank_deposit"
+        };
+    }
+
+    private static string ResolveManagedShopName(string? shopName, string fieldName)
+    {
+        var normalized = NormalizeOptionalValue(shopName);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                $"{fieldName} is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        if (normalized.Length > 160)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                $"{fieldName} must be 160 characters or less.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        return normalized;
+    }
+
+    private async Task<Shop> ResolveExistingShopByIdAsync(
+        Guid shopId,
+        CancellationToken cancellationToken)
+    {
+        if (shopId == Guid.Empty)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "shop_id is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        return await dbContext.Shops
+            .FirstOrDefaultAsync(x => x.Id == shopId, cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Shop was not found.",
+                StatusCodes.Status404NotFound);
+    }
+
+    private async Task<ShopDeactivationDependencySnapshot> BuildShopDeactivationDependencySnapshotAsync(
+        Guid shopId,
+        CancellationToken cancellationToken)
+    {
+        var activeDevices = await dbContext.ProvisionedDevices
+            .AsNoTracking()
+            .CountAsync(
+                x => x.ShopId == shopId &&
+                     x.Status == ProvisionedDeviceStatus.Active,
+                cancellationToken);
+        var nonTerminalSubscriptions = await dbContext.Subscriptions
+            .AsNoTracking()
+            .CountAsync(
+                x => x.ShopId == shopId &&
+                     x.Status != SubscriptionStatus.Canceled,
+                cancellationToken);
+        var openOrPendingInvoices = await dbContext.ManualBillingInvoices
+            .AsNoTracking()
+            .CountAsync(
+                x => x.ShopId == shopId &&
+                     (x.Status == ManualBillingInvoiceStatus.Open ||
+                      x.Status == ManualBillingInvoiceStatus.PendingVerification),
+                cancellationToken);
+        var pendingManualPayments = await dbContext.ManualBillingPayments
+            .AsNoTracking()
+            .CountAsync(
+                x => x.ShopId == shopId &&
+                     x.Status == ManualBillingPaymentStatus.PendingVerification,
+                cancellationToken);
+        var pendingAiOrders = await dbContext.AiCreditOrders
+            .AsNoTracking()
+            .CountAsync(
+                x => x.ShopId == shopId &&
+                     (x.Status == AiCreditOrderStatus.Submitted ||
+                      x.Status == AiCreditOrderStatus.PendingVerification ||
+                      x.Status == AiCreditOrderStatus.Verified),
+                cancellationToken);
+        var pendingAiPayments = await dbContext.AiCreditPayments
+            .AsNoTracking()
+            .CountAsync(
+                x => x.ShopId == shopId &&
+                     x.Status == AiCreditPaymentStatus.Pending,
+                cancellationToken);
+
+        return new ShopDeactivationDependencySnapshot(
+            activeDevices,
+            nonTerminalSubscriptions,
+            openOrPendingInvoices,
+            pendingManualPayments,
+            pendingAiOrders,
+            pendingAiPayments);
+    }
+
+    private static AdminShopMutationShopRow MapAdminShopMutationRow(Shop shop)
+    {
+        return new AdminShopMutationShopRow
+        {
+            ShopId = shop.Id,
+            ShopCode = shop.Code,
+            ShopName = shop.Name,
+            IsActive = shop.IsActive,
+            CreatedAt = shop.CreatedAtUtc,
+            UpdatedAt = shop.UpdatedAtUtc
+        };
+    }
+
+    private static AdminShopMutationOwnerSummary MapAdminShopOwnerSummary(AppUser user)
+    {
+        return new AdminShopMutationOwnerSummary
+        {
+            UserId = user.Id,
+            Username = user.Username,
+            FullName = user.FullName
+        };
+    }
+
+    private static string ResolveManagedRoleCodeFromCandidates(IEnumerable<string> roleCodes)
+    {
+        var normalizedRoles = roleCodes
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Trim().ToLowerInvariant())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var roleCode in ManagedShopRolePriority)
+        {
+            if (normalizedRoles.Contains(roleCode))
+            {
+                return roleCode;
+            }
+        }
+
+        throw new LicenseException(
+            LicenseErrorCodes.InvalidAdminRequest,
+            "User does not have a supported shop role.",
+            StatusCodes.Status400BadRequest);
+    }
+
+    private static string ResolveManagedShopUsername(string? username, string fieldName)
+    {
+        var normalized = NormalizeOptionalValue(username)?.ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                $"{fieldName} is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        if (normalized.Length is < 3 or > 64)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                $"{fieldName} must be between 3 and 64 characters.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        foreach (var character in normalized)
+        {
+            if (char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.')
+            {
+                continue;
+            }
+
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                $"{fieldName} contains invalid characters.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        return normalized;
+    }
+
+    private static string ResolveManagedShopFullName(string? fullName)
+    {
+        var normalized = NormalizeOptionalValue(fullName);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "full_name is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        if (normalized.Length > 120)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "full_name must be 120 characters or less.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        return normalized;
+    }
+
+    private static string ResolveManagedShopPassword(string? password, string fieldName)
+    {
+        var normalized = NormalizeOptionalValue(password);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                $"{fieldName} is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        if (normalized.Length is < 8 or > 128)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                $"{fieldName} must be between 8 and 128 characters.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        return normalized;
+    }
+
+    private static string ResolveManagedShopRoleCode(string? roleCode)
+    {
+        var normalized = NormalizeOptionalValue(roleCode)?.ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "role_code is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        if (!ManagedShopRoleCodes.Contains(normalized))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "role_code must be one of: owner, manager, cashier.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        return normalized;
+    }
+
+    private async Task<AppRole> ResolveManagedShopRoleEntityAsync(
+        string roleCode,
+        CancellationToken cancellationToken)
+    {
+        var normalized = ResolveManagedShopRoleCode(roleCode);
+        return await dbContext.Roles
+            .FirstOrDefaultAsync(x => x.Code.ToLower() == normalized, cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.LicensingConfigurationError,
+                $"Role '{normalized}' is not configured.",
+                StatusCodes.Status500InternalServerError);
+    }
+
+    private static string? ResolveManagedRoleCodeForUser(AppUser user)
+    {
+        var roleCodes = user.UserRoles
+            .Select(x => x.Role.Code?.Trim().ToLowerInvariant())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Cast<string>()
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return ManagedShopRolePriority.FirstOrDefault(roleCodes.Contains);
+    }
+
+    private async Task<(AppUser User, Shop Shop, string RoleCode)> ResolveManagedShopUserContextAsync(
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var user = await dbContext.Users
+            .Include(x => x.UserRoles)
+            .ThenInclude(x => x.Role)
+            .FirstOrDefaultAsync(
+                x => x.Id == userId && x.StoreId.HasValue && x.StoreId.Value != Guid.Empty,
+                cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "User was not found.",
+                StatusCodes.Status404NotFound);
+
+        var roleCode = ResolveManagedRoleCodeForUser(user);
+        if (string.IsNullOrWhiteSpace(roleCode))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Only owner, manager, or cashier users can be managed from this endpoint.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var shop = await dbContext.Shops
+            .FirstOrDefaultAsync(x => x.Id == user.StoreId!.Value, cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "User is linked to an unknown shop.",
+                StatusCodes.Status400BadRequest);
+
+        return (user, shop, roleCode);
+    }
+
+    private async Task ReplaceManagedRoleForUserAsync(
+        AppUser user,
+        string newRoleCode,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var role = await ResolveManagedShopRoleEntityAsync(newRoleCode, cancellationToken);
+        var managedAssignments = user.UserRoles
+            .Where(x => ManagedShopRoleCodes.Contains(x.Role.Code))
+            .ToList();
+        foreach (var assignment in managedAssignments)
+        {
+            dbContext.UserRoles.Remove(assignment);
+        }
+
+        dbContext.UserRoles.Add(new UserRole
+        {
+            UserId = user.Id,
+            RoleId = role.Id,
+            AssignedAtUtc = now,
+            User = user,
+            Role = role
+        });
+    }
+
+    private async Task EnsureShopHasAnotherActiveOwnerAsync(
+        Guid shopId,
+        Guid excludedUserId,
+        CancellationToken cancellationToken)
+    {
+        var hasOtherOwner = await (
+            from user in dbContext.Users.AsNoTracking()
+            join userRole in dbContext.UserRoles.AsNoTracking() on user.Id equals userRole.UserId
+            join role in dbContext.Roles.AsNoTracking() on userRole.RoleId equals role.Id
+            where user.StoreId == shopId &&
+                  user.IsActive &&
+                  user.Id != excludedUserId &&
+                  role.Code.ToLower() == SmartPosRoles.Owner
+            select user.Id)
+            .AnyAsync(cancellationToken);
+
+        if (!hasOtherOwner)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "At least one active owner is required for each shop.",
+                StatusCodes.Status409Conflict);
+        }
+    }
+
+    private async Task<int> RevokeAuthSessionsForUserAsync(
+        Guid userId,
+        DateTimeOffset now,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        var sessions = await dbContext.Devices
+            .Where(x => x.AppUserId == userId)
+            .ToListAsync(cancellationToken);
+        foreach (var session in sessions)
+        {
+            session.AuthSessionVersion = Math.Max(1, session.AuthSessionVersion) + 1;
+            session.AuthSessionRevokedAtUtc = now;
+            session.AuthSessionRevocationReason = reason;
+        }
+
+        return sessions.Count;
+    }
+
+    private static AdminShopUserRow MapAdminShopUserRow(AppUser user, Shop shop, string roleCode)
+    {
+        return new AdminShopUserRow
+        {
+            UserId = user.Id,
+            ShopId = shop.Id,
+            ShopCode = shop.Code,
+            Username = user.Username,
+            FullName = user.FullName,
+            RoleCode = roleCode,
+            IsActive = user.IsActive,
+            CreatedAt = user.CreatedAtUtc,
+            LastLoginAt = user.LastLoginAtUtc
         };
     }
 

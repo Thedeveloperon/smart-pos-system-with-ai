@@ -1,7 +1,7 @@
 # SmartPOS Ops Alert Event Catalog
 
 Last updated: 2026-04-08  
-Catalog version: `w6-alert-catalog-v1-2026-04-08`
+Catalog version: `w6-alert-catalog-v2-2026-04-08`
 
 ## Purpose
 
@@ -18,6 +18,9 @@ Publish a single reference for operations-facing alert/event codes, where they a
 | `recovery_drill_alert_raised` | recovery | warning | `RecoveryDrillAlertService` | License audit logs, support triage recent events |
 | `billing_webhook_malformed_payload` | security | critical | `LicenseEndpoints` | Security anomaly stream, audit logs |
 | `provisioning_rate_limit_exceeded` | security | warning | `ProvisioningRateLimitMiddleware` | Security anomaly stream |
+| `manual_override_ai_wallet_correction` | support_override | warning | `LicenseService` | License audit logs, support triage recent events |
+| `device_fraud_lock_applied` | security | critical | `LicenseService` | License audit logs, support triage recent events |
+| `manual_override_fraud_lock_device` | security | critical | `LicenseService` | License audit logs |
 
 ## API Exposure
 
@@ -37,6 +40,11 @@ Publish a single reference for operations-facing alert/event codes, where they a
 3. Security alerts (`licensing.security_anomaly_spike`, `provisioning_rate_limit_exceeded`)
 - Check source fingerprints/IP prefixes for abuse patterns.
 - Validate if traffic spike is legitimate onboarding activity.
+
+4. Support override events (`manual_override_ai_wallet_correction`, `device_fraud_lock_applied`, `manual_override_fraud_lock_device`)
+- Validate reason code and actor note against ticket timeline.
+- Confirm immutable hash-chain continuity in license audit exports.
+- Verify step-up approval evidence for fraud-lock actions.
 
 ## Ownership
 

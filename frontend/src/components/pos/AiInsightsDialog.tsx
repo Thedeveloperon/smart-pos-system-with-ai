@@ -257,11 +257,11 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, language = "eng
 
   return (
     <div className="pointer-events-none fixed bottom-[5.25rem] right-4 z-50 md:bottom-20 md:right-6">
-      <div className="pointer-events-auto w-[min(92vw,30rem)]">
-        <div className="overflow-hidden rounded-2xl border border-border bg-background shadow-2xl">
-          <div className="flex items-center justify-between bg-primary px-4 py-3 text-primary-foreground">
+      <div className="pointer-events-auto w-[min(92vw,34rem)]">
+        <div className="overflow-hidden rounded-3xl border border-border/70 bg-surface-elevated shadow-2xl">
+          <div className="flex items-center justify-between border-b border-primary/20 bg-gradient-to-r from-primary to-emerald-500 px-4 py-3 text-primary-foreground">
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary-foreground/15">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary-foreground/20">
                 <MessageCircle className="h-4 w-4" />
               </div>
               <div>
@@ -272,7 +272,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, language = "eng
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                className="rounded-md p-1 text-primary-foreground/90 transition-colors hover:bg-primary-foreground/15 hover:text-primary-foreground"
+                className="rounded-md p-1 text-primary-foreground/90 transition-colors hover:bg-primary-foreground/20 hover:text-primary-foreground"
                 onClick={() => setIsCollapsed((previous) => !previous)}
                 aria-label={isCollapsed ? uiText.expandAssistant : uiText.collapseAssistant}
               >
@@ -280,7 +280,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, language = "eng
               </button>
               <button
                 type="button"
-                className="rounded-md p-1 text-primary-foreground/90 transition-colors hover:bg-primary-foreground/15 hover:text-primary-foreground"
+                className="rounded-md p-1 text-primary-foreground/90 transition-colors hover:bg-primary-foreground/20 hover:text-primary-foreground"
                 onClick={() => onOpenChange(false)}
                 aria-label={uiText.closeAssistant}
               >
@@ -291,7 +291,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, language = "eng
 
           {!isCollapsed ? (
             <>
-              <div className="flex items-center justify-between border-b border-border bg-muted/10 px-3 py-2">
+              <div className="flex items-center justify-between border-b border-border/70 bg-surface-muted px-3 py-2">
                 <p className="text-xs text-muted-foreground">
                   {walletCredits === null ? uiText.aiCredits : `${uiText.creditsLabel}: ${walletCredits.toFixed(2)}`}
                 </p>
@@ -309,7 +309,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, language = "eng
                       setChatMessages([]);
                       setChatView("faq");
                     }}
-                    className="h-7 max-w-[10rem] rounded-md border border-border bg-background px-2 text-[11px]"
+                    className="h-7 max-w-[10rem] rounded-lg border border-border/70 bg-surface px-2 text-[11px]"
                   >
                     <option value="">{sessionLabel}</option>
                     {chatSessions.map((session) => (
@@ -332,7 +332,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, language = "eng
                 </div>
               </div>
 
-              <div className="h-[min(70vh,40rem)] p-3">
+              <div className="h-[min(70vh,40rem)] bg-surface p-3">
                 {chatView === "faq" ? (
                   <FaqBrowser
                     onSendQuestion={(question) => {

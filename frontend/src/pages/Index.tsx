@@ -927,7 +927,7 @@ const IndexInner = () => {
   }, [dismissedReminderId, firstOpenReminder?.reminder_id, reminderBannerDismissalStorageKey]);
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden">
+    <div className="pos-shell h-screen flex flex-col overflow-hidden">
       <HeaderBar
         cashierName={cashierName}
         heldBillsCount={heldBills.length}
@@ -1009,7 +1009,7 @@ const IndexInner = () => {
       {canSell && <CashSessionBanner onEndShift={handleEndShift} onManageDrawer={handleManageDrawer} />}
 
       {shouldShowReminderBanner && (
-        <div className="mx-3 mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
+        <div className="mx-3 mt-2 rounded-xl border border-warning/35 bg-warning/15 px-3 py-2.5 text-sm text-warning-foreground">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="space-y-0.5">
               <p className="font-medium">{openReminderCount} reminder(s) need attention.</p>
@@ -1043,7 +1043,7 @@ const IndexInner = () => {
       )}
 
       {isPosShortcutsFeatureEnabled && canSell && !isClosed && showShortcutOnboarding && (
-        <div className="mx-3 mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
+        <div className="mx-3 mt-2 rounded-xl border border-warning/35 bg-warning/15 px-3 py-2.5 text-sm text-warning-foreground">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="font-medium">
               Keyboard shortcuts are enabled: F2 search, F4 hold, F8 cash, F9 complete.
@@ -1092,13 +1092,13 @@ const IndexInner = () => {
       ) : (
         <>
           <div
-            className={`flex-1 hidden md:grid overflow-hidden ${
+            className={`flex-1 hidden md:grid overflow-hidden rounded-t-2xl border border-border/70 bg-surface-elevated mx-2 mb-2 ${
               expertModeEnabled
                 ? "md:grid-cols-[minmax(320px,0.95fr)_minmax(0,1.35fr)]"
                 : "md:grid-cols-[minmax(0,5fr)_minmax(0,3fr)]"
             }`}
           >
-            <div className="min-h-0 min-w-0 border-r border-border overflow-hidden">
+            <div className="min-h-0 min-w-0 border-r border-border/70 overflow-hidden bg-surface">
               <ProductSearchPanel
                 ref={desktopSearchRef}
                 products={products}
@@ -1107,7 +1107,7 @@ const IndexInner = () => {
                 expertMode={expertModeEnabled}
               />
             </div>
-            <div className="scrollbar-thin min-h-0 overflow-y-auto bg-card">
+            <div className="scrollbar-thin min-h-0 overflow-y-auto bg-surface-elevated">
               <div className="grid h-full min-h-0" style={{ gridTemplateRows: "38% 62%" }}>
                 <div className="min-h-0 overflow-hidden border-b border-border">
                   <CartPanel
@@ -1132,7 +1132,7 @@ const IndexInner = () => {
             </div>
           </div>
 
-          <div className="flex-1 md:hidden overflow-hidden pb-14">
+          <div className="mx-2 mb-2 flex-1 overflow-hidden rounded-t-2xl border border-border/70 bg-surface-elevated pb-14 md:hidden">
             {mobileTab === "products" && (
               <ProductSearchPanel
                 ref={mobileSearchRef}

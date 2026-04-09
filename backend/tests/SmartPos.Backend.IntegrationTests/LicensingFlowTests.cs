@@ -568,6 +568,116 @@ public sealed class LicensingFlowTests : IDisposable
     }
 
     [Fact]
+    public async Task AdminWalletCorrection_ShouldAdjustShopWallet_AndWriteManualOverrideAudit()
+    {
+        await TestAuth.SignInAsSupportAdminAsync(client);
+
+        using var scope = appFactory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+        var shop = (await dbContext.Shops
+                .AsNoTracking()
+                .ToListAsync())
+            .OrderBy(x => x.CreatedAtUtc)
+            .First();
+
+        var reference = $"wallet-correction-it-{Guid.NewGuid():N}";
+        var response = await client.PostAsJsonAsync(
+            $"/api/admin/licensing/shops/{Uri.EscapeDataString(shop.Code)}/ai-wallet/correct",
+            new
+            {
+                delta_credits = 42.50m,
+                reference,
+                actor = "support_admin",
+                reason_code = "manual_wallet_correction",
+                actor_note = "pilot wallet correction test"
+            });
+        response.EnsureSuccessStatusCode();
+
+        var payload = await TestJson.ReadObjectAsync(response);
+        Assert.Equal("applied", TestJson.GetString(payload, "status"));
+        Assert.Equal(reference, TestJson.GetString(payload, "reference"));
+        Assert.Equal(42.50m, payload["applied_delta"]?.GetValue<decimal>());
+
+        var wallet = await dbContext.AiCreditWallets
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.ShopId == shop.Id);
+        Assert.NotNull(wallet);
+
+        var manualOverrideLog = (await dbContext.LicenseAuditLogs
+                .AsNoTracking()
+                .Where(x => x.ShopId == shop.Id && x.Action == "manual_override_ai_wallet_correction")
+                .ToListAsync())
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .FirstOrDefault();
+        Assert.NotNull(manualOverrideLog);
+        Assert.True(manualOverrideLog!.IsManualOverride);
+        Assert.False(string.IsNullOrWhiteSpace(manualOverrideLog.ImmutableHash));
+    }
+
+    [Fact]
+    public async Task AdminFraudLock_ShouldRequireStepUp_AndWriteManualOverrideAudit()
+    {
+        var deviceCode = $"admin-fraud-lock-it-{Guid.NewGuid():N}";
+        var activationResponse = await client.PostAsJsonAsync("/api/provision/activate", new
+        {
+            device_code = deviceCode,
+            device_name = "Fraud Lock Device",
+            actor = "integration-tests",
+            reason = "fraud lock setup"
+        });
+        activationResponse.EnsureSuccessStatusCode();
+
+        await TestAuth.SignInAsSupportAdminAsync(client);
+
+        var withoutStepUp = await client.PostAsJsonAsync(
+            $"/api/admin/licensing/devices/{Uri.EscapeDataString(deviceCode)}/fraud-lock",
+            new
+            {
+                actor = "support_admin",
+                reason_code = "fraud_lock_device",
+                actor_note = "suspected fraudulent activation pattern"
+            });
+        Assert.Equal(HttpStatusCode.Conflict, withoutStepUp.StatusCode);
+        var withoutStepUpPayload = await ReadJsonAsync(withoutStepUp);
+        Assert.Equal("SECOND_APPROVAL_REQUIRED", withoutStepUpPayload["error"]?["code"]?.GetValue<string>());
+
+        var withStepUp = await client.PostAsJsonAsync(
+            $"/api/admin/licensing/devices/{Uri.EscapeDataString(deviceCode)}/fraud-lock",
+            new
+            {
+                actor = "support_admin",
+                reason_code = "fraud_lock_device",
+                actor_note = "confirmed suspicious behavior, lock immediately",
+                step_up_approved_by = "security_admin",
+                step_up_approval_note = "security review completed"
+            });
+        withStepUp.EnsureSuccessStatusCode();
+        var payload = await TestJson.ReadObjectAsync(withStepUp);
+        Assert.Equal("fraud_lock", TestJson.GetString(payload, "action"));
+        Assert.Equal("revoked", TestJson.GetString(payload, "status"));
+        Assert.True(payload["revoked_token_sessions"]?.GetValue<int>() >= 0);
+        Assert.True(payload["step_up_required"]?.GetValue<bool>() ?? false);
+        Assert.True(payload["step_up_applied"]?.GetValue<bool>() ?? false);
+
+        using var scope = appFactory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+        var device = await dbContext.ProvisionedDevices
+            .AsNoTracking()
+            .SingleAsync(x => x.DeviceCode == deviceCode);
+        var manualOverrideLog = (await dbContext.LicenseAuditLogs
+                .AsNoTracking()
+                .Where(x => x.ShopId == device.ShopId &&
+                            x.ProvisionedDeviceId == device.Id &&
+                            x.Action == "manual_override_fraud_lock_device")
+                .ToListAsync())
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .FirstOrDefault();
+        Assert.NotNull(manualOverrideLog);
+        Assert.True(manualOverrideLog!.IsManualOverride);
+        Assert.False(string.IsNullOrWhiteSpace(manualOverrideLog.ImmutableHash));
+    }
+
+    [Fact]
     public async Task AdminAuditLogsExport_ShouldReturnCsv()
     {
         await TestAuth.SignInAsSupportAdminAsync(client);

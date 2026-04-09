@@ -212,7 +212,7 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
     }
 
     [Fact]
-    public async Task MarketingPaymentProofUpload_ShouldAcceptPngAndReturnHostedUrl()
+    public async Task MarketingPaymentProofUpload_ShouldReturnGone_WhenFeatureDisabled()
     {
         var pngBytes = new byte[]
         {
@@ -234,11 +234,13 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
         request.Headers.TryAddWithoutValidation("Idempotency-Key", Guid.NewGuid().ToString("N"));
 
         var response = await client.SendAsync(request);
-        var payload = await TestJson.ReadObjectAsync(response);
+        var payload = await response.Content.ReadFromJsonAsync<JsonObject>()
+                      ?? throw new InvalidOperationException("Response payload was empty.");
 
-        Assert.Equal("image/png", TestJson.GetString(payload, "content_type"));
-        Assert.Equal("skipped", TestJson.GetString(payload, "scan_status"));
-        Assert.Contains("/payment-proofs/", TestJson.GetString(payload, "proof_url"), StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.Gone, response.StatusCode);
+        Assert.Equal(
+            "PAYMENT_PROOF_UPLOAD_DISABLED",
+            payload["error"]?["code"]?.GetValue<string>());
     }
 
     [Fact]

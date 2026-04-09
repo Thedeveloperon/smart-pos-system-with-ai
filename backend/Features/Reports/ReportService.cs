@@ -1116,7 +1116,7 @@ public sealed class ReportService(
         return Task.FromResult(new SupportAlertCatalogResponse
         {
             GeneratedAt = DateTimeOffset.UtcNow,
-            CatalogVersion = "w6-alert-catalog-v1-2026-04-08",
+            CatalogVersion = "w6-alert-catalog-v2-2026-04-08",
             Items =
             [
                 new SupportAlertCatalogItem
@@ -1188,6 +1188,36 @@ public sealed class ReportService(
                     Description = "Provisioning actions exceeded request rate policy.",
                     Surfaces = ["support_triage.alerts.top_security_anomalies"],
                     TriageHint = "Validate traffic source and distinguish abuse from expected onboarding burst."
+                },
+                new SupportAlertCatalogItem
+                {
+                    Code = "manual_override_ai_wallet_correction",
+                    Category = "support_override",
+                    Severity = "warning",
+                    Source = "LicenseService",
+                    Description = "Manual AI wallet correction applied under support/billing override controls.",
+                    Surfaces = ["license_audit_logs", "support_triage.recent_audit_events"],
+                    TriageHint = "Verify reason code, reference uniqueness, and post-adjustment balance."
+                },
+                new SupportAlertCatalogItem
+                {
+                    Code = "device_fraud_lock_applied",
+                    Category = "security",
+                    Severity = "critical",
+                    Source = "LicenseService",
+                    Description = "Device fraud lock was executed with deactivation and token session revocation.",
+                    Surfaces = ["license_audit_logs", "support_triage.recent_audit_events"],
+                    TriageHint = "Confirm step-up approval evidence and customer communication status."
+                },
+                new SupportAlertCatalogItem
+                {
+                    Code = "manual_override_fraud_lock_device",
+                    Category = "security",
+                    Severity = "critical",
+                    Source = "LicenseService",
+                    Description = "Immutable manual-override entry created for fraud lock action.",
+                    Surfaces = ["license_audit_logs"],
+                    TriageHint = "Validate immutable hash-chain continuity across neighboring override events."
                 }
             ]
         });

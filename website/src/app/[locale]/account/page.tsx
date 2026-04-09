@@ -366,7 +366,6 @@ export default function AccountPage() {
   const [isAiManualFallbackExpanded, setIsAiManualFallbackExpanded] = useState(false);
   const [aiManualPaymentMethod, setAiManualPaymentMethod] = useState<"cash" | "bank_deposit">("bank_deposit");
   const [aiManualBankReference, setAiManualBankReference] = useState("");
-  const [aiManualDepositSlipUrl, setAiManualDepositSlipUrl] = useState("");
   const [aiPanelViewedTracked, setAiPanelViewedTracked] = useState(false);
 
   const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
@@ -410,7 +409,6 @@ export default function AccountPage() {
     setIsAiManualFallbackExpanded(false);
     setAiManualPaymentMethod("bank_deposit");
     setAiManualBankReference("");
-    setAiManualDepositSlipUrl("");
   }, []);
   const persistPendingAiCheckoutReference = useCallback((reference: string) => {
     const normalizedReference = reference.trim();
@@ -1142,15 +1140,14 @@ export default function AccountPage() {
 
     const normalizedMethod = paymentMethod;
     const bankReference = aiManualBankReference.trim();
-    const depositSlipUrl = aiManualDepositSlipUrl.trim();
 
     if (normalizedMethod === "cash" && !bankReference) {
       setAiBillingError("Reference is required for cash manual payments.");
       return;
     }
 
-    if (normalizedMethod === "bank_deposit" && (!bankReference || !depositSlipUrl)) {
-      setAiBillingError("Bank reference and deposit slip URL are required for bank transfer.");
+    if (normalizedMethod === "bank_deposit" && !bankReference) {
+      setAiBillingError("Bank reference is required for bank transfer.");
       return;
     }
 
@@ -1169,9 +1166,6 @@ export default function AccountPage() {
       };
       if (normalizedMethod !== "card") {
         requestPayload.bank_reference = bankReference;
-      }
-      if (normalizedMethod === "bank_deposit") {
-        requestPayload.deposit_slip_url = depositSlipUrl;
       }
 
       const response = await fetch("/api/account/ai/payments/checkout", {
@@ -1239,7 +1233,6 @@ export default function AccountPage() {
       if (normalizedMethod !== "card") {
         setIsAiManualFallbackExpanded(false);
         setAiManualBankReference("");
-        setAiManualDepositSlipUrl("");
       }
       await loadAiBillingData();
     } catch (error) {
@@ -1283,7 +1276,7 @@ export default function AccountPage() {
   );
 
   return (
-    <main className="min-h-screen bg-background px-4 py-12">
+    <main className="app-shell px-4 py-10 md:py-12">
       <div className="mx-auto w-full max-w-4xl space-y-6">
         <Link
           href={`/${locale}`}
@@ -1293,7 +1286,7 @@ export default function AccountPage() {
           Back to Home
         </Link>
 
-        <section className="glass-card p-6 md:p-8 space-y-4">
+        <section className="portal-surface space-y-4">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-foreground">My Account</h1>
             <p className="mt-2 text-sm text-muted-foreground">
@@ -1306,7 +1299,7 @@ export default function AccountPage() {
           )}
 
           {authSession ? (
-            <div className="rounded-lg border border-border p-4 space-y-3">
+            <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-3">
               <p className="text-sm">
                 Signed in as <span className="font-semibold">{authSession.full_name}</span> ({authSession.username})
               </p>
@@ -1342,9 +1335,9 @@ export default function AccountPage() {
           ) : (
             <form className="grid gap-3 md:grid-cols-2" onSubmit={handleLogin}>
               <label className="space-y-1">
-                <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Username</span>
+                <span className="portal-kicker">Username</span>
                 <input
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  className="field-shell"
                   value={authUsername}
                   onChange={(event) => setAuthUsername(event.target.value)}
                   placeholder="owner"
@@ -1352,10 +1345,10 @@ export default function AccountPage() {
                 />
               </label>
               <label className="space-y-1">
-                <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Password</span>
+                <span className="portal-kicker">Password</span>
                 <input
                   type="password"
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  className="field-shell"
                   value={authPassword}
                   onChange={(event) => setAuthPassword(event.target.value)}
                   placeholder="••••••••"
@@ -1363,18 +1356,18 @@ export default function AccountPage() {
                 />
               </label>
               <label className="space-y-1">
-                <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">MFA Code (optional)</span>
+                <span className="portal-kicker">MFA Code (optional)</span>
                 <input
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  className="field-shell"
                   value={authMfaCode}
                   onChange={(event) => setAuthMfaCode(event.target.value)}
                   placeholder="123456"
                 />
               </label>
               <label className="space-y-1">
-                <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Device Code</span>
+                <span className="portal-kicker">Device Code</span>
                 <input
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
+                  className="field-shell font-mono"
                   value={accountDeviceCode}
                   onChange={(event) => setAccountDeviceCode(event.target.value.toUpperCase())}
                   required
@@ -1398,16 +1391,16 @@ export default function AccountPage() {
 
         {portalData && (
           <>
-            <section className="glass-card p-6 md:p-8 space-y-4">
+            <section className="portal-surface space-y-4">
               <h2 className="text-xl font-semibold">Licensed Account</h2>
               <div className="grid gap-3 md:grid-cols-2">
-                <div className="rounded-lg border border-border p-4">
-                  <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Shop</p>
+                <div className="rounded-xl border border-border/70 bg-surface-muted p-4">
+                  <p className="portal-kicker">Shop</p>
                   <p className="mt-1 text-sm font-semibold">{portalData.shop_name}</p>
                   <p className="text-xs text-muted-foreground">{portalData.shop_code}</p>
                 </div>
-                <div className="rounded-lg border border-border p-4">
-                  <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Seats</p>
+                <div className="rounded-xl border border-border/70 bg-surface-muted p-4">
+                  <p className="portal-kicker">Seats</p>
                   <p className="mt-1 text-sm">
                     Active: <span className="font-semibold">{portalData.active_seats}</span> /{" "}
                     <span className="font-semibold">{portalData.seat_limit}</span>
@@ -1424,7 +1417,7 @@ export default function AccountPage() {
             </section>
 
             {AccountAiTopUpEnabled && (
-              <section className="glass-card p-6 md:p-8 space-y-4">
+              <section className="portal-surface space-y-4">
                 <div>
                   <h2 className="text-xl font-semibold">AI Credits</h2>
                   <p className="mt-1 text-sm text-muted-foreground">
@@ -1445,8 +1438,8 @@ export default function AccountPage() {
                 {!aiTopUpUnavailable && (
                   <>
                     <div className="grid gap-3 md:grid-cols-2">
-                      <div className="rounded-lg border border-border p-4">
-                        <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Available Credits</p>
+                      <div className="rounded-xl border border-border/70 bg-surface-muted p-4">
+                        <p className="portal-kicker">Available Credits</p>
                         <p className="mt-1 text-lg font-semibold">
                           {formatCredits(aiWallet?.available_credits)} credits
                         </p>
@@ -1455,10 +1448,10 @@ export default function AccountPage() {
                         </p>
                       </div>
 
-                      <div className="rounded-lg border border-border p-4 space-y-2">
-                        <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Top-Up Pack</p>
+                      <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-2">
+                        <p className="portal-kicker">Top-Up Pack</p>
                         <select
-                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          className="field-shell"
                           value={selectedAiPackCode}
                           onChange={(event) => {
                             const nextPackCode = event.target.value;
@@ -1542,9 +1535,9 @@ export default function AccountPage() {
                     </div>
 
                     {AccountAiManualFallbackEnabled && isAiManualFallbackExpanded && (
-                      <div className="rounded-lg border border-border p-4 space-y-3">
+                      <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-3">
                         <div className="space-y-1">
-                          <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
+                          <p className="portal-kicker">
                             Manual Payment Fallback
                           </p>
                           <p className="text-xs text-muted-foreground">
@@ -1575,32 +1568,18 @@ export default function AccountPage() {
                           </label>
                         </div>
 
-                        <div className="grid gap-3 md:grid-cols-2">
+                        <div className="grid gap-3">
                           <label className="space-y-1">
-                            <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
+                            <span className="portal-kicker">
                               Reference
                             </span>
                             <input
-                              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                              className="field-shell"
                               value={aiManualBankReference}
                               onChange={(event) => setAiManualBankReference(event.target.value)}
                               placeholder={aiManualPaymentMethod === "cash" ? "CASH-REF-001" : "BANK-REF-001"}
                             />
                           </label>
-
-                          {aiManualPaymentMethod === "bank_deposit" && (
-                            <label className="space-y-1">
-                              <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
-                                Deposit Slip URL
-                              </span>
-                              <input
-                                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                                value={aiManualDepositSlipUrl}
-                                onChange={(event) => setAiManualDepositSlipUrl(event.target.value)}
-                                placeholder="https://.../deposit-slip.pdf"
-                              />
-                            </label>
-                          )}
                         </div>
 
                         <div className="flex flex-wrap gap-2">
@@ -1639,8 +1618,8 @@ export default function AccountPage() {
                     )}
 
                     {(aiCheckoutStatusItem || aiPendingCheckoutReference || isPollingAiCheckoutStatus) && (
-                      <div className="rounded-lg border border-border p-4 space-y-1">
-                        <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
+                      <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-1">
+                        <p className="portal-kicker">
                           Latest Checkout Status
                         </p>
                         <p className="text-sm">
@@ -1720,8 +1699,8 @@ export default function AccountPage() {
                       </div>
                     )}
 
-                    <div className="rounded-lg border border-border p-4 space-y-2">
-                      <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Recent Top-Ups</p>
+                    <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-2">
+                      <p className="portal-kicker">Recent Top-Ups</p>
                       {aiPaymentHistory.length === 0 ? (
                         <p className="text-sm text-muted-foreground">No AI credit payments found yet.</p>
                       ) : (
@@ -1752,7 +1731,7 @@ export default function AccountPage() {
               </section>
             )}
 
-            <section className="glass-card p-6 md:p-8 space-y-4">
+            <section className="portal-surface space-y-4">
               <h2 className="text-xl font-semibold">Devices</h2>
               <div className="space-y-3">
                 {portalData.devices.length === 0 && (
@@ -1765,7 +1744,7 @@ export default function AccountPage() {
                     !device.is_current_device;
                   const isDeactivating = deactivatingDeviceCode === device.device_code;
                   return (
-                    <div key={device.provisioned_device_id} className="rounded-lg border border-border p-4 space-y-2">
+                    <div key={device.provisioned_device_id} className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-2">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className="text-sm font-semibold">{device.device_name || device.device_code}</p>
                         <p className="text-xs text-muted-foreground">{device.device_code}</p>
@@ -1795,7 +1774,7 @@ export default function AccountPage() {
           </>
         )}
 
-        <section className="glass-card p-6 md:p-8 space-y-5">
+        <section className="portal-surface space-y-5">
           <div>
             <h2 className="text-xl font-semibold">Activation Key Access</h2>
             <p className="mt-2 text-sm text-muted-foreground">
@@ -1805,11 +1784,11 @@ export default function AccountPage() {
 
           <form className="space-y-3" onSubmit={handleLookup}>
             <label className="space-y-1 block">
-              <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
+              <span className="portal-kicker">
                 Activation Entitlement Key
               </span>
               <input
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
+                className="field-shell font-mono"
                 value={activationKeyInput}
                 onChange={(event) => setActivationKeyInput(event.target.value)}
                 placeholder="SPK-..."
@@ -1825,10 +1804,10 @@ export default function AccountPage() {
 
         {accessData && (
           <>
-            <section className="glass-card p-6 md:p-8 space-y-4">
+            <section className="portal-surface space-y-4">
               <h2 className="text-xl font-semibold">Activation Key</h2>
-              <div className="rounded-lg border border-border p-4 space-y-3">
-                <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">License Key</p>
+              <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-3">
+                <p className="portal-kicker">License Key</p>
                 <p className="font-mono text-sm break-all">{displayedActivationKey || "-"}</p>
                 <div className="flex flex-wrap gap-2">
                   <Button
@@ -1861,10 +1840,10 @@ export default function AccountPage() {
               </div>
             </section>
 
-            <section className="glass-card p-6 md:p-8 space-y-4">
+            <section className="portal-surface space-y-4">
               <h2 className="text-xl font-semibold">Install SmartPOS</h2>
               <div className="grid gap-3 md:grid-cols-2">
-                <div className="rounded-lg border border-border p-4 space-y-3">
+                <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-3">
                   <p className="text-sm font-semibold">Desktop Installer</p>
                   <p className="text-xs text-muted-foreground">
                     Recommended for production stores using local data storage on each device.
@@ -1925,7 +1904,7 @@ export default function AccountPage() {
                   )}
                 </div>
 
-                <div className="rounded-lg border border-border p-4 space-y-3">
+                <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-3">
                   <p className="text-sm font-semibold">PWA Install</p>
                   <p className="text-xs text-muted-foreground">
                     Optional browser-based install. Use this for quick onboarding or lightweight setups.
@@ -1961,7 +1940,7 @@ export default function AccountPage() {
                   </div>
                 </div>
               </div>
-              <div className="rounded-lg border border-border p-4 space-y-2 text-xs text-muted-foreground">
+              <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-2 text-xs text-muted-foreground">
                 <p className="font-medium text-foreground">Installer Verification</p>
                 <p>1. Download from this account page only.</p>
                 <p>2. Compare installer SHA-256 with the checksum shown above.</p>

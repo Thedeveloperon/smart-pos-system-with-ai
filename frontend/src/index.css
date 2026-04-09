@@ -35,6 +35,11 @@
 
     --success: 152 60% 40%;
     --success-foreground: 0 0% 100%;
+    --info: 204 82% 48%;
+    --info-foreground: 0 0% 100%;
+    --surface: 0 0% 100%;
+    --surface-muted: 210 18% 97%;
+    --surface-elevated: 0 0% 100%;
 
     --border: 214 20% 90%;
     --input: 214 20% 90%;
@@ -75,6 +80,11 @@
     --border: 220 15% 18%;
     --input: 220 15% 18%;
     --ring: 152 60% 45%;
+    --info: 204 75% 56%;
+    --info-foreground: 0 0% 100%;
+    --surface: 220 20% 10%;
+    --surface-muted: 220 15% 13%;
+    --surface-elevated: 220 20% 12%;
     --pos-header: 220 25% 8%;
     --pos-header-foreground: 210 20% 95%;
     --sidebar-background: 240 5.9% 10%;
@@ -118,6 +128,33 @@
   }
   .pos-shadow-lg {
     box-shadow: 0 10px 15px -3px hsl(220 20% 10% / 0.08), 0 4px 6px -4px hsl(220 20% 10% / 0.05);
+  }
+  .pos-shell {
+    background:
+      radial-gradient(circle at top left, hsl(152 58% 93% / 0.82), transparent 38%),
+      radial-gradient(circle at top right, hsl(206 90% 94% / 0.74), transparent 33%),
+      linear-gradient(180deg, hsl(210 20% 99%) 0%, hsl(150 36% 96%) 100%);
+  }
+  .pos-surface {
+    @apply rounded-2xl border border-border/80 bg-surface shadow-sm;
+  }
+  .pos-surface-elevated {
+    @apply rounded-2xl border border-border/80 bg-surface-elevated shadow-md;
+  }
+  .status-badge {
+    @apply inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold;
+  }
+  .status-badge-neutral {
+    @apply bg-muted text-muted-foreground;
+  }
+  .status-badge-success {
+    @apply bg-success/15 text-success;
+  }
+  .status-badge-warning {
+    @apply bg-warning/20 text-warning-foreground;
+  }
+  .status-badge-info {
+    @apply bg-info/15 text-info;
   }
   .scrollbar-thin {
     scrollbar-width: thin;

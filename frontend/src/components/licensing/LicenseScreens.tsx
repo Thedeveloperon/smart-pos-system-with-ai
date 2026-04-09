@@ -36,6 +36,12 @@ type LicenseOfflineBannerProps = {
   onDismiss?: () => void;
 };
 
+const MARKETING_WEBSITE_BASE_URL = (import.meta.env.VITE_MARKETING_WEBSITE_URL || "http://localhost:3000").replace(
+  /\/+$/,
+  "",
+);
+const MARKETING_ADMIN_LOGIN_URL = `${MARKETING_WEBSITE_BASE_URL}/admin/login`;
+
 const formatDateTime = (value?: Date | null) => {
   if (!value) {
     return "unknown";
@@ -265,7 +271,7 @@ export const LicenseBlockedScreen = ({
               Retry Activation
             </Button>
             <Button asChild variant="ghost" className="rounded-xl sm:col-span-2">
-              <a href="/admin/login">Open Admin Sign-In</a>
+              <a href={MARKETING_ADMIN_LOGIN_URL}>Open Admin Sign-In</a>
             </Button>
           </div>
         </div>

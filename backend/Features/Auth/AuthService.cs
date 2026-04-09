@@ -36,11 +36,6 @@ public sealed class AuthService(
             throw new InvalidOperationException("Username and password are required.");
         }
 
-        if (string.IsNullOrWhiteSpace(deviceCode))
-        {
-            throw new InvalidOperationException("device_code is required.");
-        }
-
         var normalizedUsername = username.ToLowerInvariant();
         var user = await dbContext.Users
             .Include(x => x.UserRoles)
@@ -71,20 +66,30 @@ public sealed class AuthService(
         }
 
         var (role, superAdminScope) = ResolveRoleAndScope(user);
+        var isSuperAdminScope = SmartPosRoles.IsSuperAdminRole(role);
+        var resolvedDeviceCode = ResolveLoginDeviceCode(deviceCode, user, isSuperAdminScope);
         bool mfaVerified;
-        try
+        if (isSuperAdminScope)
         {
-            mfaVerified = ValidateMfa(user, role, request.MfaCode);
+            // Temporary product decision: admin portal login requires username/password only.
+            mfaVerified = true;
         }
-        catch (InvalidOperationException exception)
+        else
         {
-            if (!exception.Message.Contains("not configured for MFA", StringComparison.OrdinalIgnoreCase))
+            try
             {
-                await RegisterFailedLoginAttemptAsync(user, source, now, "invalid_mfa", cancellationToken);
-                await ApplyFailureThrottleDelayAsync(cancellationToken);
+                mfaVerified = ValidateMfa(user, role, request.MfaCode);
             }
+            catch (InvalidOperationException exception)
+            {
+                if (!exception.Message.Contains("not configured for MFA", StringComparison.OrdinalIgnoreCase))
+                {
+                    await RegisterFailedLoginAttemptAsync(user, source, now, "invalid_mfa", cancellationToken);
+                    await ApplyFailureThrottleDelayAsync(cancellationToken);
+                }
 
-            throw;
+                throw;
+            }
         }
 
         ResetFailedLoginState(user);
@@ -92,16 +97,16 @@ public sealed class AuthService(
         var expiresAt = now.AddMinutes(Math.Max(15, jwtOptions.ExpiryMinutes));
 
         var device = await dbContext.Devices
-            .FirstOrDefaultAsync(x => x.DeviceCode == deviceCode, cancellationToken);
+            .FirstOrDefaultAsync(x => x.DeviceCode == resolvedDeviceCode, cancellationToken);
 
         if (device is null)
         {
             device = new Device
             {
                 AppUserId = user.Id,
-                DeviceCode = deviceCode,
+                DeviceCode = resolvedDeviceCode,
                 Name = string.IsNullOrWhiteSpace(request.DeviceName)
-                    ? "POS Browser"
+                    ? isSuperAdminScope ? "Admin Portal" : "POS Browser"
                     : request.DeviceName.Trim(),
                 IsTrusted = true,
                 AuthSessionVersion = 1,
@@ -812,6 +817,24 @@ public sealed class AuthService(
     private static string? NormalizeOptionalValue(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static string ResolveLoginDeviceCode(string requestedDeviceCode, AppUser user, bool isSuperAdminScope)
+    {
+        if (!string.IsNullOrWhiteSpace(requestedDeviceCode))
+        {
+            return requestedDeviceCode.Trim();
+        }
+
+        if (isSuperAdminScope)
+        {
+            var normalizedUsername = string.IsNullOrWhiteSpace(user.Username)
+                ? user.Id.ToString("N")
+                : user.Username.Trim().ToUpperInvariant();
+            return $"ADMIN-WEB-{normalizedUsername}";
+        }
+
+        throw new InvalidOperationException("device_code is required.");
     }
 
     private static AuthContext? ResolveAuthContext(ClaimsPrincipal principal)

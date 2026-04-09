@@ -399,7 +399,7 @@ describe("Account API proxy routes", () => {
       },
     });
 
-    const missingBankDepositProofRequest = new NextRequest("http://localhost/api/account/ai/payments/checkout", {
+    const missingBankDepositReferenceRequest = new NextRequest("http://localhost/api/account/ai/payments/checkout", {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -407,36 +407,14 @@ describe("Account API proxy routes", () => {
       body: JSON.stringify({
         pack_code: "pack_100",
         payment_method: "bank_deposit",
-        bank_reference: "BD-001",
       }),
     });
-    const missingBankDepositProofResponse = await aiCheckoutPost(missingBankDepositProofRequest);
-    expect(missingBankDepositProofResponse.status).toBe(400);
-    await expect(missingBankDepositProofResponse.json()).resolves.toEqual({
+    const missingBankDepositReferenceResponse = await aiCheckoutPost(missingBankDepositReferenceRequest);
+    expect(missingBankDepositReferenceResponse.status).toBe(400);
+    await expect(missingBankDepositReferenceResponse.json()).resolves.toEqual({
       error: {
         code: "INVALID_REQUEST",
-        message: "bank_reference and deposit_slip_url are required for bank_deposit payments.",
-      },
-    });
-
-    const invalidDepositSlipUrlRequest = new NextRequest("http://localhost/api/account/ai/payments/checkout", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        pack_code: "pack_100",
-        payment_method: "bank_deposit",
-        bank_reference: "BD-001",
-        deposit_slip_url: "https://example.test/proofs/slip.txt",
-      }),
-    });
-    const invalidDepositSlipUrlResponse = await aiCheckoutPost(invalidDepositSlipUrlRequest);
-    expect(invalidDepositSlipUrlResponse.status).toBe(400);
-    await expect(invalidDepositSlipUrlResponse.json()).resolves.toEqual({
-      error: {
-        code: "INVALID_REQUEST",
-        message: "deposit_slip_url file type must be one of: .jpg, .jpeg, .png, .webp, .pdf.",
+        message: "bank_reference is required for bank_deposit payments.",
       },
     });
 

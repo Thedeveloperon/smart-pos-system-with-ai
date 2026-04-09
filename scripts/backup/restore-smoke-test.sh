@@ -10,6 +10,29 @@ WORK_ROOT="${WORK_ROOT:-$REPO_ROOT/backups/restore-smoke}"
 METRICS_FILE="${METRICS_FILE:-$REPO_ROOT/backups/metrics/restore_metrics.jsonl}"
 POSTGRES_RESTORE_URL="${POSTGRES_RESTORE_URL:-}"
 
+is_windows_path() {
+  [[ "$1" =~ ^[A-Za-z]:[\\/].* ]]
+}
+
+normalize_path_for_shell() {
+  local path="$1"
+  if [ -z "$path" ]; then
+    printf '%s\n' ""
+    return
+  fi
+
+  if command -v cygpath >/dev/null 2>&1 && is_windows_path "$path"; then
+    cygpath -u "$path"
+    return
+  fi
+
+  printf '%s\n' "$path"
+}
+
+BACKUP_FILE="$(normalize_path_for_shell "$BACKUP_FILE")"
+WORK_ROOT="$(normalize_path_for_shell "$WORK_ROOT")"
+METRICS_FILE="$(normalize_path_for_shell "$METRICS_FILE")"
+
 log() {
   printf '[restore] %s\n' "$1"
 }
@@ -23,14 +46,68 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || fail "Required command not found: $1"
 }
 
+find_python_cmd() {
+  if command -v python >/dev/null 2>&1 && python --version >/dev/null 2>&1; then
+    printf '%s\n' "python"
+    return
+  fi
+
+  if command -v python3 >/dev/null 2>&1 && python3 --version >/dev/null 2>&1; then
+    printf '%s\n' "python3"
+    return
+  fi
+
+  printf '%s\n' ""
+}
+
+to_python_path() {
+  local path="$1"
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -w "$path"
+    return
+  fi
+
+  printf '%s\n' "$path"
+}
+
+sqlite_query_scalar() {
+  local db_path="$1"
+  local query="$2"
+
+  if command -v sqlite3 >/dev/null 2>&1; then
+    sqlite3 "$db_path" "$query"
+    return
+  fi
+
+  local python_cmd
+  python_cmd="$(find_python_cmd)"
+  [ -n "$python_cmd" ] || return 1
+  local python_path
+  python_path="$(to_python_path "$db_path")"
+
+  "$python_cmd" - "$python_path" "$query" <<'PY' | tr -d '\r'
+import sqlite3
+import sys
+
+db_path = sys.argv[1]
+query = sys.argv[2]
+with sqlite3.connect(db_path) as conn:
+    row = conn.execute(query).fetchone()
+if row is None:
+    print("")
+else:
+    print(row[0])
+PY
+}
+
 sqlite_count_if_table_exists() {
   local db_path="$1"
   local table_name="$2"
   local exists
 
-  exists="$(sqlite3 "$db_path" "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='$table_name';")"
+  exists="$(sqlite_query_scalar "$db_path" "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='$table_name';")"
   if [ "$exists" -gt 0 ]; then
-    sqlite3 "$db_path" "SELECT COUNT(*) FROM \"$table_name\";"
+    sqlite_query_scalar "$db_path" "SELECT COUNT(*) FROM \"$table_name\";"
     return
   fi
 
@@ -146,7 +223,9 @@ products_count="null"
 notes=""
 
 if [ "$resolved_mode" = "sqlite" ]; then
-  require_cmd sqlite3
+  if ! command -v sqlite3 >/dev/null 2>&1 && [ -z "$(find_python_cmd)" ]; then
+    fail "sqlite3 or python is required for SQLite restore smoke tests."
+  fi
 
   sqlite_restore_dir="$WORK_ROOT/sqlite"
   mkdir -p "$sqlite_restore_dir"
@@ -154,12 +233,12 @@ if [ "$resolved_mode" = "sqlite" ]; then
   restore_db_path="$sqlite_restore_dir/restore-$(date -u +%Y%m%dT%H%M%SZ).sqlite3"
   cp "$artifact_path" "$restore_db_path"
 
-  integrity_result="$(sqlite3 "$restore_db_path" 'PRAGMA integrity_check;')"
+  integrity_result="$(sqlite_query_scalar "$restore_db_path" 'PRAGMA integrity_check;')"
   if [ "$integrity_result" != "ok" ]; then
     fail "SQLite integrity check failed: $integrity_result"
   fi
 
-  table_count="$(sqlite3 "$restore_db_path" "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")"
+  table_count="$(sqlite_query_scalar "$restore_db_path" "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")"
   [ "$table_count" -gt 0 ] || fail "SQLite restore smoke failed: no application tables found."
 
   users_count="$(sqlite_count_if_table_exists "$restore_db_path" "users")"

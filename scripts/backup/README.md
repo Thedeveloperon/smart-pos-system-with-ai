@@ -46,6 +46,7 @@ bash scripts/backup/restore-smoke-test.sh <path-to-backup-file>
 - `BACKUP_MODE=sqlite`
   - Uses `sqlite3 .backup` when available.
   - Falls back to file copy if `sqlite3` command is unavailable.
+  - If `sqlite3` is unavailable but Python is available, preflight validation and restore smoke checks use Python's built-in `sqlite3` module.
   - By default, rejects empty/corrupt SQLite sources before backup:
     - `SQLITE_REQUIRE_APP_TABLES=true`
     - `SQLITE_REQUIRE_INTEGRITY_CHECK=true`
@@ -90,6 +91,11 @@ Retention pruning is controlled by:
 - `METRICS_FILE` (default `./backups/metrics/restore_metrics.jsonl`)
 
 Each record includes mode, status, RTO, RPO (if backup metadata has timestamp), and basic row-count checks.
+
+## Windows Path Handling
+
+- Backup scripts normalize Windows-style paths (for example `C:\...`) when running under Git Bash/MSYS.
+- This allows API-launched recovery jobs to pass absolute Windows paths while scripts operate with POSIX-compatible paths internally.
 
 ## Suggested Scheduling
 
