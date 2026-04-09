@@ -99,10 +99,16 @@ type ApiErrorPayload = {
   };
 };
 
-const isManualBillingFallbackEnabled =
-  (process.env.NEXT_PUBLIC_MARKETING_MANUAL_BILLING_FALLBACK_ENABLED || "true")
-    .trim()
-    .toLowerCase() === "true";
+const isManualBillingFallbackEnabled = (() => {
+  const configured = process.env.NEXT_PUBLIC_MARKETING_MANUAL_BILLING_FALLBACK_ENABLED;
+  if (configured && configured.trim().length > 0) {
+    return configured.trim().toLowerCase() === "true";
+  }
+
+  // Keep frontend default aligned with backend defaults:
+  // production -> disabled, non-production -> enabled.
+  return process.env.NODE_ENV !== "production";
+})();
 
 function normalizePlanCode(rawValue: string | null): PlanCode {
   const normalized = (rawValue || "").trim().toLowerCase();
