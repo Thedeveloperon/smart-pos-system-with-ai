@@ -31,6 +31,15 @@ export Licensing__AccessDeliverySmtpUsername="smtp-user"
 export SMARTPOS_ACCESS_DELIVERY_SMTP_PASSWORD="smtp-password"
 ```
 
+Optional (run local POS backend as cloud licensing relay):
+
+```bash
+export Licensing__CloudRelayEnabled=true
+export Licensing__CloudRelayBaseUrl="https://your-cloud-backend.onrender.com"
+export Licensing__CloudRelayTimeoutSeconds=10
+export Licensing__CloudRelayStatusCacheMaxAgeMinutes=60
+```
+
 Optional (protected installer download links from backend):
 
 ```bash

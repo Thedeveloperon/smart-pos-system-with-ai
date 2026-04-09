@@ -64,6 +64,7 @@ builder.Services.Configure<CloudApiCompatibilityOptions>(
     builder.Configuration.GetSection(CloudApiCompatibilityOptions.SectionName));
 
 ValidateAiProviderPolicy(builder.Configuration, builder.Environment);
+ValidateLicenseCloudRelayPolicy(builder.Configuration);
 
 static void ValidateAiProviderPolicy(IConfiguration configuration, IWebHostEnvironment environment)
 {
@@ -160,9 +161,37 @@ static bool IsOpenAiProvider(string provider)
     return string.Equals(provider, "openai", StringComparison.OrdinalIgnoreCase);
 }
 
+static void ValidateLicenseCloudRelayPolicy(IConfiguration configuration)
+{
+    var options = configuration
+                      .GetSection(LicenseOptions.SectionName)
+                      .Get<LicenseOptions>()
+                  ?? new LicenseOptions();
+    if (!options.CloudRelayEnabled)
+    {
+        return;
+    }
+
+    var baseUrl = (options.CloudRelayBaseUrl ?? string.Empty).Trim();
+    if (string.IsNullOrWhiteSpace(baseUrl))
+    {
+        throw new InvalidOperationException(
+            "Licensing cloud relay is enabled, but Licensing:CloudRelayBaseUrl is not configured.");
+    }
+
+    if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var relayUri) ||
+        !string.Equals(relayUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException(
+            "Licensing:CloudRelayBaseUrl must be an absolute HTTPS URL when Licensing:CloudRelayEnabled=true.");
+    }
+}
+
 builder.Services.AddSingleton(jwtOptions);
 builder.Services.AddSingleton<IOpsAlertPublisher, WebhookOpsAlertPublisher>();
 builder.Services.AddSingleton<LicensingMetrics>();
+builder.Services.AddSingleton<LicenseCloudRelayMetrics>();
+builder.Services.AddSingleton<LicenseCloudRelayStatusCache>();
 builder.Services.AddSingleton<LicensingAlertMonitor>();
 builder.Services.AddSingleton<ILicensingAlertMonitor>(
     serviceProvider => serviceProvider.GetRequiredService<LicensingAlertMonitor>());
@@ -308,6 +337,7 @@ builder.Services.AddScoped<SyncEventsProcessor>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<AuditLogService>();
 builder.Services.AddScoped<LicenseService>();
+builder.Services.AddScoped<LicenseCloudRelayService>();
 builder.Services.AddScoped<LicensingMigrationDryRunService>();
 builder.Services.AddScoped<RecoveryOpsService>();
 builder.Services.AddScoped<DeviceActionProofService>();
@@ -329,6 +359,18 @@ builder.Services.AddScoped<AiChatService>();
 builder.Services.AddScoped<ReminderService>();
 builder.Services.AddHttpClient<AiSuggestionService>();
 builder.Services.AddHttpClient<AiInsightService>();
+builder.Services.AddHttpClient("cloud-license-relay", (serviceProvider, httpClient) =>
+{
+    var options = serviceProvider.GetRequiredService<IOptions<LicenseOptions>>().Value;
+    var baseUrl = (options.CloudRelayBaseUrl ?? string.Empty).Trim();
+    if (Uri.TryCreate(baseUrl, UriKind.Absolute, out var relayUri))
+    {
+        httpClient.BaseAddress = relayUri;
+    }
+
+    var timeoutSeconds = Math.Max(1, options.CloudRelayTimeoutSeconds);
+    httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+});
 builder.Services.AddHttpClient("openai-ocr");
 builder.Services.AddHttpClient("stripe-billing");
 builder.Services.AddHttpClient("ops-alert-delivery");

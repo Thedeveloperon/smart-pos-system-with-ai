@@ -2479,4 +2479,5 @@ internal static class LicenseErrorCodes
     public const string SecondApprovalRequired = "SECOND_APPROVAL_REQUIRED";
     public const string RateLimitExceeded = "RATE_LIMIT_EXCEEDED";
     public const string DuplicateSubmission = "DUPLICATE_SUBMISSION";
+    public const string CloudLicenseUnreachable = "CLOUD_LICENSE_UNREACHABLE";
 }

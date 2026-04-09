@@ -10,18 +10,20 @@ function getDefaultApiBaseUrl() {
   if (typeof window !== "undefined") {
     const host = window.location.hostname;
     if (import.meta.env.DEV && (host === "127.0.0.1" || host === "localhost")) {
-      return `http://${host}:5080`;
+      return `http://${host}:5102`;
     }
 
     return window.location.origin;
   }
 
-  return "http://localhost:5080";
+  return "http://localhost:5102";
 }
 
 const DEFAULT_API_BASE_URL = getDefaultApiBaseUrl();
 
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL).replace(/\/$/, "");
+const DEFAULT_POS_VERSION = "1.0.0";
+const POS_CLIENT_VERSION = (import.meta.env.VITE_POS_VERSION || DEFAULT_POS_VERSION).trim() || DEFAULT_POS_VERSION;
 
 export class ApiError extends Error {
   status: number;
@@ -124,6 +126,9 @@ export type ActivateLicenseRequest = {
 const DEVICE_CODE_STORAGE_KEY = "smartpos-device-code";
 const LEGACY_LICENSE_TOKEN_STORAGE_KEY = "smartpos-license-token";
 const DEFAULT_DEVICE_NAME = "RetailFlow POS Web";
+const DEVICE_ID_HEADER = "X-Device-Id";
+const DEVICE_CODE_HEADER = "X-Device-Code";
+const POS_VERSION_HEADER = "X-POS-Version";
 const DEVICE_NONCE_ID_HEADER = "X-Device-Nonce-Id";
 const DEVICE_SIGNATURE_HEADER = "X-Device-Signature";
 const DEVICE_TIMESTAMP_HEADER = "X-Device-Timestamp";
@@ -1813,7 +1818,9 @@ async function request<T>(path: string, init: RequestInit = {}, options: Request
       ...init,
       headers: {
         ...(init.body && !isFormData ? { "Content-Type": "application/json" } : {}),
-        "X-Device-Code": deviceCode,
+        [DEVICE_ID_HEADER]: deviceCode,
+        [DEVICE_CODE_HEADER]: deviceCode,
+        [POS_VERSION_HEADER]: POS_CLIENT_VERSION,
         ...(licenseToken ? { "X-License-Token": licenseToken } : {}),
         ...Object.fromEntries(existingHeaders.entries()),
       },
@@ -3852,7 +3859,9 @@ export async function exportAdminLicenseAuditLogs({
   const response = await fetch(`${API_BASE_URL}${path}`, {
     credentials: "include",
     headers: {
-      "X-Device-Code": deviceCode,
+      [DEVICE_ID_HEADER]: deviceCode,
+      [DEVICE_CODE_HEADER]: deviceCode,
+      [POS_VERSION_HEADER]: POS_CLIENT_VERSION,
       ...(licenseToken ? { "X-License-Token": licenseToken } : {}),
     },
   });

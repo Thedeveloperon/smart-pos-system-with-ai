@@ -84,6 +84,10 @@ public sealed class LicenseOptions
     public int BillingReconciliationTake { get; set; } = 100;
     public int BillingReconciliationWebhookFailureTake { get; set; } = 50;
     public bool MarketingManualBillingFallbackEnabled { get; set; } = true;
+    public bool CloudRelayEnabled { get; set; }
+    public string CloudRelayBaseUrl { get; set; } = string.Empty;
+    public int CloudRelayTimeoutSeconds { get; set; } = 10;
+    public int CloudRelayStatusCacheMaxAgeMinutes { get; set; } = 60;
     public int ProvisioningRateLimitPerMinute { get; set; } = 20;
     public int MarketingPaymentRequestRateLimitPerMinute { get; set; } = 12;
     public int MarketingPaymentSubmitRateLimitPerMinute { get; set; } = 8;
