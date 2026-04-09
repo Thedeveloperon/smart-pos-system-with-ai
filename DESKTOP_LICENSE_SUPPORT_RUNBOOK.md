@@ -106,3 +106,96 @@ Webhook bridge is controlled by `Licensing:OpsAlerts`:
 Notes:
 - Keep `AuthToken` empty in config and provide token via environment variable.
 - When enabled, security and recovery alert spikes are pushed to the configured webhook in addition to API diagnostics and audit logs.
+
+## G) Support Overrides Playbook (W12)
+
+### 1) Grace Extension (Temporary Access Recovery)
+
+Endpoint:
+- `POST /api/admin/licensing/devices/{device_code}/extend-grace`
+
+Required request fields:
+- `reason_code`
+- `actor_note`
+- `extend_days`
+
+High-risk behavior:
+- When `extend_days` reaches high-risk threshold, `step_up_approved_by` and `step_up_approval_note` are mandatory.
+
+Expected audit entries:
+- `device_grace_extended`
+- `manual_override_extend_grace` (`is_manual_override=true` with immutable hash chain)
+
+### 2) AI Wallet Correction (Billing Reconciliation Fix)
+
+Endpoint:
+- `POST /api/admin/licensing/shops/{shop_code}/ai-wallet/correct`
+
+Required request fields:
+- `delta_credits` (positive or negative, non-zero)
+- `reference` (idempotent correction reference)
+- `reason_code`
+- `actor_note`
+
+Expected behavior:
+- duplicate correction reference returns no-op status and does not apply delta twice
+- balance cannot go below zero
+
+Expected audit entries:
+- `ai_wallet_corrected`
+- `manual_override_ai_wallet_correction` (`is_manual_override=true` with immutable hash chain)
+
+### 3) Device Reset Workflow (Support Recovery Path)
+
+Primary actions:
+1. `POST /api/admin/licensing/devices/{device_code}/deactivate`
+2. `POST /api/admin/licensing/devices/{device_code}/activate` or `/reactivate`
+3. optional tenant-wide token refresh: `POST /api/admin/licensing/resync`
+
+Use cases:
+- device replacement
+- corrupted local token/session state
+- post-incident reissue
+
+Expected audit entries:
+- `manual_override_device_deactivate`
+- `manual_override_device_activate` or `manual_override_device_reactivate`
+- optional `manual_override_force_resync`
+
+### 4) Fraud Lock Workflow (Security Containment)
+
+Endpoint:
+- `POST /api/admin/licensing/devices/{device_code}/fraud-lock`
+
+Required request fields:
+- `reason_code`
+- `actor_note`
+
+High-risk behavior:
+- step-up approval required when high-risk step-up policy is enabled
+
+Effects:
+- device is deactivated
+- active token sessions revoked immediately
+
+Expected audit entries:
+- `device_fraud_lock_applied`
+- `manual_override_fraud_lock_device`
+- `manual_override_fraud_lock_revoke_tokens`
+
+## H) On-call Override Checklist
+
+Before executing any override:
+1. Confirm tenant/shop and device identity from support ticket + audit search.
+2. Confirm incident classification (`billing`, `recovery`, `security`, `fraud`).
+3. Capture reason code and analyst note in the ticket first.
+
+During override:
+1. Use unique `Idempotency-Key` header.
+2. Record API response payload and timestamp.
+3. If step-up required, capture approver identity and approval note.
+
+After override:
+1. Verify immutable manual override audit entries exist.
+2. Confirm customer-visible state (license status, wallet balance, or activation).
+3. Close with remediation notes and any follow-up actions.

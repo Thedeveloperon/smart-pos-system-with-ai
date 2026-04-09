@@ -259,9 +259,6 @@ public sealed class AiCheckoutSessionRequest
     [JsonPropertyName("bank_reference")]
     public string? BankReference { get; set; }
 
-    [JsonPropertyName("deposit_slip_url")]
-    public string? DepositSlipUrl { get; set; }
-
     [JsonPropertyName("idempotency_key")]
     public string? IdempotencyKey { get; set; }
 }

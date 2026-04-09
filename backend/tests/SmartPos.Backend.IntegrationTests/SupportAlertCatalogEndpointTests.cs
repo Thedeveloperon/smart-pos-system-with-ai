@@ -32,6 +32,18 @@ public sealed class SupportAlertCatalogEndpointTests(CustomWebApplicationFactory
                 item?["code"]?.GetValue<string>(),
                 "licensing.security_anomaly_spike",
                 StringComparison.Ordinal));
+        Assert.Contains(
+            items,
+            item => string.Equals(
+                item?["code"]?.GetValue<string>(),
+                "manual_override_ai_wallet_correction",
+                StringComparison.Ordinal));
+        Assert.Contains(
+            items,
+            item => string.Equals(
+                item?["code"]?.GetValue<string>(),
+                "device_fraud_lock_applied",
+                StringComparison.Ordinal));
     }
 
     [Fact]

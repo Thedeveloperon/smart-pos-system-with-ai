@@ -21,6 +21,29 @@ AWS_S3_URI="${AWS_S3_URI:-}"
 RCLONE_REMOTE="${RCLONE_REMOTE:-}"
 SQLITE_VALIDATE_ERROR=""
 
+is_windows_path() {
+  [[ "$1" =~ ^[A-Za-z]:[\\/].* ]]
+}
+
+normalize_path_for_shell() {
+  local path="$1"
+  if [ -z "$path" ]; then
+    printf '%s\n' ""
+    return
+  fi
+
+  if command -v cygpath >/dev/null 2>&1 && is_windows_path "$path"; then
+    cygpath -u "$path"
+    return
+  fi
+
+  printf '%s\n' "$path"
+}
+
+BACKUP_ROOT="$(normalize_path_for_shell "$BACKUP_ROOT")"
+SQLITE_DB_PATH="$(normalize_path_for_shell "$SQLITE_DB_PATH")"
+IMMUTABLE_COPY_DIR="$(normalize_path_for_shell "$IMMUTABLE_COPY_DIR")"
+
 log() {
   printf '[backup] %s\n' "$1"
 }
@@ -32,6 +55,30 @@ fail() {
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || fail "Required command not found: $1"
+}
+
+find_python_cmd() {
+  if command -v python >/dev/null 2>&1 && python --version >/dev/null 2>&1; then
+    printf '%s\n' "python"
+    return
+  fi
+
+  if command -v python3 >/dev/null 2>&1 && python3 --version >/dev/null 2>&1; then
+    printf '%s\n' "python3"
+    return
+  fi
+
+  printf '%s\n' ""
+}
+
+to_python_path() {
+  local path="$1"
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -w "$path"
+    return
+  fi
+
+  printf '%s\n' "$path"
 }
 
 sha256_file() {
@@ -63,12 +110,52 @@ validate_bool_flag() {
 
 sqlite_app_table_count() {
   local path="$1"
-  sqlite3 "$path" "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
+  if command -v sqlite3 >/dev/null 2>&1; then
+    sqlite3 "$path" "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
+    return
+  fi
+
+  local python_cmd
+  python_cmd="$(find_python_cmd)"
+  [ -n "$python_cmd" ] || return 1
+  local python_path
+  python_path="$(to_python_path "$path")"
+
+  "$python_cmd" - "$python_path" <<'PY' | tr -d '\r'
+import sqlite3
+import sys
+
+db_path = sys.argv[1]
+with sqlite3.connect(db_path) as conn:
+    value = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
+    ).fetchone()[0]
+print(value)
+PY
 }
 
 sqlite_integrity_check() {
   local path="$1"
-  sqlite3 "$path" "PRAGMA integrity_check;"
+  if command -v sqlite3 >/dev/null 2>&1; then
+    sqlite3 "$path" "PRAGMA integrity_check;"
+    return
+  fi
+
+  local python_cmd
+  python_cmd="$(find_python_cmd)"
+  [ -n "$python_cmd" ] || return 1
+  local python_path
+  python_path="$(to_python_path "$path")"
+
+  "$python_cmd" - "$python_path" <<'PY' | tr -d '\r'
+import sqlite3
+import sys
+
+db_path = sys.argv[1]
+with sqlite3.connect(db_path) as conn:
+    value = conn.execute("PRAGMA integrity_check;").fetchone()[0]
+print(value)
+PY
 }
 
 validate_sqlite_candidate() {
@@ -76,11 +163,12 @@ validate_sqlite_candidate() {
   SQLITE_VALIDATE_ERROR=""
 
   if ! command -v sqlite3 >/dev/null 2>&1; then
-    if [ "$SQLITE_REQUIRE_APP_TABLES" = "true" ] || [ "$SQLITE_REQUIRE_INTEGRITY_CHECK" = "true" ]; then
-      SQLITE_VALIDATE_ERROR="sqlite3 command is required when SQLite validation guards are enabled."
+    local python_cmd
+    python_cmd="$(find_python_cmd)"
+    if [ -z "$python_cmd" ] && { [ "$SQLITE_REQUIRE_APP_TABLES" = "true" ] || [ "$SQLITE_REQUIRE_INTEGRITY_CHECK" = "true" ]; }; then
+      SQLITE_VALIDATE_ERROR="sqlite3 command is required when SQLite validation guards are enabled unless Python is available."
       return 1
     fi
-    return 0
   fi
 
   if [ "$SQLITE_REQUIRE_APP_TABLES" = "true" ]; then

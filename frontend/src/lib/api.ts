@@ -1154,7 +1154,6 @@ export type AdminManualBillingPaymentRow = {
   currency: string;
   status: "pending_verification" | "verified" | "rejected";
   bank_reference?: string | null;
-  deposit_slip_url?: string | null;
   received_at: string;
   notes?: string | null;
   recorded_by?: string | null;
@@ -1180,7 +1179,6 @@ export type RecordAdminManualBillingPaymentRequest = {
   amount: number;
   currency?: string;
   bank_reference?: string;
-  deposit_slip_url?: string;
   received_at?: string;
   notes?: string;
   actor?: string;
@@ -3071,7 +3069,6 @@ export type AiCheckoutSessionRequest = {
   pack_code: string;
   payment_method?: AiCheckoutPaymentMethod;
   bank_reference?: string;
-  deposit_slip_url?: string;
   idempotency_key?: string;
 };
 

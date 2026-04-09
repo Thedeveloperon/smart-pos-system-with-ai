@@ -1,0 +1,315 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json.Nodes;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using SmartPos.Backend.Domain;
+using SmartPos.Backend.Infrastructure;
+
+namespace SmartPos.Backend.IntegrationTests;
+
+public sealed class AdminShopCrudTests(CustomWebApplicationFactory factory)
+    : IClassFixture<CustomWebApplicationFactory>
+{
+    private readonly CustomWebApplicationFactory appFactory = factory;
+    private readonly HttpClient adminClient = factory.CreateClient();
+
+    [Fact]
+    public async Task SupportAdmin_ShouldCreateUpdateDeactivateReactivateShop()
+    {
+        await TestAuth.SignInAsSupportAdminAsync(adminClient);
+
+        var shopCode = $"shop-{Guid.NewGuid():N}"[..18];
+        var ownerUsername = $"owner-{Guid.NewGuid():N}"[..20];
+
+        var created = await SendMutationAndReadAsync(
+            adminClient,
+            HttpMethod.Post,
+            "/api/admin/licensing/shops",
+            new
+            {
+                shop_code = shopCode,
+                shop_name = "Pilot Shop",
+                owner_username = ownerUsername,
+                owner_password = "OwnerPass123!",
+                owner_full_name = "Pilot Owner",
+                actor = "support_admin",
+                reason_code = "manual_shop_create",
+                actor_note = "create pilot shop"
+            });
+
+        Assert.Equal("create", TestJson.GetString(created, "action"));
+        Assert.Equal(shopCode, TestJson.GetString(created["shop"]!, "shop_code"));
+        Assert.True(created["shop"]?["is_active"]?.GetValue<bool>() ?? false);
+
+        var shopId = TestJson.GetString(created["shop"]!, "shop_id");
+
+        var users = await TestJson.ReadObjectAsync(
+            await adminClient.GetAsync($"/api/admin/licensing/users?shop_code={Uri.EscapeDataString(shopCode)}&take=20"));
+        var owner = users["items"]?
+            .AsArray()
+            .FirstOrDefault(x => string.Equals(x?["username"]?.GetValue<string>(), ownerUsername, StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(owner);
+        Assert.Equal("owner", TestJson.GetString(owner!, "role_code"));
+
+        var updated = await SendMutationAndReadAsync(
+            adminClient,
+            HttpMethod.Put,
+            $"/api/admin/licensing/shops/{Uri.EscapeDataString(shopId)}",
+            new
+            {
+                shop_name = "Pilot Shop Renamed",
+                actor = "support_admin",
+                reason_code = "manual_shop_update",
+                actor_note = "rename shop"
+            });
+
+        Assert.Equal("update", TestJson.GetString(updated, "action"));
+        Assert.Equal("Pilot Shop Renamed", TestJson.GetString(updated["shop"]!, "shop_name"));
+
+        var deactivated = await SendMutationAndReadAsync(
+            adminClient,
+            HttpMethod.Delete,
+            $"/api/admin/licensing/shops/{Uri.EscapeDataString(shopId)}",
+            new
+            {
+                actor = "support_admin",
+                reason_code = "manual_shop_deactivate",
+                actor_note = "deactivate pilot shop"
+            });
+
+        Assert.Equal("deactivate", TestJson.GetString(deactivated, "action"));
+        Assert.False(deactivated["shop"]?["is_active"]?.GetValue<bool>() ?? true);
+
+        var defaultList = await TestJson.ReadObjectAsync(await adminClient.GetAsync("/api/admin/licensing/shops?take=300"));
+        var presentInDefault = defaultList["items"]?
+            .AsArray()
+            .Any(x => string.Equals(x?["shop_code"]?.GetValue<string>(), shopCode, StringComparison.OrdinalIgnoreCase));
+        Assert.False(presentInDefault ?? false);
+
+        var withInactive = await TestJson.ReadObjectAsync(
+            await adminClient.GetAsync("/api/admin/licensing/shops?include_inactive=true&take=300"));
+        var inactiveRow = withInactive["items"]?
+            .AsArray()
+            .FirstOrDefault(x => string.Equals(x?["shop_code"]?.GetValue<string>(), shopCode, StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(inactiveRow);
+        Assert.False(inactiveRow!["is_active"]?.GetValue<bool>() ?? true);
+
+        var reactivated = await SendMutationAndReadAsync(
+            adminClient,
+            HttpMethod.Post,
+            $"/api/admin/licensing/shops/{Uri.EscapeDataString(shopId)}/reactivate",
+            new
+            {
+                actor = "support_admin",
+                reason_code = "manual_shop_reactivate",
+                actor_note = "reactivate pilot shop"
+            });
+
+        Assert.Equal("reactivate", TestJson.GetString(reactivated, "action"));
+        Assert.True(reactivated["shop"]?["is_active"]?.GetValue<bool>() ?? false);
+    }
+
+    [Fact]
+    public async Task ShopCreate_ShouldRejectDuplicateShopCodeAndOwnerUsername()
+    {
+        await TestAuth.SignInAsSupportAdminAsync(adminClient);
+
+        var shopCode = $"dup-{Guid.NewGuid():N}"[..16];
+        var ownerUsername = $"dup-owner-{Guid.NewGuid():N}"[..22];
+
+        await SendMutationAndReadAsync(
+            adminClient,
+            HttpMethod.Post,
+            "/api/admin/licensing/shops",
+            new
+            {
+                shop_code = shopCode,
+                shop_name = "Duplicate Seed",
+                owner_username = ownerUsername,
+                owner_password = "OwnerPass123!",
+                owner_full_name = "Dup Owner",
+                actor = "support_admin",
+                reason_code = "manual_shop_create",
+                actor_note = "seed"
+            });
+
+        var duplicateCodeResponse = await SendMutationAsync(
+            adminClient,
+            HttpMethod.Post,
+            "/api/admin/licensing/shops",
+            new
+            {
+                shop_code = shopCode,
+                shop_name = "Duplicate Code",
+                owner_username = $"another-{Guid.NewGuid():N}"[..18],
+                owner_password = "OwnerPass123!",
+                owner_full_name = "Another Owner",
+                actor = "support_admin",
+                reason_code = "manual_shop_create",
+                actor_note = "duplicate code"
+            });
+        Assert.Equal(HttpStatusCode.Conflict, duplicateCodeResponse.StatusCode);
+
+        var duplicateUserResponse = await SendMutationAsync(
+            adminClient,
+            HttpMethod.Post,
+            "/api/admin/licensing/shops",
+            new
+            {
+                shop_code = $"unique-{Guid.NewGuid():N}"[..18],
+                shop_name = "Duplicate User",
+                owner_username = ownerUsername,
+                owner_password = "OwnerPass123!",
+                owner_full_name = "Duplicate Owner",
+                actor = "support_admin",
+                reason_code = "manual_shop_create",
+                actor_note = "duplicate username"
+            });
+        Assert.Equal(HttpStatusCode.Conflict, duplicateUserResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task ShopUpdate_ShouldRejectShopCodeMutation()
+    {
+        await TestAuth.SignInAsSupportAdminAsync(adminClient);
+
+        var created = await SendMutationAndReadAsync(
+            adminClient,
+            HttpMethod.Post,
+            "/api/admin/licensing/shops",
+            new
+            {
+                shop_code = $"immut-{Guid.NewGuid():N}"[..18],
+                shop_name = "Immutable Code Shop",
+                owner_username = $"immut-owner-{Guid.NewGuid():N}"[..22],
+                owner_password = "OwnerPass123!",
+                owner_full_name = "Immutable Owner",
+                actor = "support_admin",
+                reason_code = "manual_shop_create",
+                actor_note = "seed"
+            });
+
+        var shopId = TestJson.GetString(created["shop"]!, "shop_id");
+
+        var response = await SendMutationAsync(
+            adminClient,
+            HttpMethod.Put,
+            $"/api/admin/licensing/shops/{Uri.EscapeDataString(shopId)}",
+            new
+            {
+                shop_code = "changed-code",
+                actor = "support_admin",
+                reason_code = "manual_shop_update",
+                actor_note = "attempt code change"
+            });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ShopDeactivate_ShouldBlockWhenActiveDependentsExist()
+    {
+        await TestAuth.SignInAsSupportAdminAsync(adminClient);
+
+        var created = await SendMutationAndReadAsync(
+            adminClient,
+            HttpMethod.Post,
+            "/api/admin/licensing/shops",
+            new
+            {
+                shop_code = $"guard-{Guid.NewGuid():N}"[..18],
+                shop_name = "Guard Shop",
+                owner_username = $"guard-owner-{Guid.NewGuid():N}"[..22],
+                owner_password = "OwnerPass123!",
+                owner_full_name = "Guard Owner",
+                actor = "support_admin",
+                reason_code = "manual_shop_create",
+                actor_note = "seed"
+            });
+
+        var shopId = Guid.Parse(TestJson.GetString(created["shop"]!, "shop_id"));
+
+        await using (var scope = appFactory.Services.CreateAsyncScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+            dbContext.ProvisionedDevices.Add(new ProvisionedDevice
+            {
+                ShopId = shopId,
+                DeviceCode = $"guard-device-{Guid.NewGuid():N}"[..24],
+                Name = "Guard Device",
+                Status = ProvisionedDeviceStatus.Active,
+                AssignedAtUtc = DateTimeOffset.UtcNow,
+                Shop = await dbContext.Shops.FirstAsync(x => x.Id == shopId)
+            });
+            await dbContext.SaveChangesAsync();
+        }
+
+        var response = await SendMutationAsync(
+            adminClient,
+            HttpMethod.Delete,
+            $"/api/admin/licensing/shops/{Uri.EscapeDataString(shopId.ToString())}",
+            new
+            {
+                actor = "support_admin",
+                reason_code = "manual_shop_deactivate",
+                actor_note = "should block"
+            });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task BillingAndLocalRoles_ShouldBeForbidden_FromShopCrud()
+    {
+        var billingClient = appFactory.CreateClient();
+        await TestAuth.SignInAsBillingAdminAsync(billingClient);
+
+        var billingResponse = await billingClient.PostAsJsonAsync("/api/admin/licensing/shops", new
+        {
+            shop_code = "billing-forbidden-shop",
+            shop_name = "Billing Forbidden",
+            owner_username = "billing.forbidden.owner",
+            owner_password = "OwnerPass123!",
+            actor_note = "forbidden"
+        });
+        Assert.Equal(HttpStatusCode.Forbidden, billingResponse.StatusCode);
+
+        var ownerClient = appFactory.CreateClient();
+        var ownerLogin = await ownerClient.PostAsJsonAsync("/api/auth/login", new
+        {
+            username = "owner",
+            password = "owner123",
+            device_code = $"owner-shop-crud-{Guid.NewGuid():N}",
+            device_name = "Owner Shop CRUD Test"
+        });
+        ownerLogin.EnsureSuccessStatusCode();
+
+        var ownerResponse = await ownerClient.PostAsJsonAsync("/api/admin/licensing/shops", new
+        {
+            shop_code = "owner-forbidden-shop",
+            shop_name = "Owner Forbidden",
+            owner_username = "owner.forbidden.user",
+            owner_password = "OwnerPass123!",
+            actor_note = "forbidden"
+        });
+        Assert.Equal(HttpStatusCode.Forbidden, ownerResponse.StatusCode);
+    }
+
+    private static async Task<HttpResponseMessage> SendMutationAsync(HttpClient client, HttpMethod method, string path, object payload)
+    {
+        using var request = new HttpRequestMessage(method, path)
+        {
+            Content = JsonContent.Create(payload)
+        };
+        request.Headers.TryAddWithoutValidation("Idempotency-Key", Guid.NewGuid().ToString("N"));
+        return await client.SendAsync(request);
+    }
+
+    private static async Task<JsonObject> SendMutationAndReadAsync(HttpClient client, HttpMethod method, string path, object payload)
+    {
+        var response = await SendMutationAsync(client, method, path, payload);
+        response.EnsureSuccessStatusCode();
+        return await TestJson.ReadObjectAsync(response);
+    }
+}

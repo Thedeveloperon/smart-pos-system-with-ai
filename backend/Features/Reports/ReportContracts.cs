@@ -611,7 +611,7 @@ public sealed class SupportAlertCatalogResponse
     public DateTimeOffset GeneratedAt { get; set; } = DateTimeOffset.UtcNow;
 
     [JsonPropertyName("catalog_version")]
-    public string CatalogVersion { get; set; } = "w6-alert-catalog-v1-2026-04-08";
+    public string CatalogVersion { get; set; } = "w6-alert-catalog-v2-2026-04-08";
 
     [JsonPropertyName("items")]
     public List<SupportAlertCatalogItem> Items { get; set; } = [];

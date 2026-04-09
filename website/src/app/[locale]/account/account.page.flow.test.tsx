@@ -726,15 +726,10 @@ describe("Account page authenticated flow", () => {
     const referenceInput = container.querySelector(
       'input[placeholder="BANK-REF-001"]',
     ) as HTMLInputElement | null;
-    const depositSlipInput = container.querySelector(
-      'input[placeholder="https://.../deposit-slip.pdf"]',
-    ) as HTMLInputElement | null;
     expect(referenceInput).toBeTruthy();
-    expect(depositSlipInput).toBeTruthy();
 
     await act(async () => {
       setInputValue(referenceInput!, "BD-TEST-1001");
-      setInputValue(depositSlipInput!, "https://example.test/proofs/slip-001.pdf");
       await flushUi();
     });
 
@@ -766,7 +761,6 @@ describe("Account page authenticated flow", () => {
         pack_code: "pack_100",
         payment_method: "bank_deposit",
         bank_reference: "BD-TEST-1001",
-        deposit_slip_url: "https://example.test/proofs/slip-001.pdf",
       }),
     );
     expect(getHeaderValue(checkoutInit.headers, "content-type")).toBe("application/json");

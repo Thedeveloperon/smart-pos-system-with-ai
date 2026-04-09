@@ -46,7 +46,7 @@ public sealed class LicensingManualFallbackFeatureFlagTests(ManualFallbackDisabl
     }
 
     [Fact]
-    public async Task PaymentProofUploadEndpoint_ShouldReturnForbidden_WhenManualFallbackDisabled()
+    public async Task PaymentProofUploadEndpoint_ShouldReturnGone_WhenFeatureDisabled()
     {
         var client = appFactory.CreateClient();
 
@@ -56,11 +56,11 @@ public sealed class LicensingManualFallbackFeatureFlagTests(ManualFallbackDisabl
         multipart.Add(content, "file", "proof.png");
 
         var response = await client.PostAsync("/api/license/public/payment-proof-upload", multipart);
-        Assert.Equal(StatusCodes.Status403Forbidden, (int)response.StatusCode);
+        Assert.Equal(StatusCodes.Status410Gone, (int)response.StatusCode);
 
         var body = await response.Content.ReadFromJsonAsync<JsonObject>();
         var error = body?["error"] as JsonObject;
-        Assert.Equal("INVALID_ADMIN_REQUEST", error?["code"]?.GetValue<string>());
+        Assert.Equal("PAYMENT_PROOF_UPLOAD_DISABLED", error?["code"]?.GetValue<string>());
         Assert.Contains("disabled", error?["message"]?.GetValue<string>() ?? string.Empty, StringComparison.OrdinalIgnoreCase);
     }
 }

@@ -601,6 +601,9 @@ public sealed class AdminShopLicensingSnapshotRow
     [JsonPropertyName("shop_name")]
     public string ShopName { get; set; } = string.Empty;
 
+    [JsonPropertyName("is_active")]
+    public bool IsActive { get; set; } = true;
+
     [JsonPropertyName("subscription_status")]
     public string SubscriptionStatus { get; set; } = "trialing";
 
@@ -621,6 +624,135 @@ public sealed class AdminShopLicensingSnapshotRow
 
     [JsonPropertyName("devices")]
     public List<AdminDeviceSeatRow> Devices { get; set; } = [];
+}
+
+public sealed class AdminShopCreateRequest
+{
+    [JsonPropertyName("shop_code")]
+    public string? ShopCode { get; set; }
+
+    [JsonPropertyName("shop_name")]
+    public string? ShopName { get; set; }
+
+    [JsonPropertyName("owner_username")]
+    public string? OwnerUsername { get; set; }
+
+    [JsonPropertyName("owner_password")]
+    public string? OwnerPassword { get; set; }
+
+    [JsonPropertyName("owner_full_name")]
+    public string? OwnerFullName { get; set; }
+
+    [JsonPropertyName("actor")]
+    public string? Actor { get; set; }
+
+    [JsonPropertyName("reason_code")]
+    public string? ReasonCode { get; set; }
+
+    [JsonPropertyName("actor_note")]
+    public string? ActorNote { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+}
+
+public sealed class AdminShopUpdateRequest
+{
+    [JsonPropertyName("shop_name")]
+    public string? ShopName { get; set; }
+
+    [JsonPropertyName("shop_code")]
+    public string? ShopCode { get; set; }
+
+    [JsonPropertyName("actor")]
+    public string? Actor { get; set; }
+
+    [JsonPropertyName("reason_code")]
+    public string? ReasonCode { get; set; }
+
+    [JsonPropertyName("actor_note")]
+    public string? ActorNote { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+}
+
+public sealed class AdminShopDeactivateRequest
+{
+    [JsonPropertyName("actor")]
+    public string? Actor { get; set; }
+
+    [JsonPropertyName("reason_code")]
+    public string? ReasonCode { get; set; }
+
+    [JsonPropertyName("actor_note")]
+    public string? ActorNote { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+}
+
+public sealed class AdminShopReactivateRequest
+{
+    [JsonPropertyName("actor")]
+    public string? Actor { get; set; }
+
+    [JsonPropertyName("reason_code")]
+    public string? ReasonCode { get; set; }
+
+    [JsonPropertyName("actor_note")]
+    public string? ActorNote { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+}
+
+public sealed class AdminShopMutationShopRow
+{
+    [JsonPropertyName("shop_id")]
+    public Guid ShopId { get; set; }
+
+    [JsonPropertyName("shop_code")]
+    public string ShopCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("shop_name")]
+    public string ShopName { get; set; } = string.Empty;
+
+    [JsonPropertyName("is_active")]
+    public bool IsActive { get; set; } = true;
+
+    [JsonPropertyName("created_at")]
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("updated_at")]
+    public DateTimeOffset? UpdatedAt { get; set; }
+}
+
+public sealed class AdminShopMutationOwnerSummary
+{
+    [JsonPropertyName("user_id")]
+    public Guid UserId { get; set; }
+
+    [JsonPropertyName("username")]
+    public string Username { get; set; } = string.Empty;
+
+    [JsonPropertyName("full_name")]
+    public string FullName { get; set; } = string.Empty;
+}
+
+public sealed class AdminShopMutationResponse
+{
+    [JsonPropertyName("action")]
+    public string Action { get; set; } = string.Empty;
+
+    [JsonPropertyName("shop")]
+    public AdminShopMutationShopRow Shop { get; set; } = new();
+
+    [JsonPropertyName("owner")]
+    public AdminShopMutationOwnerSummary? Owner { get; set; }
+
+    [JsonPropertyName("processed_at")]
+    public DateTimeOffset ProcessedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public sealed class AdminDeviceSeatRow
@@ -1022,6 +1154,108 @@ public sealed class AdminLicenseResyncResponse
     public DateTimeOffset ProcessedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
+public sealed class AdminAiWalletCorrectionRequest
+{
+    [JsonPropertyName("delta_credits")]
+    public decimal DeltaCredits { get; set; }
+
+    [JsonPropertyName("reference")]
+    public string? Reference { get; set; }
+
+    [JsonPropertyName("actor")]
+    public string? Actor { get; set; }
+
+    [JsonPropertyName("reason_code")]
+    public string? ReasonCode { get; set; }
+
+    [JsonPropertyName("actor_note")]
+    public string? ActorNote { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+}
+
+public sealed class AdminAiWalletCorrectionResponse
+{
+    [JsonPropertyName("shop_id")]
+    public Guid ShopId { get; set; }
+
+    [JsonPropertyName("shop_code")]
+    public string ShopCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "applied";
+
+    [JsonPropertyName("reference")]
+    public string Reference { get; set; } = string.Empty;
+
+    [JsonPropertyName("previous_balance")]
+    public decimal PreviousBalance { get; set; }
+
+    [JsonPropertyName("updated_balance")]
+    public decimal UpdatedBalance { get; set; }
+
+    [JsonPropertyName("applied_delta")]
+    public decimal AppliedDelta { get; set; }
+
+    [JsonPropertyName("processed_at")]
+    public DateTimeOffset ProcessedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class AdminDeviceFraudLockRequest
+{
+    [JsonPropertyName("actor")]
+    public string? Actor { get; set; }
+
+    [JsonPropertyName("reason_code")]
+    public string? ReasonCode { get; set; }
+
+    [JsonPropertyName("actor_note")]
+    public string? ActorNote { get; set; }
+
+    [JsonPropertyName("step_up_approved_by")]
+    public string? StepUpApprovedBy { get; set; }
+
+    [JsonPropertyName("step_up_approval_note")]
+    public string? StepUpApprovalNote { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+}
+
+public sealed class AdminDeviceFraudLockResponse
+{
+    [JsonPropertyName("shop_id")]
+    public Guid ShopId { get; set; }
+
+    [JsonPropertyName("device_code")]
+    public string DeviceCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("action")]
+    public string Action { get; set; } = "fraud_lock";
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "revoked";
+
+    [JsonPropertyName("license_state")]
+    public string LicenseState { get; set; } = "revoked";
+
+    [JsonPropertyName("revoked_token_sessions")]
+    public int RevokedTokenSessions { get; set; }
+
+    [JsonPropertyName("step_up_required")]
+    public bool StepUpRequired { get; set; }
+
+    [JsonPropertyName("step_up_applied")]
+    public bool StepUpApplied { get; set; }
+
+    [JsonPropertyName("step_up_approved_by")]
+    public string? StepUpApprovedBy { get; set; }
+
+    [JsonPropertyName("processed_at")]
+    public DateTimeOffset ProcessedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
 public sealed class AdminAuditLogsResponse
 {
     [JsonPropertyName("generated_at")]
@@ -1068,6 +1302,162 @@ public sealed class AdminAuditLogRow
 
     [JsonPropertyName("immutable_previous_hash")]
     public string? ImmutablePreviousHash { get; set; }
+}
+
+public sealed class AdminShopUsersResponse
+{
+    [JsonPropertyName("generated_at")]
+    public DateTimeOffset GeneratedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("count")]
+    public int Count { get; set; }
+
+    [JsonPropertyName("items")]
+    public List<AdminShopUserRow> Items { get; set; } = [];
+}
+
+public sealed class AdminShopUserRow
+{
+    [JsonPropertyName("user_id")]
+    public Guid UserId { get; set; }
+
+    [JsonPropertyName("shop_id")]
+    public Guid ShopId { get; set; }
+
+    [JsonPropertyName("shop_code")]
+    public string ShopCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("username")]
+    public string Username { get; set; } = string.Empty;
+
+    [JsonPropertyName("full_name")]
+    public string FullName { get; set; } = string.Empty;
+
+    [JsonPropertyName("role_code")]
+    public string RoleCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("is_active")]
+    public bool IsActive { get; set; } = true;
+
+    [JsonPropertyName("created_at")]
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("last_login_at")]
+    public DateTimeOffset? LastLoginAt { get; set; }
+}
+
+public sealed class AdminShopUserCreateRequest
+{
+    [JsonPropertyName("shop_code")]
+    public string? ShopCode { get; set; }
+
+    [JsonPropertyName("username")]
+    public string? Username { get; set; }
+
+    [JsonPropertyName("full_name")]
+    public string? FullName { get; set; }
+
+    [JsonPropertyName("role_code")]
+    public string? RoleCode { get; set; }
+
+    [JsonPropertyName("password")]
+    public string? Password { get; set; }
+
+    [JsonPropertyName("actor")]
+    public string? Actor { get; set; }
+
+    [JsonPropertyName("reason_code")]
+    public string? ReasonCode { get; set; }
+
+    [JsonPropertyName("actor_note")]
+    public string? ActorNote { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+}
+
+public sealed class AdminShopUserUpdateRequest
+{
+    [JsonPropertyName("username")]
+    public string? Username { get; set; }
+
+    [JsonPropertyName("full_name")]
+    public string? FullName { get; set; }
+
+    [JsonPropertyName("role_code")]
+    public string? RoleCode { get; set; }
+
+    [JsonPropertyName("actor")]
+    public string? Actor { get; set; }
+
+    [JsonPropertyName("reason_code")]
+    public string? ReasonCode { get; set; }
+
+    [JsonPropertyName("actor_note")]
+    public string? ActorNote { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+}
+
+public sealed class AdminShopUserDeactivateRequest
+{
+    [JsonPropertyName("actor")]
+    public string? Actor { get; set; }
+
+    [JsonPropertyName("reason_code")]
+    public string? ReasonCode { get; set; }
+
+    [JsonPropertyName("actor_note")]
+    public string? ActorNote { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+}
+
+public sealed class AdminShopUserReactivateRequest
+{
+    [JsonPropertyName("actor")]
+    public string? Actor { get; set; }
+
+    [JsonPropertyName("reason_code")]
+    public string? ReasonCode { get; set; }
+
+    [JsonPropertyName("actor_note")]
+    public string? ActorNote { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+}
+
+public sealed class AdminShopUserPasswordResetRequest
+{
+    [JsonPropertyName("new_password")]
+    public string? NewPassword { get; set; }
+
+    [JsonPropertyName("actor")]
+    public string? Actor { get; set; }
+
+    [JsonPropertyName("reason_code")]
+    public string? ReasonCode { get; set; }
+
+    [JsonPropertyName("actor_note")]
+    public string? ActorNote { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+}
+
+public sealed class AdminShopUserMutationResponse
+{
+    [JsonPropertyName("action")]
+    public string Action { get; set; } = string.Empty;
+
+    [JsonPropertyName("user")]
+    public AdminShopUserRow User { get; set; } = new();
+
+    [JsonPropertyName("processed_at")]
+    public DateTimeOffset ProcessedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public sealed class MarketingPaymentRequestCreateRequest
@@ -1302,9 +1692,6 @@ public sealed class MarketingPaymentSubmissionRequest
 
     [JsonPropertyName("bank_reference")]
     public string? BankReference { get; set; }
-
-    [JsonPropertyName("deposit_slip_url")]
-    public string? DepositSlipUrl { get; set; }
 
     [JsonPropertyName("paid_at")]
     public DateTimeOffset? PaidAt { get; set; }
@@ -1585,9 +1972,6 @@ public sealed class AdminManualBillingPaymentRecordRequest
     [JsonPropertyName("bank_reference")]
     public string? BankReference { get; set; }
 
-    [JsonPropertyName("deposit_slip_url")]
-    public string? DepositSlipUrl { get; set; }
-
     [JsonPropertyName("received_at")]
     public DateTimeOffset? ReceivedAt { get; set; }
 
@@ -1647,9 +2031,6 @@ public sealed class AdminManualBillingPaymentRow
 
     [JsonPropertyName("bank_reference")]
     public string? BankReference { get; set; }
-
-    [JsonPropertyName("deposit_slip_url")]
-    public string? DepositSlipUrl { get; set; }
 
     [JsonPropertyName("received_at")]
     public DateTimeOffset ReceivedAt { get; set; }

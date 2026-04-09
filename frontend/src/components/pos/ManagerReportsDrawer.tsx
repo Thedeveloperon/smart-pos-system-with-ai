@@ -1104,7 +1104,7 @@ const ManagerReportsDrawer = ({
 
     const methodInput = await openPromptDialog({
       title: "Record Payment",
-      description: "Method rules: cash requires reference. bank_deposit/bank_transfer require reference + deposit slip URL.",
+      description: "Method rules: cash, bank_deposit, and bank_transfer require reference number.",
       label: "Payment method",
       defaultValue: "bank_deposit",
       confirmLabel: "Continue",
@@ -1152,35 +1152,6 @@ const ManagerReportsDrawer = ({
       return;
     }
 
-    let depositSlipUrl: string | null = null;
-    if (method !== "cash") {
-      depositSlipUrl = await openPromptDialog({
-        title: "Record Payment",
-        description: "Deposit slip URL is required for bank_deposit and bank_transfer.",
-        label: "Deposit slip URL",
-        placeholder: "https://...",
-        confirmLabel: "Continue",
-        validate: (value) => {
-          const normalized = value.trim();
-          if (!normalized) {
-            return "Deposit slip URL is required.";
-          }
-
-          try {
-            const parsed = new URL(normalized);
-            return parsed.protocol === "http:" || parsed.protocol === "https:"
-              ? null
-              : "Deposit slip URL must use http or https.";
-          } catch {
-            return "Deposit slip URL must be a valid absolute URL.";
-          }
-        },
-      });
-      if (!depositSlipUrl) {
-        return;
-      }
-    }
-
     const notes = await openPromptDialog({
       title: "Record Payment",
       description: "Optional notes for this payment.",
@@ -1209,7 +1180,6 @@ const ManagerReportsDrawer = ({
         amount,
         currency: "LKR",
         bank_reference: bankReference || undefined,
-        deposit_slip_url: depositSlipUrl || undefined,
         notes: notes || undefined,
         actor: "support-ui",
         reason_code: "manual_payment_pending_verification",
@@ -3410,18 +3380,6 @@ const ManagerReportsDrawer = ({
                       : "-"}
                   </span>
                 </p>
-                {verifyPaymentDialog.payment?.deposit_slip_url && (
-                  <p className="sm:col-span-2">
-                    <a
-                      href={verifyPaymentDialog.payment.deposit_slip_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-sm font-medium text-primary underline underline-offset-2"
-                    >
-                      View deposit slip
-                    </a>
-                  </p>
-                )}
               </div>
             </div>
 
@@ -3430,7 +3388,7 @@ const ManagerReportsDrawer = ({
               <textarea
                 id="verify-payment-actor-note"
                 value={verifyPaymentDialog.actorNote}
-                placeholder="Example: Confirmed bank deposit against slip and reference."
+                placeholder="Example: Confirmed bank/cash reference with payment timeline."
                 className="min-h-[92px] w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
                 autoFocus
                 onChange={(event) => {

@@ -312,7 +312,6 @@ public sealed class AiInsightsCreditFlowTests(CustomWebApplicationFactory factor
                 pack_code = "pack_100",
                 payment_method = "bankdeposit",
                 bank_reference = $"BD-{Guid.NewGuid():N}"[..20],
-                deposit_slip_url = "https://example.com/payment-proofs/deposit-slip-001.pdf",
                 idempotency_key = $"it-bank-deposit-{Guid.NewGuid():N}"
             }));
 
@@ -354,7 +353,7 @@ public sealed class AiInsightsCreditFlowTests(CustomWebApplicationFactory factor
     }
 
     [Fact]
-    public async Task Checkout_WithBankDepositWithoutSlip_ShouldReturnBadRequest()
+    public async Task Checkout_WithBankDepositWithoutReference_ShouldReturnBadRequest()
     {
         await TestAuth.SignInAsManagerAsync(client);
 
@@ -362,14 +361,13 @@ public sealed class AiInsightsCreditFlowTests(CustomWebApplicationFactory factor
         {
             pack_code = "pack_100",
             payment_method = "bank_deposit",
-            bank_reference = "BD-ONLY-REF-001",
-            idempotency_key = $"it-bank-missing-slip-{Guid.NewGuid():N}"
+            idempotency_key = $"it-bank-missing-ref-{Guid.NewGuid():N}"
         });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonObject>();
         var message = payload?["message"]?.GetValue<string>() ?? string.Empty;
-        Assert.Contains("deposit_slip_url", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("bank_reference", message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -438,7 +436,6 @@ public sealed class AiInsightsCreditFlowTests(CustomWebApplicationFactory factor
                 pack_code = "pack_100",
                 payment_method = "bank_deposit",
                 bank_reference = submittedReference,
-                deposit_slip_url = "https://example.com/payment-proofs/deposit-slip-002.pdf",
                 idempotency_key = $"it-pending-list-{Guid.NewGuid():N}"
             }));
 

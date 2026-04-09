@@ -50,17 +50,6 @@ type PaymentSubmitResponse = {
   next_step: string;
 };
 
-type PaymentProofUploadResponse = {
-  uploaded_at: string;
-  proof_url: string;
-  file_name: string;
-  content_type: string;
-  size_bytes: number;
-  sha256: string;
-  scan_status: string;
-  scan_message?: string | null;
-};
-
 type StripeCheckoutSessionResponse = {
   created_at: string;
   shop_code: string;
@@ -111,7 +100,7 @@ type ApiErrorPayload = {
 };
 
 const isManualBillingFallbackEnabled =
-  (process.env.NEXT_PUBLIC_MARKETING_MANUAL_BILLING_FALLBACK_ENABLED || "false")
+  (process.env.NEXT_PUBLIC_MARKETING_MANUAL_BILLING_FALLBACK_ENABLED || "true")
     .trim()
     .toLowerCase() === "true";
 
@@ -193,8 +182,6 @@ export default function StartPage() {
   const [submitResult, setSubmitResult] = useState<PaymentSubmitResponse | null>(null);
   const [amountPaid, setAmountPaid] = useState("0");
   const [bankReference, setBankReference] = useState("");
-  const [slipUrl, setSlipUrl] = useState("");
-  const [paymentProofFile, setPaymentProofFile] = useState<File | null>(null);
   const [paymentNotes, setPaymentNotes] = useState("");
 
   const [requestError, setRequestError] = useState<string | null>(null);
@@ -202,7 +189,6 @@ export default function StartPage() {
   const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
   const [isCreatingStripeCheckout, setIsCreatingStripeCheckout] = useState(false);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
-  const [isUploadingProof, setIsUploadingProof] = useState(false);
   const [checkoutReturnState, setCheckoutReturnState] = useState<"none" | "success" | "cancel">("none");
   const [checkoutSessionId, setCheckoutSessionId] = useState("");
   const [stripeCheckoutStatus, setStripeCheckoutStatus] = useState<StripeCheckoutStatusResponse | null>(null);
@@ -493,7 +479,9 @@ export default function StartPage() {
 
       window.location.href = data.checkout_url;
     } catch (error) {
-      setRequestError(error instanceof Error ? error.message : "Unable to start Stripe checkout.");
+      setRequestError(
+        `${error instanceof Error ? error.message : "Unable to start Stripe checkout."} You can continue with bank transfer/cash using payment request.`,
+      );
     } finally {
       setIsCreatingStripeCheckout(false);
     }
@@ -514,41 +502,6 @@ export default function StartPage() {
         throw new Error("Enter a valid paid amount.");
       }
 
-      let resolvedDepositSlipUrl = slipUrl.trim() || undefined;
-      if (paymentProofFile) {
-        setIsUploadingProof(true);
-        try {
-          const uploadFormData = new FormData();
-          uploadFormData.append("file", paymentProofFile);
-          const uploadResponse = await fetch("/api/payment/proof-upload", {
-            method: "POST",
-            headers: {
-              "Idempotency-Key": crypto.randomUUID(),
-            },
-            body: uploadFormData,
-          });
-
-          const uploadPayload = await parseApiPayload(uploadResponse);
-          if (!uploadResponse.ok) {
-            throw new Error(parseErrorMessage(uploadPayload));
-          }
-
-          const uploaded = requireObjectPayload<PaymentProofUploadResponse>(
-            uploadPayload,
-            "Payment proof upload returned an empty response. Please try again.",
-          );
-          resolvedDepositSlipUrl = uploaded.proof_url;
-          setSlipUrl(uploaded.proof_url);
-          trackMarketingEvent("marketing_payment_proof_uploaded", {
-            locale,
-            scan_status: uploaded.scan_status,
-            proof_url: uploaded.proof_url,
-          });
-        } finally {
-          setIsUploadingProof(false);
-        }
-      }
-
       const normalizedReference = bankReference.trim();
       if (!normalizedReference) {
         throw new Error(
@@ -556,11 +509,6 @@ export default function StartPage() {
             ? "Reference number is required for cash payments."
             : "Bank reference is required for bank deposits."
         );
-      }
-
-      resolvedDepositSlipUrl = resolvedDepositSlipUrl?.trim();
-      if (paymentMethod === "bank_deposit" && !resolvedDepositSlipUrl) {
-        throw new Error("Deposit slip URL or uploaded slip is required for bank deposits.");
       }
 
       const response = await fetch("/api/payment/submit", {
@@ -575,7 +523,6 @@ export default function StartPage() {
           amount: parsedAmount,
           currency: requestResult.currency,
           bank_reference: normalizedReference,
-          deposit_slip_url: paymentMethod === "bank_deposit" ? resolvedDepositSlipUrl : undefined,
           contact_name: contactName || undefined,
           contact_email: contactEmail || undefined,
           contact_phone: contactPhone || undefined,
@@ -608,24 +555,25 @@ export default function StartPage() {
   };
 
   return (
-    <main className="min-h-screen bg-background px-4 py-12">
-      <div className="mx-auto w-full max-w-4xl space-y-6">
+    <main className="app-shell px-4 py-10 md:py-12">
+      <div className="mx-auto w-full max-w-5xl space-y-6">
         <Link
           href={`/${locale}#pricing`}
-          className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft size={16} />
           Back to Pricing
         </Link>
 
-        <section className="glass-card p-6 md:p-8">
-          <h1 className="text-2xl md:text-3xl font-bold text-foreground">Start SmartPOS</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
+        <section className="portal-hero space-y-2">
+          <p className="portal-kicker">Owner Onboarding</p>
+          <h1 className="text-2xl font-bold text-foreground md:text-3xl">Start SmartPOS</h1>
+          <p className="text-sm text-muted-foreground">
             Create your shop owner account, then continue with trial or complete payment for paid plans.
           </p>
 
           {checkoutReturnState === "cancel" && (
-            <div className="mt-4 rounded-lg border border-amber-300/40 bg-amber-100/40 p-3 text-sm text-amber-900">
+            <div className="mt-4 rounded-xl border border-warning/35 bg-warning/15 p-3 text-sm text-warning-foreground">
               Stripe checkout was canceled. You can retry card payment
               {isManualBillingFallbackEnabled
                 ? " or continue with manual payment request."
@@ -634,16 +582,21 @@ export default function StartPage() {
           )}
 
           {!isManualBillingFallbackEnabled && (
-            <div className="mt-4 rounded-lg border border-sky-300/40 bg-sky-100/40 p-3 text-sm text-sky-900">
+            <div className="mt-4 rounded-xl border border-info/35 bg-info/10 p-3 text-sm text-info">
               Manual bank/cash fallback is disabled for this environment. Paid plans use Stripe card checkout.
+            </div>
+          )}
+          {isManualBillingFallbackEnabled && planCode !== "starter" && (
+            <div className="mt-4 rounded-xl border border-info/35 bg-info/10 p-3 text-sm text-info">
+              Choose payment method: create a bank transfer/cash request now, or continue with Stripe card checkout.
             </div>
           )}
 
           {checkoutReturnState === "success" && (
-            <div className="mt-4 rounded-lg border border-emerald-400/40 bg-emerald-100/30 p-3 text-sm text-emerald-900 space-y-1">
+            <div className="mt-4 space-y-1 rounded-xl border border-success/35 bg-success/10 p-3 text-sm text-success">
               <p className="font-semibold">Stripe checkout completed. Confirming payment status...</p>
               {isCheckingStripeStatus && (
-                <p className="text-xs text-emerald-900/80">Checking live status from billing service...</p>
+                <p className="text-xs text-success/80">Checking live status from billing service...</p>
               )}
               {stripeCheckoutStatusError && (
                 <p className="text-xs text-destructive">{stripeCheckoutStatusError}</p>
@@ -668,13 +621,13 @@ export default function StartPage() {
                       {stripeCheckoutStatus.plan ? ` (${stripeCheckoutStatus.plan})` : ""}
                     </p>
                   )}
-                  <p className={stripeCheckoutStatus.access_ready ? "text-emerald-900 font-medium" : "text-emerald-900/80"}>
+                  <p className={stripeCheckoutStatus.access_ready ? "font-medium text-success" : "text-success/80"}>
                     {stripeCheckoutStatus.access_ready
                       ? "Payment confirmed and access is ready. You can continue activation in your POS app."
                       : "Payment is processing. If this takes more than a minute, refresh this page or contact support."}
                   </p>
                   {stripeCheckoutStatus.access_ready && (
-                    <p className="text-emerald-900/90">
+                    <p className="text-success/90">
                       <Link href={`/${locale}/account`} className="underline underline-offset-2 font-medium">
                         Open My Account
                       </Link>{" "}
@@ -688,9 +641,9 @@ export default function StartPage() {
 
           <form className="mt-6 grid gap-4 md:grid-cols-2" onSubmit={handleRequestCreate}>
             <label className="space-y-1 md:col-span-2">
-              <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Plan</span>
+              <span className="portal-kicker">Plan</span>
               <select
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="field-shell"
                 value={planCode}
                 onChange={(event) => setPlanCode(normalizePlanCode(event.target.value))}
               >
@@ -703,9 +656,9 @@ export default function StartPage() {
             </label>
 
             <label className="space-y-1 md:col-span-2">
-              <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Shop Name</span>
+              <span className="portal-kicker">Shop Name</span>
               <input
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="field-shell"
                 value={shopName}
                 onChange={(event) => setShopName(event.target.value)}
                 placeholder="Nelu Grocery"
@@ -714,9 +667,9 @@ export default function StartPage() {
             </label>
 
             <label className="space-y-1">
-              <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Contact Name</span>
+              <span className="portal-kicker">Contact Name</span>
               <input
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="field-shell"
                 value={contactName}
                 onChange={(event) => setContactName(event.target.value)}
                 placeholder="Owner name"
@@ -726,9 +679,9 @@ export default function StartPage() {
 
             {isManualBillingFallbackEnabled && (
               <label className="space-y-1">
-                <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Payment Method</span>
+                <span className="portal-kicker">Payment Method</span>
                 <select
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  className="field-shell"
                   value={paymentMethod}
                   onChange={(event) => setPaymentMethod(event.target.value as PaymentMethod)}
                 >
@@ -739,10 +692,10 @@ export default function StartPage() {
             )}
 
             <label className="space-y-1">
-              <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Email (optional)</span>
+              <span className="portal-kicker">Email (optional)</span>
               <input
                 type="email"
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="field-shell"
                 value={contactEmail}
                 onChange={(event) => setContactEmail(event.target.value)}
                 placeholder="owner@shop.lk"
@@ -750,9 +703,9 @@ export default function StartPage() {
             </label>
 
             <label className="space-y-1">
-              <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Phone (optional)</span>
+              <span className="portal-kicker">Phone (optional)</span>
               <input
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="field-shell"
                 value={contactPhone}
                 onChange={(event) => setContactPhone(event.target.value)}
                 placeholder="+94..."
@@ -760,9 +713,9 @@ export default function StartPage() {
             </label>
 
             <label className="space-y-1 md:col-span-2">
-              <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Notes (optional)</span>
+              <span className="portal-kicker">Notes (optional)</span>
               <textarea
-                className="min-h-[88px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="field-shell min-h-[96px] resize-y"
                 value={notes}
                 onChange={(event) => setNotes(event.target.value)}
                 placeholder="Any billing details..."
@@ -770,9 +723,9 @@ export default function StartPage() {
             </label>
 
             <label className="space-y-1">
-              <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Owner Username</span>
+              <span className="portal-kicker">Owner Username</span>
               <input
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="field-shell"
                 value={ownerUsername}
                 onChange={(event) => setOwnerUsername(event.target.value)}
                 placeholder="shopowner"
@@ -781,10 +734,10 @@ export default function StartPage() {
             </label>
 
             <label className="space-y-1">
-              <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Owner Password</span>
+              <span className="portal-kicker">Owner Password</span>
               <input
                 type="password"
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="field-shell"
                 value={ownerPassword}
                 onChange={(event) => setOwnerPassword(event.target.value)}
                 placeholder="At least 8 characters"
@@ -793,9 +746,9 @@ export default function StartPage() {
             </label>
 
             <label className="space-y-1 md:col-span-2">
-              <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Owner Full Name (optional)</span>
+              <span className="portal-kicker">Owner Full Name (optional)</span>
               <input
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="field-shell"
                 value={ownerFullName}
                 onChange={(event) => setOwnerFullName(event.target.value)}
                 placeholder="Shop Owner"
@@ -808,7 +761,7 @@ export default function StartPage() {
               {isManualBillingFallbackEnabled ? (
                 <>
                   <Button type="submit" variant="hero" disabled={isSubmittingRequest || isCreatingStripeCheckout}>
-                    {isSubmittingRequest ? "Creating..." : "Create Payment Request"}
+                    {isSubmittingRequest ? "Creating..." : "Pay by Bank Transfer / Cash"}
                   </Button>
                   <Button
                     type="button"
@@ -842,24 +795,24 @@ export default function StartPage() {
         </section>
 
         {requestResult && (
-          <section className="glass-card p-6 md:p-8 space-y-4">
+          <section className="portal-surface space-y-4">
             <h2 className="text-xl font-semibold">Request Created</h2>
             <div className="grid gap-3 md:grid-cols-2">
-              <div className="rounded-lg border border-border p-3">
-                <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Shop</p>
+              <div className="rounded-xl border border-border/70 bg-surface-muted p-3">
+                <p className="portal-kicker">Shop</p>
                 <p className="mt-1 text-sm font-semibold">{requestResult.shop_name}</p>
                 <p className="text-xs text-muted-foreground">{requestResult.shop_code}</p>
               </div>
-              <div className="rounded-lg border border-border p-3">
-                <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Plan Mapping</p>
+              <div className="rounded-xl border border-border/70 bg-surface-muted p-3">
+                <p className="portal-kicker">Plan Mapping</p>
                 <p className="mt-1 text-sm font-semibold">
                   {requestResult.marketing_plan_code} {"->"} {requestResult.internal_plan_code}
                 </p>
               </div>
             </div>
 
-            <div className="rounded-lg border border-border p-4 space-y-1">
-              <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Owner Account</p>
+            <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-1">
+              <p className="portal-kicker">Owner Account</p>
               <p className="text-sm">
                 Username: <span className="font-semibold">{requestResult.owner_username || ownerUsername || "-"}</span>
               </p>
@@ -869,15 +822,15 @@ export default function StartPage() {
             </div>
 
             {!requestResult.requires_payment && (
-              <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-200">
+              <div className="rounded-xl border border-success/35 bg-success/10 p-4 text-sm text-success">
                 {requestResult.instructions.message}
               </div>
             )}
 
             {requestResult.requires_payment && requestResult.invoice && isManualBillingFallbackEnabled && (
               <>
-                <div className="rounded-lg border border-border p-4 space-y-2">
-                  <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Invoice</p>
+                <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-2">
+                  <p className="portal-kicker">Invoice</p>
                   <p className="text-sm">Invoice Number: <span className="font-semibold">{requestResult.invoice.invoice_number}</span></p>
                   <p className="text-sm">Amount Due: <span className="font-semibold">{requestResult.amount_due} {requestResult.currency}</span></p>
                   <p className="text-sm">Due At: <span className="font-semibold">{formatDate(requestResult.invoice.due_at)}</span></p>
@@ -889,18 +842,18 @@ export default function StartPage() {
                   <h3 className="text-base font-semibold">I Have Paid</h3>
                   <div className="grid gap-3 md:grid-cols-2">
                     <label className="space-y-1">
-                      <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Amount Paid</span>
+                      <span className="portal-kicker">Amount Paid</span>
                       <input
-                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        className="field-shell"
                         value={amountPaid}
                         onChange={(event) => setAmountPaid(event.target.value)}
                         required
                       />
                     </label>
                     <label className="space-y-1">
-                      <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Reference Number</span>
+                      <span className="portal-kicker">Reference Number</span>
                       <input
-                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        className="field-shell"
                         value={bankReference}
                         onChange={(event) => setBankReference(event.target.value)}
                         placeholder={paymentMethod === "cash" ? "Cash receipt/reference number" : "Deposit reference"}
@@ -908,50 +861,19 @@ export default function StartPage() {
                       />
                     </label>
                   </div>
-                  {paymentMethod === "bank_deposit" && (
-                    <>
-                      <label className="space-y-1">
-                        <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Slip URL</span>
-                        <input
-                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                          value={slipUrl}
-                          onChange={(event) => setSlipUrl(event.target.value)}
-                          placeholder="https://..."
-                        />
-                      </label>
-                      <label className="space-y-1">
-                        <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Upload Slip</span>
-                        <input
-                          type="file"
-                          accept=".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/png,image/jpeg,image/webp"
-                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary/10 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-primary"
-                          onChange={(event) => {
-                            const file = event.target.files?.[0] || null;
-                            setPaymentProofFile(file);
-                          }}
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          Bank deposits require both a reference number and slip evidence.
-                        </p>
-                      </label>
-                    </>
-                  )}
                   <label className="space-y-1">
-                    <span className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Notes (optional)</span>
+                    <span className="portal-kicker">Notes (optional)</span>
                     <textarea
-                      className="min-h-[88px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      className="field-shell min-h-[96px] resize-y"
                       value={paymentNotes}
                       onChange={(event) => setPaymentNotes(event.target.value)}
                     />
                   </label>
 
                   {submitError && <p className="text-sm text-destructive">{submitError}</p>}
-                  {isUploadingProof && (
-                    <p className="text-sm text-muted-foreground">Uploading and scanning proof...</p>
-                  )}
 
-                  <Button type="submit" variant="hero" disabled={isSubmittingPayment || isUploadingProof}>
-                    {isSubmittingPayment ? "Submitting..." : isUploadingProof ? "Uploading Proof..." : "Submit Payment Proof"}
+                  <Button type="submit" variant="hero" disabled={isSubmittingPayment}>
+                    {isSubmittingPayment ? "Submitting..." : "Submit Payment Reference"}
                   </Button>
                 </form>
               </>
@@ -966,7 +888,7 @@ export default function StartPage() {
         )}
 
         {submitResult && (
-          <section className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-6 text-emerald-100">
+          <section className="rounded-xl border border-success/35 bg-success/10 p-6 text-success">
             <div className="flex items-start gap-3">
               <CheckCircle2 className="mt-0.5" size={20} />
               <div>

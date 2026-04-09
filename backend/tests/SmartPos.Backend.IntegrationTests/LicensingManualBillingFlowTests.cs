@@ -37,6 +37,7 @@ public sealed class LicensingManualBillingFlowTests(CustomWebApplicationFactory 
         var invoiceNumber = TestJson.GetString(invoiceResponse, "invoice_number");
         Assert.False(string.IsNullOrWhiteSpace(invoiceId));
         Assert.False(string.IsNullOrWhiteSpace(invoiceNumber));
+        Assert.Matches("^[A-Z]{2}[0-9]{4}$", invoiceNumber);
 
         var paymentResponse = await TestJson.ReadObjectAsync(
             await client.PostAsJsonAsync("/api/admin/licensing/billing/payments/record", new
@@ -155,6 +156,7 @@ public sealed class LicensingManualBillingFlowTests(CustomWebApplicationFactory 
             }));
 
         var invoiceNumber = TestJson.GetString(invoiceResponse, "invoice_number");
+        Assert.Matches("^[A-Z]{2}[0-9]{4}$", invoiceNumber);
         var paymentResponse = await TestJson.ReadObjectAsync(
             await client.PostAsJsonAsync("/api/admin/licensing/billing/payments/record", new
             {
@@ -414,7 +416,7 @@ public sealed class LicensingManualBillingFlowTests(CustomWebApplicationFactory 
         });
         Assert.Equal(HttpStatusCode.BadRequest, cashWithoutReference.StatusCode);
 
-        var bankWithoutSlip = await client.PostAsJsonAsync("/api/admin/licensing/billing/payments/record", new
+        var bankWithReferenceOnly = await client.PostAsJsonAsync("/api/admin/licensing/billing/payments/record", new
         {
             invoice_id = invoiceId,
             method = "bank_deposit",
@@ -422,26 +424,25 @@ public sealed class LicensingManualBillingFlowTests(CustomWebApplicationFactory 
             bank_reference = "BANK-REF-ONLY",
             actor = "support_admin",
             reason_code = "manual_payment_pending_verification",
-            actor_note = "missing bank slip"
+            actor_note = "reference-only proof"
         });
-        Assert.Equal(HttpStatusCode.BadRequest, bankWithoutSlip.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, bankWithReferenceOnly.StatusCode);
 
-        var bankWithFullEvidence = await client.PostAsJsonAsync("/api/admin/licensing/billing/payments/record", new
+        var bankWithReferenceAndNote = await client.PostAsJsonAsync("/api/admin/licensing/billing/payments/record", new
         {
             invoice_id = invoiceId,
             method = "bank_deposit",
             amount = 1000m,
             bank_reference = "BANK-REF-OK",
-            deposit_slip_url = "https://proofs.smartpos.test/bank-ref-ok.png",
             actor = "support_admin",
             reason_code = "manual_payment_pending_verification",
-            actor_note = "bank evidence complete"
+            actor_note = "reference-only proof accepted"
         });
-        Assert.Equal(HttpStatusCode.OK, bankWithFullEvidence.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, bankWithReferenceAndNote.StatusCode);
     }
 
     [Fact]
-    public async Task ManualPayment_Verify_ShouldRejectLegacyRecordWithoutRequiredEvidence()
+    public async Task ManualPayment_Verify_ShouldAllowLegacyRecordWithoutSlip()
     {
         await TestAuth.SignInAsSupportAdminAsync(client);
 
@@ -467,10 +468,9 @@ public sealed class LicensingManualBillingFlowTests(CustomWebApplicationFactory 
                 method = "bank_deposit",
                 amount = 4000m,
                 bank_reference = "LEGACY-REF-001",
-                deposit_slip_url = "https://proofs.smartpos.test/legacy-ref-001.png",
                 actor = "support_admin",
                 reason_code = "manual_payment_pending_verification",
-                actor_note = "recorded with full evidence"
+                actor_note = "recorded with reference-only proof"
             }));
         var paymentId = TestJson.GetString(paymentResponse, "payment_id");
 
@@ -490,16 +490,13 @@ public sealed class LicensingManualBillingFlowTests(CustomWebApplicationFactory 
             new
             {
                 reason_code = "manual_payment_verified",
-                actor_note = "attempt verify legacy partial evidence",
-                reason = "attempt verify legacy partial evidence",
+                actor_note = "verify legacy reference-only payment",
+                reason = "verify legacy reference-only payment",
                 extend_days = 30,
                 actor = "billing_admin"
             });
 
-        Assert.Equal(HttpStatusCode.BadRequest, verifyResponse.StatusCode);
-        var payload = await ReadJsonAsync(verifyResponse);
-        var message = payload["error"]?["message"]?.GetValue<string>() ?? string.Empty;
-        Assert.Contains("bank_reference and deposit_slip_url are both required", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(HttpStatusCode.OK, verifyResponse.StatusCode);
     }
 
     private static async Task<JsonObject> ReadJsonAsync(HttpResponseMessage response)
