@@ -25,6 +25,7 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
             contact_name = "Nelu",
             contact_email = "nelu@example.com",
             contact_phone = "+94770000000",
+            device_code = "mkt-pro-device-001",
             plan_code = "pro",
             payment_method = "bank_deposit",
             source = "website_pricing",
@@ -48,6 +49,7 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
         {
             invoice_id = invoiceId,
             payment_method = "bank_deposit",
+            device_code = "mkt-pro-device-001",
             amount = 19m,
             currency = "USD",
             bank_reference = "DEP-REF-MKT-001",
@@ -78,6 +80,8 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
         Assert.Equal("verified", verifyResponse["payment"]?["status"]?.GetValue<string>());
         Assert.Equal("paid", verifyResponse["invoice"]?["status"]?.GetValue<string>());
         Assert.Equal("growth", TestJson.GetString(verifyResponse, "plan"));
+        Assert.Null(verifyResponse["activation_entitlement"]);
+        Assert.Null(verifyResponse["access_delivery"]);
     }
 
     [Fact]
@@ -103,6 +107,64 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
     }
 
     [Fact]
+    public async Task MarketingPaymentFlow_PaidPlan_ShouldRejectMissingDeviceCode()
+    {
+        var response = await PostJsonRawAsync("/api/license/public/payment-request", new
+        {
+            shop_name = "Missing Device Shop",
+            contact_name = "Owner",
+            contact_email = "owner+missing-device@example.com",
+            plan_code = "pro",
+            payment_method = "bank_deposit",
+            source = "website_pricing",
+            owner_username = "missing_device_owner_001",
+            owner_password = "OwnerPass123!"
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonObject>()
+            ?? throw new InvalidOperationException("Missing response payload.");
+        Assert.Equal("INVALID_ADMIN_REQUEST", payload["error"]?["code"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task MarketingPaymentFlow_ShouldRejectPaymentSubmitWhenDeviceCodeDoesNotMatchRequest()
+    {
+        var createResponse = await PostJsonAsync("/api/license/public/payment-request", new
+        {
+            shop_name = "Device Match Shop",
+            contact_name = "Owner",
+            contact_email = "owner+device-match@example.com",
+            device_code = "mkt-device-match-001",
+            plan_code = "pro",
+            payment_method = "bank_deposit",
+            source = "website_pricing",
+            owner_username = "device_match_owner_001",
+            owner_password = "OwnerPass123!"
+        });
+
+        var invoiceId = createResponse["invoice"]?["invoice_id"]?.GetValue<Guid>()
+            ?? throw new InvalidOperationException("Missing invoice_id.");
+
+        var response = await PostJsonRawAsync("/api/license/public/payment-submit", new
+        {
+            invoice_id = invoiceId,
+            payment_method = "bank_deposit",
+            device_code = "mkt-device-match-other",
+            amount = 19m,
+            currency = "USD",
+            bank_reference = "DEP-REF-MISMATCH-001",
+            contact_name = "Owner",
+            contact_email = "owner+device-match@example.com"
+        });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonObject>()
+            ?? throw new InvalidOperationException("Missing mismatch payload.");
+        Assert.Equal("INVALID_ADMIN_REQUEST", payload["error"]?["code"]?.GetValue<string>());
+    }
+
+    [Fact]
     public async Task MarketingPaymentFlow_WithLegacyAiCreditFields_ShouldIgnoreAiOrderFromStart()
     {
         var createResponse = await PostJsonAsync("/api/license/public/payment-request", new
@@ -110,6 +172,7 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
             shop_name = "AI Credits Shop",
             contact_name = "AI Owner",
             contact_email = "ai-owner@example.com",
+            device_code = "mkt-ai-device-001",
             plan_code = "pro",
             payment_method = "bank_deposit",
             source = "website_pricing",
@@ -127,6 +190,7 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
         {
             invoice_id = invoiceId,
             payment_method = "bank_deposit",
+            device_code = "mkt-ai-device-001",
             amount = 19m,
             currency = "USD",
             bank_reference = "DEP-REF-AI-001",
@@ -171,6 +235,7 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
             shop_name = "Duplicate Submit Shop",
             contact_name = "Owner",
             contact_email = "owner+dup@example.com",
+            device_code = "mkt-dup-device-001",
             plan_code = "pro",
             payment_method = "bank_deposit",
             source = "website_pricing",
@@ -185,6 +250,7 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
         {
             invoice_id = invoiceId,
             payment_method = "bank_deposit",
+            device_code = "mkt-dup-device-001",
             amount = 19m,
             currency = "USD",
             bank_reference = "DEP-REF-DUP-001",
@@ -197,6 +263,7 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
         {
             invoice_id = invoiceId,
             payment_method = "bank_deposit",
+            device_code = "mkt-dup-device-001",
             amount = 19m,
             currency = "USD",
             bank_reference = "DEP-REF-DUP-001",
@@ -251,6 +318,7 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
             shop_name = "Tracker Shop",
             contact_name = "Tracker Owner",
             contact_email = "tracker@example.com",
+            device_code = "mkt-track-device-001",
             plan_code = "pro",
             payment_method = "bank_deposit",
             source = "website_pricing",
@@ -267,6 +335,7 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
         {
             invoice_id = invoiceId,
             payment_method = "bank_deposit",
+            device_code = "mkt-track-device-001",
             amount = 19m,
             currency = "USD",
             bank_reference = "DEP-REF-TRACK-001",
@@ -291,7 +360,19 @@ public sealed class LicensingMarketingPaymentFlowTests(CustomWebApplicationFacto
                 actor = "billing_admin"
             });
 
-        var activationEntitlementKey = verifyResponse["activation_entitlement"]?["activation_entitlement_key"]?.GetValue<string>()
+        Assert.Null(verifyResponse["activation_entitlement"]);
+
+        var generationResponse = await PostJsonAsync(
+            $"/api/admin/licensing/billing/payments/{paymentId}/license-code/generate",
+            new
+            {
+                reason_code = "manual_payment_license_code_generated",
+                actor_note = "manual key generated for onboarding",
+                reason = "manual key generated for onboarding",
+                actor = "billing_admin"
+            });
+
+        var activationEntitlementKey = generationResponse["activation_entitlement"]?["activation_entitlement_key"]?.GetValue<string>()
             ?? throw new InvalidOperationException("Missing activation entitlement key.");
 
         var downloadTrackResponse = await PostJsonAsync("/api/license/public/download-track", new

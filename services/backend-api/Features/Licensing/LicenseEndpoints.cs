@@ -1073,6 +1073,28 @@ public static class LicenseEndpoints
         .WithName("AdminVerifyManualBillingPayment")
         .WithOpenApi();
 
+        admin.MapPost("/billing/payments/{payment_id:guid}/license-code/generate", [Authorize(Policy = SmartPosPolicies.BillingOrSecurity)] async (
+            Guid payment_id,
+            AdminManualBillingPaymentLicenseCodeGenerateRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.GenerateManualPaymentLicenseCodeAsAdminAsync(payment_id, request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.BillingOrSecurity)
+        .WithName("AdminGenerateManualBillingPaymentLicenseCode")
+        .WithOpenApi();
+
         admin.MapPost("/billing/payments/{payment_id:guid}/reject", [Authorize(Policy = SmartPosPolicies.BillingOrSecurity)] async (
             Guid payment_id,
             AdminManualBillingPaymentRejectRequest request,

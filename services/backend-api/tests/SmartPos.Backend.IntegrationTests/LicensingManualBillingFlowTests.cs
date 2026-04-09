@@ -15,7 +15,7 @@ public sealed class LicensingManualBillingFlowTests(CustomWebApplicationFactory 
     private readonly HttpClient client = factory.CreateClient();
 
     [Fact]
-    public async Task ManualPayment_Verify_ShouldRequireBillingRole_AndActivateSubscription()
+    public async Task ManualPayment_VerifyThenGenerateLicense_ShouldRequireBillingRole_AndActivateSubscription()
     {
         await TestAuth.SignInAsSupportAdminAsync(client);
 
@@ -84,12 +84,23 @@ public sealed class LicensingManualBillingFlowTests(CustomWebApplicationFactory 
         Assert.Equal("verified", verifyAsBilling["payment"]?["status"]?.GetValue<string>());
         Assert.Equal("paid", verifyAsBilling["invoice"]?["status"]?.GetValue<string>());
         Assert.Equal("active", TestJson.GetString(verifyAsBilling, "subscription_status"));
-        var activationEntitlementKey = verifyAsBilling["activation_entitlement"]?["activation_entitlement_key"]?.GetValue<string>();
-        Assert.False(string.IsNullOrWhiteSpace(activationEntitlementKey));
-        var accessSuccessUrl = verifyAsBilling["access_delivery"]?["success_page_url"]?.GetValue<string>();
-        Assert.False(string.IsNullOrWhiteSpace(accessSuccessUrl));
-        var accessEmailStatus = verifyAsBilling["access_delivery"]?["email_delivery"]?["status"]?.GetValue<string>();
-        Assert.False(string.IsNullOrWhiteSpace(accessEmailStatus));
+        Assert.Null(verifyAsBilling["activation_entitlement"]);
+        Assert.Null(verifyAsBilling["access_delivery"]);
+
+        var generatedLicense = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync(
+                $"/api/admin/licensing/billing/payments/{Uri.EscapeDataString(paymentId)}/license-code/generate",
+                new
+                {
+                    reason_code = "manual_payment_license_code_generated",
+                    actor_note = "manual key generation after payment verification",
+                    reason = "manual key generation after payment verification",
+                    actor = "billing_admin"
+                }));
+
+        var activationEntitlementKey = generatedLicense["activation_entitlement"]?["activation_entitlement_key"]?.GetValue<string>()
+            ?? throw new InvalidOperationException("Missing generated activation entitlement key.");
+        Assert.True((generatedLicense["revoked_entitlements_count"]?.GetValue<int>() ?? 0) >= 0);
 
         var successPage = await TestJson.ReadObjectAsync(
             await client.GetAsync($"/api/license/access/success?activation_entitlement_key={Uri.EscapeDataString(activationEntitlementKey)}"));
@@ -134,6 +145,132 @@ public sealed class LicensingManualBillingFlowTests(CustomWebApplicationFactory 
         Assert.Equal(invoice.ShopId, entitlementActivationDevice.ShopId);
         Assert.NotNull(latestEntitlement);
         Assert.True(latestEntitlement!.ActivationsUsed >= 1);
+    }
+
+    [Fact]
+    public async Task ManualPayment_GenerateLicense_ShouldFail_WhenPaymentIsNotVerified()
+    {
+        await TestAuth.SignInAsSupportAdminAsync(client);
+
+        var shopCode = $"manual-billing-generate-unverified-{Guid.NewGuid():N}";
+        var invoiceResponse = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/admin/licensing/billing/invoices", new
+            {
+                shop_code = shopCode,
+                amount_due = 3500m,
+                currency = "LKR",
+                due_at = DateTimeOffset.UtcNow.AddDays(3),
+                notes = "generate should require verified payment",
+                actor = "support_admin",
+                reason_code = "manual_billing_invoice_created",
+                actor_note = "generate should require verified payment"
+            }));
+        var invoiceId = TestJson.GetString(invoiceResponse, "invoice_id");
+
+        var paymentResponse = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/admin/licensing/billing/payments/record", new
+            {
+                invoice_id = invoiceId,
+                method = "bank_deposit",
+                amount = 3500m,
+                bank_reference = "UNVERIFIED-GEN-001",
+                actor = "support_admin",
+                reason_code = "manual_payment_pending_verification",
+                actor_note = "record payment before verify"
+            }));
+        var paymentId = TestJson.GetString(paymentResponse, "payment_id");
+
+        await TestAuth.SignInAsBillingAdminAsync(client);
+
+        var generateResponse = await client.PostAsJsonAsync(
+            $"/api/admin/licensing/billing/payments/{Uri.EscapeDataString(paymentId)}/license-code/generate",
+            new
+            {
+                reason_code = "manual_payment_license_code_generated",
+                actor_note = "attempt without verification",
+                reason = "attempt without verification",
+                actor = "billing_admin"
+            });
+
+        Assert.Equal(HttpStatusCode.Conflict, generateResponse.StatusCode);
+        var payload = await ReadJsonAsync(generateResponse);
+        Assert.Equal("INVALID_PAYMENT_STATUS", payload["error"]?["code"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task ManualPayment_GenerateLicense_ShouldRevokePriorActiveEntitlements()
+    {
+        await TestAuth.SignInAsSupportAdminAsync(client);
+
+        var shopCode = $"manual-billing-generate-revoke-{Guid.NewGuid():N}";
+        var invoiceResponse = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/admin/licensing/billing/invoices", new
+            {
+                shop_code = shopCode,
+                amount_due = 4200m,
+                currency = "LKR",
+                due_at = DateTimeOffset.UtcNow.AddDays(3),
+                notes = "revoke old entitlement on regeneration",
+                actor = "support_admin",
+                reason_code = "manual_billing_invoice_created",
+                actor_note = "revoke old entitlement on regeneration"
+            }));
+        var invoiceId = TestJson.GetString(invoiceResponse, "invoice_id");
+
+        var paymentResponse = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/admin/licensing/billing/payments/record", new
+            {
+                invoice_id = invoiceId,
+                method = "bank_deposit",
+                amount = 4200m,
+                bank_reference = "REVOKE-GEN-001",
+                actor = "support_admin",
+                reason_code = "manual_payment_pending_verification",
+                actor_note = "payment ready for verification"
+            }));
+        var paymentId = TestJson.GetString(paymentResponse, "payment_id");
+
+        await TestAuth.SignInAsBillingAdminAsync(client);
+        await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync(
+                $"/api/admin/licensing/billing/payments/{Uri.EscapeDataString(paymentId)}/verify",
+                new
+                {
+                    reason_code = "manual_payment_verified",
+                    actor_note = "verified before generation",
+                    reason = "verified before generation",
+                    extend_days = 30,
+                    actor = "billing_admin"
+                }));
+
+        var firstGeneration = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync(
+                $"/api/admin/licensing/billing/payments/{Uri.EscapeDataString(paymentId)}/license-code/generate",
+                new
+                {
+                    reason_code = "manual_payment_license_code_generated",
+                    actor_note = "first generation",
+                    reason = "first generation",
+                    actor = "billing_admin"
+                }));
+        var firstKey = firstGeneration["activation_entitlement"]?["activation_entitlement_key"]?.GetValue<string>()
+            ?? throw new InvalidOperationException("Missing first activation key.");
+
+        var secondGeneration = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync(
+                $"/api/admin/licensing/billing/payments/{Uri.EscapeDataString(paymentId)}/license-code/generate",
+                new
+                {
+                    reason_code = "manual_payment_license_code_generated",
+                    actor_note = "regenerate after correction",
+                    reason = "regenerate after correction",
+                    actor = "billing_admin"
+                }));
+        var secondKey = secondGeneration["activation_entitlement"]?["activation_entitlement_key"]?.GetValue<string>()
+            ?? throw new InvalidOperationException("Missing second activation key.");
+
+        Assert.NotEqual(firstKey, secondKey);
+        Assert.True((secondGeneration["revoked_entitlements_count"]?.GetValue<int>() ?? 0) >= 1);
     }
 
     [Fact]

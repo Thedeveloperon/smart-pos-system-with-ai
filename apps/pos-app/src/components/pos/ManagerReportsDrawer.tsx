@@ -45,6 +45,7 @@ import {
   fetchPaymentBreakdownReport,
   fetchSupportTriageReport,
   fetchTopItemsReport,
+  generateAdminManualBillingLicenseCode,
   fetchTransactionsReport,
   recordAdminManualBillingPayment,
   rejectAdminManualBillingPayment,
@@ -167,6 +168,14 @@ type VerifyPaymentDialogState = {
   errors: VerifyPaymentDialogErrors;
 };
 
+type MarketingInvoiceMetadata = {
+  device_code?: string;
+};
+
+type MarketingPaymentSubmissionMetadata = {
+  device_code?: string;
+};
+
 const marketingInvoiceMetadataPrefix = "MARKETING_REQUEST:";
 const marketingPaymentSubmissionPrefix = "MARKETING_PAYMENT_SUBMISSION:";
 
@@ -177,6 +186,39 @@ const isMarketingBillingRecord = (notes?: string | null) => {
   }
 
   return normalized.includes(marketingInvoiceMetadataPrefix) || normalized.includes(marketingPaymentSubmissionPrefix);
+};
+
+const parseMarketingMetadataLine = <T extends object>(
+  notes: string | null | undefined,
+  prefix: string,
+): T | null => {
+  const normalized = (notes || "").trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const firstLine = normalized.split("\n")[0]?.trim() || "";
+  if (!firstLine.startsWith(prefix)) {
+    return null;
+  }
+
+  const metadataJson = firstLine.slice(prefix.length).trim();
+  if (!metadataJson) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(metadataJson) as T;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const resolveMarketingDeviceCode = (invoiceNotes?: string | null, paymentNotes?: string | null) => {
+  const invoiceCode = parseMarketingMetadataLine<MarketingInvoiceMetadata>(invoiceNotes, marketingInvoiceMetadataPrefix)?.device_code?.trim() || "";
+  const paymentCode = parseMarketingMetadataLine<MarketingPaymentSubmissionMetadata>(paymentNotes, marketingPaymentSubmissionPrefix)?.device_code?.trim() || "";
+  return paymentCode || invoiceCode || "";
 };
 
 const money = (value: number) => `Rs. ${value.toLocaleString()}`;
@@ -344,6 +386,7 @@ const ManagerReportsDrawer = ({
   const [shareState, setShareState] = useState<ShareDialogState | null>(null);
   const [verifyPaymentDialog, setVerifyPaymentDialog] = useState<VerifyPaymentDialogState | null>(null);
   const [isSubmittingVerifyPayment, setIsSubmittingVerifyPayment] = useState(false);
+  const [isGeneratingLicensePaymentId, setIsGeneratingLicensePaymentId] = useState<string | null>(null);
   const [aiVerifyReference, setAiVerifyReference] = useState("");
   const [isVerifyingAiPayment, setIsVerifyingAiPayment] = useState(false);
   const [verifyingAiPaymentId, setVerifyingAiPaymentId] = useState<string | null>(null);
@@ -1299,42 +1342,7 @@ const ManagerReportsDrawer = ({
       });
 
       setVerifyPaymentDialog(null);
-      const issuedActivationKey = verification.activation_entitlement?.activation_entitlement_key?.trim() || "";
-      const accessSuccessUrl = verification.access_delivery?.success_page_url?.trim() || "";
-      const accessEmail = verification.access_delivery?.email_delivery;
-
-      if (issuedActivationKey) {
-        await copyTextToClipboard(issuedActivationKey, "Activation key copied.");
-        toast.success("Payment verified. New activation key issued.");
-      } else {
-        toast.success("Payment verified and subscription updated.");
-      }
-
-      if (issuedActivationKey || accessSuccessUrl) {
-        setShareState({
-          title: "Customer Access Details",
-          description: "Share these details with the customer for device activation.",
-          activationKey: issuedActivationKey || undefined,
-          successUrl: accessSuccessUrl || undefined,
-        });
-      }
-
-      if (accessEmail?.status === "sent") {
-        toast.success(
-          accessEmail.recipient_email
-            ? `Access email sent to ${accessEmail.recipient_email}.`
-            : "Access email sent."
-        );
-      } else if (accessEmail?.status === "failed") {
-        toast.warning(
-          accessEmail.reason
-            ? `Access email delivery failed: ${accessEmail.reason}`
-            : "Access email delivery failed."
-        );
-      } else if (accessEmail?.status === "skipped" && accessEmail.reason === "no_recipient_email") {
-        toast.info("Access email skipped: no recipient email configured.");
-      }
-
+      toast.success("Payment verified. Generate a license code to share with the shop owner.");
       void loadReports();
     } catch (error) {
       console.error(error);
@@ -1353,7 +1361,104 @@ const ManagerReportsDrawer = ({
     } finally {
       setIsSubmittingVerifyPayment(false);
     }
-  }, [copyTextToClipboard, isSubmittingVerifyPayment, loadReports, verifyPaymentDialog]);
+  }, [isSubmittingVerifyPayment, loadReports, verifyPaymentDialog]);
+
+  const handleGenerateManualPaymentLicenseCode = useCallback(async (prefillPaymentId?: string, prefillPayment?: AdminManualBillingPaymentItem) => {
+    const paymentId = prefillPaymentId?.trim() || await openPromptDialog({
+      title: "Generate License Code",
+      description: "Enter verified payment ID to generate a new activation key.",
+      label: "Payment ID",
+      confirmLabel: "Continue",
+    });
+    if (!paymentId) {
+      return;
+    }
+
+    const payment =
+      prefillPayment ||
+      (report.manualPayments?.items ?? []).find((item) => item.payment_id === paymentId) ||
+      null;
+
+    if (payment && payment.status !== "verified") {
+      toast.error("Only verified payments can generate a license code.");
+      return;
+    }
+
+    const actorNote = await openPromptDialog({
+      title: "Generate License Code",
+      description: "Actor note is required for audit.",
+      label: "Actor note",
+      confirmLabel: "Generate",
+    });
+    if (!actorNote) {
+      return;
+    }
+
+    setIsGeneratingLicensePaymentId(paymentId);
+    try {
+      const generation = await generateAdminManualBillingLicenseCode(paymentId, {
+        reason_code: "manual_payment_license_code_generated",
+        actor_note: actorNote,
+        reason: actorNote,
+        actor: "billing-ui",
+      });
+
+      setReport((current) => {
+        const manualPayments = current.manualPayments
+          ? {
+              ...current.manualPayments,
+              items: current.manualPayments.items.some((item) => item.payment_id === generation.payment.payment_id)
+                ? current.manualPayments.items.map((item) =>
+                    item.payment_id === generation.payment.payment_id ? generation.payment : item
+                  )
+                : [generation.payment, ...current.manualPayments.items],
+            }
+          : current.manualPayments;
+
+        const manualInvoices = current.manualInvoices
+          ? {
+              ...current.manualInvoices,
+              items: current.manualInvoices.items.some((item) => item.invoice_id === generation.invoice.invoice_id)
+                ? current.manualInvoices.items.map((item) =>
+                    item.invoice_id === generation.invoice.invoice_id ? generation.invoice : item
+                  )
+                : [generation.invoice, ...current.manualInvoices.items],
+            }
+          : current.manualInvoices;
+
+        return {
+          ...current,
+          manualPayments,
+          manualInvoices,
+        };
+      });
+
+      const activationKey = generation.activation_entitlement.activation_entitlement_key?.trim() || "";
+      if (!activationKey) {
+        throw new Error("License code generation succeeded but no activation key was returned.");
+      }
+
+      await copyTextToClipboard(activationKey, "License code copied.");
+      setShareState({
+        title: "License Code Generated",
+        description: "Share this activation key manually with the shop owner.",
+        activationKey,
+      });
+
+      if (generation.revoked_entitlements_count > 0) {
+        toast.success(`License code generated. Revoked ${generation.revoked_entitlements_count} previous active key(s).`);
+      } else {
+        toast.success("License code generated.");
+      }
+
+      void loadReports();
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Failed to generate license code.");
+    } finally {
+      setIsGeneratingLicensePaymentId(null);
+    }
+  }, [copyTextToClipboard, loadReports, openPromptDialog, report.manualPayments?.items]);
 
   const handleRejectManualPayment = useCallback(async (prefillPaymentId?: string) => {
     const paymentId = prefillPaymentId?.trim() || await openPromptDialog({
@@ -2932,50 +3037,72 @@ const ManagerReportsDrawer = ({
                                             </TableCell>
                                           </TableRow>
                                         ) : (
-                                          (report.manualPayments?.items ?? []).slice(0, 12).map((payment) => (
-                                            <TableRow key={payment.payment_id}>
-                                              <TableCell className="font-medium">{payment.payment_id.slice(0, 8)}</TableCell>
-                                              <TableCell>
-                                                <div className="space-y-1">
-                                                  <p className="font-medium">{payment.invoice_number}</p>
-                                                  <p className="text-xs text-muted-foreground">{payment.method.replaceAll("_", " ")}</p>
-                                                  {isMarketingBillingRecord(payment.notes) && (
-                                                    <Badge variant="outline" className="text-[10px]">
-                                                      Marketing
-                                                    </Badge>
-                                                  )}
-                                                </div>
-                                              </TableCell>
-                                              <TableCell className="text-right font-semibold">{money(payment.amount)}</TableCell>
-                                              <TableCell className="capitalize">{payment.status.replaceAll("_", " ")}</TableCell>
-                                              <TableCell className="text-right">
-                                                {payment.status === "pending_verification" ? (
-                                                  <div className="flex justify-end gap-2">
-                                                    <Button
-                                                      variant="outline"
-                                                      size="sm"
-                                                      onClick={() => {
-                                                        void handleVerifyManualPayment(payment.payment_id, payment);
-                                                      }}
-                                                    >
-                                                      Verify
-                                                    </Button>
-                                                    <Button
-                                                      variant="outline"
-                                                      size="sm"
-                                                      onClick={() => {
-                                                        void handleRejectManualPayment(payment.payment_id);
-                                                      }}
-                                                    >
-                                                      Reject
-                                                    </Button>
+                                          (report.manualPayments?.items ?? []).slice(0, 12).map((payment) => {
+                                            const invoice = (report.manualInvoices?.items ?? [])
+                                              .find((item) => item.invoice_id === payment.invoice_id);
+                                            const submittedDeviceCode = resolveMarketingDeviceCode(invoice?.notes, payment.notes);
+
+                                            return (
+                                              <TableRow key={payment.payment_id}>
+                                                <TableCell className="font-medium">{payment.payment_id.slice(0, 8)}</TableCell>
+                                                <TableCell>
+                                                  <div className="space-y-1">
+                                                    <p className="font-medium">{payment.invoice_number}</p>
+                                                    <p className="text-xs text-muted-foreground">{payment.method.replaceAll("_", " ")}</p>
+                                                    {submittedDeviceCode && (
+                                                      <p className="text-xs font-mono text-muted-foreground">Device: {submittedDeviceCode}</p>
+                                                    )}
+                                                    {isMarketingBillingRecord(payment.notes) && (
+                                                      <Badge variant="outline" className="text-[10px]">
+                                                        Marketing
+                                                      </Badge>
+                                                    )}
                                                   </div>
-                                                ) : (
-                                                  <span className="text-xs text-muted-foreground">Processed</span>
-                                                )}
-                                              </TableCell>
-                                            </TableRow>
-                                          ))
+                                                </TableCell>
+                                                <TableCell className="text-right font-semibold">{money(payment.amount)}</TableCell>
+                                                <TableCell className="capitalize">{payment.status.replaceAll("_", " ")}</TableCell>
+                                                <TableCell className="text-right">
+                                                  {payment.status === "pending_verification" ? (
+                                                    <div className="flex justify-end gap-2">
+                                                      <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => {
+                                                          void handleVerifyManualPayment(payment.payment_id, payment);
+                                                        }}
+                                                      >
+                                                        Verify
+                                                      </Button>
+                                                      <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => {
+                                                          void handleRejectManualPayment(payment.payment_id);
+                                                        }}
+                                                      >
+                                                        Reject
+                                                      </Button>
+                                                    </div>
+                                                  ) : payment.status === "verified" ? (
+                                                    <Button
+                                                      variant="outline"
+                                                      size="sm"
+                                                      disabled={isGeneratingLicensePaymentId === payment.payment_id}
+                                                      onClick={() => {
+                                                        void handleGenerateManualPaymentLicenseCode(payment.payment_id, payment);
+                                                      }}
+                                                    >
+                                                      {isGeneratingLicensePaymentId === payment.payment_id
+                                                        ? "Generating..."
+                                                        : "Generate License Code"}
+                                                    </Button>
+                                                  ) : (
+                                                    <span className="text-xs text-muted-foreground">Processed</span>
+                                                  )}
+                                                </TableCell>
+                                              </TableRow>
+                                            );
+                                          })
                                         )}
                                       </TableBody>
                                     </Table>
@@ -3336,7 +3463,14 @@ const ManagerReportsDrawer = ({
           </DialogDescription>
         </DialogHeader>
 
-        {verifyPaymentDialog && (
+        {verifyPaymentDialog && (() => {
+          const linkedInvoice = verifyPaymentDialog.payment
+            ? (report.manualInvoices?.items ?? [])
+              .find((item) => item.invoice_id === verifyPaymentDialog.payment?.invoice_id)
+            : null;
+          const submittedDeviceCode = resolveMarketingDeviceCode(linkedInvoice?.notes, verifyPaymentDialog.payment?.notes);
+
+          return (
           <div className="space-y-4">
             <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm">
               <div className="grid gap-2 sm:grid-cols-2">
@@ -3369,6 +3503,10 @@ const ManagerReportsDrawer = ({
                 <p>
                   <span className="text-muted-foreground">Reference:</span>{" "}
                   <span className="font-medium">{verifyPaymentDialog.payment?.bank_reference || "-"}</span>
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Device Code:</span>{" "}
+                  <span className="font-mono text-xs">{submittedDeviceCode || "-"}</span>
                 </p>
                 <p className="sm:col-span-2">
                   <span className="text-muted-foreground">Submitted:</span>{" "}
@@ -3480,7 +3618,8 @@ const ManagerReportsDrawer = ({
               </p>
             )}
           </div>
-        )}
+          );
+        })()}
 
         <DialogFooter>
           <Button variant="outline" onClick={closeVerifyPaymentDialog} disabled={isSubmittingVerifyPayment}>

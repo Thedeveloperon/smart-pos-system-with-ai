@@ -4386,6 +4386,15 @@ public sealed class LicenseService(
         }
 
         var quote = ResolveMarketingPlanQuote(request.PlanCode);
+        var normalizedDeviceCode = NormalizeDeviceCode(request.DeviceCode);
+        if (quote.RequiresPayment && quote.AmountDue > 0m && string.IsNullOrWhiteSpace(normalizedDeviceCode))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "device_code is required for paid plan onboarding.",
+                StatusCodes.Status400BadRequest);
+        }
+
         var paymentMethod = ResolveMarketingPaymentMethod(request.PaymentMethod);
         var normalizedCurrency = ResolveCurrency(request.Currency ?? quote.Currency);
         var normalizedSource = NormalizeOptionalValue(request.Source) ?? "marketing_website";
@@ -4440,6 +4449,7 @@ public sealed class LicenseService(
         var invoiceNotes = BuildMarketingInvoiceNotes(
             quote,
             paymentMethod,
+            normalizedDeviceCode,
             contactName,
             contactEmail,
             contactPhone,
@@ -4555,6 +4565,7 @@ public sealed class LicenseService(
         }
 
         var normalizedCurrency = ResolveCurrency(request.Currency ?? quote.Currency);
+        var normalizedDeviceCode = NormalizeDeviceCode(request.DeviceCode);
         var normalizedSource = NormalizeOptionalValue(request.Source) ?? "marketing_website";
         var normalizedCampaign = NormalizeOptionalValue(request.Campaign);
         var normalizedLocale = NormalizeOptionalValue(request.Locale);
@@ -4570,6 +4581,7 @@ public sealed class LicenseService(
         var invoiceNotes = BuildMarketingInvoiceNotes(
             quote,
             paymentMethod: "stripe",
+            normalizedDeviceCode,
             contactName,
             contactEmail,
             contactPhone,
@@ -4798,6 +4810,15 @@ public sealed class LicenseService(
         var contactPhone = NormalizeOptionalValue(request.ContactPhone);
         var normalizedNotes = NormalizeOptionalValue(request.Notes);
         var normalizedBankReference = NormalizeMarketingBankReference(request.BankReference);
+        var normalizedDeviceCode = NormalizeDeviceCode(request.DeviceCode);
+        if (string.IsNullOrWhiteSpace(normalizedDeviceCode))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "device_code is required for paid plan onboarding.",
+                StatusCodes.Status400BadRequest);
+        }
+
         var manualPaymentMethod = ParseManualBillingPaymentMethod(paymentMethod);
         var actorNote = "customer submitted payment details via marketing website";
 
@@ -4813,6 +4834,15 @@ public sealed class LicenseService(
                 InvoiceNumber = request.InvoiceNumber
             },
             cancellationToken);
+        var expectedDeviceCode = TryResolveDeviceCodeFromMarketingMetadata(invoice.Notes);
+        if (!string.IsNullOrWhiteSpace(expectedDeviceCode) &&
+            !string.Equals(expectedDeviceCode, normalizedDeviceCode, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "device_code does not match the original onboarding request.",
+                StatusCodes.Status409Conflict);
+        }
 
         var hasExistingOpenSubmission = await dbContext.ManualBillingPayments
             .AsNoTracking()
@@ -4845,6 +4875,7 @@ public sealed class LicenseService(
         }
 
         var paymentNotes = BuildMarketingPaymentSubmissionNotes(
+            normalizedDeviceCode,
             contactName,
             contactEmail,
             contactPhone,
@@ -5663,28 +5694,6 @@ public sealed class LicenseService(
         subscription.PeriodEndUtc = periodBaseline.AddDays(extendDays);
         subscription.UpdatedAtUtc = now;
 
-        var activationEntitlement = await IssueActivationEntitlementAsync(
-            invoice.Shop,
-            ResolveSeatLimit(subscription),
-            "manual_payment_verified",
-            payment.Id.ToString("N"),
-            actor,
-            now,
-            cancellationToken);
-        var resolvedCustomerEmail = ResolveAccessDeliveryCustomerEmailCandidate(
-            request.CustomerEmail,
-            invoice.Notes,
-            payment.Notes);
-        var accessDelivery = await DeliverAccessDetailsAsync(
-            invoice.Shop,
-            activationEntitlement,
-            resolvedCustomerEmail,
-            "manual_payment_verified",
-            payment.Id.ToString("N"),
-            actor,
-            now,
-            cancellationToken);
-
         var reissueOutcome = await ForceReissueLicensesForShopAsync(
             invoice.Shop,
             subscription,
@@ -5730,10 +5739,6 @@ public sealed class LicenseService(
                 current_subscription_status = subscription.Status.ToString().ToLowerInvariant(),
                 current_plan = subscription.Plan,
                 current_period_end = subscription.PeriodEndUtc,
-                activation_entitlement_id = activationEntitlement?.EntitlementId,
-                access_delivery_recipient = resolvedCustomerEmail,
-                access_delivery_email_status = accessDelivery?.EmailDelivery.Status,
-                access_delivery_success_page_url = accessDelivery?.SuccessPageUrl,
                 ai_credit_order_id = settledAiCreditOrder?.Id,
                 ai_credit_order_status = settledAiCreditOrder is null
                     ? null
@@ -5765,9 +5770,6 @@ public sealed class LicenseService(
                 subscription_status = subscription.Status.ToString().ToLowerInvariant(),
                 plan = subscription.Plan,
                 period_end = subscription.PeriodEndUtc,
-                activation_entitlement_id = activationEntitlement?.EntitlementId,
-                access_delivery_recipient = resolvedCustomerEmail,
-                access_delivery_email_status = accessDelivery?.EmailDelivery.Status,
                 ai_credit_order_id = settledAiCreditOrder?.Id,
                 ai_credit_order_status = settledAiCreditOrder is null
                     ? null
@@ -5791,11 +5793,137 @@ public sealed class LicenseService(
             Plan = subscription.Plan,
             SeatLimit = ResolveSeatLimit(subscription),
             PeriodEnd = subscription.PeriodEndUtc,
-            ActivationEntitlement = activationEntitlement,
-            AccessDelivery = accessDelivery,
+            ActivationEntitlement = null,
+            AccessDelivery = null,
             AiCreditOrder = settledAiCreditOrder is null
                 ? null
                 : MapMarketingAiCreditOrderSummary(settledAiCreditOrder),
+            ProcessedAt = now
+        };
+    }
+
+    public async Task<AdminManualBillingPaymentLicenseCodeGenerateResponse> GenerateManualPaymentLicenseCodeAsAdminAsync(
+        Guid paymentId,
+        AdminManualBillingPaymentLicenseCodeGenerateRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (paymentId == Guid.Empty)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "payment_id is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Reason,
+            defaultActor: "billing-admin",
+            defaultReasonCode: "manual_payment_license_code_generated");
+        var actor = overrideContext.Actor;
+
+        var payment = await dbContext.ManualBillingPayments
+            .Include(x => x.Invoice)
+            .ThenInclude(x => x.Shop)
+            .FirstOrDefaultAsync(x => x.Id == paymentId, cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.PaymentNotFound,
+                "Manual payment was not found.",
+                StatusCodes.Status404NotFound);
+
+        if (payment.Status != ManualBillingPaymentStatus.Verified)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidPaymentStatus,
+                "Only verified payments can generate a license code.",
+                StatusCodes.Status409Conflict);
+        }
+
+        var invoice = payment.Invoice;
+        if (invoice.Status != ManualBillingInvoiceStatus.Paid)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidPaymentStatus,
+                "Invoice must be paid before generating a license code.",
+                StatusCodes.Status409Conflict);
+        }
+
+        var activeEntitlements = await dbContext.CustomerActivationEntitlements
+            .Where(x => x.ShopId == invoice.ShopId && x.Status == ActivationEntitlementStatus.Active)
+            .ToListAsync(cancellationToken);
+
+        var revokedEntitlementsCount = 0;
+        foreach (var entitlement in activeEntitlements)
+        {
+            entitlement.Status = ActivationEntitlementStatus.Revoked;
+            entitlement.RevokedAtUtc ??= now;
+            revokedEntitlementsCount++;
+        }
+
+        var subscription = await GetLatestSubscriptionAsync(invoice.ShopId, cancellationToken)
+            ?? await GetOrCreateSubscriptionAsync(invoice.Shop, now, cancellationToken);
+
+        var activationEntitlement = await IssueActivationEntitlementAsync(
+            invoice.Shop,
+            ResolveSeatLimit(subscription),
+            "manual_payment_license_code_generated",
+            payment.Id.ToString("N"),
+            actor,
+            now,
+            cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Unable to generate license code for this payment.",
+                StatusCodes.Status503ServiceUnavailable);
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = invoice.ShopId,
+            Action = "manual_payment_license_code_generated",
+            Actor = actor,
+            Reason = overrideContext.AuditReason,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                payment_id = payment.Id,
+                invoice_id = invoice.Id,
+                invoice_number = invoice.InvoiceNumber,
+                activation_entitlement_id = activationEntitlement.EntitlementId,
+                revoked_entitlements_count = revokedEntitlementsCount,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            })
+        });
+
+        await AddManualOverrideAuditLogAsync(
+            invoice.ShopId,
+            null,
+            "manual_override_payment_generate_license_code",
+            actor,
+            overrideContext.AuditReason,
+            new
+            {
+                payment_id = payment.Id,
+                invoice_id = invoice.Id,
+                invoice_number = invoice.InvoiceNumber,
+                activation_entitlement_id = activationEntitlement.EntitlementId,
+                revoked_entitlements_count = revokedEntitlementsCount,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            },
+            now,
+            cancellationToken);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new AdminManualBillingPaymentLicenseCodeGenerateResponse
+        {
+            Payment = MapManualBillingPaymentRow(payment, invoice.Shop.Code, invoice.InvoiceNumber),
+            Invoice = MapManualBillingInvoiceRow(invoice, invoice.Shop.Code),
+            ActivationEntitlement = activationEntitlement,
+            RevokedEntitlementsCount = revokedEntitlementsCount,
             ProcessedAt = now
         };
     }
@@ -9036,6 +9164,7 @@ public sealed class LicenseService(
     private static string BuildMarketingInvoiceNotes(
         MarketingPlanQuote quote,
         string paymentMethod,
+        string? deviceCode,
         string? contactName,
         string? contactEmail,
         string? contactPhone,
@@ -9050,6 +9179,7 @@ public sealed class LicenseService(
             marketing_plan_code = quote.MarketingPlanCode,
             requested_internal_plan = quote.InternalPlanCode,
             requested_payment_method = paymentMethod,
+            device_code = NormalizeDeviceCode(deviceCode),
             contact_name = contactName,
             contact_email = contactEmail,
             contact_phone = contactPhone,
@@ -9069,6 +9199,7 @@ public sealed class LicenseService(
     }
 
     private static string BuildMarketingPaymentSubmissionNotes(
+        string? deviceCode,
         string? contactName,
         string? contactEmail,
         string? contactPhone,
@@ -9076,6 +9207,7 @@ public sealed class LicenseService(
     {
         var metadata = JsonSerializer.Serialize(new
         {
+            device_code = NormalizeDeviceCode(deviceCode),
             contact_name = contactName,
             contact_email = contactEmail,
             contact_phone = contactPhone,
@@ -9144,6 +9276,18 @@ public sealed class LicenseService(
         }
 
         return TryResolveJsonStringProperty(metadataJson, "contact_email");
+    }
+
+    private static string? TryResolveDeviceCodeFromMarketingMetadata(string? invoiceNotes)
+    {
+        var metadataJson = TryExtractMarketingInvoiceMetadataJson(invoiceNotes);
+        if (string.IsNullOrWhiteSpace(metadataJson))
+        {
+            return null;
+        }
+
+        var parsed = NormalizeDeviceCode(TryResolveJsonStringProperty(metadataJson, "device_code"));
+        return string.IsNullOrWhiteSpace(parsed) ? null : parsed;
     }
 
     private static string? TryExtractMarketingInvoiceMetadataJson(string? invoiceNotes)

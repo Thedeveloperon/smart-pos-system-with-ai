@@ -1468,6 +1468,9 @@ public sealed class MarketingPaymentRequestCreateRequest
     [JsonPropertyName("shop_code")]
     public string? ShopCode { get; set; }
 
+    [JsonPropertyName("device_code")]
+    public string? DeviceCode { get; set; }
+
     [JsonPropertyName("contact_name")]
     public string? ContactName { get; set; }
 
@@ -1683,6 +1686,9 @@ public sealed class MarketingPaymentSubmissionRequest
 
     [JsonPropertyName("payment_method")]
     public string? PaymentMethod { get; set; }
+
+    [JsonPropertyName("device_code")]
+    public string? DeviceCode { get; set; }
 
     [JsonPropertyName("amount")]
     public decimal Amount { get; set; }
@@ -2090,6 +2096,21 @@ public sealed class AdminManualBillingPaymentVerifyRequest
     public string? Reason { get; set; }
 }
 
+public sealed class AdminManualBillingPaymentLicenseCodeGenerateRequest
+{
+    [JsonPropertyName("actor")]
+    public string? Actor { get; set; }
+
+    [JsonPropertyName("reason_code")]
+    public string? ReasonCode { get; set; }
+
+    [JsonPropertyName("actor_note")]
+    public string? ActorNote { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+}
+
 public sealed class AdminManualBillingPaymentRejectRequest
 {
     [JsonPropertyName("actor")]
@@ -2133,6 +2154,24 @@ public sealed class AdminManualBillingPaymentVerificationResponse
 
     [JsonPropertyName("ai_credit_order")]
     public MarketingAiCreditOrderSummaryResponse? AiCreditOrder { get; set; }
+
+    [JsonPropertyName("processed_at")]
+    public DateTimeOffset ProcessedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class AdminManualBillingPaymentLicenseCodeGenerateResponse
+{
+    [JsonPropertyName("payment")]
+    public required AdminManualBillingPaymentRow Payment { get; set; }
+
+    [JsonPropertyName("invoice")]
+    public required AdminManualBillingInvoiceRow Invoice { get; set; }
+
+    [JsonPropertyName("activation_entitlement")]
+    public required CustomerActivationEntitlementResponse ActivationEntitlement { get; set; }
+
+    [JsonPropertyName("revoked_entitlements_count")]
+    public int RevokedEntitlementsCount { get; set; }
 
     [JsonPropertyName("processed_at")]
     public DateTimeOffset ProcessedAt { get; set; } = DateTimeOffset.UtcNow;
