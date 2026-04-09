@@ -35,6 +35,8 @@ services:
         sync: false
       - key: Licensing__AccessSuccessPageBaseUrl
         sync: false
+      - key: Licensing__MarketingManualBillingFallbackEnabled
+        value: "false"
       - key: OPENAI_API_KEY
         sync: false
 
@@ -64,3 +66,5 @@ services:
         sync: false
       - key: SMARTPOS_BACKEND_API_URL
         sync: false
+      - key: NEXT_PUBLIC_MARKETING_MANUAL_BILLING_FALLBACK_ENABLED
+        value: "false"
