@@ -2,13 +2,13 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.5.2.0
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "backend", "backend\backend.csproj", "{B5CEE1AB-68C5-FCEC-EA61-653FFB609ED2}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "backend", "services\backend-api\backend.csproj", "{B5CEE1AB-68C5-FCEC-EA61-653FFB609ED2}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "backend (1)", "backend (1)", "{F40A6B9C-1551-2899-B62A-34194074F929}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{9994AFB4-0CCB-D7E9-60B1-6A1FFDD7F35C}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SmartPos.Backend.IntegrationTests", "backend\tests\SmartPos.Backend.IntegrationTests\SmartPos.Backend.IntegrationTests.csproj", "{B1B76C03-1CFA-5B3C-0A59-937F35C2C2CC}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SmartPos.Backend.IntegrationTests", "services\backend-api\tests\SmartPos.Backend.IntegrationTests\SmartPos.Backend.IntegrationTests.csproj", "{B1B76C03-1CFA-5B3C-0A59-937F35C2C2CC}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

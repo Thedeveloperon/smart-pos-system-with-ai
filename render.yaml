@@ -8,8 +8,8 @@ services:
   - type: web
     name: smartpos-backend
     runtime: docker
-    dockerContext: ./backend
-    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./services/backend-api
+    dockerfilePath: ./services/backend-api/Dockerfile
     autoDeployTrigger: commit
     healthCheckPath: /health
     envVars:
@@ -41,8 +41,8 @@ services:
   - type: web
     name: smartpos-pos-frontend
     runtime: docker
-    dockerContext: ./frontend
-    dockerfilePath: ./frontend/Dockerfile.render
+    dockerContext: ./apps/pos-app
+    dockerfilePath: ./apps/pos-app/Dockerfile.render
     autoDeployTrigger: commit
     healthCheckPath: /health
     envVars:
@@ -55,7 +55,7 @@ services:
   - type: web
     name: smartpos-marketing-website
     runtime: node
-    rootDir: website
+    rootDir: apps/cloud-portal
     autoDeployTrigger: commit
     buildCommand: npm ci && npm run build
     startCommand: npm run start

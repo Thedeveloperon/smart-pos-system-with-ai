@@ -136,7 +136,7 @@ GitHub Actions workflow:
 When preflight fails due SQLite integrity errors, repair on a copy first:
 
 ```bash
-bash scripts/backup/repair-sqlite-source.sh backend/smartpos-dev.db /secure/path/smartpos-dev.backup-safe.db
+bash scripts/backup/repair-sqlite-source.sh services/backend-api/smartpos-dev.db /secure/path/smartpos-dev.backup-safe.db
 ```
 
 Then set:

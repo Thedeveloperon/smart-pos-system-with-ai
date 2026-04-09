@@ -1,6 +1,6 @@
 # SmartPOS Lanka
 
-Local development quick start for backend, frontend, and super-admin MFA.
+Local development quick start for backend API, cloud portal (marketing + super admin), and POS app.
 
 ## 1. One-time setup (local signing keys)
 
@@ -16,7 +16,7 @@ openssl rsa -in ~/.smartpos/license-private.pem -pubout -out ~/.smartpos/license
 cd "/Users/iroshwijesiri/Documents/SMART POS SYSTEM WITH AI"
 export SMARTPOS_LICENSE_SIGNING_PRIVATE_KEY_PEM="$(cat ~/.smartpos/license-private.pem)"
 export Licensing__VerificationPublicKeyPem="$(cat ~/.smartpos/license-public.pem)"
-dotnet run --project backend/backend.csproj --urls "http://127.0.0.1:5080"
+dotnet run --project services/backend-api/backend.csproj --urls "http://127.0.0.1:5080"
 ```
 
 Optional (enable automatic access email delivery after payment verification):
@@ -50,10 +50,17 @@ export ProductBarcodes__Enabled=true
 
 Barcode mutation endpoints (`/api/products/{id}/barcode/generate`, `/api/products/barcodes/bulk-generate-missing`) also honor `Idempotency-Key` for deterministic safe retries.
 
-## 3. Run frontend
+## 3. Run cloud portal app
 
 ```bash
-cd "/Users/iroshwijesiri/Documents/SMART POS SYSTEM WITH AI/frontend"
+cd "/Users/iroshwijesiri/Documents/SMART POS SYSTEM WITH AI/apps/cloud-portal"
+npm run dev -- --host 127.0.0.1 --port 3000
+```
+
+## 4. Run POS app
+
+```bash
+cd "/Users/iroshwijesiri/Documents/SMART POS SYSTEM WITH AI/apps/pos-app"
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
@@ -73,14 +80,15 @@ export VITE_BARCODE_FEATURE_ENABLED=true
 
 Barcode label print supports both desktop Chromium and Electron shell runtimes with runtime-specific print trigger behavior.
 
-## 4. URLs
+## 5. URLs
 
+- Cloud portal: `http://127.0.0.1:3000/`
+- Super admin login: `http://127.0.0.1:3000/admin/login`
+- Super admin console: `http://127.0.0.1:3000/admin`
 - POS app: `http://127.0.0.1:5173/`
-- Super admin login: `http://127.0.0.1:5173/admin/login`
-- Super admin console: `http://127.0.0.1:5173/admin`
 - Backend health: `http://127.0.0.1:5080/health`
 
-## 5. Seeded users
+## 6. Seeded users
 
 - Shop users:
   - `owner / owner123`
@@ -91,11 +99,11 @@ Barcode label print supports both desktop Chromium and Electron shell runtimes w
   - `billing_admin / billing123`
   - `security_admin / security123`
 
-## 6. Generate MFA codes (super admin)
+## 7. Generate MFA codes (super admin)
 
 Codes rotate every 30 seconds.
 
-### 6.1 Support admin only
+### 7.1 Support admin only
 
 ```bash
 node - <<'NODE'
@@ -110,7 +118,7 @@ console.log(String(value%1_000_000).padStart(6,'0'));
 NODE
 ```
 
-### 6.2 All super-admin users (current/prev/next)
+### 7.2 All super-admin users (current/prev/next)
 
 ```bash
 node - <<'NODE'
@@ -135,7 +143,7 @@ for (const [user, secret] of Object.entries(users)){
 NODE
 ```
 
-## 7. POS keyboard shortcuts
+## 8. POS keyboard shortcuts
 
 These are enabled by default in cashier billing flow (desktop and laptop keyboards):
 
@@ -152,7 +160,7 @@ Behavior and safety:
 - Shortcuts are suspended when POS dialogs/drawers are open.
 - Blocked actions show clear reasons (for example, `F9 blocked` when payment is insufficient).
 
-## 8. Cashier quick card text
+## 9. Cashier quick card text
 
 Use this exact text on a printed desk card for training:
 
@@ -162,7 +170,7 @@ F2 Search   F4 Hold   F8 Cash   F9 Complete
 F1/? Help   Esc Close Help
 ```
 
-## 9. AI insights setup (credits + OpenAI)
+## 10. AI insights setup (credits + OpenAI)
 
 Required for production OpenAI provider:
 
