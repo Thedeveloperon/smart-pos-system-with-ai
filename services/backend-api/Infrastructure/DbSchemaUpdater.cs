@@ -2196,7 +2196,6 @@ public static class DbSchemaUpdater
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_billing_webhook_events_ProviderEventId" ON billing_webhook_events("ProviderEventId");
             CREATE INDEX IF NOT EXISTS "IX_billing_webhook_events_EventType" ON billing_webhook_events("EventType");
             CREATE INDEX IF NOT EXISTS "IX_billing_webhook_events_ShopId" ON billing_webhook_events("ShopId");
-            CREATE INDEX IF NOT EXISTS "IX_billing_webhook_events_DeadLetteredAtUtc" ON billing_webhook_events("DeadLetteredAtUtc");
             CREATE INDEX IF NOT EXISTS "IX_manual_billing_invoices_ShopId" ON manual_billing_invoices("ShopId");
             CREATE INDEX IF NOT EXISTS "IX_manual_billing_invoices_Status" ON manual_billing_invoices("Status");
             CREATE INDEX IF NOT EXISTS "IX_manual_billing_invoices_DueAtUtc" ON manual_billing_invoices("DueAtUtc");
@@ -2232,6 +2231,9 @@ public static class DbSchemaUpdater
             cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(
             """ALTER TABLE billing_webhook_events ADD COLUMN IF NOT EXISTS "DeadLetteredAtUtc" timestamptz NULL;""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE INDEX IF NOT EXISTS "IX_billing_webhook_events_DeadLetteredAtUtc" ON billing_webhook_events("DeadLetteredAtUtc");""",
             cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(
             """
