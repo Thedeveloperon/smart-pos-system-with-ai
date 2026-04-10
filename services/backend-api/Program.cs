@@ -167,6 +167,33 @@ static void ValidateLicenseCloudRelayPolicy(IConfiguration configuration)
                       .GetSection(LicenseOptions.SectionName)
                       .Get<LicenseOptions>()
                   ?? new LicenseOptions();
+    var mode = (options.Mode ?? string.Empty).Trim();
+    if (string.IsNullOrWhiteSpace(mode))
+    {
+        mode = "LocalOffline";
+    }
+
+    if (string.Equals(mode, "LocalOffline", StringComparison.OrdinalIgnoreCase) &&
+        !options.RequireActivationEntitlementKey)
+    {
+        throw new InvalidOperationException(
+            "Licensing:RequireActivationEntitlementKey must be true when Licensing:Mode=LocalOffline.");
+    }
+
+    if (options.CloudRelayEnabled &&
+        string.Equals(mode, "LocalOffline", StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException(
+            "Licensing:CloudRelayEnabled cannot be true when Licensing:Mode=LocalOffline.");
+    }
+
+    if (options.CloudRelayEnabled &&
+        !options.CloudLicensingEndpointsEnabled)
+    {
+        throw new InvalidOperationException(
+            "Licensing:CloudRelayEnabled requires Licensing:CloudLicensingEndpointsEnabled=true.");
+    }
+
     if (!options.CloudRelayEnabled)
     {
         return;
@@ -563,6 +590,7 @@ if (staticFilesAvailable)
 
 app.UseCors("frontend");
 app.UseMiddleware<ProvisioningRateLimitMiddleware>();
+app.UseMiddleware<CloudLicensingSurfaceGuardMiddleware>();
 app.UseMiddleware<CloudApiVersionCompatibilityMiddleware>();
 app.UseMiddleware<CloudWriteReliabilityMiddleware>();
 app.UseMiddleware<CloudLegacyApiDeprecationMiddleware>();

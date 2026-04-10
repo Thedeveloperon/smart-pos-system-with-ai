@@ -18,6 +18,8 @@ type LicenseBlockedScreenProps = {
   status: LicenseStatus;
   error?: string | null;
   isBusy?: boolean;
+  activationEntitlementKey?: string;
+  onActivationEntitlementKeyChange?: (value: string) => void;
   onRefresh: () => void;
   onActivate: (activationEntitlementKey?: string) => void;
 };
@@ -189,7 +191,14 @@ export const LicenseActivationScreen = ({
             <Button
               variant="pos-primary"
               className="rounded-xl"
-              onClick={() => onActivate(activationEntitlementKey)}
+              onClick={() => {
+                const key = (activationEntitlementKey || "").trim();
+                if (!key) {
+                  toast.error("Activation key is required.");
+                  return;
+                }
+                onActivate(key);
+              }}
               disabled={isBusy}
             >
               {isBusy ? "Activating..." : "Activate Device"}
@@ -208,6 +217,8 @@ export const LicenseBlockedScreen = ({
   status,
   error,
   isBusy,
+  activationEntitlementKey,
+  onActivationEntitlementKeyChange,
   onRefresh,
   onActivate,
 }: LicenseBlockedScreenProps) => {
@@ -256,6 +267,19 @@ export const LicenseBlockedScreen = ({
             </ol>
           </div>
 
+          <div className="space-y-2">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Activation Key</p>
+            <Input
+              value={activationEntitlementKey || ""}
+              onChange={(event) => onActivationEntitlementKeyChange?.(event.target.value)}
+              placeholder="SPK-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
+              disabled={isBusy}
+            />
+            <p className="text-xs text-muted-foreground">
+              Enter a valid activation key before retrying activation.
+            </p>
+          </div>
+
           {error && (
             <div className="rounded-xl bg-destructive/10 text-destructive text-sm px-3 py-2 flex items-start gap-2">
               <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
@@ -267,7 +291,19 @@ export const LicenseBlockedScreen = ({
             <Button variant="outline" className="rounded-xl" onClick={onRefresh} disabled={isBusy}>
               {isBusy ? "Checking..." : "Recheck Status"}
             </Button>
-            <Button variant="pos-primary" className="rounded-xl" onClick={onActivate} disabled={isBusy}>
+            <Button
+              variant="pos-primary"
+              className="rounded-xl"
+              onClick={() => {
+                const key = (activationEntitlementKey || "").trim();
+                if (!key) {
+                  toast.error("Activation key is required.");
+                  return;
+                }
+                onActivate(key);
+              }}
+              disabled={isBusy}
+            >
               Retry Activation
             </Button>
             <Button asChild variant="ghost" className="rounded-xl sm:col-span-2">

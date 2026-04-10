@@ -54,6 +54,11 @@ public sealed class LicenseService(
     private const string MarketingPaymentSubmissionMetadataPrefix = "MARKETING_PAYMENT_SUBMISSION:";
     private const string AiCreditOrderSettlementReferencePrefix = "ai_order";
     private const int MarketingBankReferenceMaxLength = 128;
+    private const string LocalOfflineMode = "LocalOffline";
+    private const string OfflineLocalManualBatchEntitlementSource = "offline_local_batch_manual";
+    private const int OfflineLocalManualBatchEntitlementCount = 10;
+    private const int OfflineLocalManualBatchMaxActivations = 1000000;
+    private const int OfflineLocalManualBatchTtlDays = 3650;
     private static readonly char[] AllowedBranchCodeCharacters = "abcdefghijklmnopqrstuvwxyz0123456789-_".ToCharArray();
     private static readonly HashSet<string> EmergencyActions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -183,6 +188,14 @@ public sealed class LicenseService(
 
     private readonly LicenseOptions options = optionsAccessor.Value;
     private readonly Dictionary<string, LicensePlanDefinition> planCatalog = BuildPlanCatalog(optionsAccessor.Value);
+
+    private bool IsLocalOfflineMode()
+    {
+        return string.Equals(
+            NormalizeOptionalValue(options.Mode),
+            LocalOfflineMode,
+            StringComparison.OrdinalIgnoreCase);
+    }
 
     public async Task<ProvisionChallengeResponse> CreateActivationChallengeAsync(
         ProvisionChallengeRequest request,
@@ -5851,9 +5864,23 @@ public sealed class LicenseService(
                 StatusCodes.Status409Conflict);
         }
 
-        var activeEntitlements = await dbContext.CustomerActivationEntitlements
-            .Where(x => x.ShopId == invoice.ShopId && x.Status == ActivationEntitlementStatus.Active)
-            .ToListAsync(cancellationToken);
+        var activeEntitlementsQuery = dbContext.CustomerActivationEntitlements
+            .Where(x => x.ShopId == invoice.ShopId);
+
+        List<CustomerActivationEntitlement> activeEntitlements;
+        if (dbContext.Database.IsSqlite())
+        {
+            activeEntitlements = (await activeEntitlementsQuery
+                    .ToListAsync(cancellationToken))
+                .Where(x => x.Status == ActivationEntitlementStatus.Active)
+                .ToList();
+        }
+        else
+        {
+            activeEntitlements = await activeEntitlementsQuery
+                .Where(x => x.Status == ActivationEntitlementStatus.Active)
+                .ToListAsync(cancellationToken);
+        }
 
         var revokedEntitlementsCount = 0;
         foreach (var entitlement in activeEntitlements)
@@ -5925,6 +5952,175 @@ public sealed class LicenseService(
             ActivationEntitlement = activationEntitlement,
             RevokedEntitlementsCount = revokedEntitlementsCount,
             ProcessedAt = now
+        };
+    }
+
+    public async Task<AdminOfflineActivationEntitlementBatchGenerateResponse> GenerateOfflineActivationEntitlementsBatchAsAdminAsync(
+        AdminOfflineActivationEntitlementBatchGenerateRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var now = DateTimeOffset.UtcNow;
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Reason,
+            defaultActor: "offline-licensing-admin",
+            defaultReasonCode: "offline_activation_batch_generated");
+        var actor = overrideContext.Actor;
+
+        var requestedCount = request.Count <= 0
+            ? OfflineLocalManualBatchEntitlementCount
+            : request.Count;
+        if (requestedCount != OfflineLocalManualBatchEntitlementCount)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                $"count must be exactly {OfflineLocalManualBatchEntitlementCount}.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var resolvedMaxActivations = request.MaxActivations ?? OfflineLocalManualBatchMaxActivations;
+        if (resolvedMaxActivations <= 0)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "max_activations must be greater than zero.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var maxActivations = Math.Clamp(resolvedMaxActivations, 1, OfflineLocalManualBatchMaxActivations);
+        var resolvedTtlDays = request.TtlDays ?? OfflineLocalManualBatchTtlDays;
+        if (resolvedTtlDays <= 0)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "ttl_days must be greater than zero.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var ttlDays = Math.Clamp(resolvedTtlDays, 1, OfflineLocalManualBatchTtlDays);
+        var shop = await GetOrCreateShopAsync(request.ShopCode, now, cancellationToken);
+
+        int existingActiveBatchCount;
+        if (dbContext.Database.IsSqlite())
+        {
+            existingActiveBatchCount = (await dbContext.CustomerActivationEntitlements
+                    .AsNoTracking()
+                    .Where(x =>
+                        x.ShopId == shop.Id &&
+                        x.Source == OfflineLocalManualBatchEntitlementSource)
+                    .ToListAsync(cancellationToken))
+                .Count(x =>
+                    x.Status == ActivationEntitlementStatus.Active &&
+                    x.ExpiresAtUtc > now);
+        }
+        else
+        {
+            existingActiveBatchCount = await dbContext.CustomerActivationEntitlements
+                .AsNoTracking()
+                .Where(x =>
+                    x.ShopId == shop.Id &&
+                    x.Source == OfflineLocalManualBatchEntitlementSource &&
+                    x.Status == ActivationEntitlementStatus.Active &&
+                    x.ExpiresAtUtc > now)
+                .CountAsync(cancellationToken);
+        }
+        if (existingActiveBatchCount > 0 && !request.AllowIfExistingBatch)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                $"An active offline batch already exists for shop '{shop.Code}'. Existing active keys: {existingActiveBatchCount}.",
+                StatusCodes.Status409Conflict);
+        }
+
+        var sourceReference = $"offline-batch-{now:yyyyMMddHHmmss}-{Guid.NewGuid():N}";
+        if (sourceReference.Length > 160)
+        {
+            sourceReference = sourceReference[..160];
+        }
+
+        var generatedEntitlements = new List<CustomerActivationEntitlementResponse>(requestedCount);
+        for (var index = 0; index < requestedCount; index++)
+        {
+            var entitlement = await IssueActivationEntitlementAsync(
+                shop,
+                maxActivations,
+                OfflineLocalManualBatchEntitlementSource,
+                sourceReference,
+                actor,
+                now,
+                cancellationToken,
+                ttlDays)
+                ?? throw new LicenseException(
+                    LicenseErrorCodes.InvalidAdminRequest,
+                    "Unable to generate offline activation entitlement keys.",
+                    StatusCodes.Status503ServiceUnavailable);
+            generatedEntitlements.Add(entitlement);
+        }
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = shop.Id,
+            Action = "offline_activation_batch_generated",
+            Actor = actor,
+            Reason = overrideContext.AuditReason,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                shop_code = shop.Code,
+                source = OfflineLocalManualBatchEntitlementSource,
+                source_reference = sourceReference,
+                requested_count = requestedCount,
+                generated_count = generatedEntitlements.Count,
+                max_activations = maxActivations,
+                ttl_days = ttlDays,
+                existing_active_batch_count = existingActiveBatchCount,
+                allow_if_existing_batch = request.AllowIfExistingBatch,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            }),
+            CreatedAtUtc = now
+        });
+
+        await AddManualOverrideAuditLogAsync(
+            shop.Id,
+            null,
+            "manual_override_offline_activation_batch_generated",
+            actor,
+            overrideContext.AuditReason,
+            new
+            {
+                shop_code = shop.Code,
+                source = OfflineLocalManualBatchEntitlementSource,
+                source_reference = sourceReference,
+                requested_count = requestedCount,
+                generated_count = generatedEntitlements.Count,
+                max_activations = maxActivations,
+                ttl_days = ttlDays,
+                existing_active_batch_count = existingActiveBatchCount,
+                allow_if_existing_batch = request.AllowIfExistingBatch,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            },
+            now,
+            cancellationToken);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new AdminOfflineActivationEntitlementBatchGenerateResponse
+        {
+            GeneratedAt = now,
+            ShopId = shop.Id,
+            ShopCode = shop.Code,
+            Source = OfflineLocalManualBatchEntitlementSource,
+            SourceReference = sourceReference,
+            RequestedCount = requestedCount,
+            GeneratedCount = generatedEntitlements.Count,
+            MaxActivations = maxActivations,
+            TtlDays = ttlDays,
+            ExistingActiveBatchCount = existingActiveBatchCount,
+            Entitlements = generatedEntitlements
         };
     }
 
@@ -11600,6 +11796,14 @@ public sealed class LicenseService(
         var normalizedInput = NormalizeOptionalValue(activationEntitlementKey);
         if (string.IsNullOrWhiteSpace(normalizedInput))
         {
+            if (options.RequireActivationEntitlementKey || IsLocalOfflineMode())
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.InvalidActivationEntitlement,
+                    "activation_entitlement_key is required.",
+                    StatusCodes.Status403Forbidden);
+            }
+
             return null;
         }
 
@@ -12142,13 +12346,15 @@ public sealed class LicenseService(
         string? sourceReference,
         string actor,
         DateTimeOffset now,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int? ttlDaysOverride = null)
     {
         var normalizedSource = NormalizeOptionalValue(source) ?? "payment_success";
         var normalizedActor = NormalizeOptionalValue(actor) ?? "system";
         var normalizedSourceReference = NormalizeOptionalValue(sourceReference);
-        var normalizedMaxActivations = Math.Clamp(maxActivations <= 0 ? 1 : maxActivations, 1, 250);
-        var configuredTtlDays = options.ActivationEntitlementTtlDays <= 0 ? 90 : options.ActivationEntitlementTtlDays;
+        var normalizedMaxActivations = Math.Clamp(maxActivations <= 0 ? 1 : maxActivations, 1, OfflineLocalManualBatchMaxActivations);
+        var configuredTtlDays = ttlDaysOverride ?? options.ActivationEntitlementTtlDays;
+        configuredTtlDays = configuredTtlDays <= 0 ? 90 : configuredTtlDays;
         var ttlDays = Math.Clamp(configuredTtlDays, 1, 3650);
         var keyPrefix = NormalizeOptionalValue(options.ActivationEntitlementKeyPrefix)?.ToUpperInvariant() ?? "SPK";
 

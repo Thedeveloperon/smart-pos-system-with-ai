@@ -2111,6 +2111,72 @@ public sealed class AdminManualBillingPaymentLicenseCodeGenerateRequest
     public string? Reason { get; set; }
 }
 
+public sealed class AdminOfflineActivationEntitlementBatchGenerateRequest
+{
+    [JsonPropertyName("shop_code")]
+    public string? ShopCode { get; set; }
+
+    [JsonPropertyName("count")]
+    public int Count { get; set; } = 10;
+
+    [JsonPropertyName("max_activations")]
+    public int? MaxActivations { get; set; }
+
+    [JsonPropertyName("ttl_days")]
+    public int? TtlDays { get; set; }
+
+    [JsonPropertyName("allow_if_existing_batch")]
+    public bool AllowIfExistingBatch { get; set; }
+
+    [JsonPropertyName("actor")]
+    public string? Actor { get; set; }
+
+    [JsonPropertyName("reason_code")]
+    public string? ReasonCode { get; set; }
+
+    [JsonPropertyName("actor_note")]
+    public string? ActorNote { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+}
+
+public sealed class AdminOfflineActivationEntitlementBatchGenerateResponse
+{
+    [JsonPropertyName("generated_at")]
+    public DateTimeOffset GeneratedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("shop_id")]
+    public Guid ShopId { get; set; }
+
+    [JsonPropertyName("shop_code")]
+    public string ShopCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("source")]
+    public string Source { get; set; } = string.Empty;
+
+    [JsonPropertyName("source_reference")]
+    public string SourceReference { get; set; } = string.Empty;
+
+    [JsonPropertyName("requested_count")]
+    public int RequestedCount { get; set; }
+
+    [JsonPropertyName("generated_count")]
+    public int GeneratedCount { get; set; }
+
+    [JsonPropertyName("max_activations")]
+    public int MaxActivations { get; set; }
+
+    [JsonPropertyName("ttl_days")]
+    public int TtlDays { get; set; }
+
+    [JsonPropertyName("existing_active_batch_count")]
+    public int ExistingActiveBatchCount { get; set; }
+
+    [JsonPropertyName("entitlements")]
+    public List<CustomerActivationEntitlementResponse> Entitlements { get; set; } = [];
+}
+
 public sealed class AdminManualBillingPaymentRejectRequest
 {
     [JsonPropertyName("actor")]
@@ -2480,4 +2546,5 @@ internal static class LicenseErrorCodes
     public const string RateLimitExceeded = "RATE_LIMIT_EXCEEDED";
     public const string DuplicateSubmission = "DUPLICATE_SUBMISSION";
     public const string CloudLicenseUnreachable = "CLOUD_LICENSE_UNREACHABLE";
+    public const string CloudLicensingDisabled = "CLOUD_LICENSING_DISABLED";
 }

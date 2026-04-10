@@ -62,6 +62,20 @@ const formatDateTime = (value?: string | null) => {
 };
 
 const toSentence = (value: string) => value.replaceAll("_", " ");
+const cloudLicensingDisabledMessage =
+  "Cloud licensing self-service links are disabled in this environment. Request activation keys from your local licensing administrator.";
+
+const toAccessErrorMessage = (error: unknown) => {
+  if (error instanceof ApiError) {
+    if (error.code === "CLOUD_LICENSING_DISABLED") {
+      return cloudLicensingDisabledMessage;
+    }
+
+    return error.message;
+  }
+
+  return "Failed to load access details.";
+};
 
 const LicenseAccessSuccess = () => {
   const [activationKey, setActivationKey] = useState(readKeyFromUrl());
@@ -99,11 +113,7 @@ const LicenseAccessSuccess = () => {
     } catch (error) {
       console.error(error);
       setData(null);
-      if (error instanceof ApiError) {
-        setErrorMessage(error.message);
-      } else {
-        setErrorMessage("Failed to load access details.");
-      }
+      setErrorMessage(toAccessErrorMessage(error));
     } finally {
       setIsLoading(false);
     }
@@ -151,6 +161,10 @@ const LicenseAccessSuccess = () => {
     try {
       await trackLicenseAccessDownload(key, "installer_download_button");
     } catch (error) {
+      if (error instanceof ApiError && error.code === "CLOUD_LICENSING_DISABLED") {
+        toast.info(cloudLicensingDisabledMessage);
+        return;
+      }
       console.error("Failed to track installer download.", error);
     }
   };
