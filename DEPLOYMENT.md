@@ -101,3 +101,67 @@ AiSuggestions__CustomEndpointUrl=http://127.0.0.1:8091/v1/suggestions
 AiSuggestions__CustomSuggestionField=suggestion
 AiSuggestions__RequestTimeoutMs=25000
 ```
+
+## 8. Offline-local licensing defaults (2026-04-09)
+
+Backend now defaults to local-first licensing policy:
+
+- `Licensing:Mode=LocalOffline`
+- `Licensing:RequireActivationEntitlementKey=true`
+- `Licensing:CloudLicensingEndpointsEnabled=false`
+- `Licensing:CloudRelayEnabled=false` (must stay off when `Mode=LocalOffline`)
+
+Effects:
+- POS activation always requires an activation entitlement key.
+- Cloud billing/licensing public surfaces (`/api/license/public/*`, webhooks, cloud v1 compatibility entry points) return `503` with `CLOUD_LICENSING_DISABLED`.
+- License status and heartbeat continue to work locally against backend + local DB.
+
+## 9. Operator batch key generation
+
+Use the local script to generate the locked policy batch (`count=10`) and write secure CSV output:
+
+```bash
+./scripts/licensing/generate-offline-activation-codes.sh
+```
+
+Optional environment overrides:
+- `SMARTPOS_BACKEND_URL` (default `http://127.0.0.1:5102`)
+- `SMARTPOS_ADMIN_USERNAME`
+- `SMARTPOS_ADMIN_PASSWORD`
+- `SMARTPOS_ADMIN_MFA_CODE`
+- `SMARTPOS_SHOP_CODE`
+- `SMARTPOS_OUTPUT_DIR` (default `./secure/licensing`)
+
+Security behavior:
+- Script prints plaintext keys once to console.
+- CSV is created with restrictive permissions (`umask 077`, `chmod 600`).
+
+## 10. Support runbook pointers
+
+- Primary support workflow: [docs/OFFLINE_LOCAL_LICENSING_SUPPORT_RUNBOOK.md](docs/OFFLINE_LOCAL_LICENSING_SUPPORT_RUNBOOK.md)
+- Incident escalation for fraud/high-risk actions: `docs/archive/root-markdown/LICENSE_FRAUD_RESPONSE_RUNBOOK.md`
+
+## 11. Rollback and hosted override path
+
+If a hosted environment must temporarily re-enable cloud licensing flows:
+
+1. Set:
+   - `Licensing:Mode=CloudCompatible`
+   - `Licensing:CloudLicensingEndpointsEnabled=true`
+   - `Licensing:RequireActivationEntitlementKey=false` (optional, policy-driven)
+2. If cloud relay is required, set:
+   - `Licensing:CloudRelayEnabled=true`
+3. Restart backend and verify:
+   - `GET /cloud/v1/health` returns non-disabled status
+   - `/api/license/public/payment-request` accepts requests
+4. Keep this as time-boxed override; revert to offline defaults after incident window closes.
+
+Local-offline rollback (to strict mode) is the inverse:
+- `Mode=LocalOffline`
+- `RequireActivationEntitlementKey=true`
+- `CloudLicensingEndpointsEnabled=false`
+- `CloudRelayEnabled=false`
+
+CSV retention policy:
+- Keep generated activation CSV files in restricted storage for maximum 90 days.
+- Rotate to encrypted archive or securely delete after reconciliation window closes.

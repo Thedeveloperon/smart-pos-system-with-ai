@@ -210,11 +210,13 @@ const LicenseGate = () => {
         status={status}
         error={error}
         isBusy={isActivating || isRefreshing}
+        activationEntitlementKey={activationEntitlementKey}
+        onActivationEntitlementKeyChange={setActivationEntitlementKey}
         onRefresh={() => {
           void refresh();
         }}
-        onActivate={() => {
-          void handleActivate(activationEntitlementKey);
+        onActivate={(key) => {
+          void handleActivate(key);
         }}
       />
     );

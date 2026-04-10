@@ -4,6 +4,9 @@ public sealed class LicenseOptions
 {
     public const string SectionName = "Licensing";
 
+    public string Mode { get; set; } = "LocalOffline";
+    public bool RequireActivationEntitlementKey { get; set; } = true;
+    public bool CloudLicensingEndpointsEnabled { get; set; }
     public string DefaultShopCode { get; set; } = "default";
     public string DefaultShopName { get; set; } = "Default SmartPOS Shop";
     public string DefaultBranchCode { get; set; } = "main";
