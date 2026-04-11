@@ -60,7 +60,7 @@ const Navbar = () => {
             <Link href={`/${locale}/account`}>{t("nav.account")}</Link>
           </Button>
           <Button variant="hero" size="sm" asChild>
-            <Link href={`/${locale}/start?plan=starter`}>{t("nav.cta")}</Link>
+            <Link href={`/${locale}/start?plan=starter`}>{t("nav.signUp")}</Link>
           </Button>
         </div>
 
@@ -109,7 +109,7 @@ const Navbar = () => {
               </Button>
               <Button variant="hero" size="sm" asChild>
                 <Link href={`/${locale}/start?plan=starter`} onClick={() => setOpen(false)}>
-                  {t("nav.cta")}
+                  {t("nav.signUp")}
                 </Link>
               </Button>
             </div>
