@@ -7,8 +7,11 @@ import { GET as licensePortalGet } from "@/app/api/account/license-portal/route"
 import { POST as deactivateDevicePost } from "@/app/api/account/license-portal/devices/[deviceCode]/deactivate/route";
 import { GET as aiWalletGet } from "@/app/api/account/ai/wallet/route";
 import { GET as aiCreditPacksGet } from "@/app/api/account/ai/credit-packs/route";
+import { GET as aiLedgerGet } from "@/app/api/account/ai/ledger/route";
 import { GET as aiPaymentsGet } from "@/app/api/account/ai/payments/route";
+import { GET as aiPendingManualPaymentsGet } from "@/app/api/account/ai/payments/pending-manual/route";
 import { POST as aiCheckoutPost } from "@/app/api/account/ai/payments/checkout/route";
+import { POST as aiVerifyManualPaymentPost } from "@/app/api/account/ai/payments/verify/route";
 
 function jsonResponse(payload: unknown, init?: ResponseInit) {
   return new Response(JSON.stringify(payload), {
@@ -323,6 +326,132 @@ describe("Account API proxy routes", () => {
     expect(url).toBe("http://backend.test/api/ai/payments?take=100");
     expect(init.method).toBe("GET");
     expect(readHeaders(init).get("cookie")).toContain("smartpos_auth=session-token");
+  });
+
+  it("ai ledger route normalizes take query and forwards authenticated GET request", async () => {
+    vi.mocked(global.fetch).mockResolvedValueOnce(
+      jsonResponse({
+        items: [],
+      }),
+    );
+
+    const request = new NextRequest("http://localhost/api/account/ai/ledger?take=999", {
+      method: "GET",
+      headers: {
+        cookie: "smartpos_auth=session-token",
+      },
+    });
+
+    const response = await aiLedgerGet(request);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ items: [] });
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const [url, init] = vi.mocked(global.fetch).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://backend.test/api/ai/ledger?take=200");
+    expect(init.method).toBe("GET");
+    expect(readHeaders(init).get("cookie")).toContain("smartpos_auth=session-token");
+    expect(readHeaders(init).get("Idempotency-Key")).toBeNull();
+  });
+
+  it("ai pending manual payments route normalizes take query and forwards authenticated GET request", async () => {
+    vi.mocked(global.fetch).mockResolvedValueOnce(
+      jsonResponse({
+        items: [],
+      }),
+    );
+
+    const request = new NextRequest("http://localhost/api/account/ai/payments/pending-manual?take=999", {
+      method: "GET",
+      headers: {
+        cookie: "smartpos_auth=session-token",
+      },
+    });
+
+    const response = await aiPendingManualPaymentsGet(request);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ items: [] });
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const [url, init] = vi.mocked(global.fetch).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://backend.test/api/ai/payments/pending-manual?take=200");
+    expect(init.method).toBe("GET");
+    expect(readHeaders(init).get("cookie")).toContain("smartpos_auth=session-token");
+    expect(readHeaders(init).get("Idempotency-Key")).toBeNull();
+  });
+
+  it("ai payments verify route validates JSON and forwards with idempotency key", async () => {
+    const invalidJsonRequest = new NextRequest("http://localhost/api/account/ai/payments/verify", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: "{invalid-json",
+    });
+
+    const invalidJsonResponse = await aiVerifyManualPaymentPost(invalidJsonRequest);
+    expect(invalidJsonResponse.status).toBe(400);
+    await expect(invalidJsonResponse.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Request body must be valid JSON.",
+      },
+    });
+
+    const invalidPayloadRequest = new NextRequest("http://localhost/api/account/ai/payments/verify", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({}),
+    });
+
+    const invalidPayloadResponse = await aiVerifyManualPaymentPost(invalidPayloadRequest);
+    expect(invalidPayloadResponse.status).toBe(400);
+    await expect(invalidPayloadResponse.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Either payment_id or external_reference is required.",
+      },
+    });
+
+    vi.mocked(global.fetch).mockResolvedValueOnce(
+      jsonResponse({
+        payment_status: "succeeded",
+      }),
+    );
+
+    const request = new NextRequest("http://localhost/api/account/ai/payments/verify", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: "smartpos_auth=session-token",
+      },
+      body: JSON.stringify({
+        payment_id: "11111111-1111-1111-1111-111111111111",
+      }),
+    });
+
+    const response = await aiVerifyManualPaymentPost(request);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      payment_status: "succeeded",
+    });
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const [url, init] = vi.mocked(global.fetch).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://backend.test/api/ai/payments/verify");
+    expect(init.method).toBe("POST");
+    expect(init.body).toBe(
+      JSON.stringify({
+        payment_id: "11111111-1111-1111-1111-111111111111",
+      }),
+    );
+
+    const headers = readHeaders(init);
+    expect(headers.get("cookie")).toContain("smartpos_auth=session-token");
+    expect(headers.get("content-type")).toBe("application/json");
+    expect(headers.get("Idempotency-Key")).toBeTruthy();
   });
 
   it("ai checkout route validates JSON and forwards with idempotency key", async () => {

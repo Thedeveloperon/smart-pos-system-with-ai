@@ -15,8 +15,10 @@ public static class AiChatEndpoints
 
         group.MapPost("/sessions", async (
             AiChatCreateSessionRequest request,
+            HttpContext httpContext,
             ClaimsPrincipal user,
             IOptions<AiInsightOptions> aiInsightOptions,
+            AiCreditCloudRelayService cloudRelayService,
             AiChatService chatService,
             CancellationToken cancellationToken) =>
         {
@@ -33,8 +35,14 @@ public static class AiChatEndpoints
                     return Results.Forbid();
                 }
 
-                var result = await chatService.CreateSessionAsync(userId.Value, request, cancellationToken);
+                var result = cloudRelayService.IsEnabled
+                    ? await cloudRelayService.CreateChatSessionAsync(request, httpContext, cancellationToken)
+                    : await chatService.CreateSessionAsync(userId.Value, request, cancellationToken);
                 return Results.Ok(result);
+            }
+            catch (AiRelayException exception)
+            {
+                return ToAiErrorResult(exception);
             }
             catch (InvalidOperationException exception)
             {
@@ -50,6 +58,7 @@ public static class AiChatEndpoints
             HttpContext httpContext,
             ClaimsPrincipal user,
             IOptions<AiInsightOptions> aiInsightOptions,
+            AiCreditCloudRelayService cloudRelayService,
             AiChatService chatService,
             CancellationToken cancellationToken) =>
         {
@@ -66,13 +75,19 @@ public static class AiChatEndpoints
                     return Results.Forbid();
                 }
 
-                var result = await chatService.PostMessageAsync(
-                    userId.Value,
-                    id,
-                    request,
-                    ResolveOptionalHeaderIdempotencyKey(httpContext),
-                    cancellationToken);
+                var result = cloudRelayService.IsEnabled
+                    ? await cloudRelayService.PostChatMessageAsync(id, request, httpContext, cancellationToken)
+                    : await chatService.PostMessageAsync(
+                        userId.Value,
+                        id,
+                        request,
+                        ResolveOptionalHeaderIdempotencyKey(httpContext),
+                        cancellationToken);
                 return Results.Ok(result);
+            }
+            catch (AiRelayException exception)
+            {
+                return ToAiErrorResult(exception);
             }
             catch (InvalidOperationException exception)
             {
@@ -85,8 +100,10 @@ public static class AiChatEndpoints
         group.MapGet("/sessions/{id:guid}", async (
             Guid id,
             int? take,
+            HttpContext httpContext,
             ClaimsPrincipal user,
             IOptions<AiInsightOptions> aiInsightOptions,
+            AiCreditCloudRelayService cloudRelayService,
             AiChatService chatService,
             CancellationToken cancellationToken) =>
         {
@@ -103,12 +120,22 @@ public static class AiChatEndpoints
                     return Results.Forbid();
                 }
 
-                var result = await chatService.GetSessionAsync(
-                    userId.Value,
-                    id,
-                    take.GetValueOrDefault(50),
-                    cancellationToken);
+                var result = cloudRelayService.IsEnabled
+                    ? await cloudRelayService.GetChatSessionAsync(
+                        id,
+                        take.GetValueOrDefault(50),
+                        httpContext,
+                        cancellationToken)
+                    : await chatService.GetSessionAsync(
+                        userId.Value,
+                        id,
+                        take.GetValueOrDefault(50),
+                        cancellationToken);
                 return Results.Ok(result);
+            }
+            catch (AiRelayException exception)
+            {
+                return ToAiErrorResult(exception);
             }
             catch (InvalidOperationException exception)
             {
@@ -120,29 +147,58 @@ public static class AiChatEndpoints
 
         group.MapGet("/history", async (
             int? take,
+            HttpContext httpContext,
             ClaimsPrincipal user,
             IOptions<AiInsightOptions> aiInsightOptions,
+            AiCreditCloudRelayService cloudRelayService,
             AiChatService chatService,
             CancellationToken cancellationToken) =>
         {
-            var userId = ResolveUserId(user);
-            if (!userId.HasValue)
+            try
             {
-                return Results.Unauthorized();
-            }
+                var userId = ResolveUserId(user);
+                if (!userId.HasValue)
+                {
+                    return Results.Unauthorized();
+                }
 
-            if (!IsAiInsightsEnabledForUser(aiInsightOptions.Value, user))
+                if (!IsAiInsightsEnabledForUser(aiInsightOptions.Value, user))
+                {
+                    return Results.Forbid();
+                }
+
+                var result = cloudRelayService.IsEnabled
+                    ? await cloudRelayService.GetChatHistoryAsync(
+                        take.GetValueOrDefault(20),
+                        httpContext,
+                        cancellationToken)
+                    : await chatService.GetHistoryAsync(
+                        userId.Value,
+                        take.GetValueOrDefault(20),
+                        cancellationToken);
+                return Results.Ok(result);
+            }
+            catch (AiRelayException exception)
             {
-                return Results.Forbid();
+                return ToAiErrorResult(exception);
             }
-
-            var result = await chatService.GetHistoryAsync(userId.Value, take.GetValueOrDefault(20), cancellationToken);
-            return Results.Ok(result);
         })
         .WithName("GetAiChatHistory")
         .WithOpenApi();
 
         return app;
+    }
+
+    private static IResult ToAiErrorResult(AiRelayException exception)
+    {
+        return Results.Json(new AiRelayErrorPayload
+        {
+            Error = new AiRelayErrorItem
+            {
+                Code = exception.Code,
+                Message = exception.Message
+            }
+        }, statusCode: exception.StatusCode);
     }
 
     private static Guid? ResolveUserId(ClaimsPrincipal user)

@@ -45,6 +45,11 @@ public sealed class AiInsightOptions
     public bool CanaryOnlyEnabled { get; set; } = false;
     public string[] CanaryAllowedUsers { get; set; } = [];
     public bool UseIntentPipelineForChatbot { get; set; } = true;
+    public bool CloudRelayEnabled { get; set; } = false;
+    public string CloudRelayBaseUrl { get; set; } = string.Empty;
+    public int CloudRelayTimeoutSeconds { get; set; } = 30;
+    public int CloudRelayWalletCacheMaxAgeSeconds { get; set; } = 60;
+    public bool CloudAiRelayEndpointsEnabled { get; set; } = false;
     public bool AuthorizationReconciliationEnabled { get; set; } = true;
     public int AuthorizationReconciliationIntervalSeconds { get; set; } = 300;
     public int AuthorizationPendingTimeoutSeconds { get; set; } = 900;

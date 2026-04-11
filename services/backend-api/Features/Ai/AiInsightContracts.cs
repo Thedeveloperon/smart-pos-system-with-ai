@@ -179,6 +179,33 @@ public sealed class AiInsightHistoryResponse
     public List<AiInsightHistoryItemResponse> Items { get; set; } = [];
 }
 
+public sealed class AiCreditLedgerResponse
+{
+    [JsonPropertyName("items")]
+    public List<AiCreditLedgerItemResponse> Items { get; set; } = [];
+}
+
+public sealed class AiCreditLedgerItemResponse
+{
+    [JsonPropertyName("entry_type")]
+    public string EntryType { get; set; } = string.Empty;
+
+    [JsonPropertyName("delta_credits")]
+    public decimal DeltaCredits { get; set; }
+
+    [JsonPropertyName("balance_after_credits")]
+    public decimal BalanceAfterCredits { get; set; }
+
+    [JsonPropertyName("reference")]
+    public string? Reference { get; set; }
+
+    [JsonPropertyName("description")]
+    public string? Description { get; set; }
+
+    [JsonPropertyName("created_at_utc")]
+    public DateTimeOffset CreatedAtUtc { get; set; }
+}
+
 public sealed class AiInsightHistoryItemResponse
 {
     [JsonPropertyName("request_id")]

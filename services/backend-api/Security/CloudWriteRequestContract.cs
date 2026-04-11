@@ -27,6 +27,9 @@ public static class CloudWriteRequestContract
                || path.StartsWithSegments("/cloud/v1/device/activate", StringComparison.OrdinalIgnoreCase)
                || path.StartsWithSegments("/cloud/v1/device/deactivate", StringComparison.OrdinalIgnoreCase)
                || path.StartsWithSegments("/cloud/v1/license/heartbeat", StringComparison.OrdinalIgnoreCase)
+               || path.StartsWithSegments("/cloud/v1/ai/insights", StringComparison.OrdinalIgnoreCase)
+               || path.StartsWithSegments("/cloud/v1/ai/chat/sessions", StringComparison.OrdinalIgnoreCase)
+               || path.StartsWithSegments("/cloud/v1/ai/payments/checkout", StringComparison.OrdinalIgnoreCase)
                || path.StartsWithSegments("/api/security/challenge", StringComparison.OrdinalIgnoreCase)
                || path.StartsWithSegments("/api/ai/insights", StringComparison.OrdinalIgnoreCase)
                || path.StartsWithSegments("/api/ai/chat/sessions", StringComparison.OrdinalIgnoreCase);
