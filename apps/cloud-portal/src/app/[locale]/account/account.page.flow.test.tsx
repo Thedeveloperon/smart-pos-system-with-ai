@@ -48,6 +48,18 @@ function normalizeFetchUrl(url: string) {
   return `${parsed.pathname}${parsed.search}`;
 }
 
+function resolveRequestUrl(input: RequestInfo | URL) {
+  if (typeof input === "string") {
+    return input;
+  }
+
+  if (input instanceof URL) {
+    return input.toString();
+  }
+
+  return input.url;
+}
+
 function setInputValue(input: HTMLInputElement, value: string) {
   const descriptor = Object.getOwnPropertyDescriptor(
     window.HTMLInputElement.prototype,
@@ -93,6 +105,7 @@ describe("Account page authenticated flow", () => {
   beforeEach(async () => {
     vi.stubGlobal("fetch", vi.fn());
     window.localStorage.clear();
+    window.sessionStorage.clear();
     window.localStorage.setItem("smartpos_marketing_account_device_code_v1", "MKTWEB-TESTDEV");
     window.history.replaceState({}, "", "/en/account");
 
@@ -119,7 +132,7 @@ describe("Account page authenticated flow", () => {
   it("signs in, loads portal, and deactivates a device with refreshed state", async () => {
     let portalCallCount = 0;
     vi.mocked(global.fetch).mockImplementation(async (input, init) => {
-      const rawRequestUrl = typeof input === "string" ? input : input.url;
+      const rawRequestUrl = resolveRequestUrl(input);
       const parsedRequestUrl = rawRequestUrl.startsWith("http")
         ? new URL(rawRequestUrl)
         : new URL(rawRequestUrl, "http://localhost");
@@ -268,6 +281,12 @@ describe("Account page authenticated flow", () => {
         });
       }
 
+      if (requestUrl.startsWith("/api/account/ai/payments/pending-manual?take=")) {
+        return jsonResponse({
+          items: [],
+        });
+      }
+
       if (requestUrl.startsWith("/api/license/access-success?activation_entitlement_key=")) {
         return jsonResponse({
           generated_at: "2026-04-07T10:00:00Z",
@@ -348,7 +367,9 @@ describe("Account page authenticated flow", () => {
         .mock.calls.some(([url]) => normalizeFetchUrl(String(url)) === "/api/account/login"),
     );
 
-    await waitForCondition(() => container.textContent?.includes("Licensed Account") ?? false);
+    await waitForCondition(() => portalCallCount >= 1);
+    await waitForCondition(() => container.textContent?.includes("Signed in as") ?? false);
+    expect(container.textContent).toContain("Licensed Account");
     expect(container.textContent).toContain("Counter POS");
 
     const deactivateButton = Array.from(container.querySelectorAll("button")).find(
@@ -379,7 +400,7 @@ describe("Account page authenticated flow", () => {
   it("creates AI checkout and reconciles checkout status to succeeded", async () => {
     let paymentHistoryCallCount = 0;
     vi.mocked(global.fetch).mockImplementation(async (input, init) => {
-      const rawRequestUrl = typeof input === "string" ? input : input.url;
+      const rawRequestUrl = resolveRequestUrl(input);
       const requestUrl = normalizeFetchUrl(rawRequestUrl);
 
       if (requestUrl === "/api/account/me") {
@@ -488,6 +509,12 @@ describe("Account page authenticated flow", () => {
         });
       }
 
+      if (requestUrl.startsWith("/api/account/ai/payments/pending-manual?take=")) {
+        return jsonResponse({
+          items: [],
+        });
+      }
+
       if (requestUrl === "/api/account/ai/payments/checkout") {
         return jsonResponse({
           payment_id: "55555555-5555-5555-5555-555555555555",
@@ -591,7 +618,7 @@ describe("Account page authenticated flow", () => {
 
   it("submits manual bank transfer checkout from account fallback section", async () => {
     vi.mocked(global.fetch).mockImplementation(async (input, init) => {
-      const rawRequestUrl = typeof input === "string" ? input : input.url;
+      const rawRequestUrl = resolveRequestUrl(input);
       const requestUrl = normalizeFetchUrl(rawRequestUrl);
 
       if (requestUrl === "/api/account/me") {
@@ -673,6 +700,12 @@ describe("Account page authenticated flow", () => {
               completed_at: null,
             },
           ],
+        });
+      }
+
+      if (requestUrl.startsWith("/api/account/ai/payments/pending-manual?take=")) {
+        return jsonResponse({
+          items: [],
         });
       }
 
@@ -790,10 +823,192 @@ describe("Account page authenticated flow", () => {
     expect(container.textContent).toContain("Status: pending verification");
   });
 
+  it("verifies pending manual payment by reference from the account page card", async () => {
+    let pendingManualCallCount = 0;
+    const pendingPaymentId = "77777777-7777-7777-7777-777777777777";
+    vi.mocked(global.fetch).mockImplementation(async (input, init) => {
+      const rawRequestUrl = resolveRequestUrl(input);
+      const requestUrl = normalizeFetchUrl(rawRequestUrl);
+
+      if (requestUrl === "/api/account/me") {
+        return jsonResponse({
+          user_id: "11111111-1111-1111-1111-111111111111",
+          username: "manager",
+          full_name: "Manager",
+          role: "manager",
+          device_id: "22222222-2222-2222-2222-222222222222",
+          device_code: "MKTWEB-TESTDEV",
+          expires_at: "2026-04-08T00:00:00Z",
+          mfa_verified: true,
+        });
+      }
+
+      if (requestUrl === "/api/account/license-portal") {
+        return jsonResponse({
+          generated_at: "2026-04-07T10:00:00Z",
+          shop_id: "33333333-3333-3333-3333-333333333333",
+          shop_code: "default",
+          shop_name: "Integration Test Shop",
+          subscription_status: "active",
+          plan: "growth",
+          seat_limit: 5,
+          active_seats: 2,
+          self_service_deactivation_limit_per_day: 2,
+          self_service_deactivations_used_today: 0,
+          self_service_deactivations_remaining_today: 2,
+          can_deactivate_more_devices_today: true,
+          latest_activation_entitlement: {
+            activation_entitlement_key: "SPK-TEST-KEY-123456",
+            max_activations: 3,
+            activations_used: 1,
+            expires_at: "2026-05-07T00:00:00Z",
+          },
+          devices: [],
+        });
+      }
+
+      if (requestUrl === "/api/account/ai/wallet") {
+        return jsonResponse({
+          available_credits: 120,
+          updated_at: "2026-04-07T10:00:00Z",
+        });
+      }
+
+      if (requestUrl === "/api/account/ai/credit-packs") {
+        return jsonResponse({
+          items: [
+            {
+              pack_code: "pack_100",
+              credits: 100,
+              price: 5,
+              currency: "USD",
+            },
+          ],
+        });
+      }
+
+      if (requestUrl.startsWith("/api/account/ai/payments?take=")) {
+        return jsonResponse({
+          items: [],
+        });
+      }
+
+      if (requestUrl.startsWith("/api/account/ai/ledger?take=")) {
+        return jsonResponse({
+          items: [],
+        });
+      }
+
+      if (requestUrl.startsWith("/api/account/ai/payments/pending-manual?take=")) {
+        pendingManualCallCount += 1;
+        if (pendingManualCallCount === 1) {
+          return jsonResponse({
+            items: [
+              {
+                payment_id: pendingPaymentId,
+                target_username: "manager",
+                target_full_name: "Manager",
+                shop_name: "Integration Test Shop",
+                payment_status: "pending_verification",
+                payment_method: "bank_deposit",
+                credits: 100,
+                amount: 5,
+                currency: "USD",
+                external_reference: "aicpay_ref_001",
+                submitted_reference: "BD-REF-1001",
+                created_at: "2026-04-07T10:01:00Z",
+              },
+            ],
+          });
+        }
+
+        return jsonResponse({ items: [] });
+      }
+
+      if (requestUrl === "/api/account/ai/payments/verify") {
+        const requestInit = init as RequestInit;
+        expect(requestInit.method).toBe("POST");
+        expect(getHeaderValue(requestInit.headers, "content-type")).toBe("application/json");
+        expect(requestInit.body).toBe(JSON.stringify({ payment_id: pendingPaymentId }));
+        return jsonResponse({
+          payment_id: pendingPaymentId,
+          payment_status: "succeeded",
+        });
+      }
+
+      if (requestUrl.startsWith("/api/license/access-success?activation_entitlement_key=")) {
+        return jsonResponse({
+          generated_at: "2026-04-07T10:00:00Z",
+          shop_id: "33333333-3333-3333-3333-333333333333",
+          shop_code: "default",
+          shop_name: "Integration Test Shop",
+          subscription_status: "active",
+          plan: "growth",
+          seat_limit: 5,
+          entitlement_state: "active",
+          can_activate: true,
+          installer_download_url: "https://downloads.smartpos.test/installer.exe",
+          installer_download_expires_at: "2026-04-08T00:00:00Z",
+          installer_download_protected: true,
+          installer_checksum_sha256: "abc123",
+          activation_entitlement: {
+            activation_entitlement_key: "SPK-TEST-KEY-123456",
+            max_activations: 3,
+            activations_used: 1,
+            expires_at: "2026-05-07T00:00:00Z",
+            status: "active",
+          },
+        });
+      }
+
+      throw new Error(`Unexpected fetch URL: ${rawRequestUrl}`);
+    });
+
+    await act(async () => {
+      root.render(
+        <I18nProvider locale="en" messages={{}}>
+          <AccountPage />
+        </I18nProvider>,
+      );
+      await flushUi();
+    });
+
+    await waitForCondition(() => container.textContent?.includes("Pending Verifications") ?? false);
+    expect(container.textContent).toContain("BD-REF-1001");
+
+    const referenceInput = container.querySelector(
+      'input[placeholder="Submitted ref or aicpay_... external ref"]',
+    ) as HTMLInputElement | null;
+    expect(referenceInput).toBeTruthy();
+
+    await act(async () => {
+      setInputValue(referenceInput!, "BD-REF-1001");
+      await flushUi();
+    });
+
+    const verifyByReferenceButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Verify by Reference",
+    );
+    expect(verifyByReferenceButton).toBeTruthy();
+
+    await act(async () => {
+      verifyByReferenceButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flushUi();
+    });
+
+    await waitForCondition(() =>
+      vi
+        .mocked(global.fetch)
+        .mock.calls.some(([url]) => normalizeFetchUrl(String(url)) === "/api/account/ai/payments/verify"),
+    );
+    await waitForCondition(() => container.textContent?.includes("Payment verified and credits were added.") ?? false);
+    expect(pendingManualCallCount).toBeGreaterThanOrEqual(2);
+  });
+
   it("shows role-based access denied message for cashier login without calling portal API", async () => {
     let portalCallCount = 0;
     vi.mocked(global.fetch).mockImplementation(async (input) => {
-      const rawRequestUrl = typeof input === "string" ? input : input.url;
+      const rawRequestUrl = resolveRequestUrl(input);
       const requestUrl = normalizeFetchUrl(rawRequestUrl);
 
       if (requestUrl === "/api/account/me") {

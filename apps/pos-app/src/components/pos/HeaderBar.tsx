@@ -38,6 +38,8 @@ interface HeaderBarProps {
   onImportSupplierBill: () => void;
   onAiInsights?: () => void;
   aiCredits?: number | null;
+  isAiCreditLow?: boolean;
+  cloudPortalUrl?: string;
   onReminders?: () => void;
   openReminderCount?: number;
   todayIssueCount?: number;
@@ -79,6 +81,8 @@ const HeaderBar = ({
   onImportSupplierBill,
   onAiInsights,
   aiCredits = null,
+  isAiCreditLow = false,
+  cloudPortalUrl,
   onReminders,
   openReminderCount = 0,
   todayIssueCount = 0,
@@ -161,20 +165,37 @@ const HeaderBar = ({
         )}
 
         {onAiInsights && allowCashier(cashierToolbarVisibility?.aiInsights) && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onAiInsights}
-            className="text-pos-header-foreground hover:bg-pos-header-foreground/10 relative"
-          >
-            <Sparkles className="h-4 w-4" />
-            <span className="hidden md:inline ml-1">AI Insights</span>
-            {aiCredits !== null && (
-              <Badge className="absolute -top-1 -right-1 h-5 min-w-5 px-1.5 flex items-center justify-center text-[10px] bg-emerald-500 text-white">
-                {aiCredits > 999 ? "999+" : aiCredits.toFixed(0)}
-              </Badge>
+          <div className="flex flex-col items-center gap-0.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onAiInsights}
+              className="text-pos-header-foreground hover:bg-pos-header-foreground/10 relative"
+            >
+              <Sparkles className="h-4 w-4" />
+              <span className="hidden md:inline ml-1">AI Insights</span>
+              {aiCredits !== null && (
+                <Badge
+                  className={`absolute -top-1 -right-1 h-5 min-w-5 px-1.5 flex items-center justify-center text-[10px] text-white ${
+                    isAiCreditLow ? "bg-amber-500" : "bg-emerald-500"
+                  }`}
+                >
+                  {isAiCreditLow ? "!" : aiCredits > 999 ? "999+" : aiCredits.toFixed(0)}
+                </Badge>
+              )}
+            </Button>
+            {isAiCreditLow && cloudPortalUrl && (
+              <a
+                href={`${cloudPortalUrl}/en/account`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[10px] text-amber-400 hover:text-amber-300 leading-none"
+                onClick={(event) => event.stopPropagation()}
+              >
+                Top Up
+              </a>
             )}
-          </Button>
+          </div>
         )}
 
         {onReminders && allowCashier(cashierToolbarVisibility?.reminders) && (
@@ -360,8 +381,12 @@ const HeaderBar = ({
                 <Sparkles className="mr-3 h-5 w-5" />
                 AI Insights
                 {aiCredits !== null && (
-                  <Badge className="ml-auto h-5 min-w-5 px-1 text-[10px]">
-                    {aiCredits > 999 ? "999+" : aiCredits.toFixed(0)}
+                  <Badge
+                    className={`ml-auto h-5 min-w-5 px-1 text-[10px] text-white ${
+                      isAiCreditLow ? "bg-amber-500" : "bg-emerald-500"
+                    }`}
+                  >
+                    {isAiCreditLow ? "Low" : aiCredits > 999 ? "999+" : aiCredits.toFixed(0)}
                   </Badge>
                 )}
               </DropdownMenuItem>

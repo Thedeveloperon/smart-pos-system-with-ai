@@ -23,6 +23,18 @@ function normalizeFetchUrl(url: string) {
   return `${parsed.pathname}${parsed.search}`;
 }
 
+function resolveRequestUrl(input: RequestInfo | URL) {
+  if (typeof input === "string") {
+    return input;
+  }
+
+  if (input instanceof URL) {
+    return input.toString();
+  }
+
+  return input.url;
+}
+
 async function flushUi() {
   await Promise.resolve();
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -74,7 +86,7 @@ describe("AI checkout return page", () => {
     window.history.replaceState({}, "", "/en/ai-checkout?reference=ai_checkout_ref_001&pack=pack_500");
 
     vi.mocked(global.fetch).mockImplementation(async (input) => {
-      const requestUrl = normalizeFetchUrl(typeof input === "string" ? input : input.url);
+      const requestUrl = normalizeFetchUrl(resolveRequestUrl(input));
       if (requestUrl === "/api/account/ai/payments?take=100") {
         return jsonResponse({
           items: [
@@ -127,7 +139,7 @@ describe("AI checkout return page", () => {
     window.history.replaceState({}, "", "/en/ai-checkout?reference=ai_checkout_ref_401&pack=pack_100");
 
     vi.mocked(global.fetch).mockImplementation(async (input) => {
-      const requestUrl = normalizeFetchUrl(typeof input === "string" ? input : input.url);
+      const requestUrl = normalizeFetchUrl(resolveRequestUrl(input));
       if (requestUrl === "/api/account/ai/payments?take=100") {
         return jsonResponse(
           {
@@ -157,4 +169,3 @@ describe("AI checkout return page", () => {
     );
   });
 });
-

@@ -958,6 +958,8 @@ const IndexInner = () => {
         onReports={() => setShowReports(true)}
         onAiInsights={() => setShowAiInsights(true)}
         aiCredits={aiCreditsBalance}
+        isAiCreditLow={isAiCreditLow}
+        cloudPortalUrl={CLOUD_PORTAL_URL || undefined}
         onReminders={() => setShowReminders(true)}
         openReminderCount={openReminderCount}
         onImportSupplierBill={() => setShowImportSupplierBill(true)}
