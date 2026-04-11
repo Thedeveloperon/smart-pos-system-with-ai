@@ -599,6 +599,73 @@ public sealed class AiInsightsCreditFlowTests(CustomWebApplicationFactory factor
     }
 
     [Fact]
+    public async Task AiCreditLedger_ShouldReturnCustomerFacingEntries_WithoutReserveArtifacts()
+    {
+        await TestAuth.SignInAsBillingAdminAsync(client);
+        await ResetWalletAsync("billing_admin");
+
+        var testWindowStart = DateTimeOffset.UtcNow.AddSeconds(-1);
+        var topUpReference = $"it-ledger-topup-{Guid.NewGuid():N}";
+        await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/ai/wallet/top-up", new
+            {
+                credits = 30m,
+                purchase_reference = topUpReference,
+                description = "integration_test_ledger_topup"
+            }));
+
+        var insightPayload = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/ai/insights", new
+            {
+                prompt = "Give one short action to improve tomorrow afternoon sales.",
+                idempotency_key = $"it-ledger-insight-{Guid.NewGuid():N}"
+            }));
+        var chargedCredits = TestJson.GetDecimal(insightPayload, "charged_credits");
+
+        var ledgerResponse = await client.GetAsync("/api/ai/ledger?take=25");
+        ledgerResponse.EnsureSuccessStatusCode();
+
+        var ledgerPayload = await ledgerResponse.Content.ReadFromJsonAsync<JsonObject>();
+        var items = ledgerPayload?["items"]?.AsArray() ?? throw new InvalidOperationException("Ledger items not found.");
+        var recentItems = items
+            .Select(item => new
+            {
+                EntryType = item?["entry_type"]?.GetValue<string>() ?? string.Empty,
+                DeltaCredits = item?["delta_credits"]?.GetValue<decimal>() ?? 0m,
+                Reference = item?["reference"]?.GetValue<string>(),
+                Description = item?["description"]?.GetValue<string>(),
+                CreatedAtUtc = item?["created_at_utc"]?.GetValue<DateTimeOffset>() ?? DateTimeOffset.MinValue
+            })
+            .Where(item => item.CreatedAtUtc >= testWindowStart)
+            .ToList();
+
+        Assert.Contains(
+            recentItems,
+            item => item.EntryType == "purchase" && string.Equals(item.Reference, topUpReference, StringComparison.Ordinal));
+        Assert.DoesNotContain(recentItems, item => item.EntryType == "reserve");
+        Assert.DoesNotContain(
+            recentItems,
+            item => item.EntryType == "refund" &&
+                    (string.Equals(item.Description, "ai_reserve_refund", StringComparison.Ordinal) ||
+                     string.Equals(item.Description, "ai_refund", StringComparison.Ordinal)));
+
+        var chargeEntry = recentItems
+            .FirstOrDefault(item => item.EntryType == "charge" && string.Equals(item.Description, "ai_charge", StringComparison.Ordinal));
+        Assert.NotNull(chargeEntry);
+        Assert.Equal(-chargedCredits, chargeEntry.DeltaCredits);
+    }
+
+    [Fact]
+    public async Task AiCreditLedger_WithManagerRole_ShouldReturnSuccess()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var response = await client.GetAsync("/api/ai/ledger?take=10");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
     public async Task WalletAdjust_WithManagerRole_ShouldReturnForbidden()
     {
         await TestAuth.SignInAsManagerAsync(client);

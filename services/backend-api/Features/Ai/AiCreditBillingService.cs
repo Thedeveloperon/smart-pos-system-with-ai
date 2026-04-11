@@ -1,4 +1,5 @@
 using System.Data;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Infrastructure;
@@ -30,6 +31,48 @@ public sealed class AiCreditBillingService(
         {
             AvailableCredits = wallet.AvailableCredits,
             UpdatedAt = wallet.UpdatedAtUtc
+        };
+    }
+
+    public async Task<AiCreditLedgerResponse> GetLedgerAsync(
+        Guid userId,
+        int take,
+        CancellationToken cancellationToken)
+    {
+        var context = await ResolveUserShopContextAsync(userId, cancellationToken);
+        var normalizedTake = Math.Clamp(take, 1, 200);
+        var candidateTake = Math.Clamp(normalizedTake * 4, normalizedTake, 800);
+
+        List<AiCreditLedgerEntry> rows;
+        if (dbContext.Database.IsSqlite())
+        {
+            rows = (await dbContext.AiCreditLedgerEntries
+                    .AsNoTracking()
+                    .Where(x => x.ShopId == context.ShopId && x.EntryType != AiCreditLedgerEntryType.Reserve)
+                    .ToListAsync(cancellationToken))
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Take(candidateTake)
+                .ToList();
+        }
+        else
+        {
+            rows = await dbContext.AiCreditLedgerEntries
+                .AsNoTracking()
+                .Where(x => x.ShopId == context.ShopId && x.EntryType != AiCreditLedgerEntryType.Reserve)
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Take(candidateTake)
+                .ToListAsync(cancellationToken);
+        }
+
+        var items = rows
+            .Where(ShouldExposeLedgerEntry)
+            .Select(MapLedgerItem)
+            .Take(normalizedTake)
+            .ToList();
+
+        return new AiCreditLedgerResponse
+        {
+            Items = items
         };
     }
 
@@ -578,6 +621,83 @@ public sealed class AiCreditBillingService(
     private static decimal RoundCredits(decimal credits)
     {
         return decimal.Round(credits, 2, MidpointRounding.AwayFromZero);
+    }
+
+    private static bool ShouldExposeLedgerEntry(AiCreditLedgerEntry entry)
+    {
+        // Reserve/refund pairs are internal settlement details for AI requests.
+        // They are hidden from user-facing history to prevent misleading deltas.
+        if (entry.EntryType == AiCreditLedgerEntryType.Refund && entry.AiInsightRequestId.HasValue)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static AiCreditLedgerItemResponse MapLedgerItem(AiCreditLedgerEntry entry)
+    {
+        return new AiCreditLedgerItemResponse
+        {
+            EntryType = MapLedgerEntryType(entry.EntryType),
+            DeltaCredits = MapLedgerDelta(entry),
+            BalanceAfterCredits = entry.BalanceAfterCredits,
+            Reference = entry.Reference,
+            Description = entry.Description,
+            CreatedAtUtc = entry.CreatedAtUtc
+        };
+    }
+
+    private static string MapLedgerEntryType(AiCreditLedgerEntryType entryType)
+    {
+        return entryType switch
+        {
+            AiCreditLedgerEntryType.Purchase => "purchase",
+            AiCreditLedgerEntryType.Charge => "charge",
+            AiCreditLedgerEntryType.Refund => "refund",
+            AiCreditLedgerEntryType.Adjustment => "adjustment",
+            _ => "adjustment"
+        };
+    }
+
+    private static decimal MapLedgerDelta(AiCreditLedgerEntry entry)
+    {
+        if (entry.EntryType != AiCreditLedgerEntryType.Charge)
+        {
+            return entry.DeltaCredits;
+        }
+
+        var chargedCredits = ResolveChargedCredits(entry);
+        if (chargedCredits <= 0m)
+        {
+            return entry.DeltaCredits;
+        }
+
+        return -chargedCredits;
+    }
+
+    private static decimal ResolveChargedCredits(AiCreditLedgerEntry entry)
+    {
+        if (string.IsNullOrWhiteSpace(entry.MetadataJson))
+        {
+            return Math.Abs(entry.DeltaCredits);
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(entry.MetadataJson);
+            if (document.RootElement.TryGetProperty("charged_credits", out var chargedCreditsElement) &&
+                chargedCreditsElement.TryGetDecimal(out var chargedCredits))
+            {
+                return RoundCredits(Math.Max(0m, chargedCredits));
+            }
+        }
+        catch (JsonException)
+        {
+            // Fall back to persisted delta for malformed metadata.
+        }
+
+        return Math.Abs(entry.DeltaCredits);
     }
 
     private readonly record struct ShopActorContext(

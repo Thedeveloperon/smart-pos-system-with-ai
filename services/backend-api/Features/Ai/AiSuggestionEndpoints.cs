@@ -51,9 +51,44 @@ public static class AiSuggestionEndpoints
         .WithOpenApi();
 
         group.MapGet("/wallet", async (
+            HttpContext httpContext,
+            ClaimsPrincipal user,
+            IOptions<AiInsightOptions> aiInsightOptions,
+            AiCreditCloudRelayService cloudRelayService,
+            AiCreditBillingService creditBillingService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var userId = ResolveUserId(user);
+                if (!userId.HasValue)
+                {
+                    return Results.Unauthorized();
+                }
+
+                if (!IsAiInsightsEnabledForUser(aiInsightOptions.Value, user))
+                {
+                    return Results.Forbid();
+                }
+
+                var wallet = cloudRelayService.IsEnabled
+                    ? await cloudRelayService.GetWalletAsync(httpContext, cancellationToken)
+                    : await creditBillingService.GetWalletAsync(userId.Value, cancellationToken);
+                return Results.Ok(wallet);
+            }
+            catch (AiRelayException exception)
+            {
+                return ToAiErrorResult(exception);
+            }
+        })
+        .WithName("GetAiWallet")
+        .WithOpenApi();
+
+        group.MapGet("/ledger", async (
             ClaimsPrincipal user,
             IOptions<AiInsightOptions> aiInsightOptions,
             AiCreditBillingService creditBillingService,
+            int? take,
             CancellationToken cancellationToken) =>
         {
             var userId = ResolveUserId(user);
@@ -67,10 +102,13 @@ public static class AiSuggestionEndpoints
                 return Results.Forbid();
             }
 
-            var wallet = await creditBillingService.GetWalletAsync(userId.Value, cancellationToken);
-            return Results.Ok(wallet);
+            var ledger = await creditBillingService.GetLedgerAsync(
+                userId.Value,
+                take.GetValueOrDefault(50),
+                cancellationToken);
+            return Results.Ok(ledger);
         })
-        .WithName("GetAiWallet")
+        .WithName("GetAiCreditLedger")
         .WithOpenApi();
 
         group.MapPost("/insights", async (
@@ -78,6 +116,7 @@ public static class AiSuggestionEndpoints
             HttpContext httpContext,
             ClaimsPrincipal user,
             IOptions<AiInsightOptions> aiInsightOptions,
+            AiCreditCloudRelayService cloudRelayService,
             AiInsightService aiInsightService,
             CancellationToken cancellationToken) =>
         {
@@ -94,14 +133,19 @@ public static class AiSuggestionEndpoints
                     return Results.Forbid();
                 }
 
-                var idempotencyKey = ResolveIdempotencyKey(request, httpContext);
-                var result = await aiInsightService.GenerateInsightAsync(
-                    userId.Value,
-                    request.Prompt,
-                    idempotencyKey,
-                    request.UsageType,
-                    cancellationToken);
+                var result = cloudRelayService.IsEnabled
+                    ? await cloudRelayService.GenerateInsightAsync(request, httpContext, cancellationToken)
+                    : await aiInsightService.GenerateInsightAsync(
+                        userId.Value,
+                        request.Prompt,
+                        ResolveIdempotencyKey(request, httpContext),
+                        request.UsageType,
+                        cancellationToken);
                 return Results.Ok(result);
+            }
+            catch (AiRelayException exception)
+            {
+                return ToAiErrorResult(exception);
             }
             catch (InvalidOperationException exception)
             {
@@ -111,18 +155,30 @@ public static class AiSuggestionEndpoints
         .WithName("GenerateAiInsight")
         .WithOpenApi();
 
-        group.MapGet("/credit-packs", (
+        group.MapGet("/credit-packs", async (
+            HttpContext httpContext,
             ClaimsPrincipal user,
             IOptions<AiInsightOptions> aiInsightOptions,
-            AiCreditPaymentService paymentService) =>
+            AiCreditCloudRelayService cloudRelayService,
+            AiCreditPaymentService paymentService,
+            CancellationToken cancellationToken) =>
         {
-            if (!IsAiInsightsEnabledForUser(aiInsightOptions.Value, user))
+            try
             {
-                return Results.Forbid();
-            }
+                if (!IsAiInsightsEnabledForUser(aiInsightOptions.Value, user))
+                {
+                    return Results.Forbid();
+                }
 
-            var packs = paymentService.GetCreditPacks();
-            return Results.Ok(packs);
+                var packs = cloudRelayService.IsEnabled
+                    ? await cloudRelayService.GetCreditPacksAsync(httpContext, cancellationToken)
+                    : paymentService.GetCreditPacks();
+                return Results.Ok(packs);
+            }
+            catch (AiRelayException exception)
+            {
+                return ToAiErrorResult(exception);
+            }
         })
         .WithName("GetAiCreditPacks")
         .WithOpenApi();
@@ -132,6 +188,7 @@ public static class AiSuggestionEndpoints
             HttpContext httpContext,
             ClaimsPrincipal user,
             IOptions<AiInsightOptions> aiInsightOptions,
+            AiCreditCloudRelayService cloudRelayService,
             AiCreditPaymentService paymentService,
             CancellationToken cancellationToken) =>
         {
@@ -148,15 +205,20 @@ public static class AiSuggestionEndpoints
                     return Results.Forbid();
                 }
 
-                var idempotencyKey = ResolveCheckoutIdempotencyKey(request, httpContext);
-                var result = await paymentService.CreateCheckoutSessionAsync(
-                    userId.Value,
-                    request.PackCode,
-                    idempotencyKey,
-                    request.PaymentMethod,
-                    request.BankReference,
-                    cancellationToken);
+                var result = cloudRelayService.IsEnabled
+                    ? await cloudRelayService.CreateCheckoutSessionAsync(request, httpContext, cancellationToken)
+                    : await paymentService.CreateCheckoutSessionAsync(
+                        userId.Value,
+                        request.PackCode,
+                        ResolveCheckoutIdempotencyKey(request, httpContext),
+                        request.PaymentMethod,
+                        request.BankReference,
+                        cancellationToken);
                 return Results.Ok(result);
+            }
+            catch (AiRelayException exception)
+            {
+                return ToAiErrorResult(exception);
             }
             catch (InvalidOperationException exception)
             {
@@ -167,28 +229,42 @@ public static class AiSuggestionEndpoints
         .WithOpenApi();
 
         group.MapGet("/payments", async (
+            HttpContext httpContext,
             ClaimsPrincipal user,
             IOptions<AiInsightOptions> aiInsightOptions,
+            AiCreditCloudRelayService cloudRelayService,
             AiCreditPaymentService paymentService,
             int? take,
             CancellationToken cancellationToken) =>
         {
-            var userId = ResolveUserId(user);
-            if (!userId.HasValue)
+            try
             {
-                return Results.Unauthorized();
-            }
+                var userId = ResolveUserId(user);
+                if (!userId.HasValue)
+                {
+                    return Results.Unauthorized();
+                }
 
-            if (!IsAiInsightsEnabledForUser(aiInsightOptions.Value, user))
+                if (!IsAiInsightsEnabledForUser(aiInsightOptions.Value, user))
+                {
+                    return Results.Forbid();
+                }
+
+                var result = cloudRelayService.IsEnabled
+                    ? await cloudRelayService.GetPaymentHistoryAsync(
+                        take.GetValueOrDefault(20),
+                        httpContext,
+                        cancellationToken)
+                    : await paymentService.GetPaymentHistoryAsync(
+                        userId.Value,
+                        take.GetValueOrDefault(20),
+                        cancellationToken);
+                return Results.Ok(result);
+            }
+            catch (AiRelayException exception)
             {
-                return Results.Forbid();
+                return ToAiErrorResult(exception);
             }
-
-            var result = await paymentService.GetPaymentHistoryAsync(
-                userId.Value,
-                take.GetValueOrDefault(20),
-                cancellationToken);
-            return Results.Ok(result);
         })
         .WithName("GetAiPaymentHistory")
         .WithOpenApi();
@@ -254,8 +330,10 @@ public static class AiSuggestionEndpoints
 
         group.MapPost("/insights/estimate", async (
             AiInsightEstimateRequestPayload request,
+            HttpContext httpContext,
             ClaimsPrincipal user,
             IOptions<AiInsightOptions> aiInsightOptions,
+            AiCreditCloudRelayService cloudRelayService,
             AiInsightService aiInsightService,
             CancellationToken cancellationToken) =>
         {
@@ -272,12 +350,18 @@ public static class AiSuggestionEndpoints
                     return Results.Forbid();
                 }
 
-                var result = await aiInsightService.EstimateInsightAsync(
-                    userId.Value,
-                    request.Prompt,
-                    request.UsageType,
-                    cancellationToken);
+                var result = cloudRelayService.IsEnabled
+                    ? await cloudRelayService.EstimateInsightAsync(request, httpContext, cancellationToken)
+                    : await aiInsightService.EstimateInsightAsync(
+                        userId.Value,
+                        request.Prompt,
+                        request.UsageType,
+                        cancellationToken);
                 return Results.Ok(result);
+            }
+            catch (AiRelayException exception)
+            {
+                return ToAiErrorResult(exception);
             }
             catch (InvalidOperationException exception)
             {
@@ -288,28 +372,42 @@ public static class AiSuggestionEndpoints
         .WithOpenApi();
 
         group.MapGet("/insights/history", async (
+            HttpContext httpContext,
             ClaimsPrincipal user,
             IOptions<AiInsightOptions> aiInsightOptions,
+            AiCreditCloudRelayService cloudRelayService,
             AiInsightService aiInsightService,
             int? take,
             CancellationToken cancellationToken) =>
         {
-            var userId = ResolveUserId(user);
-            if (!userId.HasValue)
+            try
             {
-                return Results.Unauthorized();
-            }
+                var userId = ResolveUserId(user);
+                if (!userId.HasValue)
+                {
+                    return Results.Unauthorized();
+                }
 
-            if (!IsAiInsightsEnabledForUser(aiInsightOptions.Value, user))
+                if (!IsAiInsightsEnabledForUser(aiInsightOptions.Value, user))
+                {
+                    return Results.Forbid();
+                }
+
+                var result = cloudRelayService.IsEnabled
+                    ? await cloudRelayService.GetInsightHistoryAsync(
+                        take.GetValueOrDefault(20),
+                        httpContext,
+                        cancellationToken)
+                    : await aiInsightService.GetHistoryAsync(
+                        userId.Value,
+                        take.GetValueOrDefault(20),
+                        cancellationToken);
+                return Results.Ok(result);
+            }
+            catch (AiRelayException exception)
             {
-                return Results.Forbid();
+                return ToAiErrorResult(exception);
             }
-
-            var result = await aiInsightService.GetHistoryAsync(
-                userId.Value,
-                take.GetValueOrDefault(20),
-                cancellationToken);
-            return Results.Ok(result);
         })
         .WithName("GetAiInsightHistory")
         .WithOpenApi();
@@ -453,6 +551,18 @@ public static class AiSuggestionEndpoints
         .WithOpenApi();
 
         return app;
+    }
+
+    private static IResult ToAiErrorResult(AiRelayException exception)
+    {
+        return Results.Json(new AiRelayErrorPayload
+        {
+            Error = new AiRelayErrorItem
+            {
+                Code = exception.Code,
+                Message = exception.Message
+            }
+        }, statusCode: exception.StatusCode);
     }
 
     private static Guid? ResolveUserId(ClaimsPrincipal user)

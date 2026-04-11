@@ -121,6 +121,12 @@ public sealed class LicenseService(
         Webp = 4
     }
 
+    public readonly record struct ValidatedLicenseTokenContext(
+        Guid ShopId,
+        string DeviceCode,
+        Guid LicenseId,
+        DateTimeOffset ValidUntil);
+
     private readonly record struct ManualOverrideContext(
         string Actor,
         string ReasonCode,
@@ -585,6 +591,110 @@ public sealed class LicenseService(
         }
 
         return CreateResponse(snapshot);
+    }
+
+    public async Task<ValidatedLicenseTokenContext> ValidateLicenseTokenAsync(
+        string? licenseToken,
+        CancellationToken cancellationToken)
+    {
+        var normalizedLicenseToken = NormalizeOptionalValue(licenseToken);
+        if (string.IsNullOrWhiteSpace(normalizedLicenseToken))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidToken,
+                "license_token is required.",
+                StatusCodes.Status401Unauthorized);
+        }
+
+        try
+        {
+            var payload = ParseAndValidateToken(normalizedLicenseToken);
+            var normalizedDeviceCode = NormalizeDeviceCode(payload.DeviceCode);
+            if (string.IsNullOrWhiteSpace(normalizedDeviceCode))
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.InvalidToken,
+                    "license_token device code is invalid.",
+                    StatusCodes.Status403Forbidden);
+            }
+
+            var provisionedDevice = await dbContext.ProvisionedDevices
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.DeviceCode == normalizedDeviceCode, cancellationToken)
+                ?? throw new LicenseException(
+                    LicenseErrorCodes.Unprovisioned,
+                    "Device is not provisioned.",
+                    StatusCodes.Status403Forbidden);
+
+            if (payload.ShopId != provisionedDevice.ShopId)
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.InvalidToken,
+                    "license_token is not valid for this shop.",
+                    StatusCodes.Status403Forbidden);
+            }
+
+            if (!string.IsNullOrWhiteSpace(provisionedDevice.DeviceKeyFingerprint))
+            {
+                var payloadFingerprint = NormalizeOptionalValue(payload.DeviceKeyFingerprint);
+                if (string.IsNullOrWhiteSpace(payloadFingerprint) ||
+                    !string.Equals(
+                        NormalizeKeyFingerprint(payloadFingerprint),
+                        NormalizeKeyFingerprint(provisionedDevice.DeviceKeyFingerprint),
+                        StringComparison.Ordinal))
+                {
+                    throw new LicenseException(
+                        LicenseErrorCodes.DeviceKeyMismatch,
+                        "license_token device key binding is invalid.",
+                        StatusCodes.Status403Forbidden);
+                }
+            }
+
+            var record = await dbContext.Licenses
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    x => x.Id == payload.LicenseId && x.ProvisionedDeviceId == provisionedDevice.Id,
+                    cancellationToken)
+                ?? throw new LicenseException(
+                    LicenseErrorCodes.InvalidToken,
+                    "license_token is unknown.",
+                    StatusCodes.Status403Forbidden);
+
+            var storedSignature = UnprotectSensitiveValue(record.Signature);
+            if (!string.Equals(storedSignature, GetSignaturePart(normalizedLicenseToken), StringComparison.Ordinal))
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.InvalidToken,
+                    "license_token signature metadata mismatch.",
+                    StatusCodes.Status403Forbidden);
+            }
+
+            await ValidateTokenSessionAsync(
+                payload,
+                provisionedDevice,
+                TokenValidationPurpose.General,
+                cancellationToken);
+
+            var now = DateTimeOffset.UtcNow;
+            if (record.Status == LicenseRecordStatus.Revoked ||
+                (record.RevokedAtUtc.HasValue && now >= record.RevokedAtUtc.Value))
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.TokenReplayDetected,
+                    "license_token has been rotated or revoked.",
+                    StatusCodes.Status403Forbidden);
+            }
+
+            return new ValidatedLicenseTokenContext(
+                payload.ShopId,
+                normalizedDeviceCode,
+                payload.LicenseId,
+                payload.ValidUntil);
+        }
+        catch (Exception ex) when (IsLicensingConfigurationException(ex))
+        {
+            throw CreateLicensingConfigurationException(ex);
+        }
     }
 
     private async Task<LicenseStatusSnapshot> RefreshStatusSnapshotTokenIfNeededAsync(

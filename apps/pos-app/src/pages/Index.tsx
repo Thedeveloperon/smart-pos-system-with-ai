@@ -70,6 +70,8 @@ import { X } from "lucide-react";
 const SHORTCUTS_ONBOARDING_STORAGE_KEY_PREFIX = "smartpos.shortcuts.onboarding.v1";
 const REMINDER_BANNER_DISMISSAL_STORAGE_KEY_PREFIX = "smartpos.reminders.banner.dismissed.v1";
 const OFFLINE_BANNER_DISMISSAL_STORAGE_KEY_PREFIX = "smartpos.license.offline.banner.dismissed.v1";
+const AI_LOW_CREDIT_THRESHOLD = 10;
+const CLOUD_PORTAL_URL = (import.meta.env.VITE_CLOUD_PORTAL_URL || "").trim().replace(/\/$/, "");
 const isPosShortcutsFeatureEnabled = import.meta.env.VITE_POS_SHORTCUTS_ENABLED !== "false";
 
 const IndexInner = () => {
@@ -188,6 +190,9 @@ const IndexInner = () => {
 
   const shouldShowReminderBanner =
     openReminderCount > 0 && firstOpenReminder?.reminder_id !== dismissedReminderId;
+  const isAiCreditLow =
+    isAdmin && typeof aiCreditsBalance === "number" && aiCreditsBalance <= AI_LOW_CREDIT_THRESHOLD;
+  const aiTopUpUrl = CLOUD_PORTAL_URL ? `${CLOUD_PORTAL_URL}/en/account` : "";
 
   const dismissReminderBanner = useCallback(() => {
     if (!firstOpenReminder?.reminder_id) {
@@ -279,6 +284,20 @@ const IndexInner = () => {
   useEffect(() => {
     void loadAiWallet();
   }, [loadAiWallet]);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void loadAiWallet();
+    }, 60_000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [isAdmin, loadAiWallet]);
 
   useEffect(() => {
     void loadTodayIssueCount();
@@ -972,6 +991,24 @@ const IndexInner = () => {
           sync: shopProfile?.showOfflineSyncForCashier ?? true,
         }}
       />
+
+      {isAiCreditLow && (
+        <div className="mx-2 mt-2 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-warning/60 bg-warning/15 px-4 py-2 text-sm text-warning-foreground">
+          <span>
+            Low AI credits: <strong>{aiCreditsBalance?.toFixed(2)}</strong>. Top up soon to avoid interruptions.
+          </span>
+          {aiTopUpUrl && (
+            <a
+              href={aiTopUpUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center rounded-md border border-warning/50 px-3 py-1 text-xs font-medium hover:bg-warning/20"
+            >
+              Top Up
+            </a>
+          )}
+        </div>
+      )}
 
       {licenseStatus?.state === "grace" && (
         <LicenseGraceBanner

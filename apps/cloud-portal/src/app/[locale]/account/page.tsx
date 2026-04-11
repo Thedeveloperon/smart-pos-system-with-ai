@@ -122,6 +122,19 @@ type AiPaymentHistoryResponse = {
   items: AiPaymentHistoryItemResponse[];
 };
 
+type AiCreditLedgerItemResponse = {
+  entry_type: string;
+  delta_credits: number;
+  balance_after_credits: number;
+  reference?: string | null;
+  description?: string | null;
+  created_at_utc: string;
+};
+
+type AiCreditLedgerResponse = {
+  items: AiCreditLedgerItemResponse[];
+};
+
 type AiCheckoutSessionResponse = {
   payment_id: string;
   payment_status: string;
@@ -357,6 +370,8 @@ export default function AccountPage() {
   const [aiCreditPacks, setAiCreditPacks] = useState<AiCreditPackResponse[]>([]);
   const [selectedAiPackCode, setSelectedAiPackCode] = useState("");
   const [aiPaymentHistory, setAiPaymentHistory] = useState<AiPaymentHistoryItemResponse[]>([]);
+  const [aiCreditLedger, setAiCreditLedger] = useState<AiCreditLedgerItemResponse[]>([]);
+  const [aiBillingView, setAiBillingView] = useState<"payment_history" | "usage">("payment_history");
   const [aiCheckoutStatusItem, setAiCheckoutStatusItem] = useState<AiPaymentHistoryItemResponse | null>(null);
   const [aiPendingCheckoutReference, setAiPendingCheckoutReference] = useState("");
   const [isPollingAiCheckoutStatus, setIsPollingAiCheckoutStatus] = useState(false);
@@ -576,24 +591,32 @@ export default function AccountPage() {
       setIsLoadingAiBilling(true);
       setAiBillingError(null);
       try {
-        const [walletResponse, packsResponse, paymentsResponse] = await Promise.all([
+        const [walletResponse, packsResponse, paymentsResponse, ledgerResponse] = await Promise.all([
           fetch("/api/account/ai/wallet", { method: "GET", cache: "no-store" }),
           fetch("/api/account/ai/credit-packs", { method: "GET", cache: "no-store" }),
           fetch("/api/account/ai/payments?take=10", { method: "GET", cache: "no-store" }),
+          fetch("/api/account/ai/ledger?take=50", { method: "GET", cache: "no-store" }),
         ]);
 
-        const [walletPayload, packsPayload, paymentsPayload] = await Promise.all([
+        const [walletPayload, packsPayload, paymentsPayload, ledgerPayload] = await Promise.all([
           parseApiPayload(walletResponse),
           parseApiPayload(packsResponse),
           parseApiPayload(paymentsResponse),
+          parseApiPayload(ledgerResponse),
         ]);
 
-        if (walletResponse.status === 401 || packsResponse.status === 401 || paymentsResponse.status === 401) {
+        if (
+          walletResponse.status === 401 ||
+          packsResponse.status === 401 ||
+          paymentsResponse.status === 401 ||
+          ledgerResponse.status === 401
+        ) {
           setAuthSession(null);
           setAiWallet(null);
           setAiCreditPacks([]);
           setSelectedAiPackCode("");
           setAiPaymentHistory([]);
+          setAiCreditLedger([]);
           setAiCheckoutStatusItem(null);
           setAiTopUpUnavailable(false);
           setAiCheckoutMessage(null);
@@ -602,12 +625,18 @@ export default function AccountPage() {
           return null;
         }
 
-        if (walletResponse.status === 403 || packsResponse.status === 403 || paymentsResponse.status === 403) {
+        if (
+          walletResponse.status === 403 ||
+          packsResponse.status === 403 ||
+          paymentsResponse.status === 403 ||
+          ledgerResponse.status === 403
+        ) {
           setAiTopUpUnavailable(true);
           setAiWallet(null);
           setAiCreditPacks([]);
           setSelectedAiPackCode("");
           setAiPaymentHistory([]);
+          setAiCreditLedger([]);
           clearPendingAiCheckoutTracking();
           setAiCheckoutMessage(null);
           resetAiManualFallbackState();
@@ -626,6 +655,10 @@ export default function AccountPage() {
           throw new Error(parseErrorMessage(paymentsPayload));
         }
 
+        if (!ledgerResponse.ok) {
+          throw new Error(parseErrorMessage(ledgerPayload));
+        }
+
         const wallet = requireObjectPayload<AiWalletResponse>(walletPayload, "Wallet payload is empty.");
         const packs = requireObjectPayload<AiCreditPackListResponse>(
           packsPayload,
@@ -635,14 +668,20 @@ export default function AccountPage() {
           paymentsPayload,
           "AI payment history payload is empty.",
         );
+        const ledger = requireObjectPayload<AiCreditLedgerResponse>(
+          ledgerPayload,
+          "AI credit ledger payload is empty.",
+        );
 
         const nextPacks = Array.isArray(packs.items) ? packs.items : [];
         const nextPayments = Array.isArray(payments.items) ? payments.items : [];
+        const nextLedger = Array.isArray(ledger.items) ? ledger.items : [];
 
         setAiTopUpUnavailable(false);
         setAiWallet(wallet);
         setAiCreditPacks(nextPacks);
         setAiPaymentHistory(nextPayments);
+        setAiCreditLedger(nextLedger);
         setSelectedAiPackCode((current) => {
           if (current && nextPacks.some((pack) => pack.pack_code === current)) {
             return current;
@@ -672,6 +711,7 @@ export default function AccountPage() {
         setAiCreditPacks([]);
         setSelectedAiPackCode("");
         setAiPaymentHistory([]);
+        setAiCreditLedger([]);
         setAiCheckoutStatusItem(null);
         setAiBillingError(error instanceof Error ? error.message : "Unable to load AI credit billing data.");
         setAiCheckoutMessage(null);
@@ -1699,31 +1739,87 @@ export default function AccountPage() {
                       </div>
                     )}
 
-                    <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-2">
-                      <p className="portal-kicker">Recent Top-Ups</p>
-                      {aiPaymentHistory.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">No AI credit payments found yet.</p>
-                      ) : (
-                        <div className="space-y-2">
-                          {aiPaymentHistory.slice(0, 8).map((item) => (
-                            <div
-                              key={item.payment_id}
-                              className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2"
-                            >
-                              <div>
-                                <p className="text-sm font-medium">
-                                  {formatCredits(item.credits)} credits · {formatAmount(item.amount, item.currency)}
-                                </p>
-                                <p className="text-xs text-muted-foreground">
-                                  {toSentence(item.payment_status)} · {toSentence(item.payment_method)} · {formatDate(item.created_at)}
-                                </p>
-                              </div>
-                              <p className="text-xs text-muted-foreground font-mono">
-                                {item.external_reference || item.payment_id}
-                              </p>
-                            </div>
-                          ))}
+                    <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="portal-kicker">Billing Activity</p>
+                        <div className="inline-flex rounded-md border border-border/70 bg-background p-1">
+                          <button
+                            type="button"
+                            className={`rounded px-2 py-1 text-xs ${aiBillingView === "payment_history" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent"}`}
+                            onClick={() => setAiBillingView("payment_history")}
+                          >
+                            Payment History
+                          </button>
+                          <button
+                            type="button"
+                            className={`rounded px-2 py-1 text-xs ${aiBillingView === "usage" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent"}`}
+                            onClick={() => setAiBillingView("usage")}
+                          >
+                            Usage
+                          </button>
                         </div>
+                      </div>
+
+                      {aiBillingView === "payment_history" && (
+                        <>
+                          {aiPaymentHistory.length === 0 ? (
+                            <p className="text-sm text-muted-foreground">No AI credit payments found yet.</p>
+                          ) : (
+                            <div className="space-y-2">
+                              {aiPaymentHistory.slice(0, 8).map((item) => (
+                                <div
+                                  key={item.payment_id}
+                                  className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2"
+                                >
+                                  <div>
+                                    <p className="text-sm font-medium">
+                                      {formatCredits(item.credits)} credits · {formatAmount(item.amount, item.currency)}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                      {toSentence(item.payment_status)} · {toSentence(item.payment_method)} · {formatDate(item.created_at)}
+                                    </p>
+                                  </div>
+                                  <p className="text-xs text-muted-foreground font-mono">
+                                    {item.external_reference || item.payment_id}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      )}
+
+                      {aiBillingView === "usage" && (
+                        <>
+                          {aiCreditLedger.length === 0 ? (
+                            <p className="text-sm text-muted-foreground">No AI credit usage entries yet.</p>
+                          ) : (
+                            <div className="space-y-2">
+                              {aiCreditLedger.slice(0, 12).map((item, index) => (
+                                <div
+                                  key={`${item.created_at_utc}-${item.entry_type}-${item.reference || index}`}
+                                  className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2"
+                                >
+                                  <div>
+                                    <p className="text-sm font-medium">
+                                      {toSentence(item.entry_type)} ·{" "}
+                                      <span className={item.delta_credits >= 0 ? "text-emerald-700" : "text-amber-700"}>
+                                        {item.delta_credits >= 0 ? "+" : ""}
+                                        {formatCredits(item.delta_credits)} credits
+                                      </span>
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                      Balance after: {formatCredits(item.balance_after_credits)} · {formatDate(item.created_at_utc)}
+                                    </p>
+                                  </div>
+                                  <p className="text-xs text-muted-foreground font-mono">
+                                    {(item.reference || item.description || "-").toString()}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                   </>

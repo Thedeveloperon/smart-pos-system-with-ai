@@ -243,6 +243,12 @@ describe("Account page authenticated flow", () => {
         });
       }
 
+      if (requestUrl.startsWith("/api/account/ai/ledger?take=")) {
+        return jsonResponse({
+          items: [],
+        });
+      }
+
       if (requestUrl.startsWith("/api/account/ai/payments?take=")) {
         return jsonResponse({
           items: [
@@ -430,6 +436,12 @@ describe("Account page authenticated flow", () => {
               currency: "USD",
             },
           ],
+        });
+      }
+
+      if (requestUrl.startsWith("/api/account/ai/ledger?take=")) {
+        return jsonResponse({
+          items: [],
         });
       }
 
@@ -636,6 +648,12 @@ describe("Account page authenticated flow", () => {
               currency: "USD",
             },
           ],
+        });
+      }
+
+      if (requestUrl.startsWith("/api/account/ai/ledger?take=")) {
+        return jsonResponse({
+          items: [],
         });
       }
 

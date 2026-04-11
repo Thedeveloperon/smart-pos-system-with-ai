@@ -66,6 +66,7 @@ builder.Services.Configure<CloudApiCompatibilityOptions>(
 
 ValidateAiProviderPolicy(builder.Configuration, builder.Environment);
 ValidateLicenseCloudRelayPolicy(builder.Configuration);
+ValidateAiCreditRelayPolicy(builder.Configuration);
 
 static void ValidateAiProviderPolicy(IConfiguration configuration, IWebHostEnvironment environment)
 {
@@ -83,18 +84,21 @@ static void ValidateAiProviderPolicy(IConfiguration configuration, IWebHostEnvir
         provider: suggestionOptions.Provider,
         enabled: suggestionOptions.Enabled,
         allowNonOpenAiInNonProduction: suggestionOptions.AllowNonOpenAiInNonProduction,
-        environment: environment);
+        environment: environment,
+        skipOpenAiRequirement: false);
     ValidateAiProviderPolicyForSection(
         sectionName: AiInsightOptions.SectionName,
         provider: insightOptions.Provider,
         enabled: insightOptions.Enabled,
         allowNonOpenAiInNonProduction: insightOptions.AllowNonOpenAiInNonProduction,
-        environment: environment);
+        environment: environment,
+        skipOpenAiRequirement: insightOptions.CloudRelayEnabled);
 
     var needsOpenAiKey = suggestionOptions.Enabled &&
                          IsOpenAiProvider(suggestionOptions.Provider) ||
                          insightOptions.Enabled &&
-                         IsOpenAiProvider(insightOptions.Provider);
+                         IsOpenAiProvider(insightOptions.Provider) &&
+                         !insightOptions.CloudRelayEnabled;
     if (!needsOpenAiKey)
     {
         return;
@@ -123,9 +127,15 @@ static void ValidateAiProviderPolicyForSection(
     string provider,
     bool enabled,
     bool allowNonOpenAiInNonProduction,
-    IWebHostEnvironment environment)
+    IWebHostEnvironment environment,
+    bool skipOpenAiRequirement)
 {
     if (!enabled)
+    {
+        return;
+    }
+
+    if (skipOpenAiRequirement)
     {
         return;
     }
@@ -215,11 +225,39 @@ static void ValidateLicenseCloudRelayPolicy(IConfiguration configuration)
     }
 }
 
+static void ValidateAiCreditRelayPolicy(IConfiguration configuration)
+{
+    var options = configuration
+                      .GetSection(AiInsightOptions.SectionName)
+                      .Get<AiInsightOptions>()
+                  ?? new AiInsightOptions();
+
+    if (!options.CloudRelayEnabled)
+    {
+        return;
+    }
+
+    var baseUrl = (options.CloudRelayBaseUrl ?? string.Empty).Trim();
+    if (string.IsNullOrWhiteSpace(baseUrl))
+    {
+        throw new InvalidOperationException(
+            "AiInsights:CloudRelayBaseUrl is required when AiInsights:CloudRelayEnabled=true.");
+    }
+
+    if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out _))
+    {
+        throw new InvalidOperationException(
+            "AiInsights:CloudRelayBaseUrl must be a valid absolute URL when AiInsights:CloudRelayEnabled=true.");
+    }
+}
+
 builder.Services.AddSingleton(jwtOptions);
 builder.Services.AddSingleton<IOpsAlertPublisher, WebhookOpsAlertPublisher>();
 builder.Services.AddSingleton<LicensingMetrics>();
 builder.Services.AddSingleton<LicenseCloudRelayMetrics>();
 builder.Services.AddSingleton<LicenseCloudRelayStatusCache>();
+builder.Services.AddSingleton<AiCreditCloudRelayMetrics>();
+builder.Services.AddSingleton<AiCreditCloudRelayWalletCache>();
 builder.Services.AddSingleton<LicensingAlertMonitor>();
 builder.Services.AddSingleton<ILicensingAlertMonitor>(
     serviceProvider => serviceProvider.GetRequiredService<LicensingAlertMonitor>());
@@ -366,6 +404,7 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<AuditLogService>();
 builder.Services.AddScoped<LicenseService>();
 builder.Services.AddScoped<LicenseCloudRelayService>();
+builder.Services.AddScoped<AiCreditCloudRelayService>();
 builder.Services.AddScoped<LicensingMigrationDryRunService>();
 builder.Services.AddScoped<RecoveryOpsService>();
 builder.Services.AddScoped<DeviceActionProofService>();
@@ -390,6 +429,18 @@ builder.Services.AddHttpClient<AiInsightService>();
 builder.Services.AddHttpClient("cloud-license-relay", (serviceProvider, httpClient) =>
 {
     var options = serviceProvider.GetRequiredService<IOptions<LicenseOptions>>().Value;
+    var baseUrl = (options.CloudRelayBaseUrl ?? string.Empty).Trim();
+    if (Uri.TryCreate(baseUrl, UriKind.Absolute, out var relayUri))
+    {
+        httpClient.BaseAddress = relayUri;
+    }
+
+    var timeoutSeconds = Math.Max(1, options.CloudRelayTimeoutSeconds);
+    httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+});
+builder.Services.AddHttpClient("cloud-ai-relay", (serviceProvider, httpClient) =>
+{
+    var options = serviceProvider.GetRequiredService<IOptions<AiInsightOptions>>().Value;
     var baseUrl = (options.CloudRelayBaseUrl ?? string.Empty).Trim();
     if (Uri.TryCreate(baseUrl, UriKind.Absolute, out var relayUri))
     {
@@ -592,6 +643,7 @@ if (staticFilesAvailable)
 app.UseCors("frontend");
 app.UseMiddleware<ProvisioningRateLimitMiddleware>();
 app.UseMiddleware<CloudLicensingSurfaceGuardMiddleware>();
+app.UseMiddleware<CloudAiRelaySurfaceGuardMiddleware>();
 app.UseMiddleware<CloudApiVersionCompatibilityMiddleware>();
 app.UseMiddleware<CloudWriteReliabilityMiddleware>();
 app.UseMiddleware<CloudLegacyApiDeprecationMiddleware>();
@@ -632,6 +684,7 @@ if (!staticIndexFileAvailable)
 app.MapAuthEndpoints();
 app.MapLicensingEndpoints();
 app.MapCloudV1Endpoints();
+app.MapCloudAiRelayEndpoints();
 app.MapRecoveryEndpoints();
 app.MapDeviceActionProofEndpoints();
 app.MapAiSuggestionEndpoints();

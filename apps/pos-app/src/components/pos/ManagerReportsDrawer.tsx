@@ -31,7 +31,6 @@ import {
   adminTransferDeviceSeat,
   exportAdminLicenseAuditLogs,
   createAdminManualBillingInvoice,
-  fetchAiPendingManualPayments,
   runAdminEmergencyAction,
   fetchAdminManualBillingDailyReconciliation,
   fetchAdminManualBillingInvoices,
@@ -49,8 +48,6 @@ import {
   fetchTransactionsReport,
   recordAdminManualBillingPayment,
   rejectAdminManualBillingPayment,
-  type AiPendingManualPaymentItem,
-  verifyAiManualPayment,
   verifyAdminManualBillingPayment,
 } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
@@ -387,11 +384,6 @@ const ManagerReportsDrawer = ({
   const [verifyPaymentDialog, setVerifyPaymentDialog] = useState<VerifyPaymentDialogState | null>(null);
   const [isSubmittingVerifyPayment, setIsSubmittingVerifyPayment] = useState(false);
   const [isGeneratingLicensePaymentId, setIsGeneratingLicensePaymentId] = useState<string | null>(null);
-  const [aiVerifyReference, setAiVerifyReference] = useState("");
-  const [isVerifyingAiPayment, setIsVerifyingAiPayment] = useState(false);
-  const [verifyingAiPaymentId, setVerifyingAiPaymentId] = useState<string | null>(null);
-  const [pendingAiPayments, setPendingAiPayments] = useState<AiPendingManualPaymentItem[]>([]);
-  const [loadingPendingAiPayments, setLoadingPendingAiPayments] = useState(false);
   const [supportSection, setSupportSection] = useState("overview");
   const [billingSection, setBillingSection] = useState("ledger");
   const promptResolveRef = useRef<((value: string | null) => void) | null>(null);
@@ -482,29 +474,6 @@ const ManagerReportsDrawer = ({
     };
   }, []);
 
-  const loadPendingAiPayments = useCallback(
-    async (quiet = false) => {
-      if (!isSuperAdmin) {
-        setPendingAiPayments([]);
-        return;
-      }
-
-      setLoadingPendingAiPayments(true);
-      try {
-        const response = await fetchAiPendingManualPayments(80);
-        setPendingAiPayments(response.items);
-      } catch (error) {
-        console.error(error);
-        if (!quiet) {
-          toast.error(error instanceof Error ? error.message : "Failed to load pending AI payment requests.");
-        }
-      } finally {
-        setLoadingPendingAiPayments(false);
-      }
-    },
-    [isSuperAdmin]
-  );
-
   const loadReports = useCallback(async () => {
     setLoading(true);
     try {
@@ -577,91 +546,7 @@ const ManagerReportsDrawer = ({
 
   const refreshSupportData = useCallback(() => {
     void loadReports();
-    if (isSuperAdmin) {
-      void loadPendingAiPayments(true);
-    }
-  }, [isSuperAdmin, loadPendingAiPayments, loadReports]);
-
-  const handleVerifyAiPayment = useCallback(
-    async (payload: { paymentId?: string; externalReference?: string }, clearReferenceInput = false) => {
-      const paymentId = payload.paymentId?.trim();
-      const externalReference = payload.externalReference?.trim();
-      if (!paymentId && !externalReference) {
-        toast.error("Payment ID or external reference is required.");
-        return;
-      }
-
-      setIsVerifyingAiPayment(true);
-      setVerifyingAiPaymentId(paymentId ?? "__by_reference__");
-      try {
-        const result = await verifyAiManualPayment({
-          payment_id: paymentId,
-          external_reference: externalReference,
-        });
-        await loadPendingAiPayments(true);
-        toast.success(
-          result.payment_status === "succeeded"
-            ? "AI payment verified and credits added."
-            : `AI payment status: ${result.payment_status.replaceAll("_", " ")}.`,
-        );
-        if (clearReferenceInput) {
-          setAiVerifyReference("");
-        }
-      } catch (error) {
-        console.error(error);
-        toast.error(error instanceof Error ? error.message : "Failed to verify AI payment.");
-      } finally {
-        setIsVerifyingAiPayment(false);
-        setVerifyingAiPaymentId(null);
-      }
-    },
-    [loadPendingAiPayments]
-  );
-
-  const handleVerifyAiPaymentByReference = useCallback(async () => {
-    const rawReference = aiVerifyReference.trim();
-    if (!rawReference) {
-      toast.error("Enter a submitted or external reference.");
-      return;
-    }
-
-    const normalizedReference = rawReference.toLowerCase();
-    const findMatches = (items: AiPendingManualPaymentItem[]) =>
-      items.filter((item) => {
-        const externalReference = (item.external_reference || "").trim().toLowerCase();
-        const submittedReference = (item.submitted_reference || "").trim().toLowerCase();
-        return externalReference === normalizedReference || submittedReference === normalizedReference;
-      });
-
-    let matches = findMatches(pendingAiPayments);
-    if (matches.length === 0) {
-      try {
-        const refreshed = await fetchAiPendingManualPayments(200);
-        setPendingAiPayments(refreshed.items);
-        matches = findMatches(refreshed.items);
-      } catch {
-        // Keep existing message path below.
-      }
-    }
-
-    if (matches.length === 0) {
-      toast.error("No pending payment matched this reference. Refresh and try again.");
-      return;
-    }
-
-    if (matches.length > 1) {
-      toast.error("Multiple pending payments share this reference. Verify from the exact row.");
-      return;
-    }
-
-    const target = matches[0];
-    await handleVerifyAiPayment(
-      {
-        paymentId: target.payment_id,
-      },
-      true
-    );
-  }, [aiVerifyReference, handleVerifyAiPayment, pendingAiPayments]);
+  }, [loadReports]);
 
   const handleSearchAuditLogs = useCallback(async () => {
     try {
@@ -1617,10 +1502,7 @@ const ManagerReportsDrawer = ({
     }
 
     void loadReports();
-    if (isSuperAdmin) {
-      void loadPendingAiPayments(true);
-    }
-  }, [isSuperAdmin, loadPendingAiPayments, open, loadReports, refreshToken]);
+  }, [open, loadReports, refreshToken]);
 
   const overview = useMemo(() => {
     const cashierMap = new Map<string, number>();
@@ -2402,7 +2284,6 @@ const ManagerReportsDrawer = ({
                       <TabsList className="grid w-full grid-cols-2 gap-2 lg:grid-cols-5">
                         <TabsTrigger value="overview">Overview</TabsTrigger>
                         <TabsTrigger value="devices">Devices</TabsTrigger>
-                        <TabsTrigger value="aiPayments">AI Payments</TabsTrigger>
                         <TabsTrigger value="billing">Billing</TabsTrigger>
                         <TabsTrigger value="auditLogs">Audit Logs</TabsTrigger>
                       </TabsList>
@@ -2782,92 +2663,6 @@ const ManagerReportsDrawer = ({
                               )}
                             </TableBody>
                           </Table>
-                        </div>
-                      </div>
-                    </TabsContent>
-
-                    <TabsContent value="aiPayments" className="mt-0 space-y-4">
-                      <div className="rounded-2xl border border-border bg-card shadow-sm">
-                        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
-                          <div className="space-y-1">
-                            <p className="text-sm font-semibold">AI Credit Purchasing Requests</p>
-                            <p className="text-xs text-muted-foreground">
-                              Pending manual AI payments (`cash` / `bank_deposit`) with submitted reference details.
-                            </p>
-                          </div>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              void loadPendingAiPayments();
-                            }}
-                            disabled={loadingPendingAiPayments}
-                          >
-                            Refresh Requests
-                          </Button>
-                        </div>
-
-                        <div className="space-y-3 p-4">
-                          <div className="flex flex-col gap-2 sm:flex-row">
-                            <Input
-                              value={aiVerifyReference}
-                              onChange={(event) => setAiVerifyReference(event.target.value)}
-                              placeholder="Submitted ref or aicpay_... external ref"
-                              className="sm:flex-1"
-                            />
-                            <Button
-                              onClick={() => {
-                                void handleVerifyAiPaymentByReference();
-                              }}
-                              disabled={isVerifyingAiPayment}
-                            >
-                              {isVerifyingAiPayment ? "Verifying..." : "Verify by Reference"}
-                            </Button>
-                          </div>
-
-                          {loadingPendingAiPayments ? (
-                            <p className="text-sm text-muted-foreground">Loading pending AI credit requests...</p>
-                          ) : pendingAiPayments.length === 0 ? (
-                            <p className="text-sm text-muted-foreground">No pending AI credit purchase requests.</p>
-                          ) : (
-                            <div className="max-h-[60vh] space-y-2 overflow-auto pr-1">
-                              {pendingAiPayments.slice(0, 20).map((item) => (
-                                <div key={item.payment_id} className="rounded-md border border-border/70 bg-muted/20 p-3">
-                                  <div className="flex flex-wrap items-center gap-2 text-xs">
-                                    <span className="font-semibold text-foreground">{item.payment_status.replaceAll("_", " ")}</span>
-                                    <BadgeTone method={item.payment_method} />
-                                    <span className="text-muted-foreground">{new Date(item.created_at).toLocaleString()}</span>
-                                    <span className="ml-auto text-muted-foreground">
-                                      {item.credits.toFixed(0)} credits ({item.currency} {item.amount.toFixed(2)})
-                                    </span>
-                                  </div>
-                                  <p className="mt-1 text-xs text-muted-foreground">
-                                    User: {item.target_full_name || item.target_username}
-                                    {item.target_full_name ? ` (${item.target_username})` : ""}
-                                    {item.shop_name ? ` • Shop: ${item.shop_name}` : ""}
-                                  </p>
-                                  <p className="mt-1 text-xs text-muted-foreground">
-                                    Submitted Ref: {item.submitted_reference || "-"} • External Ref: {item.external_reference}
-                                  </p>
-                                  <div className="mt-2 flex justify-end">
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      onClick={() =>
-                                        void handleVerifyAiPayment({
-                                          paymentId: item.payment_id,
-                                          externalReference: item.external_reference,
-                                        })
-                                      }
-                                      disabled={isVerifyingAiPayment && verifyingAiPaymentId === item.payment_id}
-                                    >
-                                      {isVerifyingAiPayment && verifyingAiPaymentId === item.payment_id ? "Verifying..." : "Verify"}
-                                    </Button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
                         </div>
                       </div>
                     </TabsContent>
