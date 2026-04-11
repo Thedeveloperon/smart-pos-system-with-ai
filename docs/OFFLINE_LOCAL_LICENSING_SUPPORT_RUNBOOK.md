@@ -37,8 +37,9 @@ Use this runbook for stores operating in `LocalOffline` licensing mode where act
 - Cause: wrong key, typo, or key from unrelated environment.
 - Action:
   1. Validate key format and source batch.
-  2. Compare against current active batch CSV.
-  3. If unknown key source, generate fresh batch and re-issue key.
+  2. Confirm key batch was generated from the same active backend instance/database (for packaged client: `http://127.0.0.1:5080`).
+  3. Compare against current active batch CSV.
+  4. If unknown key source, generate fresh batch and re-issue key.
 
 ### `activation_entitlement_key is revoked` / `expired`
 
@@ -75,6 +76,7 @@ For fraud indicators, follow:
 
 - Generate keys only with:
   - `./scripts/licensing/generate-offline-activation-codes.sh`
+  - Default backend target is `http://127.0.0.1:5080`; override with `SMARTPOS_BACKEND_URL` only when intentionally targeting another instance.
 - Store CSV under restricted path (`chmod 600` effective).
 - Retention:
   - operational copy: up to 90 days

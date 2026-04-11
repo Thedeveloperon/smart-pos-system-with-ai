@@ -82,8 +82,52 @@ Invoke-External -Label "Publishing backend" -Command "dotnet" -Arguments $publis
 New-Item -ItemType Directory -Path $wwwrootDir -Force | Out-Null
 Copy-Item -Path (Join-Path $frontendDistDir "*") -Destination $wwwrootDir -Recurse -Force
 
+$shortcutIconOutput = Join-Path $outputRoot "lanka-pos.ico"
+$shortcutIconPngSource = Join-Path $frontendDir "public/favicon.png"
+$shortcutIconIcoFallback = Join-Path $frontendDir "public/favicon.ico"
+$shortcutIconWritten = $false
+
+$pythonCommand = Get-Command python3 -ErrorAction SilentlyContinue
+if ($null -eq $pythonCommand) {
+    $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+}
+
+if ($null -ne $pythonCommand -and (Test-Path -LiteralPath $shortcutIconPngSource)) {
+    Write-Host "Generating shortcut icon from $shortcutIconPngSource" -ForegroundColor Cyan
+    $pythonScript = @"
+from PIL import Image
+import sys
+source, target = sys.argv[1], sys.argv[2]
+img = Image.open(source).convert('RGBA')
+sizes = [(256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (16, 16)]
+img.save(target, format='ICO', sizes=sizes)
+"@
+    & $pythonCommand.Source -c $pythonScript $shortcutIconPngSource $shortcutIconOutput
+    if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $shortcutIconOutput)) {
+        $shortcutIconWritten = $true
+    }
+}
+
+if (-not $shortcutIconWritten -and (Test-Path -LiteralPath $shortcutIconIcoFallback)) {
+    Write-Host "Using fallback shortcut icon: $shortcutIconIcoFallback" -ForegroundColor Yellow
+    Copy-Item -Path $shortcutIconIcoFallback -Destination $shortcutIconOutput -Force
+    $shortcutIconWritten = $true
+}
+
+if (-not $shortcutIconWritten) {
+    Write-Host "Warning: shortcut icon was not generated. Shortcuts will fall back to backend.exe icon." -ForegroundColor Yellow
+}
+
 Copy-Item -Path (Join-Path $clientTemplatesDir "Start-SmartPOS.bat") -Destination $outputRoot -Force
 Copy-Item -Path (Join-Path $clientTemplatesDir "Stop-SmartPOS.bat") -Destination $outputRoot -Force
+Copy-Item -Path (Join-Path $clientTemplatesDir "Install-SmartPOS-Service.bat") -Destination $outputRoot -Force
+Copy-Item -Path (Join-Path $clientTemplatesDir "Install-SmartPOS-Service.ps1") -Destination $outputRoot -Force
+Copy-Item -Path (Join-Path $clientTemplatesDir "Uninstall-SmartPOS-Service.bat") -Destination $outputRoot -Force
+Copy-Item -Path (Join-Path $clientTemplatesDir "Uninstall-SmartPOS-Service.ps1") -Destination $outputRoot -Force
+Copy-Item -Path (Join-Path $clientTemplatesDir "Precheck-SmartPOS-Host.bat") -Destination $outputRoot -Force
+Copy-Item -Path (Join-Path $clientTemplatesDir "Precheck-SmartPOS-Host.ps1") -Destination $outputRoot -Force
+Copy-Item -Path (Join-Path $clientTemplatesDir "Generate-Offline-Activation-Codes.bat") -Destination $outputRoot -Force
+Copy-Item -Path (Join-Path $clientTemplatesDir "Generate-Offline-Activation-Codes.ps1") -Destination $outputRoot -Force
 Copy-Item -Path (Join-Path $clientTemplatesDir "client.env.example") -Destination $outputRoot -Force
 Copy-Item -Path (Join-Path $clientTemplatesDir "README-CLIENT.txt") -Destination $outputRoot -Force
 

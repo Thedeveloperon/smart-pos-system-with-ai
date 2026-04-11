@@ -23,6 +23,7 @@ using SmartPos.Backend.Infrastructure;
 using SmartPos.Backend.Security;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Host.UseWindowsService();
 var jwtOptions = builder.Configuration
                      .GetSection(JwtCookieOptions.SectionName)
                      .Get<JwtCookieOptions>()
