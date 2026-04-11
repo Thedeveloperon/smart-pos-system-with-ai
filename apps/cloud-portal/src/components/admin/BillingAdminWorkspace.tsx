@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import AiCreditVerificationPanel from "./AiCreditVerificationPanel";
 import {
   adminActivateDevice,
   adminDeactivateDevice,
@@ -625,9 +626,10 @@ const BillingAdminWorkspace = ({ username, onSignOut }: BillingAdminWorkspacePro
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="invoices">Invoices</TabsTrigger>
             <TabsTrigger value="licenses">Licenses</TabsTrigger>
+            <TabsTrigger value="ai-credits">AI Credits</TabsTrigger>
             <TabsTrigger value="audit">Audit</TabsTrigger>
           </TabsList>
 
@@ -1086,6 +1088,10 @@ const BillingAdminWorkspace = ({ username, onSignOut }: BillingAdminWorkspacePro
                 </TableBody>
               </Table>
             </div>
+          </TabsContent>
+
+          <TabsContent value="ai-credits" className="space-y-4">
+            <AiCreditVerificationPanel />
           </TabsContent>
 
           <TabsContent value="audit" className="space-y-4">

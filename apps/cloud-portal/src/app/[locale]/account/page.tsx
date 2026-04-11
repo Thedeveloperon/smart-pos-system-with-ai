@@ -392,11 +392,6 @@ export default function AccountPage() {
   const [aiCreditLedger, setAiCreditLedger] = useState<AiCreditLedgerItemResponse[]>([]);
   const [aiBillingView, setAiBillingView] = useState<"payment_history" | "usage">("payment_history");
   const [aiPendingManualPayments, setAiPendingManualPayments] = useState<AiPendingManualPaymentItem[]>([]);
-  const [isVerifyingAiManualPayment, setIsVerifyingAiManualPayment] = useState(false);
-  const [verifyingAiPaymentId, setVerifyingAiPaymentId] = useState<string | null>(null);
-  const [aiVerifyReferenceInput, setAiVerifyReferenceInput] = useState("");
-  const [aiVerifyError, setAiVerifyError] = useState<string | null>(null);
-  const [aiVerifySuccess, setAiVerifySuccess] = useState<string | null>(null);
   const [aiCheckoutStatusItem, setAiCheckoutStatusItem] = useState<AiPaymentHistoryItemResponse | null>(null);
   const [aiPendingCheckoutReference, setAiPendingCheckoutReference] = useState("");
   const [isPollingAiCheckoutStatus, setIsPollingAiCheckoutStatus] = useState(false);
@@ -649,8 +644,6 @@ export default function AccountPage() {
           setAiCheckoutStatusItem(null);
           setAiTopUpUnavailable(false);
           setAiCheckoutMessage(null);
-          setAiVerifyError(null);
-          setAiVerifySuccess(null);
           resetAiManualFallbackState();
           setAiBillingError("Your session expired. Please log in again.");
           return null;
@@ -672,8 +665,6 @@ export default function AccountPage() {
           setAiPendingManualPayments([]);
           clearPendingAiCheckoutTracking();
           setAiCheckoutMessage(null);
-          setAiVerifyError(null);
-          setAiVerifySuccess(null);
           resetAiManualFallbackState();
           return null;
         }
@@ -760,8 +751,6 @@ export default function AccountPage() {
         setAiCheckoutStatusItem(null);
         setAiBillingError(error instanceof Error ? error.message : "Unable to load AI credit billing data.");
         setAiCheckoutMessage(null);
-        setAiVerifyError(null);
-        setAiVerifySuccess(null);
         resetAiManualFallbackState();
         return null;
       } finally {
@@ -771,80 +760,6 @@ export default function AccountPage() {
     [aiPendingCheckoutReference, clearPendingAiCheckoutTracking, locale, resetAiManualFallbackState],
   );
 
-  const handleVerifyAiManualPayment = useCallback(
-    async (paymentId: string): Promise<boolean> => {
-      const normalizedPaymentId = paymentId.trim();
-      if (!normalizedPaymentId) {
-        setAiVerifyError("Payment ID is required.");
-        return false;
-      }
-
-      setIsVerifyingAiManualPayment(true);
-      setVerifyingAiPaymentId(normalizedPaymentId);
-      setAiVerifyError(null);
-      setAiVerifySuccess(null);
-      try {
-        const response = await fetch("/api/account/ai/payments/verify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ payment_id: normalizedPaymentId }),
-        });
-        const payload = await parseApiPayload(response);
-        if (!response.ok) {
-          setAiVerifyError(parseErrorMessage(payload) || "Verification failed.");
-          return false;
-        }
-
-        const result = payload as { payment_status?: string };
-        const status = normalizePaymentStatus(result.payment_status || "updated");
-        setAiVerifySuccess(
-          status === "succeeded"
-            ? "Payment verified and credits were added."
-            : `Payment status updated: ${status.replaceAll("_", " ")}.`,
-        );
-        await loadAiBillingData({ trackEvent: false });
-        return true;
-      } catch (error) {
-        setAiVerifyError(error instanceof Error ? error.message : "Unexpected error.");
-        return false;
-      } finally {
-        setIsVerifyingAiManualPayment(false);
-        setVerifyingAiPaymentId(null);
-      }
-    },
-    [loadAiBillingData],
-  );
-
-  const handleVerifyAiManualPaymentByReference = useCallback(async () => {
-    const normalizedReference = aiVerifyReferenceInput.trim().toLowerCase();
-    if (!normalizedReference) {
-      setAiVerifyError("Enter a submitted or external reference.");
-      return;
-    }
-
-    setAiVerifyError(null);
-    setAiVerifySuccess(null);
-    const matches = aiPendingManualPayments.filter((item) => {
-      const externalReference = (item.external_reference || "").trim().toLowerCase();
-      const submittedReference = (item.submitted_reference || "").trim().toLowerCase();
-      return externalReference === normalizedReference || submittedReference === normalizedReference;
-    });
-
-    if (matches.length === 0) {
-      setAiVerifyError("No pending payment matched this reference.");
-      return;
-    }
-
-    if (matches.length > 1) {
-      setAiVerifyError("Multiple pending payments match this reference. Verify from the exact row.");
-      return;
-    }
-
-    const verified = await handleVerifyAiManualPayment(matches[0].payment_id);
-    if (verified) {
-      setAiVerifyReferenceInput("");
-    }
-  }, [aiPendingManualPayments, aiVerifyReferenceInput, handleVerifyAiManualPayment]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -1951,83 +1866,38 @@ export default function AccountPage() {
                       )}
                     </div>
 
-                    {canViewLicensePortal && (
+                    {canViewLicensePortal && aiPendingManualPayments.length > 0 && (
                       <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-3">
                         <p className="portal-kicker">Pending Verifications</p>
                         <p className="text-sm text-muted-foreground">
-                          Manual AI credit purchases (`cash` / `bank_deposit`) awaiting confirmation.
+                          Manual AI credit purchases awaiting confirmation. Our team will verify your reference and release credits shortly.
                         </p>
 
-                        <div className="flex flex-col gap-2 sm:flex-row">
-                          <input
-                            type="text"
-                            value={aiVerifyReferenceInput}
-                            onChange={(event) => {
-                              setAiVerifyReferenceInput(event.target.value);
-                              setAiVerifyError(null);
-                              setAiVerifySuccess(null);
-                            }}
-                            placeholder="Submitted ref or aicpay_... external ref"
-                            className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm sm:flex-1"
-                          />
-                          <Button
-                            type="button"
-                            disabled={isVerifyingAiManualPayment || !aiVerifyReferenceInput.trim()}
-                            onClick={() => {
-                              void handleVerifyAiManualPaymentByReference();
-                            }}
-                          >
-                            {isVerifyingAiManualPayment ? "Verifying..." : "Verify by Reference"}
-                          </Button>
-                        </div>
-
-                        {aiVerifyError && (
-                          <p className="text-sm text-destructive">{aiVerifyError}</p>
-                        )}
-                        {aiVerifySuccess && (
-                          <p className="text-sm text-emerald-700">{aiVerifySuccess}</p>
-                        )}
-
-                        {aiPendingManualPayments.length === 0 ? (
-                          <p className="text-sm text-muted-foreground">No pending manual payment requests.</p>
-                        ) : (
-                          <div className="space-y-2">
-                            {aiPendingManualPayments.map((item) => (
-                              <div
-                                key={item.payment_id}
-                                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2"
-                              >
-                                <div>
-                                  <p className="text-sm font-medium">
-                                    {formatCredits(item.credits)} credits · {formatAmount(item.amount, item.currency)}
-                                  </p>
-                                  <p className="text-xs text-muted-foreground">
-                                    {toSentence(item.payment_method)} · {toSentence(item.payment_status)} · {formatDate(item.created_at)}
-                                  </p>
-                                  <p className="text-xs text-muted-foreground">
-                                    User: {item.target_full_name || item.target_username}
-                                    {item.target_full_name ? ` (${item.target_username})` : ""}
-                                    {item.shop_name ? ` · Shop: ${item.shop_name}` : ""}
-                                  </p>
+                        <div className="space-y-2">
+                          {aiPendingManualPayments.map((item) => (
+                            <div
+                              key={item.payment_id}
+                              className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2"
+                            >
+                              <div>
+                                <p className="text-sm font-medium">
+                                  {formatCredits(item.credits)} credits · {formatAmount(item.amount, item.currency)}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  {toSentence(item.payment_method)} · {toSentence(item.payment_status)} · {formatDate(item.created_at)}
+                                </p>
+                                {item.submitted_reference && (
                                   <p className="text-xs font-mono text-muted-foreground">
-                                    Ref: {item.submitted_reference || "-"} · {item.external_reference}
+                                    Ref: {item.submitted_reference}
                                   </p>
-                                </div>
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  disabled={isVerifyingAiManualPayment}
-                                  onClick={() => {
-                                    void handleVerifyAiManualPayment(item.payment_id);
-                                  }}
-                                >
-                                  {isVerifyingAiManualPayment && verifyingAiPaymentId === item.payment_id ? "Verifying..." : "Verify"}
-                                </Button>
+                                )}
                               </div>
-                            ))}
-                          </div>
-                        )}
+                              <span className="inline-flex h-8 items-center rounded-md border border-border/50 bg-muted px-3 text-xs text-muted-foreground">
+                                Awaiting admin
+                              </span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </>
