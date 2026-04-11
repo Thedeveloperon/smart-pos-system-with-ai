@@ -37,6 +37,8 @@ services:
         sync: false
       - key: Licensing__MarketingManualBillingFallbackEnabled
         value: "true"
+      - key: Licensing__CloudLicensingEndpointsEnabled
+        value: "true"
       - key: AiInsights__CloudAiRelayEndpointsEnabled
         value: "true"
       - key: OPENAI_API_KEY

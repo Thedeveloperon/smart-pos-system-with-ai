@@ -17,7 +17,8 @@
       "howItWorks": "How It Works",
       "pricing": "Pricing"
     },
-    "account": "My Account",
+    "account": "Sign In",
+    "signUp": "Sign Up",
     "cta": "Get Started Free",
     "languageLabel": "Language",
     "languages": {
