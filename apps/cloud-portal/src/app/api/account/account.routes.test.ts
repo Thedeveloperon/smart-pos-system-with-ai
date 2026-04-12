@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 import { POST as loginPost } from "@/app/api/account/login/route";
 import { GET as meGet } from "@/app/api/account/me/route";
 import { POST as logoutPost } from "@/app/api/account/logout/route";
+import { GET as tenantContextGet } from "@/app/api/account/tenant-context/route";
 import { GET as licensePortalGet } from "@/app/api/account/license-portal/route";
 import { POST as deactivateDevicePost } from "@/app/api/account/license-portal/devices/[deviceCode]/deactivate/route";
 import { GET as aiWalletGet } from "@/app/api/account/ai/wallet/route";
@@ -190,6 +191,46 @@ describe("Account API proxy routes", () => {
     expect(secondHeaders.get("Idempotency-Key")).toBeNull();
   });
 
+  it("login route falls back to /auth/json-login and synthesizes auth cookie when needed", async () => {
+    vi.mocked(global.fetch)
+      .mockResolvedValueOnce(jsonResponse({ detail: "Not Found" }, { status: 404 }))
+      .mockResolvedValueOnce(jsonResponse({ detail: "Not Found" }, { status: 404 }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          username: "owner",
+          role: "owner",
+          token: "fallback-token",
+          user_id: "user-123",
+        }),
+      );
+
+    const request = new NextRequest("http://localhost/api/account/login", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        username: "owner",
+        password: "owner123",
+      }),
+    });
+
+    const response = await loginPost(request);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      username: "owner",
+      role: "owner",
+    });
+    expect(response.headers.get("set-cookie")).toContain("smartpos_auth=fallback-token");
+    expect(response.headers.get("set-cookie")).toContain("smartpos_user_id=user-123");
+
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+    const [thirdUrl, thirdInit] = vi.mocked(global.fetch).mock.calls[2] as [string, RequestInit];
+    expect(thirdUrl).toBe("http://backend.test/auth/json-login");
+    expect(thirdInit.method).toBe("POST");
+    expect(readHeaders(thirdInit).get("content-type")).toBe("application/json");
+  });
+
   it("session route forwards cookie to backend /api/auth/me", async () => {
     vi.mocked(global.fetch).mockResolvedValueOnce(
       jsonResponse({
@@ -289,6 +330,39 @@ describe("Account API proxy routes", () => {
 
     const headers = readHeaders(init);
     expect(headers.get("cookie")).toContain("smartpos_auth=session-token");
+  });
+
+  it("tenant-context route falls back to license-portal payload when direct endpoint is missing", async () => {
+    vi.mocked(global.fetch)
+      .mockResolvedValueOnce(jsonResponse({ detail: "Not Found" }, { status: 404 }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          shop_code: "default",
+          role: "owner",
+          username: "owner",
+          full_name: "Store Owner",
+        }),
+      );
+
+    const request = new NextRequest("http://localhost/api/account/tenant-context", {
+      method: "GET",
+      headers: {
+        cookie: "smartpos_auth=session-token",
+      },
+    });
+
+    const response = await tenantContextGet(request);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      shop_id: "00000000-0000-0000-0000-000000000000",
+      shop_code: "default",
+      username: "owner",
+      full_name: "Store Owner",
+      role: "owner",
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    const [secondUrl] = vi.mocked(global.fetch).mock.calls[1] as [string, RequestInit];
+    expect(secondUrl).toBe("http://backend.test/api/license/account/licenses");
   });
 
   it("license-portal route propagates upstream forbidden response", async () => {
