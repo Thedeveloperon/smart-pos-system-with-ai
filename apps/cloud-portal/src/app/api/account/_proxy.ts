@@ -9,6 +9,7 @@ type ForwardAccountRequestOptions = {
   body?: BodyInit | null;
   contentType?: string;
   includeIdempotencyKey?: boolean;
+  extraHeaders?: HeadersInit;
 };
 
 function resolveBackendApiUrl() {
@@ -63,6 +64,12 @@ export async function forwardAccountRequest(options: ForwardAccountRequestOption
     const incomingAuthorization = options.request.headers.get("authorization");
     if (incomingAuthorization) {
       headers.set("authorization", incomingAuthorization);
+    }
+
+    if (options.extraHeaders) {
+      for (const [key, value] of new Headers(options.extraHeaders).entries()) {
+        headers.set(key, value);
+      }
     }
 
     if (options.contentType) {

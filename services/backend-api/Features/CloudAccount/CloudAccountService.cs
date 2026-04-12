@@ -22,6 +22,7 @@ public sealed class CloudAccountService(
 {
     private const string CloudAccountLinkClientName = "cloud-account-link";
     private const string CloudAuthCookieName = "smartpos_auth";
+    private const string CloudUserIdCookieName = "smartpos_user_id";
     private const string EncryptedValuePrefix = "enc:v1:";
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -107,7 +108,7 @@ public sealed class CloudAccountService(
         var tenantContext = await ResolveTenantContextAsync(
             client,
             cloudBaseUrl,
-            loginResult.AuthToken,
+            loginResult.CookieHeader,
             cloudLogin,
             cancellationToken);
 
@@ -278,7 +279,8 @@ public sealed class CloudAccountService(
         var loginPaths = new[]
         {
             "/api/auth/login",
-            "/api/account/login"
+            "/api/account/login",
+            "/auth/json-login"
         };
 
         foreach (var path in loginPaths)
@@ -304,25 +306,56 @@ public sealed class CloudAccountService(
                     ParseCloudErrorMessage(loginResponse.StatusCode, loginBody, "Cloud login failed."));
             }
 
-            var cloudLogin = DeserializePayload<CloudLoginResponse>(
-                loginBody,
-                "Cloud login returned an invalid response.");
-            if (!TryExtractAuthCookie(loginResponse.Headers, out var cloudAuthToken))
+            var cloudLogin = BuildCloudLoginResponse(loginBody);
+            if (!TryBuildCookieHeader(loginResponse.Headers, loginBody, out var cookieHeader))
             {
                 throw new InvalidOperationException("Cloud login succeeded but auth session cookie was not returned.");
             }
 
-            return new CloudLoginResult(cloudLogin, cloudAuthToken);
+            var cloudAuthToken = ResolveCloudAuthToken(cookieHeader, loginBody);
+            if (string.IsNullOrWhiteSpace(cloudAuthToken))
+            {
+                throw new InvalidOperationException("Cloud login succeeded but auth session token could not be resolved.");
+            }
+
+            if (cloudLogin.ExpiresAt <= DateTimeOffset.UtcNow.AddMinutes(1))
+            {
+                cloudLogin.ExpiresAt = TryExtractJwtExpiry(cloudAuthToken)
+                                       ?? DateTimeOffset.UtcNow.AddHours(12);
+            }
+
+            if (string.IsNullOrWhiteSpace(cloudLogin.Username))
+            {
+                cloudLogin.Username = NormalizeOptionalValue(
+                    TryExtractJsonString(loginBody, "username", "user.username", "profile.username", "email"))
+                    ?? string.Empty;
+            }
+
+            if (string.IsNullOrWhiteSpace(cloudLogin.FullName))
+            {
+                cloudLogin.FullName = NormalizeOptionalValue(
+                    TryExtractJsonString(loginBody, "full_name", "user.full_name", "profile.full_name", "name", "user.name"))
+                    ?? string.Empty;
+            }
+
+            if (string.IsNullOrWhiteSpace(cloudLogin.Role))
+            {
+                cloudLogin.Role = NormalizeOptionalValue(
+                    TryExtractJsonString(loginBody, "role", "user.role", "profile.role"))
+                    ?? string.Empty;
+            }
+
+            return new CloudLoginResult(cloudLogin, cloudAuthToken, cookieHeader);
         }
 
         throw new InvalidOperationException(
-            "Configured cloud service does not expose a supported login endpoint. Expected '/api/auth/login' or '/api/account/login'.");
+            "Configured cloud service does not expose a supported login endpoint. Expected '/api/auth/login', '/api/account/login', or '/auth/json-login'.");
     }
 
     private async Task<CloudTenantContextResponse> ResolveTenantContextAsync(
         HttpClient client,
         string cloudBaseUrl,
-        string cloudAuthToken,
+        string cloudCookieHeader,
         CloudLoginResponse cloudLogin,
         CancellationToken cancellationToken)
     {
@@ -331,7 +364,7 @@ public sealed class CloudAccountService(
             HttpMethod.Get,
             cloudBaseUrl,
             "/api/account/tenant-context");
-        tenantRequest.Headers.TryAddWithoutValidation("Cookie", $"{CloudAuthCookieName}={cloudAuthToken}");
+        tenantRequest.Headers.TryAddWithoutValidation("Cookie", cloudCookieHeader);
         using var tenantResponse = await SendAsync(client, tenantRequest, cancellationToken);
         var tenantBody = await tenantResponse.Content.ReadAsStringAsync(cancellationToken);
 
@@ -354,7 +387,9 @@ public sealed class CloudAccountService(
         var fallbackPaths = new[]
         {
             "/api/account/license-portal",
-            "/api/license/account/licenses"
+            "/api/license/account/licenses",
+            "/api/account/me",
+            "/users/me"
         };
         var encounteredProvisioningBoundFallbackError = false;
         foreach (var path in fallbackPaths)
@@ -364,7 +399,12 @@ public sealed class CloudAccountService(
                 HttpMethod.Get,
                 cloudBaseUrl,
                 path);
-            fallbackRequest.Headers.TryAddWithoutValidation("Cookie", $"{CloudAuthCookieName}={cloudAuthToken}");
+            fallbackRequest.Headers.TryAddWithoutValidation("Cookie", cloudCookieHeader);
+            if (path.Equals("/users/me", StringComparison.OrdinalIgnoreCase) &&
+                TryExtractCookieValue(cloudCookieHeader, CloudUserIdCookieName) is { } cloudUserId)
+            {
+                fallbackRequest.Headers.TryAddWithoutValidation("x-user-id", cloudUserId);
+            }
             using var fallbackResponse = await SendAsync(client, fallbackRequest, cancellationToken);
             var fallbackBody = await fallbackResponse.Content.ReadAsStringAsync(cancellationToken);
 
@@ -388,19 +428,13 @@ public sealed class CloudAccountService(
                 throw new InvalidOperationException(parsedFallbackError);
             }
 
-            var fallbackShopCode = TryExtractShopCodeFromLicensePortal(fallbackBody);
-            if (string.IsNullOrWhiteSpace(fallbackShopCode))
+            var fallbackTenantContext = TryExtractTenantContextFromFallback(fallbackBody, cloudLogin);
+            if (fallbackTenantContext is null || string.IsNullOrWhiteSpace(fallbackTenantContext.ShopCode))
             {
                 throw new InvalidOperationException("Cloud account tenant mapping is missing shop code.");
             }
 
-            return new CloudTenantContextResponse
-            {
-                ShopCode = fallbackShopCode,
-                Username = NormalizeOptionalValue(cloudLogin.Username) ?? string.Empty,
-                FullName = NormalizeOptionalValue(cloudLogin.FullName) ?? string.Empty,
-                Role = NormalizeOptionalValue(cloudLogin.Role) ?? string.Empty
-            };
+            return fallbackTenantContext;
         }
 
         if (encounteredProvisioningBoundFallbackError)
@@ -414,7 +448,9 @@ public sealed class CloudAccountService(
             "Configured cloud service does not expose tenant context. Expected '/api/account/tenant-context' or '/api/account/license-portal'.");
     }
 
-    private static string? TryExtractShopCodeFromLicensePortal(string payload)
+    private static CloudTenantContextResponse? TryExtractTenantContextFromFallback(
+        string payload,
+        CloudLoginResponse cloudLogin)
     {
         if (string.IsNullOrWhiteSpace(payload))
         {
@@ -424,19 +460,49 @@ public sealed class CloudAccountService(
         try
         {
             using var doc = JsonDocument.Parse(payload);
-            if (doc.RootElement.ValueKind == JsonValueKind.Object &&
-                doc.RootElement.TryGetProperty("shop_code", out var shopCodeNode) &&
-                shopCodeNode.ValueKind == JsonValueKind.String)
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
             {
-                return NormalizeOptionalValue(shopCodeNode.GetString());
+                return null;
             }
+
+            var shopCode = TryExtractJsonString(root,
+                "shop_code",
+                "shopCode",
+                "store_code",
+                "storeCode",
+                "user.shop_code",
+                "profile.shop_code");
+            if (string.IsNullOrWhiteSpace(shopCode))
+            {
+                return null;
+            }
+
+            var shopIdText = TryExtractJsonString(root, "shop_id", "shopId", "user.shop_id", "profile.shop_id");
+            var parsedShopId = ParseGuid(shopIdText) ?? Guid.Empty;
+
+            return new CloudTenantContextResponse
+            {
+                ShopId = parsedShopId,
+                ShopCode = shopCode,
+                Username = NormalizeOptionalValue(
+                    TryExtractJsonString(root, "username", "user.username", "profile.username", "email"))
+                    ?? NormalizeOptionalValue(cloudLogin.Username)
+                    ?? string.Empty,
+                FullName = NormalizeOptionalValue(
+                    TryExtractJsonString(root, "full_name", "fullName", "name", "user.full_name", "profile.full_name"))
+                    ?? NormalizeOptionalValue(cloudLogin.FullName)
+                    ?? string.Empty,
+                Role = NormalizeOptionalValue(
+                    TryExtractJsonString(root, "role", "user.role", "profile.role"))
+                    ?? NormalizeOptionalValue(cloudLogin.Role)
+                    ?? string.Empty
+            };
         }
         catch (JsonException)
         {
             return null;
         }
-
-        return null;
     }
 
     private static async Task<HttpResponseMessage> SendAsync(
@@ -541,56 +607,250 @@ public sealed class CloudAccountService(
         }
     }
 
-    private static bool TryExtractAuthCookie(HttpResponseHeaders headers, out string token)
+    private static CloudLoginResponse BuildCloudLoginResponse(string loginBody)
     {
-        token = string.Empty;
-        if (!headers.TryGetValues("Set-Cookie", out var values))
+        CloudLoginResponse? parsed = null;
+        if (!string.IsNullOrWhiteSpace(loginBody))
         {
-            return false;
+            try
+            {
+                parsed = JsonSerializer.Deserialize<CloudLoginResponse>(loginBody, JsonOptions);
+            }
+            catch (JsonException)
+            {
+                parsed = null;
+            }
         }
 
-        foreach (var headerValue in values)
+        parsed ??= new CloudLoginResponse();
+        return parsed;
+    }
+
+    private static DateTimeOffset? TryExtractJwtExpiry(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
         {
-            var parsed = TryExtractCookieValue(headerValue, CloudAuthCookieName);
-            if (!string.IsNullOrWhiteSpace(parsed))
+            return null;
+        }
+
+        var parts = token.Split('.');
+        if (parts.Length < 2)
+        {
+            return null;
+        }
+
+        try
+        {
+            var payload = parts[1]
+                .Replace('-', '+')
+                .Replace('_', '/');
+            var remainder = payload.Length % 4;
+            if (remainder is > 0 and < 4)
             {
-                token = parsed;
+                payload = payload.PadRight(payload.Length + (4 - remainder), '=');
+            }
+
+            var bytes = Convert.FromBase64String(payload);
+            using var doc = JsonDocument.Parse(bytes);
+            if (!doc.RootElement.TryGetProperty("exp", out var expNode))
+            {
+                return null;
+            }
+
+            if (expNode.ValueKind == JsonValueKind.Number &&
+                expNode.TryGetInt64(out var expSeconds))
+            {
+                return DateTimeOffset.FromUnixTimeSeconds(expSeconds);
+            }
+
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? TryExtractJsonString(string payload, params string[] paths)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            return TryExtractJsonString(doc.RootElement, paths);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? TryExtractJsonString(JsonElement element, params string[] paths)
+    {
+        if (element.ValueKind != JsonValueKind.Object || paths.Length == 0)
+        {
+            return null;
+        }
+
+        foreach (var path in paths)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                continue;
+            }
+
+            var current = element;
+            var found = true;
+            foreach (var rawSegment in path.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (current.ValueKind != JsonValueKind.Object ||
+                    !TryGetPropertyCaseInsensitive(current, rawSegment, out var next))
+                {
+                    found = false;
+                    break;
+                }
+
+                current = next;
+            }
+
+            if (!found || current.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            var normalized = NormalizeOptionalValue(current.GetString());
+            if (!string.IsNullOrWhiteSpace(normalized))
+            {
+                return normalized;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool TryGetPropertyCaseInsensitive(JsonElement element, string propertyName, out JsonElement value)
+    {
+        foreach (var property in element.EnumerateObject())
+        {
+            if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
                 return true;
             }
         }
 
+        value = default;
         return false;
     }
 
-    private static string? TryExtractCookieValue(string headerValue, string cookieName)
+    private static bool TryBuildCookieHeader(
+        HttpResponseHeaders headers,
+        string loginBody,
+        out string cookieHeader)
     {
-        if (string.IsNullOrWhiteSpace(headerValue))
+        cookieHeader = string.Empty;
+        var cookieSegments = new List<string>();
+        if (!headers.TryGetValues("Set-Cookie", out var values))
+        {
+            return TryBuildSyntheticCookieHeader(loginBody, out cookieHeader);
+        }
+
+        foreach (var headerValue in values)
+        {
+            var firstSegment = headerValue
+                .Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(firstSegment))
+            {
+                cookieSegments.Add(firstSegment);
+            }
+        }
+
+        if (cookieSegments.Count == 0)
+        {
+            return TryBuildSyntheticCookieHeader(loginBody, out cookieHeader);
+        }
+
+        cookieHeader = string.Join("; ", cookieSegments);
+        return true;
+    }
+
+    private static bool TryBuildSyntheticCookieHeader(string loginBody, out string cookieHeader)
+    {
+        cookieHeader = string.Empty;
+        var authToken = TryExtractJsonString(
+            loginBody,
+            "smartpos_auth",
+            "auth_token",
+            "token",
+            "access_token",
+            "session.token",
+            "session.access_token",
+            "data.token");
+        if (string.IsNullOrWhiteSpace(authToken))
+        {
+            return false;
+        }
+
+        var cookieParts = new List<string> { $"{CloudAuthCookieName}={authToken}" };
+        var userId = TryExtractJsonString(loginBody, "user_id", "user.id", "profile.id", "id");
+        if (!string.IsNullOrWhiteSpace(userId))
+        {
+            cookieParts.Add($"{CloudUserIdCookieName}={userId}");
+        }
+
+        cookieHeader = string.Join("; ", cookieParts);
+        return true;
+    }
+
+    private static string? ResolveCloudAuthToken(string cookieHeader, string loginBody)
+    {
+        return TryExtractCookieValue(cookieHeader, CloudAuthCookieName)
+               ?? TryExtractCookieValue(cookieHeader, "auth_token")
+               ?? TryExtractCookieValue(cookieHeader, "access_token")
+               ?? TryExtractCookieValue(cookieHeader, "token")
+               ?? TryExtractJsonString(
+                   loginBody,
+                   "smartpos_auth",
+                   "auth_token",
+                   "token",
+                   "access_token",
+                   "session.token",
+                   "session.access_token",
+                   "data.token");
+    }
+
+    private static string? TryExtractCookieValue(string cookieHeader, string cookieName)
+    {
+        if (string.IsNullOrWhiteSpace(cookieHeader))
         {
             return null;
         }
 
-        var firstSegment = headerValue
-            .Split(';', StringSplitOptions.TrimEntries)
-            .FirstOrDefault();
-        if (string.IsNullOrWhiteSpace(firstSegment))
+        var segments = cookieHeader.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        foreach (var segment in segments)
         {
-            return null;
+            var separator = segment.IndexOf('=');
+            if (separator <= 0)
+            {
+                continue;
+            }
+
+            var key = segment[..separator].Trim();
+            if (!string.Equals(key, cookieName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var value = segment[(separator + 1)..].Trim().Trim('"');
+            return string.IsNullOrWhiteSpace(value) ? null : value;
         }
 
-        var separator = firstSegment.IndexOf('=');
-        if (separator <= 0)
-        {
-            return null;
-        }
-
-        var key = firstSegment[..separator].Trim();
-        if (!string.Equals(key, cookieName, StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-
-        var value = firstSegment[(separator + 1)..].Trim().Trim('"');
-        return string.IsNullOrWhiteSpace(value) ? null : value;
+        return null;
     }
 
     private bool TryResolveCloudBaseUrl(out string baseUrl)
@@ -689,5 +949,6 @@ public sealed class CloudAccountService(
 
     private sealed record CloudLoginResult(
         CloudLoginResponse Login,
-        string AuthToken);
+        string AuthToken,
+        string CookieHeader);
 }
