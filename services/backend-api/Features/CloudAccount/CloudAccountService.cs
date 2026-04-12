@@ -356,6 +356,7 @@ public sealed class CloudAccountService(
             "/api/account/license-portal",
             "/api/license/account/licenses"
         };
+        var encounteredProvisioningBoundFallbackError = false;
         foreach (var path in fallbackPaths)
         {
             using var fallbackRequest = BuildRequest(
@@ -374,11 +375,17 @@ public sealed class CloudAccountService(
                     continue;
                 }
 
-                throw new InvalidOperationException(
-                    ParseCloudErrorMessage(
-                        fallbackResponse.StatusCode,
-                        fallbackBody,
-                        "Unable to resolve cloud account tenant context."));
+                var parsedFallbackError = ParseCloudErrorMessage(
+                    fallbackResponse.StatusCode,
+                    fallbackBody,
+                    "Unable to resolve cloud account tenant context.");
+                if (IsProvisioningBoundTenantFallbackError(parsedFallbackError))
+                {
+                    encounteredProvisioningBoundFallbackError = true;
+                    continue;
+                }
+
+                throw new InvalidOperationException(parsedFallbackError);
             }
 
             var fallbackShopCode = TryExtractShopCodeFromLicensePortal(fallbackBody);
@@ -394,6 +401,13 @@ public sealed class CloudAccountService(
                 FullName = NormalizeOptionalValue(cloudLogin.FullName) ?? string.Empty,
                 Role = NormalizeOptionalValue(cloudLogin.Role) ?? string.Empty
             };
+        }
+
+        if (encounteredProvisioningBoundFallbackError)
+        {
+            throw new InvalidOperationException(
+                "Cloud tenant mapping is unavailable in the current deployment. " +
+                "Deploy '/api/account/tenant-context' in cloud backend (or update account portal tenant mapping to avoid device provisioning dependency) and try again.");
         }
 
         throw new InvalidOperationException(
@@ -496,6 +510,17 @@ public sealed class CloudAccountService(
             System.Net.HttpStatusCode.Forbidden => "Cloud account does not have permission for this operation.",
             _ => fallback
         };
+    }
+
+    private static bool IsProvisioningBoundTenantFallbackError(string? errorMessage)
+    {
+        if (string.IsNullOrWhiteSpace(errorMessage))
+        {
+            return false;
+        }
+
+        return errorMessage.Contains("not provisioned", StringComparison.OrdinalIgnoreCase)
+               || errorMessage.Contains("provisioned yet", StringComparison.OrdinalIgnoreCase);
     }
 
     private static T DeserializePayload<T>(string payload, string errorMessage)
