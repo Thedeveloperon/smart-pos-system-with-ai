@@ -119,6 +119,77 @@ describe("Account API proxy routes", () => {
     expect(headers.get("Idempotency-Key")).toBeNull();
   });
 
+  it("login route falls back to legacy /api/account/login when /api/auth/login is unavailable", async () => {
+    vi.mocked(global.fetch)
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            detail: "Not Found",
+          },
+          { status: 404 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            username: "owner",
+            role: "owner",
+          },
+          {
+            headers: {
+              "set-cookie": "smartpos_auth=test-token; Path=/; HttpOnly",
+            },
+          },
+        ),
+      );
+
+    const request = new NextRequest("http://localhost/api/account/login", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        username: "owner",
+        password: "owner123",
+        device_code: "MKTWEB-TEST",
+      }),
+    });
+
+    const response = await loginPost(request);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      username: "owner",
+      role: "owner",
+    });
+
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    const [firstUrl, firstInit] = vi.mocked(global.fetch).mock.calls[0] as [string, RequestInit];
+    expect(firstUrl).toBe("http://backend.test/api/auth/login");
+    expect(firstInit.method).toBe("POST");
+    expect(firstInit.body).toBe(
+      JSON.stringify({
+        username: "owner",
+        password: "owner123",
+        device_code: "MKTWEB-TEST",
+      }),
+    );
+
+    const [secondUrl, secondInit] = vi.mocked(global.fetch).mock.calls[1] as [string, RequestInit];
+    expect(secondUrl).toBe("http://backend.test/api/account/login");
+    expect(secondInit.method).toBe("POST");
+    expect(secondInit.body).toBe(
+      JSON.stringify({
+        username: "owner",
+        password: "owner123",
+        device_code: "MKTWEB-TEST",
+      }),
+    );
+
+    const secondHeaders = readHeaders(secondInit);
+    expect(secondHeaders.get("content-type")).toBe("application/json");
+    expect(secondHeaders.get("Idempotency-Key")).toBeNull();
+  });
+
   it("session route forwards cookie to backend /api/auth/me", async () => {
     vi.mocked(global.fetch).mockResolvedValueOnce(
       jsonResponse({
