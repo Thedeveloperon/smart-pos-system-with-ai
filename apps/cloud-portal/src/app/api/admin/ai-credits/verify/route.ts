@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { forwardUpstreamRequest } from "../../../../_upstreamProxy";
+import { forwardUpstreamRequest } from "../../../_upstreamProxy";
 
 export const dynamic = "force-dynamic";
 
