@@ -55,6 +55,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
     public DbSet<AiSmartReportJob> AiSmartReportJobs => Set<AiSmartReportJob>();
     public DbSet<ReminderRule> ReminderRules => Set<ReminderRule>();
     public DbSet<ReminderEvent> ReminderEvents => Set<ReminderEvent>();
+    public DbSet<CloudAccountLink> CloudAccountLinks => Set<CloudAccountLink>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -940,6 +941,17 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
                 .WithMany(x => x.Events)
                 .HasForeignKey(x => x.RuleId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<CloudAccountLink>(entity =>
+        {
+            entity.ToTable("cloud_account_links");
+            entity.Property(x => x.CloudUsername).HasMaxLength(200);
+            entity.Property(x => x.CloudFullName).HasMaxLength(300);
+            entity.Property(x => x.CloudRole).HasMaxLength(64);
+            entity.Property(x => x.CloudShopCode).HasMaxLength(80);
+            entity.Property(x => x.CloudAuthToken).HasMaxLength(4000);
+            entity.HasIndex(x => x.LinkedAtUtc);
         });
     }
 }

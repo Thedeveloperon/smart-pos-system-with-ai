@@ -87,6 +87,7 @@ const IndexInner = () => {
 
     return user?.role || "cashier";
   }, [user?.role]);
+  const isOwner = backendRole === "owner";
 
   const [products, setProducts] = useState<Product[]>([]);
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
@@ -1299,6 +1300,7 @@ const IndexInner = () => {
       <ShopProfileDialog
         open={showShopSettings}
         onOpenChange={setShowShopSettings}
+        isOwner={isOwner}
         expertModeEnabled={expertModeEnabled}
         onExpertModeEnabledChange={(enabled) => {
           setExpertModeEnabledState(enabled);

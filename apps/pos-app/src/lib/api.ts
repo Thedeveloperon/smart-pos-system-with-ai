@@ -4076,3 +4076,41 @@ export async function updateShopProfile(profile: ShopProfile) {
 
   return mapShopProfile(response);
 }
+
+export type CloudAccountStatus = {
+  is_linked: boolean;
+  cloud_username?: string | null;
+  cloud_full_name?: string | null;
+  cloud_role?: string | null;
+  cloud_shop_code?: string | null;
+  token_expires_at?: string | null;
+  is_token_expired: boolean;
+  linked_at?: string | null;
+  cloud_relay_configured: boolean;
+};
+
+export type CloudAccountLinkResult = {
+  cloud_username: string;
+  cloud_full_name: string;
+  cloud_role: string;
+  cloud_shop_code: string;
+  token_expires_at: string;
+  linked_at: string;
+};
+
+export async function fetchCloudAccountStatus() {
+  return request<CloudAccountStatus>("/api/cloud-account/status");
+}
+
+export async function linkCloudAccount(username: string, password: string) {
+  return request<CloudAccountLinkResult>("/api/cloud-account/link", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+export async function unlinkCloudAccount() {
+  return request<{ message: string }>("/api/cloud-account/unlink", {
+    method: "DELETE",
+  });
+}

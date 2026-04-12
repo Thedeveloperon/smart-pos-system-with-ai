@@ -933,6 +933,19 @@ public sealed class ReminderEvent
     public ReminderRule? Rule { get; set; }
 }
 
+public sealed class CloudAccountLink
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string CloudUsername { get; set; } = string.Empty;
+    public string CloudFullName { get; set; } = string.Empty;
+    public string CloudRole { get; set; } = string.Empty;
+    public string CloudShopCode { get; set; } = string.Empty;
+    public string CloudAuthToken { get; set; } = string.Empty;
+    public DateTimeOffset TokenExpiresAtUtc { get; set; }
+    public DateTimeOffset LinkedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+}
+
 public enum SaleStatus
 {
     Held = 1,

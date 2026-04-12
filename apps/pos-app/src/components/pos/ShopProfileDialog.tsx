@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import CloudAccountSettingsCard from "@/components/pos/CloudAccountSettingsCard";
 import { fetchShopProfile, updateShopProfile, type ShopProfile, type ShopProfileLanguage } from "@/lib/api";
 import {
   isExpertModeEnabled,
@@ -22,6 +23,7 @@ interface ShopProfileDialogProps {
   onSaved?: (profile: ShopProfile) => void;
   expertModeEnabled: boolean;
   onExpertModeEnabledChange: (enabled: boolean) => void;
+  isOwner?: boolean;
 }
 
 const emptyProfile = (): ShopProfile => ({
@@ -58,6 +60,7 @@ const ShopProfileDialog = ({
   onSaved,
   expertModeEnabled,
   onExpertModeEnabledChange,
+  isOwner = false,
 }: ShopProfileDialogProps) => {
   const languageOptions: Array<{ value: ShopProfileLanguage; label: string }> = [
     { value: "english", label: "English" },
@@ -322,6 +325,8 @@ const ShopProfileDialog = ({
                 <Switch checked={expertModeEnabledState} onCheckedChange={handleExpertModeToggle} />
               </div>
             </div>
+
+            {isOwner && <CloudAccountSettingsCard open={open} />}
 
             <div className="rounded-2xl border border-border bg-muted/10 p-4">
               <div className="space-y-1.5">
