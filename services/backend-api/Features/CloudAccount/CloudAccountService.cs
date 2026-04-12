@@ -98,47 +98,18 @@ public sealed class CloudAccountService(
             device_name = "SmartPOS Local Backend"
         };
 
-        using var loginRequest = BuildRequest(
+        var loginResult = await LoginToCloudAsync(
             client,
-            HttpMethod.Post,
             cloudBaseUrl,
-            "/api/auth/login",
-            JsonSerializer.Serialize(loginPayload, JsonOptions));
-
-        using var loginResponse = await SendAsync(client, loginRequest, cancellationToken);
-        var loginBody = await loginResponse.Content.ReadAsStringAsync(cancellationToken);
-        if (!loginResponse.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException(
-                ParseCloudErrorMessage(loginResponse.StatusCode, loginBody, "Cloud login failed."));
-        }
-
-        var cloudLogin = DeserializePayload<CloudLoginResponse>(
-            loginBody,
-            "Cloud login returned an invalid response.");
-
-        if (!TryExtractAuthCookie(loginResponse.Headers, out var cloudAuthToken))
-        {
-            throw new InvalidOperationException("Cloud login succeeded but auth session cookie was not returned.");
-        }
-
-        using var tenantRequest = BuildRequest(
+            loginPayload,
+            cancellationToken);
+        var cloudLogin = loginResult.Login;
+        var tenantContext = await ResolveTenantContextAsync(
             client,
-            HttpMethod.Get,
             cloudBaseUrl,
-            "/api/account/tenant-context");
-        tenantRequest.Headers.TryAddWithoutValidation("Cookie", $"{CloudAuthCookieName}={cloudAuthToken}");
-        using var tenantResponse = await SendAsync(client, tenantRequest, cancellationToken);
-        var tenantBody = await tenantResponse.Content.ReadAsStringAsync(cancellationToken);
-        if (!tenantResponse.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException(
-                ParseCloudErrorMessage(tenantResponse.StatusCode, tenantBody, "Unable to resolve cloud account tenant context."));
-        }
-
-        var tenantContext = DeserializePayload<CloudTenantContextResponse>(
-            tenantBody,
-            "Cloud tenant context response is invalid.");
+            loginResult.AuthToken,
+            cloudLogin,
+            cancellationToken);
 
         var normalizedCloudShopCode = NormalizeOptionalValue(tenantContext.ShopCode);
         if (string.IsNullOrWhiteSpace(normalizedCloudShopCode))
@@ -166,7 +137,7 @@ public sealed class CloudAccountService(
             .OrderByDescending(x => x.LinkedAtUtc.UtcDateTime.Ticks)
             .ToList();
         var link = existingRows.FirstOrDefault();
-        var encryptedToken = ProtectSensitiveValue(cloudAuthToken);
+        var encryptedToken = ProtectSensitiveValue(loginResult.AuthToken);
         if (link is null)
         {
             link = new CloudAccountLink
@@ -273,6 +244,163 @@ public sealed class CloudAccountService(
         }
 
         return request;
+    }
+
+    private async Task<CloudLoginResult> LoginToCloudAsync(
+        HttpClient client,
+        string cloudBaseUrl,
+        object loginPayload,
+        CancellationToken cancellationToken)
+    {
+        var payloadJson = JsonSerializer.Serialize(loginPayload, JsonOptions);
+        var loginPaths = new[]
+        {
+            "/api/auth/login",
+            "/api/account/login"
+        };
+
+        foreach (var path in loginPaths)
+        {
+            using var loginRequest = BuildRequest(
+                client,
+                HttpMethod.Post,
+                cloudBaseUrl,
+                path,
+                payloadJson);
+            using var loginResponse = await SendAsync(client, loginRequest, cancellationToken);
+            var loginBody = await loginResponse.Content.ReadAsStringAsync(cancellationToken);
+
+            if (!loginResponse.IsSuccessStatusCode)
+            {
+                if (loginResponse.StatusCode == System.Net.HttpStatusCode.NotFound ||
+                    loginResponse.StatusCode == System.Net.HttpStatusCode.MethodNotAllowed)
+                {
+                    continue;
+                }
+
+                throw new InvalidOperationException(
+                    ParseCloudErrorMessage(loginResponse.StatusCode, loginBody, "Cloud login failed."));
+            }
+
+            var cloudLogin = DeserializePayload<CloudLoginResponse>(
+                loginBody,
+                "Cloud login returned an invalid response.");
+            if (!TryExtractAuthCookie(loginResponse.Headers, out var cloudAuthToken))
+            {
+                throw new InvalidOperationException("Cloud login succeeded but auth session cookie was not returned.");
+            }
+
+            return new CloudLoginResult(cloudLogin, cloudAuthToken);
+        }
+
+        throw new InvalidOperationException(
+            "Configured cloud service does not expose a supported login endpoint. Expected '/api/auth/login' or '/api/account/login'.");
+    }
+
+    private async Task<CloudTenantContextResponse> ResolveTenantContextAsync(
+        HttpClient client,
+        string cloudBaseUrl,
+        string cloudAuthToken,
+        CloudLoginResponse cloudLogin,
+        CancellationToken cancellationToken)
+    {
+        using var tenantRequest = BuildRequest(
+            client,
+            HttpMethod.Get,
+            cloudBaseUrl,
+            "/api/account/tenant-context");
+        tenantRequest.Headers.TryAddWithoutValidation("Cookie", $"{CloudAuthCookieName}={cloudAuthToken}");
+        using var tenantResponse = await SendAsync(client, tenantRequest, cancellationToken);
+        var tenantBody = await tenantResponse.Content.ReadAsStringAsync(cancellationToken);
+
+        if (tenantResponse.IsSuccessStatusCode)
+        {
+            return DeserializePayload<CloudTenantContextResponse>(
+                tenantBody,
+                "Cloud tenant context response is invalid.");
+        }
+
+        if (tenantResponse.StatusCode != System.Net.HttpStatusCode.NotFound)
+        {
+            throw new InvalidOperationException(
+                ParseCloudErrorMessage(
+                    tenantResponse.StatusCode,
+                    tenantBody,
+                    "Unable to resolve cloud account tenant context."));
+        }
+
+        var fallbackPaths = new[]
+        {
+            "/api/account/license-portal",
+            "/api/license/account/licenses"
+        };
+        foreach (var path in fallbackPaths)
+        {
+            using var fallbackRequest = BuildRequest(
+                client,
+                HttpMethod.Get,
+                cloudBaseUrl,
+                path);
+            fallbackRequest.Headers.TryAddWithoutValidation("Cookie", $"{CloudAuthCookieName}={cloudAuthToken}");
+            using var fallbackResponse = await SendAsync(client, fallbackRequest, cancellationToken);
+            var fallbackBody = await fallbackResponse.Content.ReadAsStringAsync(cancellationToken);
+
+            if (!fallbackResponse.IsSuccessStatusCode)
+            {
+                if (fallbackResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
+                {
+                    continue;
+                }
+
+                throw new InvalidOperationException(
+                    ParseCloudErrorMessage(
+                        fallbackResponse.StatusCode,
+                        fallbackBody,
+                        "Unable to resolve cloud account tenant context."));
+            }
+
+            var fallbackShopCode = TryExtractShopCodeFromLicensePortal(fallbackBody);
+            if (string.IsNullOrWhiteSpace(fallbackShopCode))
+            {
+                throw new InvalidOperationException("Cloud account tenant mapping is missing shop code.");
+            }
+
+            return new CloudTenantContextResponse
+            {
+                ShopCode = fallbackShopCode,
+                Username = NormalizeOptionalValue(cloudLogin.Username) ?? string.Empty,
+                FullName = NormalizeOptionalValue(cloudLogin.FullName) ?? string.Empty,
+                Role = NormalizeOptionalValue(cloudLogin.Role) ?? string.Empty
+            };
+        }
+
+        throw new InvalidOperationException(
+            "Configured cloud service does not expose tenant context. Expected '/api/account/tenant-context' or '/api/account/license-portal'.");
+    }
+
+    private static string? TryExtractShopCodeFromLicensePortal(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                doc.RootElement.TryGetProperty("shop_code", out var shopCodeNode) &&
+                shopCodeNode.ValueKind == JsonValueKind.String)
+            {
+                return NormalizeOptionalValue(shopCodeNode.GetString());
+            }
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        return null;
     }
 
     private static async Task<HttpResponseMessage> SendAsync(
@@ -503,4 +631,8 @@ public sealed class CloudAccountService(
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
+
+    private sealed record CloudLoginResult(
+        CloudLoginResponse Login,
+        string AuthToken);
 }
