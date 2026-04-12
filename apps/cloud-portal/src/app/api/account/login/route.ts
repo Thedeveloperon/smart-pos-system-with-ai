@@ -19,12 +19,26 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  return forwardAccountRequest({
+  const body = JSON.stringify(payload);
+  const primaryResponse = await forwardAccountRequest({
     request,
     backendPath: "/api/auth/login",
     method: "POST",
     contentType: "application/json",
-    body: JSON.stringify(payload),
+    body,
+    includeIdempotencyKey: false,
+  });
+
+  if (primaryResponse.status !== 404 && primaryResponse.status !== 405) {
+    return primaryResponse;
+  }
+
+  return forwardAccountRequest({
+    request,
+    backendPath: "/api/account/login",
+    method: "POST",
+    contentType: "application/json",
+    body,
     includeIdempotencyKey: false,
   });
 }
