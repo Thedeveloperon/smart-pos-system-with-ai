@@ -10,7 +10,6 @@ import { LicensingProvider, useLicensing } from "@/components/licensing/Licensin
 import { LicenseActivationScreen, LicenseBlockedScreen } from "@/components/licensing/LicenseScreens";
 import { Button } from "@/components/ui/button";
 import SplashScreen from "@/components/ui/SplashScreen";
-import { getDeviceCode } from "@/lib/api";
 import { isSuperAdminBackendRole } from "@/lib/auth";
 import Index from "./pages/Index.tsx";
 import LicenseAccessSuccess from "./pages/LicenseAccessSuccess.tsx";
@@ -189,7 +188,6 @@ const LicenseGate = () => {
   if (!status || status.state === "unprovisioned") {
     return (
         <LicenseActivationScreen
-          deviceCode={status?.deviceCode || getDeviceCode()}
           error={error}
           isBusy={isActivating || isRefreshing}
           activationEntitlementKey={activationEntitlementKey}

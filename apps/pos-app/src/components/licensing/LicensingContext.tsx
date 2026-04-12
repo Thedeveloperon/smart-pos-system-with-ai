@@ -3,7 +3,7 @@ import {
   ApiError,
   activateLicense as apiActivateLicense,
   fetchLicenseStatus,
-  getDeviceCode,
+  getTerminalId,
   heartbeatLicense,
   type ActivateLicenseRequest,
   type LicenseStatus,
@@ -38,13 +38,13 @@ function toErrorMessage(error: unknown) {
     }
 
     if (error.code === "INVALID_ACTIVATION_ENTITLEMENT" && /required/i.test(error.message)) {
-      return "Activation key is required. Enter a valid key to activate this device.";
+      return "Activation key is required. Enter a valid key to activate this terminal.";
     }
 
     return error.message;
   }
 
-  return "Unable to validate device license.";
+  return "Unable to validate terminal license.";
 }
 
 export const useLicensing = () => {
@@ -69,7 +69,7 @@ export const LicensingProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const tryLoadCachedStatus = useCallback(async () => {
-    const cached = await loadCachedLicenseStatus(getDeviceCode());
+    const cached = await loadCachedLicenseStatus(getTerminalId());
     if (!cached) {
       return null;
     }
@@ -120,7 +120,7 @@ export const LicensingProvider = ({ children }: { children: ReactNode }) => {
 
   const heartbeat = useCallback(async () => {
     try {
-      const next = await heartbeatLicense(status?.deviceCode);
+      const next = await heartbeatLicense(status?.terminalId || status?.deviceCode);
       applyOnlineStatus(next);
       return next;
     } catch (heartbeatError) {
@@ -134,7 +134,7 @@ export const LicensingProvider = ({ children }: { children: ReactNode }) => {
 
       return null;
     }
-  }, [applyOnlineStatus, refresh, status?.deviceCode, tryLoadCachedStatus]);
+  }, [applyOnlineStatus, refresh, status?.deviceCode, status?.terminalId, tryLoadCachedStatus]);
 
   useEffect(() => {
     let alive = true;

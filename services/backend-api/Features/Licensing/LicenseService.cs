@@ -229,6 +229,7 @@ public sealed class LicenseService(
         return new ProvisionChallengeResponse
         {
             ChallengeId = challenge.Id.ToString(),
+            TerminalId = deviceCode,
             DeviceCode = deviceCode,
             Nonce = challenge.Nonce,
             KeyAlgorithm = DefaultDeviceKeyAlgorithm,
@@ -1721,6 +1722,7 @@ public sealed class LicenseService(
                     return new CustomerLicensePortalDeviceRow
                     {
                         ProvisionedDeviceId = device.Id,
+                        TerminalId = device.DeviceCode,
                         DeviceCode = device.DeviceCode,
                         DeviceName = device.Name,
                         BranchCode = ResolveBranchCode(device.BranchCode),
@@ -7074,6 +7076,15 @@ public sealed class LicenseService(
             return NormalizeDeviceCode(explicitDeviceCode);
         }
 
+        if (httpContext.Request.Headers.TryGetValue("X-Terminal-Id", out var headerTerminalId))
+        {
+            var fromTerminalHeader = NormalizeDeviceCode(headerTerminalId.FirstOrDefault());
+            if (!string.IsNullOrWhiteSpace(fromTerminalHeader))
+            {
+                return fromTerminalHeader;
+            }
+        }
+
         if (httpContext.Request.Headers.TryGetValue("X-Device-Code", out var headerDeviceCode))
         {
             var fromHeader = NormalizeDeviceCode(headerDeviceCode.FirstOrDefault());
@@ -7083,7 +7094,8 @@ public sealed class LicenseService(
             }
         }
 
-        var claimValue = httpContext.User.FindFirstValue("device_code");
+        var claimValue = httpContext.User.FindFirstValue("terminal_id") ??
+                         httpContext.User.FindFirstValue("device_code");
         return NormalizeDeviceCode(claimValue);
     }
 
@@ -12930,6 +12942,7 @@ public sealed class LicenseService(
         {
             State = snapshot.State.ToString().ToLowerInvariant(),
             ShopId = snapshot.ShopId,
+            TerminalId = snapshot.DeviceCode,
             DeviceCode = snapshot.DeviceCode,
             BranchCode = snapshot.BranchCode,
             SubscriptionStatus = snapshot.SubscriptionStatus?.ToString().ToLowerInvariant(),

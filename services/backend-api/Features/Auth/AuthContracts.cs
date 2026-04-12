@@ -10,6 +10,9 @@ public sealed class LoginRequest
     [JsonPropertyName("password")]
     public string Password { get; set; } = string.Empty;
 
+    [JsonPropertyName("terminal_id")]
+    public string? TerminalId { get; set; }
+
     [JsonPropertyName("device_code")]
     public string DeviceCode { get; set; } = string.Empty;
 
@@ -34,6 +37,12 @@ public sealed class AuthSessionResponse
     [JsonPropertyName("role")]
     public string Role { get; set; } = string.Empty;
 
+    [JsonPropertyName("session_id")]
+    public Guid SessionId { get; set; }
+
+    [JsonPropertyName("terminal_id")]
+    public string TerminalId { get; set; } = string.Empty;
+
     [JsonPropertyName("device_id")]
     public Guid DeviceId { get; set; }
 
@@ -52,6 +61,12 @@ public sealed class AuthSessionResponse
 
 public sealed class AuthSessionDeviceRow
 {
+    [JsonPropertyName("session_id")]
+    public Guid SessionId { get; set; }
+
+    [JsonPropertyName("terminal_id")]
+    public string TerminalId { get; set; } = string.Empty;
+
     [JsonPropertyName("device_id")]
     public Guid DeviceId { get; set; }
 
@@ -88,6 +103,9 @@ public sealed class AuthSessionsResponse
     [JsonPropertyName("generated_at")]
     public DateTimeOffset GeneratedAt { get; set; } = DateTimeOffset.UtcNow;
 
+    [JsonPropertyName("current_terminal_id")]
+    public string? CurrentTerminalId { get; set; }
+
     [JsonPropertyName("current_device_code")]
     public string? CurrentDeviceCode { get; set; }
 
@@ -108,6 +126,12 @@ public sealed class AuthSessionRevokeResponse
 
     [JsonPropertyName("revoked_count")]
     public int RevokedCount { get; set; }
+
+    [JsonPropertyName("target_session_id")]
+    public Guid? TargetSessionId { get; set; }
+
+    [JsonPropertyName("target_terminal_id")]
+    public string? TargetTerminalId { get; set; }
 
     [JsonPropertyName("target_device_code")]
     public string? TargetDeviceCode { get; set; }

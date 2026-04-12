@@ -4,6 +4,9 @@ namespace SmartPos.Backend.Features.Licensing;
 
 public sealed class ProvisionActivateRequest
 {
+    [JsonPropertyName("terminal_id")]
+    public string? TerminalId { get; set; }
+
     [JsonPropertyName("device_code")]
     public string DeviceCode { get; set; } = string.Empty;
 
@@ -40,6 +43,9 @@ public sealed class ProvisionActivateRequest
 
 public sealed class ProvisionChallengeRequest
 {
+    [JsonPropertyName("terminal_id")]
+    public string? TerminalId { get; set; }
+
     [JsonPropertyName("device_code")]
     public string DeviceCode { get; set; } = string.Empty;
 }
@@ -48,6 +54,9 @@ public sealed class ProvisionChallengeResponse
 {
     [JsonPropertyName("challenge_id")]
     public string ChallengeId { get; set; } = string.Empty;
+
+    [JsonPropertyName("terminal_id")]
+    public string TerminalId { get; set; } = string.Empty;
 
     [JsonPropertyName("device_code")]
     public string DeviceCode { get; set; } = string.Empty;
@@ -67,6 +76,9 @@ public sealed class ProvisionChallengeResponse
 
 public sealed class ProvisionDeactivateRequest
 {
+    [JsonPropertyName("terminal_id")]
+    public string? TerminalId { get; set; }
+
     [JsonPropertyName("device_code")]
     public string DeviceCode { get; set; } = string.Empty;
 
@@ -79,6 +91,9 @@ public sealed class ProvisionDeactivateRequest
 
 public sealed class LicenseHeartbeatRequest
 {
+    [JsonPropertyName("terminal_id")]
+    public string? TerminalId { get; set; }
+
     [JsonPropertyName("device_code")]
     public string DeviceCode { get; set; } = string.Empty;
 
@@ -409,6 +424,9 @@ public sealed class LicenseStatusResponse
     [JsonPropertyName("shop_id")]
     public Guid? ShopId { get; set; }
 
+    [JsonPropertyName("terminal_id")]
+    public string TerminalId { get; set; } = string.Empty;
+
     [JsonPropertyName("device_code")]
     public string DeviceCode { get; set; } = string.Empty;
 
@@ -513,6 +531,9 @@ public sealed class CustomerLicensePortalDeviceRow
 {
     [JsonPropertyName("provisioned_device_id")]
     public Guid ProvisionedDeviceId { get; set; }
+
+    [JsonPropertyName("terminal_id")]
+    public string TerminalId { get; set; } = string.Empty;
 
     [JsonPropertyName("device_code")]
     public string DeviceCode { get; set; } = string.Empty;

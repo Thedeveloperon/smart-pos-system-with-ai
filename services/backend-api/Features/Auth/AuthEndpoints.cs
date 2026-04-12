@@ -45,7 +45,9 @@ public static class AuthEndpoints
                 };
                 _ = authService.RevokeSessionAsync(
                     httpContext.User,
-                    httpContext.User.FindFirst("device_code")?.Value ?? string.Empty,
+                    httpContext.User.FindFirst("terminal_id")?.Value ??
+                    httpContext.User.FindFirst("device_code")?.Value ??
+                    string.Empty,
                     revokeRequest,
                     cancellationToken);
             }
@@ -119,6 +121,36 @@ public static class AuthEndpoints
             }
         })
         .WithName("RevokeAuthSession")
+        .WithOpenApi();
+
+        group.MapPost("/sessions/by-id/{session_id:guid}/revoke", [Authorize] async (
+            Guid session_id,
+            AuthSessionRevokeRequest request,
+            HttpContext httpContext,
+            AuthService authService,
+            JwtCookieOptions jwtOptions,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var response = await authService.RevokeSessionByIdAsync(
+                    httpContext.User,
+                    session_id,
+                    request,
+                    cancellationToken);
+                if (response.CurrentSessionRevoked)
+                {
+                    DeleteAuthCookie(httpContext, jwtOptions);
+                }
+
+                return Results.Ok(response);
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .WithName("RevokeAuthSessionById")
         .WithOpenApi();
 
         group.MapPost("/sessions/revoke-others", [Authorize] async (

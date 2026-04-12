@@ -42,6 +42,8 @@ type BackendAuthSession = {
   username: string;
   full_name: string;
   role: string;
+  session_id?: string;
+  terminal_id?: string;
   device_id: string;
   device_code: string;
   expires_at: string;
@@ -58,6 +60,7 @@ type BackendLicenseErrorPayload = {
 type BackendLicenseStatus = {
   state: "unprovisioned" | "active" | "grace" | "suspended" | "revoked";
   shop_id?: string | null;
+  terminal_id?: string;
   device_code: string;
   device_key_fingerprint?: string | null;
   subscription_status?: "trialing" | "active" | "past_due" | "canceled" | null;
@@ -77,6 +80,7 @@ type BackendLicenseStatus = {
 
 type BackendProvisionChallengeResponse = {
   challenge_id: string;
+  terminal_id?: string;
   device_code: string;
   nonce: string;
   key_algorithm: string;
@@ -86,6 +90,7 @@ type BackendProvisionChallengeResponse = {
 
 type BackendDeviceActionChallengeResponse = {
   challenge_id: string;
+  terminal_id?: string;
   device_code: string;
   nonce: string;
   key_algorithm: string;
@@ -98,6 +103,7 @@ export type LicenseState = BackendLicenseStatus["state"];
 export type LicenseStatus = {
   state: LicenseState;
   shopId?: string | null;
+  terminalId: string;
   deviceCode: string;
   deviceKeyFingerprint?: string | null;
   subscriptionStatus?: BackendLicenseStatus["subscription_status"];
@@ -116,6 +122,7 @@ export type LicenseStatus = {
 };
 
 export type ActivateLicenseRequest = {
+  terminalId?: string;
   deviceCode?: string;
   deviceName?: string;
   actor?: string;
@@ -123,10 +130,12 @@ export type ActivateLicenseRequest = {
   activationEntitlementKey?: string;
 };
 
+const TERMINAL_ID_STORAGE_KEY = "smartpos-terminal-id";
 const DEVICE_CODE_STORAGE_KEY = "smartpos-device-code";
 const LEGACY_LICENSE_TOKEN_STORAGE_KEY = "smartpos-license-token";
 const DEFAULT_DEVICE_NAME = "RetailFlow POS Web";
 const DEVICE_ID_HEADER = "X-Device-Id";
+const TERMINAL_ID_HEADER = "X-Terminal-Id";
 const DEVICE_CODE_HEADER = "X-Device-Code";
 const POS_VERSION_HEADER = "X-POS-Version";
 const DEVICE_NONCE_ID_HEADER = "X-Device-Nonce-Id";
@@ -1553,13 +1562,15 @@ function createIdempotencyKey() {
   return `idemp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function getAuthDeviceCode() {
+function getAuthTerminalId() {
   if (typeof window === "undefined") {
-    return "server-device";
+    return "server-terminal";
   }
 
-  const existing = localStorage.getItem(DEVICE_CODE_STORAGE_KEY);
+  const existing = localStorage.getItem(TERMINAL_ID_STORAGE_KEY) || localStorage.getItem(DEVICE_CODE_STORAGE_KEY);
   if (existing?.trim()) {
+    localStorage.setItem(TERMINAL_ID_STORAGE_KEY, existing.trim());
+    localStorage.removeItem(DEVICE_CODE_STORAGE_KEY);
     return existing;
   }
 
@@ -1568,15 +1579,21 @@ function getAuthDeviceCode() {
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
-  localStorage.setItem(DEVICE_CODE_STORAGE_KEY, generated);
+  localStorage.setItem(TERMINAL_ID_STORAGE_KEY, generated);
   return generated;
 }
 
+function getAuthDeviceCode() {
+  return getAuthTerminalId();
+}
+
 function mapLicenseStatus(status: BackendLicenseStatus): LicenseStatus {
+  const resolvedTerminalId = status.terminal_id || status.device_code || getAuthTerminalId();
   return {
     state: status.state,
     shopId: status.shop_id ?? null,
-    deviceCode: status.device_code || getAuthDeviceCode(),
+    terminalId: resolvedTerminalId,
+    deviceCode: resolvedTerminalId,
     deviceKeyFingerprint: status.device_key_fingerprint ?? null,
     subscriptionStatus: status.subscription_status ?? null,
     plan: status.plan ?? null,
@@ -1763,7 +1780,7 @@ type RequestExecutionOptions = {
 
 async function request<T>(path: string, init: RequestInit = {}, options: RequestExecutionOptions = {}) {
   const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
-  const deviceCode = getAuthDeviceCode();
+  const terminalId = getAuthTerminalId();
   const licenseToken = getStoredLicenseToken();
   const method = (init.method || "GET").toUpperCase();
   const isMutation = method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE";
@@ -1782,7 +1799,8 @@ async function request<T>(path: string, init: RequestInit = {}, options: Request
           {
             method: "POST",
             body: JSON.stringify({
-              device_code: deviceCode,
+              device_code: terminalId,
+              terminal_id: terminalId,
             }),
           },
           { skipDeviceProof: true }
@@ -1792,7 +1810,7 @@ async function request<T>(path: string, init: RequestInit = {}, options: Request
         const proof = await buildDeviceRequestProof({
           nonceId: challenge.challenge_id,
           nonce: challenge.nonce,
-          deviceCode,
+          deviceCode: terminalId,
           timestampUnix,
           method,
           pathAndQuery: path,
@@ -1818,8 +1836,9 @@ async function request<T>(path: string, init: RequestInit = {}, options: Request
       ...init,
       headers: {
         ...(init.body && !isFormData ? { "Content-Type": "application/json" } : {}),
-        [DEVICE_ID_HEADER]: deviceCode,
-        [DEVICE_CODE_HEADER]: deviceCode,
+        [TERMINAL_ID_HEADER]: terminalId,
+        [DEVICE_ID_HEADER]: terminalId,
+        [DEVICE_CODE_HEADER]: terminalId,
         [POS_VERSION_HEADER]: POS_CLIENT_VERSION,
         ...(licenseToken ? { "X-License-Token": licenseToken } : {}),
         ...Object.fromEntries(existingHeaders.entries()),
@@ -1896,7 +1915,7 @@ async function request<T>(path: string, init: RequestInit = {}, options: Request
           !path.startsWith("/api/admin")
         ) {
           await activateLicense({
-            deviceCode,
+            terminalId,
             actor: "pos-web-ui",
             reason: "device_proof_rebind",
           });
@@ -2277,6 +2296,10 @@ export async function bootstrapSession() {
   return request<BackendAuthSession>("/api/auth/me");
 }
 
+export function getTerminalId() {
+  return getAuthTerminalId();
+}
+
 export function getDeviceCode() {
   return getAuthDeviceCode();
 }
@@ -2302,7 +2325,7 @@ export async function fetchLicenseStatus() {
 }
 
 export async function activateLicense(requestBody: ActivateLicenseRequest = {}) {
-  const resolvedDeviceCode = requestBody.deviceCode || getAuthDeviceCode();
+  const resolvedTerminalId = requestBody.terminalId || requestBody.deviceCode || getAuthTerminalId();
   let proof:
     | {
         keyFingerprint: string;
@@ -2317,11 +2340,12 @@ export async function activateLicense(requestBody: ActivateLicenseRequest = {}) 
     const challenge = await request<BackendProvisionChallengeResponse>("/api/provision/challenge", {
       method: "POST",
       body: JSON.stringify({
-        device_code: resolvedDeviceCode,
+        terminal_id: resolvedTerminalId,
+        device_code: resolvedTerminalId,
       }),
     });
 
-    proof = await buildDeviceActivationProof(challenge.challenge_id, challenge.nonce, resolvedDeviceCode);
+    proof = await buildDeviceActivationProof(challenge.challenge_id, challenge.nonce, resolvedTerminalId);
   } catch (error) {
     if (!(error instanceof ApiError) || error.status !== 404) {
       throw error;
@@ -2329,7 +2353,8 @@ export async function activateLicense(requestBody: ActivateLicenseRequest = {}) 
   }
 
   const payload = {
-    device_code: resolvedDeviceCode,
+    terminal_id: resolvedTerminalId,
+    device_code: resolvedTerminalId,
     device_name: requestBody.deviceName || DEFAULT_DEVICE_NAME,
     actor: requestBody.actor || "pos-web-ui",
     reason: requestBody.reason || null,
@@ -2356,8 +2381,10 @@ export async function activateLicense(requestBody: ActivateLicenseRequest = {}) 
 }
 
 export async function heartbeatLicense(deviceCode?: string) {
+  const resolvedTerminalId = deviceCode || getAuthTerminalId();
   const payload = {
-    device_code: deviceCode || getAuthDeviceCode(),
+    terminal_id: resolvedTerminalId,
+    device_code: resolvedTerminalId,
     license_token: getStoredLicenseToken(),
   };
 
@@ -2419,10 +2446,12 @@ export async function trackLicenseAccessDownload(
 }
 
 export async function login(username: string, password: string, mfaCode?: string) {
+  const terminalId = getAuthTerminalId();
   const payload = {
     username,
     password,
-    device_code: getAuthDeviceCode(),
+    terminal_id: terminalId,
+    device_code: terminalId,
     device_name: DEFAULT_DEVICE_NAME,
     mfa_code: mfaCode?.trim() || null,
   };
@@ -3854,13 +3883,14 @@ export async function exportAdminLicenseAuditLogs({
   params.set("format", format);
   const query = params.toString();
   const path = `/api/admin/licensing/audit-logs/export${query ? `?${query}` : ""}`;
-  const deviceCode = getAuthDeviceCode();
+  const terminalId = getAuthTerminalId();
   const licenseToken = getStoredLicenseToken();
   const response = await fetch(`${API_BASE_URL}${path}`, {
     credentials: "include",
     headers: {
-      [DEVICE_ID_HEADER]: deviceCode,
-      [DEVICE_CODE_HEADER]: deviceCode,
+      [TERMINAL_ID_HEADER]: terminalId,
+      [DEVICE_ID_HEADER]: terminalId,
+      [DEVICE_CODE_HEADER]: terminalId,
       [POS_VERSION_HEADER]: POS_CLIENT_VERSION,
       ...(licenseToken ? { "X-License-Token": licenseToken } : {}),
     },

@@ -30,7 +30,9 @@ public sealed class AuthService(
         var now = DateTimeOffset.UtcNow;
         var username = request.Username?.Trim() ?? string.Empty;
         var password = request.Password ?? string.Empty;
-        var deviceCode = request.DeviceCode?.Trim() ?? string.Empty;
+        var terminalId = NormalizeOptionalValue(request.TerminalId) ??
+                         NormalizeOptionalValue(request.DeviceCode) ??
+                         string.Empty;
         if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
         {
             throw new InvalidOperationException("Username and password are required.");
@@ -67,7 +69,7 @@ public sealed class AuthService(
 
         var (role, superAdminScope) = ResolveRoleAndScope(user);
         var isSuperAdminScope = SmartPosRoles.IsSuperAdminRole(role);
-        var resolvedDeviceCode = ResolveLoginDeviceCode(deviceCode, user, isSuperAdminScope);
+        var resolvedTerminalId = ResolveLoginDeviceCode(terminalId, user, isSuperAdminScope);
         bool mfaVerified;
         if (isSuperAdminScope)
         {
@@ -97,14 +99,14 @@ public sealed class AuthService(
         var expiresAt = now.AddMinutes(Math.Max(15, jwtOptions.ExpiryMinutes));
 
         var device = await dbContext.Devices
-            .FirstOrDefaultAsync(x => x.DeviceCode == resolvedDeviceCode, cancellationToken);
+            .FirstOrDefaultAsync(x => x.DeviceCode == resolvedTerminalId, cancellationToken);
 
         if (device is null)
         {
             device = new Device
             {
                 AppUserId = user.Id,
-                DeviceCode = resolvedDeviceCode,
+                DeviceCode = resolvedTerminalId,
                 Name = string.IsNullOrWhiteSpace(request.DeviceName)
                     ? isSuperAdminScope ? "Admin Portal" : "POS Browser"
                     : request.DeviceName.Trim(),
@@ -184,6 +186,8 @@ public sealed class AuthService(
             Username = user.Username,
             FullName = user.FullName,
             Role = role,
+            SessionId = device.Id,
+            TerminalId = device.DeviceCode,
             DeviceId = device.Id,
             DeviceCode = device.DeviceCode,
             ExpiresAt = expiresAt,
@@ -201,13 +205,13 @@ public sealed class AuthService(
         var userId = ParseGuid(
             principal.FindFirstValue(ClaimTypes.NameIdentifier) ??
             principal.FindFirstValue(JwtRegisteredClaimNames.Sub));
-        var deviceId = ParseGuid(principal.FindFirstValue("device_id"));
+        var sessionId = ParseGuid(principal.FindFirstValue("session_id"));
         var role = principal.FindFirstValue(ClaimTypes.Role);
         var expiresAtUnix = principal.FindFirstValue(JwtRegisteredClaimNames.Exp);
         var mfaVerifiedClaim = principal.FindFirstValue("mfa_verified");
         var mfaVerified = bool.TryParse(mfaVerifiedClaim, out var parsedMfaVerified) && parsedMfaVerified;
 
-        if (!userId.HasValue || !deviceId.HasValue || string.IsNullOrWhiteSpace(role))
+        if (!userId.HasValue || !sessionId.HasValue || string.IsNullOrWhiteSpace(role))
         {
             return null;
         }
@@ -222,7 +226,7 @@ public sealed class AuthService(
 
         var device = await dbContext.Devices
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == deviceId.Value && x.AppUserId == user.Id, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == sessionId.Value && x.AppUserId == user.Id, cancellationToken);
         if (device is null)
         {
             return null;
@@ -244,6 +248,8 @@ public sealed class AuthService(
             Username = user.Username,
             FullName = user.FullName,
             Role = role,
+            SessionId = device.Id,
+            TerminalId = device.DeviceCode,
             DeviceId = device.Id,
             DeviceCode = device.DeviceCode,
             ExpiresAt = expiresAt,
@@ -313,9 +319,12 @@ public sealed class AuthService(
         return new AuthSessionsResponse
         {
             GeneratedAt = DateTimeOffset.UtcNow,
+            CurrentTerminalId = rows.FirstOrDefault(x => x.Id == context.DeviceId)?.DeviceCode,
             CurrentDeviceCode = rows.FirstOrDefault(x => x.Id == context.DeviceId)?.DeviceCode,
             Items = rows.Select(x => new AuthSessionDeviceRow
             {
+                SessionId = x.Id,
+                TerminalId = x.DeviceCode,
                 DeviceId = x.Id,
                 DeviceCode = x.DeviceCode,
                 DeviceName = x.Name,
@@ -341,7 +350,7 @@ public sealed class AuthService(
         var normalizedTarget = NormalizeOptionalValue(targetDeviceCode);
         if (string.IsNullOrWhiteSpace(normalizedTarget))
         {
-            throw new InvalidOperationException("target device_code is required.");
+            throw new InvalidOperationException("target terminal_id or device_code is required.");
         }
 
         var targetDevice = await dbContext.Devices
@@ -379,6 +388,59 @@ public sealed class AuthService(
         {
             ProcessedAt = now,
             RevokedCount = 1,
+            TargetSessionId = targetDevice.Id,
+            TargetTerminalId = targetDevice.DeviceCode,
+            TargetDeviceCode = targetDevice.DeviceCode,
+            CurrentSessionRevoked = targetDevice.Id == context.DeviceId
+        };
+    }
+
+    public async Task<AuthSessionRevokeResponse> RevokeSessionByIdAsync(
+        ClaimsPrincipal principal,
+        Guid targetSessionId,
+        AuthSessionRevokeRequest request,
+        CancellationToken cancellationToken)
+    {
+        var context = ResolveAuthContext(principal)
+                      ?? throw new InvalidOperationException("Authenticated session context is invalid.");
+
+        var targetDevice = await dbContext.Devices
+            .FirstOrDefaultAsync(
+                x => x.AppUserId == context.UserId && x.Id == targetSessionId,
+                cancellationToken)
+            ?? throw new InvalidOperationException("Session device not found.");
+
+        var now = DateTimeOffset.UtcNow;
+        targetDevice.AuthSessionVersion = Math.Max(1, targetDevice.AuthSessionVersion) + 1;
+        targetDevice.AuthSessionRevokedAtUtc = now;
+        targetDevice.AuthSessionRevocationReason = NormalizeOptionalValue(request.Reason) ?? "manual_terminal_session_revoke";
+
+        dbContext.AuditLogs.Add(new AuditLog
+        {
+            UserId = context.UserId,
+            DeviceId = context.DeviceId,
+            Action = "auth_session_revoked",
+            EntityName = "auth_session",
+            EntityId = targetDevice.Id.ToString(),
+            AfterJson = JsonSerializer.Serialize(new
+            {
+                revoked_session_id = targetDevice.Id,
+                revoked_terminal_id = targetDevice.DeviceCode,
+                revoked_device_code = targetDevice.DeviceCode,
+                revoked_device_session_version = targetDevice.AuthSessionVersion,
+                reason = targetDevice.AuthSessionRevocationReason
+            }),
+            CreatedAtUtc = now
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new AuthSessionRevokeResponse
+        {
+            ProcessedAt = now,
+            RevokedCount = 1,
+            TargetSessionId = targetDevice.Id,
+            TargetTerminalId = targetDevice.DeviceCode,
             TargetDeviceCode = targetDevice.DeviceCode,
             CurrentSessionRevoked = targetDevice.Id == context.DeviceId
         };
@@ -425,6 +487,8 @@ public sealed class AuthService(
         {
             ProcessedAt = now,
             RevokedCount = otherDevices.Count,
+            TargetSessionId = null,
+            TargetTerminalId = null,
             TargetDeviceCode = null,
             CurrentSessionRevoked = false
         };
@@ -449,6 +513,8 @@ public sealed class AuthService(
             new("full_name", user.FullName),
             new(ClaimTypes.Role, role),
             new("device_id", device.Id.ToString()),
+            new("session_id", device.Id.ToString()),
+            new("terminal_id", device.DeviceCode),
             new("device_code", device.DeviceCode),
             new("mfa_verified", mfaVerified.ToString().ToLowerInvariant()),
             new("auth_session_version", Math.Max(1, device.AuthSessionVersion).ToString())
@@ -879,7 +945,7 @@ public sealed class AuthService(
             return $"ADMIN-WEB-{normalizedUsername}";
         }
 
-        throw new InvalidOperationException("device_code is required.");
+        throw new InvalidOperationException("terminal_id or device_code is required.");
     }
 
     private static AuthContext? ResolveAuthContext(ClaimsPrincipal principal)
@@ -887,21 +953,21 @@ public sealed class AuthService(
         var userId = ParseGuid(
             principal.FindFirstValue(ClaimTypes.NameIdentifier) ??
             principal.FindFirstValue(JwtRegisteredClaimNames.Sub));
-        var deviceId = ParseGuid(principal.FindFirstValue("device_id"));
-        var deviceCode = NormalizeOptionalValue(principal.FindFirstValue("device_code"));
+        var sessionId = ParseGuid(principal.FindFirstValue("session_id"));
+        var deviceCode = NormalizeOptionalValue(principal.FindFirstValue("terminal_id"));
         var versionClaim = principal.FindFirstValue("auth_session_version");
         var sessionVersion = int.TryParse(versionClaim, out var parsedVersion)
             ? Math.Max(1, parsedVersion)
             : 0;
 
-        if (!userId.HasValue || !deviceId.HasValue || string.IsNullOrWhiteSpace(deviceCode))
+        if (!userId.HasValue || !sessionId.HasValue || string.IsNullOrWhiteSpace(deviceCode))
         {
             return null;
         }
 
         return new AuthContext(
             userId.Value,
-            deviceId.Value,
+            sessionId.Value,
             deviceCode,
             sessionVersion);
     }
@@ -930,3 +996,4 @@ public sealed class AuthService(
         string AlertReason,
         string MetadataJson);
 }
+
