@@ -149,6 +149,7 @@ public sealed class LicenseEnforcementMiddleware(RequestDelegate next)
     {
         return path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase)
                || path.StartsWithSegments("/api/auth", StringComparison.OrdinalIgnoreCase)
+               || path.StartsWithSegments("/api/cloud-account", StringComparison.OrdinalIgnoreCase)
                || path.StartsWithSegments("/api/security/challenge", StringComparison.OrdinalIgnoreCase)
                || path.StartsWithSegments("/api/admin", StringComparison.OrdinalIgnoreCase)
                || path.StartsWithSegments("/api/license/status", StringComparison.OrdinalIgnoreCase)

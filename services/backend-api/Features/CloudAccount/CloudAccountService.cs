@@ -1,4 +1,5 @@
 using System.Net.Http.Headers;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -17,7 +18,6 @@ public sealed class CloudAccountService(
     IHttpClientFactory httpClientFactory,
     IOptions<AiInsightOptions> aiInsightOptionsAccessor,
     IOptions<LicenseOptions> licenseOptionsAccessor,
-    LicenseService licenseService,
     IHttpContextAccessor httpContextAccessor)
 {
     private const string CloudAccountLinkClientName = "cloud-account-link";
@@ -209,21 +209,43 @@ public sealed class CloudAccountService(
 
     private async Task<string> ResolveLocalShopCodeAsync(CancellationToken cancellationToken)
     {
-        try
+        var principal = httpContextAccessor.HttpContext?.User;
+        var userId = ParseGuid(
+            principal?.FindFirstValue(ClaimTypes.NameIdentifier) ??
+            principal?.FindFirstValue("sub"));
+        if (!userId.HasValue)
         {
-            var portal = await licenseService.GetCustomerLicensePortalAsync(cancellationToken);
-            var localShopCode = NormalizeOptionalValue(portal.ShopCode);
-            if (string.IsNullOrWhiteSpace(localShopCode))
-            {
-                throw new InvalidOperationException("Local shop code could not be resolved.");
-            }
+            throw new InvalidOperationException("Authenticated user is invalid.");
+        }
 
-            return localShopCode;
-        }
-        catch (LicenseException exception)
+        var user = await dbContext.Users
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == userId.Value && x.IsActive, cancellationToken);
+        if (user is null)
         {
-            throw new InvalidOperationException(exception.Message);
+            throw new InvalidOperationException("Authenticated user is not available.");
         }
+
+        if (!user.StoreId.HasValue || user.StoreId == Guid.Empty)
+        {
+            throw new InvalidOperationException("Local user is not mapped to a shop.");
+        }
+
+        var shop = await dbContext.Shops
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == user.StoreId.Value && x.IsActive, cancellationToken);
+        if (shop is null)
+        {
+            throw new InvalidOperationException("Local shop mapping is invalid.");
+        }
+
+        var localShopCode = NormalizeOptionalValue(shop.Code);
+        if (string.IsNullOrWhiteSpace(localShopCode))
+        {
+            throw new InvalidOperationException("Local shop code could not be resolved.");
+        }
+
+        return localShopCode;
     }
 
     private static HttpRequestMessage BuildRequest(
@@ -570,7 +592,10 @@ public sealed class CloudAccountService(
             return "LOCAL-CLOUD-LINK";
         }
 
-        var resolved = NormalizeOptionalValue(licenseService.ResolveDeviceCode(null, httpContext));
+        var resolved = NormalizeOptionalValue(httpContext.Request.Headers["X-Terminal-Id"].FirstOrDefault()) ??
+                       NormalizeOptionalValue(httpContext.Request.Headers["X-Device-Code"].FirstOrDefault()) ??
+                       NormalizeOptionalValue(httpContext.User.FindFirstValue("terminal_id")) ??
+                       NormalizeOptionalValue(httpContext.User.FindFirstValue("device_code"));
         return string.IsNullOrWhiteSpace(resolved) ? "LOCAL-CLOUD-LINK" : resolved;
     }
 
@@ -630,6 +655,11 @@ public sealed class CloudAccountService(
     private static string? NormalizeOptionalValue(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static Guid? ParseGuid(string? value)
+    {
+        return Guid.TryParse(value, out var parsed) ? parsed : null;
     }
 
     private sealed record CloudLoginResult(
