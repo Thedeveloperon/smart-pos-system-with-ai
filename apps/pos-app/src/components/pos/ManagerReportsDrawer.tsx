@@ -1866,8 +1866,8 @@ const ManagerReportsDrawer = ({
                 className="bg-background text-foreground"
               />
             </div>
-            <Button onClick={refreshSupportData} disabled={loading || loadingPendingAiPayments} className="w-fit">
-              <RefreshCw className={`h-4 w-4 ${loading || loadingPendingAiPayments ? "animate-spin" : ""}`} />
+            <Button onClick={refreshSupportData} disabled={loading} className="w-fit">
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
               Refresh
             </Button>
           </div>
