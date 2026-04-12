@@ -252,6 +252,51 @@ public sealed class AuthService(
         };
     }
 
+    public async Task<AccountTenantContextResponse> GetTenantContextAsync(
+        ClaimsPrincipal principal,
+        CancellationToken cancellationToken)
+    {
+        var userId = ParseGuid(
+            principal.FindFirstValue(ClaimTypes.NameIdentifier) ??
+            principal.FindFirstValue(JwtRegisteredClaimNames.Sub));
+        if (!userId.HasValue)
+        {
+            throw new InvalidOperationException("Authenticated user is invalid.");
+        }
+
+        var user = await dbContext.Users
+            .Include(x => x.UserRoles)
+            .ThenInclude(x => x.Role)
+            .FirstOrDefaultAsync(x => x.Id == userId.Value && x.IsActive, cancellationToken);
+        if (user is null)
+        {
+            throw new InvalidOperationException("Authenticated user is not available.");
+        }
+
+        if (!user.StoreId.HasValue || user.StoreId == Guid.Empty)
+        {
+            throw new InvalidOperationException("Cloud account is not mapped to a shop.");
+        }
+
+        var shop = await dbContext.Shops
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == user.StoreId.Value, cancellationToken);
+        if (shop is null)
+        {
+            throw new InvalidOperationException("Cloud account shop mapping is invalid.");
+        }
+
+        var (role, _) = ResolveRoleAndScope(user);
+        return new AccountTenantContextResponse
+        {
+            ShopId = shop.Id,
+            ShopCode = shop.Code,
+            Username = user.Username,
+            FullName = user.FullName,
+            Role = role
+        };
+    }
+
     public async Task<AuthSessionsResponse> GetSessionDevicesAsync(
         ClaimsPrincipal principal,
         CancellationToken cancellationToken)

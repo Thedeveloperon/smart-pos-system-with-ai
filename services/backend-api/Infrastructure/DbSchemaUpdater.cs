@@ -766,6 +766,58 @@ public static class DbSchemaUpdater
         }
     }
 
+    public static async Task EnsureCloudAccountLinkSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken = default)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+
+        if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                CREATE TABLE IF NOT EXISTS "cloud_account_links" (
+                  "Id" TEXT NOT NULL CONSTRAINT "PK_cloud_account_links" PRIMARY KEY,
+                  "CloudUsername" TEXT NOT NULL,
+                  "CloudFullName" TEXT NOT NULL,
+                  "CloudRole" TEXT NOT NULL,
+                  "CloudShopCode" TEXT NOT NULL,
+                  "CloudAuthToken" TEXT NOT NULL,
+                  "TokenExpiresAtUtc" TEXT NOT NULL,
+                  "LinkedAtUtc" TEXT NOT NULL,
+                  "UpdatedAtUtc" TEXT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS "IX_cloud_account_links_LinkedAtUtc"
+                  ON "cloud_account_links" ("LinkedAtUtc");
+                """,
+                cancellationToken);
+            return;
+        }
+
+        if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                CREATE TABLE IF NOT EXISTS cloud_account_links (
+                  "Id" uuid NOT NULL PRIMARY KEY,
+                  "CloudUsername" varchar(200) NOT NULL,
+                  "CloudFullName" varchar(300) NOT NULL,
+                  "CloudRole" varchar(64) NOT NULL,
+                  "CloudShopCode" varchar(80) NOT NULL,
+                  "CloudAuthToken" varchar(4000) NOT NULL,
+                  "TokenExpiresAtUtc" timestamptz NOT NULL,
+                  "LinkedAtUtc" timestamptz NOT NULL,
+                  "UpdatedAtUtc" timestamptz NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS "IX_cloud_account_links_LinkedAtUtc"
+                  ON cloud_account_links("LinkedAtUtc");
+                """,
+                cancellationToken);
+        }
+    }
+
     private static async Task EnsureSqliteCloudApiReliabilitySchemaAsync(
         SmartPosDbContext dbContext,
         CancellationToken cancellationToken)

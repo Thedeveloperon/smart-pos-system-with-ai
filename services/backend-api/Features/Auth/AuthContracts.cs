@@ -115,3 +115,21 @@ public sealed class AuthSessionRevokeResponse
     [JsonPropertyName("current_session_revoked")]
     public bool CurrentSessionRevoked { get; set; }
 }
+
+public sealed class AccountTenantContextResponse
+{
+    [JsonPropertyName("shop_id")]
+    public Guid ShopId { get; set; }
+
+    [JsonPropertyName("shop_code")]
+    public string ShopCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("username")]
+    public string Username { get; set; } = string.Empty;
+
+    [JsonPropertyName("full_name")]
+    public string FullName { get; set; } = string.Empty;
+
+    [JsonPropertyName("role")]
+    public string Role { get; set; } = string.Empty;
+}

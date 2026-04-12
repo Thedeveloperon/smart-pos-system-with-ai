@@ -6,6 +6,7 @@ using SmartPos.Backend.Features.Ai;
 using SmartPos.Backend.Features.AiChat;
 using SmartPos.Backend.Features.AiChat.IntentPipeline;
 using SmartPos.Backend.Features.Auth;
+using SmartPos.Backend.Features.CloudAccount;
 using SmartPos.Backend.Features.CashSessions;
 using SmartPos.Backend.Features.Checkout;
 using SmartPos.Backend.Features.Licensing;
@@ -424,6 +425,7 @@ builder.Services.AddScoped<IAiChatGroundingHandler, CashierOperationsGroundingHa
 builder.Services.AddScoped<IAiChatGroundingHandler, ReportsGroundingHandler>();
 builder.Services.AddScoped<AiChatService>();
 builder.Services.AddScoped<ReminderService>();
+builder.Services.AddScoped<CloudAccountService>();
 builder.Services.AddHttpClient<AiSuggestionService>();
 builder.Services.AddHttpClient<AiInsightService>();
 builder.Services.AddHttpClient("cloud-license-relay", (serviceProvider, httpClient) =>
@@ -448,6 +450,24 @@ builder.Services.AddHttpClient("cloud-ai-relay", (serviceProvider, httpClient) =
     }
 
     var timeoutSeconds = Math.Max(1, options.CloudRelayTimeoutSeconds);
+    httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+});
+builder.Services.AddHttpClient("cloud-account-link", (serviceProvider, httpClient) =>
+{
+    var aiOptions = serviceProvider.GetRequiredService<IOptions<AiInsightOptions>>().Value;
+    var licenseOptions = serviceProvider.GetRequiredService<IOptions<LicenseOptions>>().Value;
+    var aiBaseUrl = (aiOptions.CloudRelayBaseUrl ?? string.Empty).Trim();
+    var licenseBaseUrl = (licenseOptions.CloudRelayBaseUrl ?? string.Empty).Trim();
+    var baseUrl = !string.IsNullOrWhiteSpace(aiBaseUrl) ? aiBaseUrl : licenseBaseUrl;
+    if (Uri.TryCreate(baseUrl, UriKind.Absolute, out var relayUri))
+    {
+        httpClient.BaseAddress = relayUri;
+    }
+
+    var configuredTimeout = !string.IsNullOrWhiteSpace(aiBaseUrl)
+        ? aiOptions.CloudRelayTimeoutSeconds
+        : licenseOptions.CloudRelayTimeoutSeconds;
+    var timeoutSeconds = Math.Max(1, configuredTimeout);
     httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
 });
 builder.Services.AddHttpClient("openai-ocr");
@@ -631,6 +651,7 @@ using (var scope = app.Services.CreateScope())
     await DbSchemaUpdater.EnsureAuthSecuritySchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureAiInsightsSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureCloudApiReliabilitySchemaAsync(dbContext);
+    await DbSchemaUpdater.EnsureCloudAccountLinkSchemaAsync(dbContext);
     await DbSeeder.SeedAsync(dbContext);
 }
 
@@ -682,6 +703,7 @@ if (!staticIndexFileAvailable)
 }
 
 app.MapAuthEndpoints();
+app.MapAccountEndpoints();
 app.MapLicensingEndpoints();
 app.MapCloudV1Endpoints();
 app.MapCloudAiRelayEndpoints();
@@ -698,6 +720,7 @@ app.MapCheckoutEndpoints();
 app.MapReceiptEndpoints();
 app.MapRefundEndpoints();
 app.MapSettingsEndpoints();
+app.MapCloudAccountEndpoints();
 app.MapReportEndpoints();
 
 if (staticIndexFileAvailable)
