@@ -247,9 +247,11 @@ public static class CloudV1Endpoints
             LicenseService licenseService,
             CancellationToken cancellationToken) =>
         {
-            request.DeviceCode = string.IsNullOrWhiteSpace(request.DeviceCode)
+            request.DeviceCode = string.IsNullOrWhiteSpace(request.TerminalId) &&
+                                 string.IsNullOrWhiteSpace(request.DeviceCode)
                 ? licenseService.ResolveDeviceCode(null, httpContext)
-                : request.DeviceCode;
+                : licenseService.ResolveDeviceCode(request.TerminalId ?? request.DeviceCode, httpContext);
+            request.TerminalId = request.DeviceCode;
 
             try
             {
@@ -271,9 +273,11 @@ public static class CloudV1Endpoints
             LicenseService licenseService,
             CancellationToken cancellationToken) =>
         {
-            request.DeviceCode = string.IsNullOrWhiteSpace(request.DeviceCode)
+            request.DeviceCode = string.IsNullOrWhiteSpace(request.TerminalId) &&
+                                 string.IsNullOrWhiteSpace(request.DeviceCode)
                 ? licenseService.ResolveDeviceCode(null, httpContext)
-                : request.DeviceCode;
+                : licenseService.ResolveDeviceCode(request.TerminalId ?? request.DeviceCode, httpContext);
+            request.TerminalId = request.DeviceCode;
 
             try
             {
@@ -301,9 +305,11 @@ public static class CloudV1Endpoints
             LicenseService licenseService,
             CancellationToken cancellationToken) =>
         {
-            request.DeviceCode = string.IsNullOrWhiteSpace(request.DeviceCode)
+            request.DeviceCode = string.IsNullOrWhiteSpace(request.TerminalId) &&
+                                 string.IsNullOrWhiteSpace(request.DeviceCode)
                 ? licenseService.ResolveDeviceCode(null, httpContext)
-                : request.DeviceCode;
+                : licenseService.ResolveDeviceCode(request.TerminalId ?? request.DeviceCode, httpContext);
+            request.TerminalId = request.DeviceCode;
 
             try
             {
@@ -322,6 +328,7 @@ public static class CloudV1Endpoints
         var license = group.MapGroup("/license");
 
         license.MapGet("/status", async (
+            string? terminal_id,
             string? device_code,
             HttpContext httpContext,
             LicenseService licenseService,
@@ -330,8 +337,9 @@ public static class CloudV1Endpoints
         {
             try
             {
-                var deviceCode = licenseService.ResolveDeviceCode(device_code, httpContext);
-                var token = string.IsNullOrWhiteSpace(device_code)
+                var resolvedTerminalId = terminal_id ?? device_code;
+                var deviceCode = licenseService.ResolveDeviceCode(resolvedTerminalId, httpContext);
+                var token = string.IsNullOrWhiteSpace(resolvedTerminalId)
                     ? licenseService.ResolveLicenseToken(httpContext)
                     : licenseService.ResolveLicenseToken(httpContext, includeCookie: false);
                 var response = await licenseService.GetStatusAsync(deviceCode, token, cancellationToken);
@@ -361,9 +369,11 @@ public static class CloudV1Endpoints
             ILicensingAlertMonitor alertMonitor,
             CancellationToken cancellationToken) =>
         {
-            request.DeviceCode = string.IsNullOrWhiteSpace(request.DeviceCode)
+            request.DeviceCode = string.IsNullOrWhiteSpace(request.TerminalId) &&
+                                 string.IsNullOrWhiteSpace(request.DeviceCode)
                 ? licenseService.ResolveDeviceCode(null, httpContext)
-                : request.DeviceCode;
+                : licenseService.ResolveDeviceCode(request.TerminalId ?? request.DeviceCode, httpContext);
+            request.TerminalId = request.DeviceCode;
 
             if (string.IsNullOrWhiteSpace(request.LicenseToken))
             {
@@ -394,6 +404,7 @@ public static class CloudV1Endpoints
 
         license.MapGet("/feature-check", async (
             string feature,
+            string? terminal_id,
             string? device_code,
             HttpContext httpContext,
             LicenseService licenseService,
@@ -410,8 +421,9 @@ public static class CloudV1Endpoints
 
             try
             {
-                var deviceCode = licenseService.ResolveDeviceCode(device_code, httpContext);
-                var token = string.IsNullOrWhiteSpace(device_code)
+                var resolvedTerminalId = terminal_id ?? device_code;
+                var deviceCode = licenseService.ResolveDeviceCode(resolvedTerminalId, httpContext);
+                var token = string.IsNullOrWhiteSpace(resolvedTerminalId)
                     ? licenseService.ResolveLicenseToken(httpContext)
                     : licenseService.ResolveLicenseToken(httpContext, includeCookie: false);
                 var response = await licenseService.GetStatusAsync(deviceCode, token, cancellationToken);

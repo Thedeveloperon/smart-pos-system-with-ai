@@ -267,6 +267,7 @@ public sealed class LicenseCloudRelayService(
             : resolvedDeviceId.Trim();
         if (!string.IsNullOrWhiteSpace(resolvedDeviceId))
         {
+            request.Headers.TryAddWithoutValidation(CloudWriteRequestContract.TerminalIdHeaderName, resolvedDeviceId);
             request.Headers.TryAddWithoutValidation(CloudWriteRequestContract.DeviceIdHeaderName, resolvedDeviceId);
             request.Headers.TryAddWithoutValidation(CloudWriteRequestContract.DeviceCodeHeaderName, resolvedDeviceId);
         }

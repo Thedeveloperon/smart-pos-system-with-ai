@@ -7,7 +7,7 @@ const apiMocks = vi.hoisted(() => ({
   fetchLicenseStatus: vi.fn(),
   heartbeatLicense: vi.fn(),
   activateLicense: vi.fn(),
-  getDeviceCode: vi.fn(),
+  getTerminalId: vi.fn(),
 }));
 
 const cacheMocks = vi.hoisted(() => ({
@@ -22,7 +22,7 @@ vi.mock("@/lib/api", async () => {
     fetchLicenseStatus: apiMocks.fetchLicenseStatus,
     heartbeatLicense: apiMocks.heartbeatLicense,
     activateLicense: apiMocks.activateLicense,
-    getDeviceCode: apiMocks.getDeviceCode,
+    getTerminalId: apiMocks.getTerminalId,
   };
 });
 
@@ -35,6 +35,7 @@ function buildStatus(overrides: Partial<LicenseStatus> = {}): LicenseStatus {
   return {
     state: "active",
     shopId: "00000000-0000-0000-0000-000000000001",
+    terminalId: "licensing-context-terminal",
     deviceCode: "licensing-context-device",
     subscriptionStatus: "active",
     plan: "starter",
@@ -75,7 +76,7 @@ describe("LicensingContext", () => {
     apiMocks.fetchLicenseStatus.mockResolvedValue(buildStatus());
     apiMocks.heartbeatLicense.mockResolvedValue(buildStatus());
     apiMocks.activateLicense.mockResolvedValue(buildStatus());
-    apiMocks.getDeviceCode.mockReturnValue("licensing-context-device");
+    apiMocks.getTerminalId.mockReturnValue("licensing-context-terminal");
     cacheMocks.loadCachedLicenseStatus.mockResolvedValue(null);
     cacheMocks.saveCachedLicenseStatus.mockResolvedValue(undefined);
   });
@@ -100,7 +101,7 @@ describe("LicensingContext", () => {
       expect(screen.getByTestId("state").textContent).toBe("grace");
     });
     expect(screen.getByTestId("error").textContent).toMatch(/Using cached license/i);
-    expect(cacheMocks.loadCachedLicenseStatus).toHaveBeenCalledWith("licensing-context-device");
+    expect(cacheMocks.loadCachedLicenseStatus).toHaveBeenCalledWith("licensing-context-terminal");
   });
 
   it("retries heartbeat when connectivity returns", async () => {

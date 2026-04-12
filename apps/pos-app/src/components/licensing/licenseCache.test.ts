@@ -9,6 +9,7 @@ function buildStatus(overrides: Partial<LicenseStatus> = {}): LicenseStatus {
   return {
     state: "active",
     shopId: "00000000-0000-0000-0000-000000000001",
+    terminalId: "cache-test-terminal",
     deviceCode: "cache-test-device",
     subscriptionStatus: "active",
     plan: "starter",
@@ -59,7 +60,7 @@ describe("licenseCache", () => {
     );
     rewriteCachedValidationTimes({ serverMsAgo: 10 * 60 * 1000, clientMsAgo: 10 * 60 * 1000 });
 
-    const cached = await loadCachedLicenseStatus("cache-test-device");
+    const cached = await loadCachedLicenseStatus("cache-test-terminal");
     expect(cached).not.toBeNull();
     expect(cached?.status.state).toBe("grace");
     expect(cached?.warning).toMatch(/Using cached license/i);
@@ -77,7 +78,7 @@ describe("licenseCache", () => {
     );
     rewriteCachedValidationTimes({ serverMsAgo: 15 * 60 * 1000, clientMsAgo: 15 * 60 * 1000 });
 
-    const cached = await loadCachedLicenseStatus("cache-test-device");
+    const cached = await loadCachedLicenseStatus("cache-test-terminal");
     expect(cached).not.toBeNull();
     expect(cached?.status.state).toBe("suspended");
     expect(cached?.status.blockedActions).toEqual(["checkout", "refund"]);
@@ -95,7 +96,7 @@ describe("licenseCache", () => {
     );
     rewriteCachedValidationTimes({ serverMsAgo: 5 * 60 * 1000, clientMsAgo: 5 * 60 * 1000 });
 
-    const cached = await loadCachedLicenseStatus("cache-test-device");
+    const cached = await loadCachedLicenseStatus("cache-test-terminal");
     expect(cached).not.toBeNull();
     expect(cached?.status.state).toBe("suspended");
     expect(cached?.warning).toMatch(/offline grant is missing/i);
@@ -111,7 +112,7 @@ describe("licenseCache", () => {
       })
     );
 
-    const cached = await loadCachedLicenseStatus("cache-test-device");
+    const cached = await loadCachedLicenseStatus("cache-test-terminal");
     expect(cached).not.toBeNull();
     expect(cached?.status.state).toBe("suspended");
     expect(cached?.warning).toMatch(/offline grant expired/i);
@@ -126,7 +127,7 @@ describe("licenseCache", () => {
     envelope.last_client_seen_time = Date.now() + 10 * 60 * 1000;
     window.localStorage.setItem(CACHE_KEY, JSON.stringify(envelope));
 
-    const cached = await loadCachedLicenseStatus("cache-test-device");
+    const cached = await loadCachedLicenseStatus("cache-test-terminal");
     expect(cached).not.toBeNull();
     expect(cached?.status.state).toBe("suspended");
     expect(cached?.warning).toMatch(/clock moved backwards/i);
@@ -142,7 +143,7 @@ describe("licenseCache", () => {
     envelope.validated_server_time = new Date(Date.now() + 60 * 60 * 1000).toISOString();
     window.localStorage.setItem(CACHE_KEY, JSON.stringify(envelope));
 
-    const cached = await loadCachedLicenseStatus("cache-test-device");
+    const cached = await loadCachedLicenseStatus("cache-test-terminal");
     expect(cached).not.toBeNull();
     expect(cached?.status.state).toBe("suspended");
     expect(cached?.warning).toMatch(/clock drift exceeded/i);

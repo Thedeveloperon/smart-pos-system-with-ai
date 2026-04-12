@@ -6,6 +6,7 @@ public static class CloudWriteRequestContract
 {
     public const string IdempotencyHeaderName = "Idempotency-Key";
     public const string DeviceIdHeaderName = "X-Device-Id";
+    public const string TerminalIdHeaderName = "X-Terminal-Id";
     public const string DeviceCodeHeaderName = "X-Device-Code";
     public const string PosVersionHeaderName = "X-POS-Version";
 
@@ -116,6 +117,7 @@ public static class CloudWriteRequestContract
 
     public static void EnsureLegacyDeviceCodeHeader(HttpContext httpContext, string deviceId)
     {
+        httpContext.Request.Headers[TerminalIdHeaderName] = deviceId;
         httpContext.Request.Headers[DeviceCodeHeaderName] = deviceId;
     }
 

@@ -5,7 +5,6 @@ import { Input } from "@/components/ui/input";
 import type { LicenseStatus } from "@/lib/api";
 
 type LicenseActivationScreenProps = {
-  deviceCode?: string;
   error?: string | null;
   isBusy?: boolean;
   activationEntitlementKey?: string;
@@ -95,37 +94,7 @@ const formatOfflineGrantRemaining = (status: LicenseStatus) => {
   return `${totalDays} day${totalDays === 1 ? "" : "s"} remaining`;
 };
 
-const copyText = async (value: string, successMessage: string) => {
-  if (!value.trim()) {
-    toast.info("Nothing to copy.");
-    return;
-  }
-
-  try {
-    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(value);
-      toast.success(successMessage);
-      return;
-    }
-
-    const textArea = document.createElement("textarea");
-    textArea.value = value;
-    textArea.style.position = "fixed";
-    textArea.style.opacity = "0";
-    document.body.appendChild(textArea);
-    textArea.focus();
-    textArea.select();
-    document.execCommand("copy");
-    document.body.removeChild(textArea);
-    toast.success(successMessage);
-  } catch (error) {
-    console.error(error);
-    toast.error("Failed to copy.");
-  }
-};
-
 export const LicenseActivationScreen = ({
-  deviceCode,
   error,
   isBusy,
   activationEntitlementKey,
@@ -142,31 +111,11 @@ export const LicenseActivationScreen = ({
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">License Activation Required</h1>
           <p className="text-sm text-muted-foreground">
-            This POS device is not provisioned yet. Activate it before sign-in.
+            This POS terminal is not provisioned yet. Activate it before sign-in.
           </p>
         </div>
 
         <div className="rounded-2xl border border-border bg-card p-6 space-y-4 shadow-sm">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground">Device Code</p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 px-2 text-xs"
-                onClick={() => {
-                  void copyText(deviceCode || "", "Device code copied.");
-                }}
-                disabled={isBusy || !deviceCode}
-              >
-                Copy
-              </Button>
-            </div>
-            <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 font-mono text-xs break-all">
-              {deviceCode || "Unavailable"}
-            </div>
-          </div>
-
           <div className="space-y-2">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">Activation Key</p>
             <Input
@@ -201,7 +150,7 @@ export const LicenseActivationScreen = ({
               }}
               disabled={isBusy}
             >
-              {isBusy ? "Activating..." : "Activate Device"}
+              {isBusy ? "Activating..." : "Activate Terminal"}
             </Button>
             <Button variant="outline" className="rounded-xl" onClick={onRefresh} disabled={isBusy}>
               Recheck Status
@@ -225,7 +174,7 @@ export const LicenseBlockedScreen = ({
   const isRevoked = status.state === "revoked";
   const title = isRevoked ? "License Revoked" : "License Suspended";
   const description = isRevoked
-    ? "This device has been revoked and cannot continue checkout operations."
+    ? "This terminal has been revoked and cannot continue checkout operations."
     : "Grace period has ended. Checkout and refund operations are blocked.";
 
   return (
@@ -242,7 +191,7 @@ export const LicenseBlockedScreen = ({
         <div className="rounded-2xl border border-border bg-card p-6 space-y-4 shadow-sm">
           <div className="rounded-xl border border-border bg-muted/30 px-3 py-3 text-sm">
             <p>
-              <span className="font-medium">Device:</span> <span className="font-mono">{status.deviceCode}</span>
+              <span className="font-medium">Terminal:</span> <span className="font-mono">{status.terminalId}</span>
             </p>
             <p className="mt-1">
               <span className="font-medium">Blocked actions:</span>{" "}
@@ -260,9 +209,9 @@ export const LicenseBlockedScreen = ({
             <p className="font-medium text-foreground">Recovery steps</p>
             <ol className="list-decimal pl-5 space-y-1">
               <li>Renew or settle the subscription payment for this shop.</li>
-              <li>Sign in to super admin billing/support and verify the device allocation.</li>
-              <li>Contact support with this device code if lock state remains after payment.</li>
-              <li>Re-run activation to request a fresh license token for this device.</li>
+              <li>Sign in to super admin billing/support and verify the terminal allocation.</li>
+              <li>Contact support with this terminal ID if lock state remains after payment.</li>
+              <li>Re-run activation to request a fresh license token for this terminal.</li>
               <li>Use Recheck Status after payment or provisioning updates complete.</li>
             </ol>
           </div>

@@ -9,6 +9,7 @@ const SUSPENDED_BLOCKED_ACTIONS = ["checkout", "refund"];
 type PersistedLicenseStatus = {
   state: LicenseState;
   shop_id?: string | null;
+  terminal_id?: string;
   device_code: string;
   device_key_fingerprint?: string | null;
   subscription_status?: "trialing" | "active" | "past_due" | "canceled" | null;
@@ -30,6 +31,7 @@ type CachedLicenseEnvelope = {
   mode: "aes-gcm" | "none";
   payload: string;
   iv?: string | null;
+  terminal_id?: string;
   device_code: string;
   validated_server_time: string;
   validated_client_time: number;
@@ -92,13 +94,13 @@ function decodeUtf8FromBase64(value: string) {
   return textDecoder.decode(base64ToBytes(value));
 }
 
-async function deriveEncryptionKey(deviceCode: string): Promise<CryptoKey | null> {
+async function deriveEncryptionKey(terminalId: string): Promise<CryptoKey | null> {
   if (!hasWebCrypto()) {
     return null;
   }
 
   try {
-    const seed = textEncoder.encode(`smartpos-license-cache:${deviceCode}`);
+    const seed = textEncoder.encode(`smartpos-license-cache:${terminalId}`);
     const hash = await crypto.subtle.digest("SHA-256", seed);
     return await crypto.subtle.importKey("raw", hash, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
   } catch {
@@ -106,8 +108,8 @@ async function deriveEncryptionKey(deviceCode: string): Promise<CryptoKey | null
   }
 }
 
-async function encryptPayload(payload: string, deviceCode: string) {
-  const key = await deriveEncryptionKey(deviceCode);
+async function encryptPayload(payload: string, terminalId: string) {
+  const key = await deriveEncryptionKey(terminalId);
   if (!key || !hasWebCrypto()) {
     return {
       mode: "none" as const,
@@ -132,7 +134,7 @@ async function decryptPayload(envelope: CachedLicenseEnvelope): Promise<string |
       return decodeUtf8FromBase64(envelope.payload);
     }
 
-    const key = await deriveEncryptionKey(envelope.device_code);
+    const key = await deriveEncryptionKey(envelope.terminal_id || envelope.device_code);
     if (!key || !envelope.iv) {
       return null;
     }
@@ -150,6 +152,7 @@ function toPersistedStatus(status: LicenseStatus): PersistedLicenseStatus {
   return {
     state: status.state,
     shop_id: status.shopId ?? null,
+    terminal_id: status.terminalId,
     device_code: status.deviceCode,
     device_key_fingerprint: status.deviceKeyFingerprint ?? null,
     subscription_status: status.subscriptionStatus ?? null,
@@ -168,10 +171,12 @@ function toPersistedStatus(status: LicenseStatus): PersistedLicenseStatus {
 }
 
 function fromPersistedStatus(payload: PersistedLicenseStatus): LicenseStatus {
+  const terminalId = payload.terminal_id || payload.device_code;
   return {
     state: payload.state,
     shopId: payload.shop_id ?? null,
-    deviceCode: payload.device_code,
+    terminalId,
+    deviceCode: terminalId,
     deviceKeyFingerprint: payload.device_key_fingerprint ?? null,
     subscriptionStatus: payload.subscription_status ?? null,
     plan: payload.plan ?? null,
@@ -223,11 +228,12 @@ function clampOfflineState(status: LicenseStatus, estimatedServerTime: Date): Li
   return next;
 }
 
-function createRollbackBlockedStatus(deviceCode: string): LicenseStatus {
+function createRollbackBlockedStatus(terminalId: string): LicenseStatus {
   return {
     state: "suspended",
     shopId: null,
-    deviceCode,
+    terminalId,
+    deviceCode: terminalId,
     subscriptionStatus: null,
     plan: null,
     seatLimit: null,
@@ -250,14 +256,16 @@ export async function saveCachedLicenseStatus(status: LicenseStatus) {
   }
 
   const payload = JSON.stringify(toPersistedStatus(status));
-  const encrypted = await encryptPayload(payload, status.deviceCode);
+  const resolvedTerminalId = status.terminalId || status.deviceCode;
+  const encrypted = await encryptPayload(payload, resolvedTerminalId);
   const clientTime = Date.now();
   const envelope: CachedLicenseEnvelope = {
     version: CACHE_VERSION,
     mode: encrypted.mode,
     payload: encrypted.payload,
     iv: encrypted.iv,
-    device_code: status.deviceCode,
+    terminal_id: resolvedTerminalId,
+    device_code: resolvedTerminalId,
     validated_server_time: status.serverTime.toISOString(),
     validated_client_time: clientTime,
     validated_server_delta_ms: status.serverTime.getTime() - clientTime,
@@ -267,7 +275,7 @@ export async function saveCachedLicenseStatus(status: LicenseStatus) {
   localStorage.setItem(CACHE_KEY, JSON.stringify(envelope));
 }
 
-export async function loadCachedLicenseStatus(deviceCode: string): Promise<CachedLicenseSnapshot | null> {
+export async function loadCachedLicenseStatus(terminalId: string): Promise<CachedLicenseSnapshot | null> {
   if (!hasLocalStorage()) {
     return null;
   }
@@ -288,7 +296,7 @@ export async function loadCachedLicenseStatus(deviceCode: string): Promise<Cache
     if (now + CLOCK_ROLLBACK_TOLERANCE_MS < envelope.last_client_seen_time) {
       localStorage.removeItem(CACHE_KEY);
       return {
-        status: createRollbackBlockedStatus(deviceCode),
+        status: createRollbackBlockedStatus(terminalId),
         warning: "System clock moved backwards. Online license validation is required.",
         lastValidatedAtServer: new Date(envelope.validated_server_time),
         lastValidatedAtClient: new Date(envelope.validated_client_time),
@@ -313,7 +321,7 @@ export async function loadCachedLicenseStatus(deviceCode: string): Promise<Cache
     if (Math.abs(observedDeltaMs - expectedDeltaMs) > SERVER_DELTA_DRIFT_TOLERANCE_MS) {
       localStorage.removeItem(CACHE_KEY);
       return {
-        status: createRollbackBlockedStatus(deviceCode),
+        status: createRollbackBlockedStatus(terminalId),
         warning: "System clock drift exceeded allowed tolerance. Online license validation is required.",
         lastValidatedAtServer: new Date(envelope.validated_server_time),
         lastValidatedAtClient: new Date(envelope.validated_client_time),

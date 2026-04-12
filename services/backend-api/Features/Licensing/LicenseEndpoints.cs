@@ -19,9 +19,11 @@ public static class LicenseEndpoints
             LicenseCloudRelayService cloudRelayService,
             CancellationToken cancellationToken) =>
         {
-            request.DeviceCode = string.IsNullOrWhiteSpace(request.DeviceCode)
+            request.DeviceCode = string.IsNullOrWhiteSpace(request.TerminalId) &&
+                                 string.IsNullOrWhiteSpace(request.DeviceCode)
                 ? licenseService.ResolveDeviceCode(null, httpContext)
-                : request.DeviceCode;
+                : licenseService.ResolveDeviceCode(request.TerminalId ?? request.DeviceCode, httpContext);
+            request.TerminalId = request.DeviceCode;
 
             try
             {
@@ -47,9 +49,11 @@ public static class LicenseEndpoints
             LicenseCloudRelayService cloudRelayService,
             CancellationToken cancellationToken) =>
         {
-            request.DeviceCode = string.IsNullOrWhiteSpace(request.DeviceCode)
+            request.DeviceCode = string.IsNullOrWhiteSpace(request.TerminalId) &&
+                                 string.IsNullOrWhiteSpace(request.DeviceCode)
                 ? licenseService.ResolveDeviceCode(null, httpContext)
-                : request.DeviceCode;
+                : licenseService.ResolveDeviceCode(request.TerminalId ?? request.DeviceCode, httpContext);
+            request.TerminalId = request.DeviceCode;
 
             try
             {
@@ -80,9 +84,11 @@ public static class LicenseEndpoints
             LicenseService licenseService,
             CancellationToken cancellationToken) =>
         {
-            request.DeviceCode = string.IsNullOrWhiteSpace(request.DeviceCode)
+            request.DeviceCode = string.IsNullOrWhiteSpace(request.TerminalId) &&
+                                 string.IsNullOrWhiteSpace(request.DeviceCode)
                 ? licenseService.ResolveDeviceCode(null, httpContext)
-                : request.DeviceCode;
+                : licenseService.ResolveDeviceCode(request.TerminalId ?? request.DeviceCode, httpContext);
+            request.TerminalId = request.DeviceCode;
 
             try
             {
@@ -103,6 +109,7 @@ public static class LicenseEndpoints
             .WithTags("Licensing");
 
         license.MapGet("/status", async (
+            string? terminal_id,
             string? device_code,
             HttpContext httpContext,
             LicenseService licenseService,
@@ -112,8 +119,9 @@ public static class LicenseEndpoints
         {
             try
             {
-                var deviceCode = licenseService.ResolveDeviceCode(device_code, httpContext);
-                var token = string.IsNullOrWhiteSpace(device_code)
+                var resolvedTerminalId = terminal_id ?? device_code;
+                var deviceCode = licenseService.ResolveDeviceCode(resolvedTerminalId, httpContext);
+                var token = string.IsNullOrWhiteSpace(resolvedTerminalId)
                     ? licenseService.ResolveLicenseToken(httpContext)
                     : licenseService.ResolveLicenseToken(httpContext, includeCookie: false);
                 var response = cloudRelayService.IsEnabled
@@ -146,9 +154,11 @@ public static class LicenseEndpoints
             ILicensingAlertMonitor alertMonitor,
             CancellationToken cancellationToken) =>
         {
-            request.DeviceCode = string.IsNullOrWhiteSpace(request.DeviceCode)
+            request.DeviceCode = string.IsNullOrWhiteSpace(request.TerminalId) &&
+                                 string.IsNullOrWhiteSpace(request.DeviceCode)
                 ? licenseService.ResolveDeviceCode(null, httpContext)
-                : request.DeviceCode;
+                : licenseService.ResolveDeviceCode(request.TerminalId ?? request.DeviceCode, httpContext);
+            request.TerminalId = request.DeviceCode;
 
             if (string.IsNullOrWhiteSpace(request.LicenseToken))
             {
