@@ -34,10 +34,12 @@ public sealed class CloudAccountService(
     public async Task<CloudAccountStatusResponse> GetStatusAsync(CancellationToken cancellationToken)
     {
         var configured = TryResolveCloudBaseUrl(out _);
-        var link = await dbContext.CloudAccountLinks
+        var linkRows = await dbContext.CloudAccountLinks
             .AsNoTracking()
-            .OrderByDescending(x => x.LinkedAtUtc)
-            .FirstOrDefaultAsync(cancellationToken);
+            .ToListAsync(cancellationToken);
+        var link = linkRows
+            .OrderByDescending(x => x.LinkedAtUtc.UtcDateTime.Ticks)
+            .FirstOrDefault();
 
         if (link is null)
         {
@@ -159,9 +161,10 @@ public sealed class CloudAccountService(
         }
 
         var now = DateTimeOffset.UtcNow;
-        var existingRows = await dbContext.CloudAccountLinks
-            .OrderByDescending(x => x.LinkedAtUtc)
-            .ToListAsync(cancellationToken);
+        var existingRows = (await dbContext.CloudAccountLinks
+            .ToListAsync(cancellationToken))
+            .OrderByDescending(x => x.LinkedAtUtc.UtcDateTime.Ticks)
+            .ToList();
         var link = existingRows.FirstOrDefault();
         var encryptedToken = ProtectSensitiveValue(cloudAuthToken);
         if (link is null)
