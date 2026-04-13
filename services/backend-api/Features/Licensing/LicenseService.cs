@@ -22,6 +22,7 @@ public sealed class LicenseService(
     SmartPosDbContext dbContext,
     AiCreditBillingService aiCreditBillingService,
     IOptions<LicenseOptions> optionsAccessor,
+    IOptions<AiInsightOptions> aiInsightOptionsAccessor,
     LicensingMetrics metrics,
     IHttpContextAccessor httpContextAccessor,
     ILicensingAlertMonitor licensingAlertMonitor,
@@ -52,7 +53,9 @@ public sealed class LicenseService(
     private const string EmergencyActionForceReauth = "force_reauth";
     private const string MarketingInvoiceMetadataPrefix = "MARKETING_REQUEST:";
     private const string MarketingPaymentSubmissionMetadataPrefix = "MARKETING_PAYMENT_SUBMISSION:";
+    private const string OwnerAiCreditInvoiceMetadataPrefix = "OWNER_AI_CREDIT_INVOICE:";
     private const string AiCreditOrderSettlementReferencePrefix = "ai_order";
+    private const string CloudOwnerAccountAiCreditOrderSource = "cloud_owner_account";
     private const int MarketingBankReferenceMaxLength = 128;
     private const string LocalOfflineMode = "LocalOffline";
     private const string OfflineLocalManualBatchEntitlementSource = "offline_local_batch_manual";
@@ -187,6 +190,29 @@ public sealed class LicenseService(
             PendingAiPayments > 0;
     }
 
+    private readonly record struct OwnerManagedShopContext(
+        AppUser User,
+        Shop Shop,
+        string RoleCode);
+
+    private sealed class OwnerAiCreditInvoiceMetadataState
+    {
+        public string? PackCode { get; set; }
+        public decimal? RequestedCredits { get; set; }
+        public string? RequestedByUserId { get; set; }
+        public string? RequestedByUsername { get; set; }
+        public string? RequestedByFullName { get; set; }
+        public string? RequestedNote { get; set; }
+        public string? ApprovedBy { get; set; }
+        public DateTimeOffset? ApprovedAt { get; set; }
+        public string? ApprovedScope { get; set; }
+        public string? ApprovedActorNote { get; set; }
+        public string? RejectedBy { get; set; }
+        public DateTimeOffset? RejectedAt { get; set; }
+        public string? RejectedReasonCode { get; set; }
+        public string? RejectedActorNote { get; set; }
+    }
+
     private static readonly JsonSerializerOptions TokenSerializerOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -194,6 +220,7 @@ public sealed class LicenseService(
 
     private readonly LicenseOptions options = optionsAccessor.Value;
     private readonly Dictionary<string, LicensePlanDefinition> planCatalog = BuildPlanCatalog(optionsAccessor.Value);
+    private readonly Dictionary<string, AiCreditPackOption> aiCreditPackCatalog = BuildAiCreditPackCatalog(aiInsightOptionsAccessor.Value);
 
     private bool IsLocalOfflineMode()
     {
@@ -1737,6 +1764,383 @@ public sealed class LicenseService(
                     };
                 })
                 .ToList()
+        };
+    }
+
+    public async Task<AiCreditInvoiceRowResponse> CreateOwnerAiCreditInvoiceAsync(
+        OwnerAiCreditInvoiceCreateRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var now = DateTimeOffset.UtcNow;
+        var ownerContext = await ResolveCurrentOwnerManagedShopContextAsync(cancellationToken);
+        var pack = ResolveConfiguredAiCreditPack(request.PackCode);
+        var normalizedNote = NormalizeOptionalValue(request.Note);
+        var invoiceNumber = await ResolveManualBillingInvoiceNumberAsync(null, cancellationToken);
+
+        var metadata = new OwnerAiCreditInvoiceMetadataState
+        {
+            PackCode = pack.PackCode,
+            RequestedCredits = pack.Credits,
+            RequestedByUserId = ownerContext.User.Id.ToString("D"),
+            RequestedByUsername = ownerContext.User.Username,
+            RequestedByFullName = ownerContext.User.FullName,
+            RequestedNote = normalizedNote
+        };
+
+        var invoice = new ManualBillingInvoice
+        {
+            ShopId = ownerContext.Shop.Id,
+            Shop = ownerContext.Shop,
+            InvoiceNumber = invoiceNumber,
+            AmountDue = decimal.Round(pack.Price, 2, MidpointRounding.AwayFromZero),
+            AmountPaid = 0m,
+            Currency = ResolveCurrency(pack.Currency),
+            Status = ManualBillingInvoiceStatus.Open,
+            DueAtUtc = now.AddDays(7),
+            Notes = BuildOwnerAiCreditInvoiceNotes(metadata),
+            CreatedBy = ownerContext.User.Username,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+
+        var aiCreditOrder = new AiCreditOrder
+        {
+            ShopId = ownerContext.Shop.Id,
+            Shop = ownerContext.Shop,
+            InvoiceId = invoice.Id,
+            Invoice = invoice,
+            TargetUserId = ownerContext.User.Id,
+            TargetUser = ownerContext.User,
+            TargetUsername = ownerContext.User.Username,
+            PackageCode = pack.PackCode,
+            RequestedCredits = RoundAiCredits(pack.Credits),
+            SettledCredits = 0m,
+            Status = AiCreditOrderStatus.Submitted,
+            Source = CloudOwnerAccountAiCreditOrderSource,
+            MetadataJson = SerializeOwnerAiCreditInvoiceMetadata(metadata),
+            SubmittedAtUtc = now,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+
+        dbContext.ManualBillingInvoices.Add(invoice);
+        dbContext.AiCreditOrders.Add(aiCreditOrder);
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = ownerContext.Shop.Id,
+            Action = "owner_ai_credit_invoice_created",
+            Actor = ownerContext.User.Username,
+            Reason = "cloud_owner_invoice_created",
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                invoice_id = invoice.Id,
+                invoice_number = invoice.InvoiceNumber,
+                ai_credit_order_id = aiCreditOrder.Id,
+                pack_code = pack.PackCode,
+                requested_credits = aiCreditOrder.RequestedCredits,
+                amount_due = invoice.AmountDue,
+                currency = invoice.Currency
+            }),
+            CreatedAtUtc = now
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return MapAiCreditInvoiceRow(invoice, aiCreditOrder, ownerContext.Shop.Code);
+    }
+
+    public async Task<AiCreditInvoicesResponse> GetOwnerAiCreditInvoicesAsync(
+        int take,
+        CancellationToken cancellationToken)
+    {
+        var ownerContext = await ResolveCurrentOwnerManagedShopContextAsync(cancellationToken);
+        var normalizedTake = Math.Clamp(take, 1, 200);
+
+        var query = dbContext.AiCreditOrders
+            .AsNoTracking()
+            .Include(x => x.Invoice)
+            .Where(x =>
+                x.ShopId == ownerContext.Shop.Id &&
+                x.Source == CloudOwnerAccountAiCreditOrderSource &&
+                x.InvoiceId.HasValue);
+
+        List<AiCreditOrder> orders;
+        if (dbContext.Database.IsSqlite())
+        {
+            orders = (await query.ToListAsync(cancellationToken))
+                .OrderByDescending(x => x.SubmittedAtUtc)
+                .ThenByDescending(x => x.CreatedAtUtc)
+                .Take(normalizedTake)
+                .ToList();
+        }
+        else
+        {
+            orders = await query
+                .OrderByDescending(x => x.SubmittedAtUtc)
+                .ThenByDescending(x => x.CreatedAtUtc)
+                .Take(normalizedTake)
+                .ToListAsync(cancellationToken);
+        }
+
+        var items = orders
+            .Where(x => x.Invoice is not null)
+            .Select(x => MapAiCreditInvoiceRow(x.Invoice!, x, ownerContext.Shop.Code))
+            .ToList();
+
+        return new AiCreditInvoicesResponse
+        {
+            GeneratedAt = DateTimeOffset.UtcNow,
+            Count = items.Count,
+            Items = items
+        };
+    }
+
+    public async Task<AiCreditInvoicesResponse> GetAdminPendingAiCreditInvoicesAsync(
+        int take,
+        CancellationToken cancellationToken)
+    {
+        var normalizedTake = Math.Clamp(take, 1, 300);
+        var pendingStates = new[]
+        {
+            AiCreditOrderStatus.Submitted,
+            AiCreditOrderStatus.PendingVerification,
+            AiCreditOrderStatus.Verified
+        };
+
+        var query = dbContext.AiCreditOrders
+            .AsNoTracking()
+            .Include(x => x.Invoice)
+            .Include(x => x.Shop)
+            .Where(x =>
+                x.Source == CloudOwnerAccountAiCreditOrderSource &&
+                x.InvoiceId.HasValue &&
+                pendingStates.Contains(x.Status));
+
+        List<AiCreditOrder> orders;
+        if (dbContext.Database.IsSqlite())
+        {
+            orders = (await query.ToListAsync(cancellationToken))
+                .OrderByDescending(x => x.SubmittedAtUtc)
+                .ThenByDescending(x => x.CreatedAtUtc)
+                .Take(normalizedTake)
+                .ToList();
+        }
+        else
+        {
+            orders = await query
+                .OrderByDescending(x => x.SubmittedAtUtc)
+                .ThenByDescending(x => x.CreatedAtUtc)
+                .Take(normalizedTake)
+                .ToListAsync(cancellationToken);
+        }
+
+        var items = orders
+            .Where(x => x.Invoice is not null)
+            .Select(x =>
+            {
+                var shopCode = x.Shop?.Code ?? ResolveShopCode(null);
+                return MapAiCreditInvoiceRow(x.Invoice!, x, shopCode);
+            })
+            .ToList();
+
+        return new AiCreditInvoicesResponse
+        {
+            GeneratedAt = DateTimeOffset.UtcNow,
+            Count = items.Count,
+            Items = items
+        };
+    }
+
+    public async Task<AdminAiCreditInvoiceActionResponse> ApproveOwnerAiCreditInvoiceAsync(
+        Guid invoiceId,
+        AdminAiCreditInvoiceApproveRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (invoiceId == Guid.Empty)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "invoice_id is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var actorNote = NormalizeOptionalValue(request.ActorNote);
+        if (string.IsNullOrWhiteSpace(actorNote))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "actor_note is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var actor = ResolveCurrentAdminActor();
+        var actorScope = ResolveCurrentAdminScope();
+        var aiCreditOrder = await ResolveOwnerAiCreditOrderByInvoiceIdAsync(invoiceId, cancellationToken);
+        if (aiCreditOrder.Status == AiCreditOrderStatus.Rejected)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidPaymentStatus,
+                "Rejected AI credit invoices cannot be approved.",
+                StatusCodes.Status409Conflict);
+        }
+
+        var invoice = aiCreditOrder.Invoice
+            ?? throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "AI credit invoice is missing invoice metadata.",
+                StatusCodes.Status409Conflict);
+        var metadata = ParseOwnerAiCreditInvoiceMetadata(aiCreditOrder.MetadataJson);
+
+        if (aiCreditOrder.Status != AiCreditOrderStatus.Settled)
+        {
+            if (invoice.Status == ManualBillingInvoiceStatus.Canceled)
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.InvalidPaymentStatus,
+                    "Canceled AI credit invoices cannot be approved.",
+                    StatusCodes.Status409Conflict);
+            }
+
+            invoice.AmountPaid = invoice.AmountDue;
+            invoice.Status = ManualBillingInvoiceStatus.Paid;
+            invoice.UpdatedAtUtc = now;
+
+            metadata.ApprovedBy = actor;
+            metadata.ApprovedAt = now;
+            metadata.ApprovedScope = actorScope;
+            metadata.ApprovedActorNote = actorNote;
+            metadata.RejectedBy = null;
+            metadata.RejectedAt = null;
+            metadata.RejectedReasonCode = null;
+            metadata.RejectedActorNote = null;
+            aiCreditOrder.MetadataJson = SerializeOwnerAiCreditInvoiceMetadata(metadata);
+
+            aiCreditOrder.Status = AiCreditOrderStatus.Verified;
+            aiCreditOrder.VerifiedAtUtc ??= now;
+            aiCreditOrder.UpdatedAtUtc = now;
+            await SettleAiCreditOrderAsync(aiCreditOrder, actor, now, cancellationToken);
+
+            dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+            {
+                ShopId = aiCreditOrder.ShopId,
+                Action = "owner_ai_credit_invoice_approved",
+                Actor = actor,
+                Reason = "cloud_owner_invoice_approved",
+                MetadataJson = JsonSerializer.Serialize(new
+                {
+                    invoice_id = invoice.Id,
+                    invoice_number = invoice.InvoiceNumber,
+                    ai_credit_order_id = aiCreditOrder.Id,
+                    credits_settled = aiCreditOrder.SettledCredits,
+                    wallet_ledger_reference = aiCreditOrder.WalletLedgerReference,
+                    actor_scope = actorScope,
+                    actor_note = actorNote
+                }),
+                CreatedAtUtc = now
+            });
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        var shopCode = aiCreditOrder.Shop?.Code ?? ResolveShopCode(null);
+        return new AdminAiCreditInvoiceActionResponse
+        {
+            Invoice = MapAiCreditInvoiceRow(invoice, aiCreditOrder, shopCode),
+            ProcessedAt = now
+        };
+    }
+
+    public async Task<AdminAiCreditInvoiceActionResponse> RejectOwnerAiCreditInvoiceAsync(
+        Guid invoiceId,
+        AdminAiCreditInvoiceRejectRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (invoiceId == Guid.Empty)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "invoice_id is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var actorNote = NormalizeOptionalValue(request.ActorNote);
+        if (string.IsNullOrWhiteSpace(actorNote))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "actor_note is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var reasonCode = NormalizeReasonCode(request.ReasonCode) ?? "owner_ai_credit_invoice_rejected";
+        var now = DateTimeOffset.UtcNow;
+        var actor = ResolveCurrentAdminActor();
+        var actorScope = ResolveCurrentAdminScope();
+        var aiCreditOrder = await ResolveOwnerAiCreditOrderByInvoiceIdAsync(invoiceId, cancellationToken);
+        if (aiCreditOrder.Status == AiCreditOrderStatus.Settled)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidPaymentStatus,
+                "Settled AI credit invoices cannot be rejected.",
+                StatusCodes.Status409Conflict);
+        }
+
+        var invoice = aiCreditOrder.Invoice
+            ?? throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "AI credit invoice is missing invoice metadata.",
+                StatusCodes.Status409Conflict);
+
+        if (aiCreditOrder.Status != AiCreditOrderStatus.Rejected)
+        {
+            var metadata = ParseOwnerAiCreditInvoiceMetadata(aiCreditOrder.MetadataJson);
+            metadata.RejectedBy = actor;
+            metadata.RejectedAt = now;
+            metadata.RejectedReasonCode = reasonCode;
+            metadata.RejectedActorNote = actorNote;
+            metadata.ApprovedBy = null;
+            metadata.ApprovedAt = null;
+            metadata.ApprovedScope = null;
+            metadata.ApprovedActorNote = null;
+            aiCreditOrder.MetadataJson = SerializeOwnerAiCreditInvoiceMetadata(metadata);
+
+            aiCreditOrder.Status = AiCreditOrderStatus.Rejected;
+            aiCreditOrder.RejectedAtUtc = now;
+            aiCreditOrder.UpdatedAtUtc = now;
+            aiCreditOrder.SettlementError = reasonCode;
+
+            invoice.Status = ManualBillingInvoiceStatus.Canceled;
+            invoice.UpdatedAtUtc = now;
+
+            dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+            {
+                ShopId = aiCreditOrder.ShopId,
+                Action = "owner_ai_credit_invoice_rejected",
+                Actor = actor,
+                Reason = reasonCode,
+                MetadataJson = JsonSerializer.Serialize(new
+                {
+                    invoice_id = invoice.Id,
+                    invoice_number = invoice.InvoiceNumber,
+                    ai_credit_order_id = aiCreditOrder.Id,
+                    actor_scope = actorScope,
+                    actor_note = actorNote
+                }),
+                CreatedAtUtc = now
+            });
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        var shopCode = aiCreditOrder.Shop?.Code ?? ResolveShopCode(null);
+        return new AdminAiCreditInvoiceActionResponse
+        {
+            Invoice = MapAiCreditInvoiceRow(invoice, aiCreditOrder, shopCode),
+            ProcessedAt = now
         };
     }
 
@@ -8177,6 +8581,36 @@ public sealed class LicenseService(
         return catalog;
     }
 
+    private static Dictionary<string, AiCreditPackOption> BuildAiCreditPackCatalog(AiInsightOptions options)
+    {
+        var catalog = new Dictionary<string, AiCreditPackOption>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pack in options.CreditPacks)
+        {
+            var packCode = NormalizeOptionalValue(pack.PackCode);
+            if (string.IsNullOrWhiteSpace(packCode))
+            {
+                continue;
+            }
+
+            var credits = RoundAiCredits(pack.Credits);
+            var price = decimal.Round(pack.Price, 2, MidpointRounding.AwayFromZero);
+            if (credits <= 0m || price <= 0m)
+            {
+                continue;
+            }
+
+            catalog[packCode] = new AiCreditPackOption
+            {
+                PackCode = packCode,
+                Credits = credits,
+                Price = price,
+                Currency = ResolveCurrency(pack.Currency)
+            };
+        }
+
+        return catalog;
+    }
+
     private async Task<BillingWebhookEvent?> ReserveWebhookEventAsync(
         string providerEventId,
         string eventType,
@@ -9541,6 +9975,75 @@ public sealed class LicenseService(
         return $"{metadataLine}\n{customerNotes}";
     }
 
+    private static string BuildOwnerAiCreditInvoiceNotes(OwnerAiCreditInvoiceMetadataState metadata)
+    {
+        var metadataJson = SerializeOwnerAiCreditInvoiceMetadata(metadata);
+        var metadataLine = $"{OwnerAiCreditInvoiceMetadataPrefix}{metadataJson}";
+        var note = NormalizeOptionalValue(metadata.RequestedNote);
+        if (string.IsNullOrWhiteSpace(note))
+        {
+            return metadataLine;
+        }
+
+        return $"{metadataLine}\n{note}";
+    }
+
+    private static OwnerAiCreditInvoiceMetadataState ParseOwnerAiCreditInvoiceMetadata(string? metadataJson)
+    {
+        if (string.IsNullOrWhiteSpace(metadataJson))
+        {
+            return new OwnerAiCreditInvoiceMetadataState();
+        }
+
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<OwnerAiCreditInvoiceMetadataState>(metadataJson);
+            if (parsed is null)
+            {
+                return new OwnerAiCreditInvoiceMetadataState();
+            }
+
+            parsed.PackCode = NormalizeOptionalValue(parsed.PackCode);
+            parsed.RequestedByUserId = NormalizeOptionalValue(parsed.RequestedByUserId);
+            parsed.RequestedByUsername = NormalizeOptionalValue(parsed.RequestedByUsername);
+            parsed.RequestedByFullName = NormalizeOptionalValue(parsed.RequestedByFullName);
+            parsed.RequestedNote = NormalizeOptionalValue(parsed.RequestedNote);
+            parsed.ApprovedBy = NormalizeOptionalValue(parsed.ApprovedBy);
+            parsed.ApprovedScope = NormalizeOptionalValue(parsed.ApprovedScope);
+            parsed.ApprovedActorNote = NormalizeOptionalValue(parsed.ApprovedActorNote);
+            parsed.RejectedBy = NormalizeOptionalValue(parsed.RejectedBy);
+            parsed.RejectedReasonCode = NormalizeOptionalValue(parsed.RejectedReasonCode);
+            parsed.RejectedActorNote = NormalizeOptionalValue(parsed.RejectedActorNote);
+            return parsed;
+        }
+        catch (JsonException)
+        {
+            return new OwnerAiCreditInvoiceMetadataState();
+        }
+    }
+
+    private static string SerializeOwnerAiCreditInvoiceMetadata(OwnerAiCreditInvoiceMetadataState metadata)
+    {
+        var normalized = new OwnerAiCreditInvoiceMetadataState
+        {
+            PackCode = NormalizeOptionalValue(metadata.PackCode),
+            RequestedCredits = metadata.RequestedCredits,
+            RequestedByUserId = NormalizeOptionalValue(metadata.RequestedByUserId),
+            RequestedByUsername = NormalizeOptionalValue(metadata.RequestedByUsername),
+            RequestedByFullName = NormalizeOptionalValue(metadata.RequestedByFullName),
+            RequestedNote = NormalizeOptionalValue(metadata.RequestedNote),
+            ApprovedBy = NormalizeOptionalValue(metadata.ApprovedBy),
+            ApprovedAt = metadata.ApprovedAt,
+            ApprovedScope = NormalizeOptionalValue(metadata.ApprovedScope),
+            ApprovedActorNote = NormalizeOptionalValue(metadata.ApprovedActorNote),
+            RejectedBy = NormalizeOptionalValue(metadata.RejectedBy),
+            RejectedAt = metadata.RejectedAt,
+            RejectedReasonCode = NormalizeOptionalValue(metadata.RejectedReasonCode),
+            RejectedActorNote = NormalizeOptionalValue(metadata.RejectedActorNote)
+        };
+        return JsonSerializer.Serialize(normalized);
+    }
+
     private static string? ResolveAccessDeliveryCustomerEmailCandidate(
         string? requestCustomerEmail,
         string? invoiceNotes,
@@ -10291,6 +10794,86 @@ public sealed class LicenseService(
         return string.IsNullOrWhiteSpace(actor) ? "super-admin" : actor;
     }
 
+    private string ResolveCurrentAdminScope()
+    {
+        var scope = NormalizeOptionalValue(httpContextAccessor.HttpContext?.User?.FindFirstValue("super_admin_scope"));
+        if (string.IsNullOrWhiteSpace(scope))
+        {
+            return SmartPosRoles.SuperAdmin;
+        }
+
+        return scope.ToLowerInvariant();
+    }
+
+    private Guid ResolveCurrentAuthenticatedUserId()
+    {
+        var principal = httpContextAccessor.HttpContext?.User;
+        var value = principal?.FindFirstValue(ClaimTypes.NameIdentifier) ?? principal?.FindFirstValue("sub");
+        if (Guid.TryParse(value, out var userId))
+        {
+            return userId;
+        }
+
+        throw new LicenseException(
+            LicenseErrorCodes.InvalidAdminRequest,
+            "Authenticated user context is missing.",
+            StatusCodes.Status401Unauthorized);
+    }
+
+    private async Task<OwnerManagedShopContext> ResolveCurrentOwnerManagedShopContextAsync(
+        CancellationToken cancellationToken)
+    {
+        var userId = ResolveCurrentAuthenticatedUserId();
+        var (user, shop, roleCode) = await ResolveManagedShopUserContextAsync(userId, cancellationToken);
+        if (!string.Equals(roleCode, SmartPosRoles.Owner, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Only shop owners can manage AI credit invoices.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        return new OwnerManagedShopContext(user, shop, roleCode);
+    }
+
+    private AiCreditPackOption ResolveConfiguredAiCreditPack(string? packCode)
+    {
+        var normalizedPackCode = NormalizeOptionalValue(packCode);
+        if (string.IsNullOrWhiteSpace(normalizedPackCode))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "pack_code is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        if (!aiCreditPackCatalog.TryGetValue(normalizedPackCode, out var pack))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "pack_code is not supported.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        return pack;
+    }
+
+    private async Task<AiCreditOrder> ResolveOwnerAiCreditOrderByInvoiceIdAsync(
+        Guid invoiceId,
+        CancellationToken cancellationToken)
+    {
+        return await dbContext.AiCreditOrders
+            .Include(x => x.Invoice)
+            .Include(x => x.Shop)
+            .FirstOrDefaultAsync(
+                x => x.InvoiceId == invoiceId && x.Source == CloudOwnerAccountAiCreditOrderSource,
+                cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "AI credit invoice was not found.",
+                StatusCodes.Status404NotFound);
+    }
+
     private async Task<AppUser> ResolveAdminActorUserAsync(
         string actor,
         CancellationToken cancellationToken)
@@ -10396,6 +10979,50 @@ public sealed class LicenseService(
 
         var upper = normalized.ToUpperInvariant();
         return upper.Length > 8 ? upper[..8] : upper;
+    }
+
+    private static AiCreditInvoiceRowResponse MapAiCreditInvoiceRow(
+        ManualBillingInvoice invoice,
+        AiCreditOrder order,
+        string shopCode)
+    {
+        var metadata = ParseOwnerAiCreditInvoiceMetadata(order.MetadataJson);
+        var approvedAt = metadata.ApprovedAt ?? order.VerifiedAtUtc;
+        var rejectedAt = metadata.RejectedAt ?? order.RejectedAtUtc;
+
+        return new AiCreditInvoiceRowResponse
+        {
+            InvoiceId = invoice.Id,
+            InvoiceNumber = invoice.InvoiceNumber,
+            ShopCode = shopCode,
+            PackCode = NormalizeOptionalValue(order.PackageCode) ?? NormalizeOptionalValue(metadata.PackCode) ?? string.Empty,
+            RequestedCredits = RoundAiCredits(order.RequestedCredits > 0m
+                ? order.RequestedCredits
+                : metadata.RequestedCredits ?? 0m),
+            AmountDue = decimal.Round(invoice.AmountDue, 2, MidpointRounding.AwayFromZero),
+            Currency = ResolveCurrency(invoice.Currency),
+            Status = MapOwnerAiCreditInvoiceStatus(order.Status),
+            CreatedAt = order.SubmittedAtUtc == default ? invoice.CreatedAtUtc : order.SubmittedAtUtc,
+            UpdatedAt = order.UpdatedAtUtc ?? invoice.UpdatedAtUtc,
+            ApprovedAt = approvedAt,
+            ApprovedBy = metadata.ApprovedBy,
+            RejectedAt = rejectedAt,
+            RejectedBy = metadata.RejectedBy,
+            Reason = metadata.RejectedReasonCode ?? metadata.RejectedActorNote ?? order.SettlementError
+        };
+    }
+
+    private static string MapOwnerAiCreditInvoiceStatus(AiCreditOrderStatus status)
+    {
+        return status switch
+        {
+            AiCreditOrderStatus.Submitted => "pending",
+            AiCreditOrderStatus.PendingVerification => "pending",
+            AiCreditOrderStatus.Verified => "approved",
+            AiCreditOrderStatus.Rejected => "rejected",
+            AiCreditOrderStatus.Settled => "settled",
+            _ => "pending"
+        };
     }
 
     private static AdminManualBillingInvoiceRow MapManualBillingInvoiceRow(

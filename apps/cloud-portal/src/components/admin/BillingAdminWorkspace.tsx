@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import AiCreditVerificationPanel from "./AiCreditVerificationPanel";
+import AiCreditInvoiceRequestsPanel from "./AiCreditInvoiceRequestsPanel";
 import {
   adminActivateDevice,
   adminDeactivateDevice,
@@ -1091,6 +1092,7 @@ const BillingAdminWorkspace = ({ username, onSignOut }: BillingAdminWorkspacePro
           </TabsContent>
 
           <TabsContent value="ai-credits" className="space-y-4">
+            <AiCreditInvoiceRequestsPanel />
             <AiCreditVerificationPanel />
           </TabsContent>
 

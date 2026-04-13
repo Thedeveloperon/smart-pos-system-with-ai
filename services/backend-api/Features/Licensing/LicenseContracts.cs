@@ -1979,6 +1979,99 @@ public sealed class AdminManualBillingInvoiceRow
     public DateTimeOffset? UpdatedAt { get; set; }
 }
 
+public sealed class OwnerAiCreditInvoiceCreateRequest
+{
+    [JsonPropertyName("pack_code")]
+    public string? PackCode { get; set; }
+
+    [JsonPropertyName("note")]
+    public string? Note { get; set; }
+}
+
+public sealed class AiCreditInvoiceRowResponse
+{
+    [JsonPropertyName("invoice_id")]
+    public Guid InvoiceId { get; set; }
+
+    [JsonPropertyName("invoice_number")]
+    public string InvoiceNumber { get; set; } = string.Empty;
+
+    [JsonPropertyName("shop_code")]
+    public string ShopCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("pack_code")]
+    public string PackCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("requested_credits")]
+    public decimal RequestedCredits { get; set; }
+
+    [JsonPropertyName("amount_due")]
+    public decimal AmountDue { get; set; }
+
+    [JsonPropertyName("currency")]
+    public string Currency { get; set; } = "LKR";
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "pending";
+
+    [JsonPropertyName("created_at")]
+    public DateTimeOffset CreatedAt { get; set; }
+
+    [JsonPropertyName("updated_at")]
+    public DateTimeOffset? UpdatedAt { get; set; }
+
+    [JsonPropertyName("approved_at")]
+    public DateTimeOffset? ApprovedAt { get; set; }
+
+    [JsonPropertyName("approved_by")]
+    public string? ApprovedBy { get; set; }
+
+    [JsonPropertyName("rejected_at")]
+    public DateTimeOffset? RejectedAt { get; set; }
+
+    [JsonPropertyName("rejected_by")]
+    public string? RejectedBy { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+}
+
+public sealed class AiCreditInvoicesResponse
+{
+    [JsonPropertyName("generated_at")]
+    public DateTimeOffset GeneratedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("count")]
+    public int Count { get; set; }
+
+    [JsonPropertyName("items")]
+    public List<AiCreditInvoiceRowResponse> Items { get; set; } = [];
+}
+
+public sealed class AdminAiCreditInvoiceApproveRequest
+{
+    [JsonPropertyName("actor_note")]
+    public string? ActorNote { get; set; }
+}
+
+public sealed class AdminAiCreditInvoiceRejectRequest
+{
+    [JsonPropertyName("actor_note")]
+    public string? ActorNote { get; set; }
+
+    [JsonPropertyName("reason_code")]
+    public string? ReasonCode { get; set; }
+}
+
+public sealed class AdminAiCreditInvoiceActionResponse
+{
+    [JsonPropertyName("invoice")]
+    public required AiCreditInvoiceRowResponse Invoice { get; set; }
+
+    [JsonPropertyName("processed_at")]
+    public DateTimeOffset ProcessedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
 public sealed class AdminManualBillingPaymentRecordRequest
 {
     [JsonPropertyName("invoice_id")]

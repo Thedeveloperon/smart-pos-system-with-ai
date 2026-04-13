@@ -13,6 +13,7 @@ import { GET as aiPaymentsGet } from "@/app/api/account/ai/payments/route";
 import { GET as aiPendingManualPaymentsGet } from "@/app/api/account/ai/payments/pending-manual/route";
 import { POST as aiCheckoutPost } from "@/app/api/account/ai/payments/checkout/route";
 import { POST as aiVerifyManualPaymentPost } from "@/app/api/account/ai/payments/verify/route";
+import { GET as aiInvoicesGet, POST as aiInvoicesPost } from "@/app/api/account/ai/invoices/route";
 
 function jsonResponse(payload: unknown, init?: ResponseInit) {
   return new Response(JSON.stringify(payload), {
@@ -523,6 +524,111 @@ describe("Account API proxy routes", () => {
     expect(init.method).toBe("GET");
     expect(readHeaders(init).get("cookie")).toContain("smartpos_auth=session-token");
     expect(readHeaders(init).get("Idempotency-Key")).toBeNull();
+  });
+
+  it("ai invoices route normalizes take query and forwards authenticated GET request", async () => {
+    vi.mocked(global.fetch).mockResolvedValueOnce(
+      jsonResponse({
+        items: [],
+      }),
+    );
+
+    const request = new NextRequest("http://localhost/api/account/ai/invoices?take=999", {
+      method: "GET",
+      headers: {
+        cookie: "smartpos_auth=session-token",
+      },
+    });
+
+    const response = await aiInvoicesGet(request);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ items: [] });
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const [url, init] = vi.mocked(global.fetch).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://backend.test/api/license/account/ai-credit-invoices?take=200");
+    expect(init.method).toBe("GET");
+    expect(readHeaders(init).get("cookie")).toContain("smartpos_auth=session-token");
+    expect(readHeaders(init).get("Idempotency-Key")).toBeNull();
+  });
+
+  it("ai invoices create route validates JSON and forwards with idempotency key", async () => {
+    const invalidJsonRequest = new NextRequest("http://localhost/api/account/ai/invoices", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: "{invalid-json",
+    });
+
+    const invalidJsonResponse = await aiInvoicesPost(invalidJsonRequest);
+    expect(invalidJsonResponse.status).toBe(400);
+    await expect(invalidJsonResponse.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "Request body must be valid JSON.",
+      },
+    });
+
+    const missingPackRequest = new NextRequest("http://localhost/api/account/ai/invoices", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        note: "hello",
+      }),
+    });
+
+    const missingPackResponse = await aiInvoicesPost(missingPackRequest);
+    expect(missingPackResponse.status).toBe(400);
+    await expect(missingPackResponse.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_REQUEST",
+        message: "pack_code is required.",
+      },
+    });
+
+    vi.mocked(global.fetch).mockResolvedValueOnce(
+      jsonResponse({
+        invoice_id: "11111111-1111-1111-1111-111111111111",
+        status: "pending",
+      }),
+    );
+
+    const request = new NextRequest("http://localhost/api/account/ai/invoices", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: "smartpos_auth=session-token",
+      },
+      body: JSON.stringify({
+        pack_code: "pack_100",
+        note: "invoice for april",
+      }),
+    });
+
+    const response = await aiInvoicesPost(request);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      invoice_id: "11111111-1111-1111-1111-111111111111",
+      status: "pending",
+    });
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const [url, init] = vi.mocked(global.fetch).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://backend.test/api/license/account/ai-credit-invoices");
+    expect(init.method).toBe("POST");
+    expect(init.body).toBe(
+      JSON.stringify({
+        pack_code: "pack_100",
+        note: "invoice for april",
+      }),
+    );
+    const headers = readHeaders(init);
+    expect(headers.get("cookie")).toContain("smartpos_auth=session-token");
+    expect(headers.get("content-type")).toBe("application/json");
+    expect(headers.get("Idempotency-Key")).toBeTruthy();
   });
 
   it("ai payments verify route validates JSON and forwards with idempotency key", async () => {

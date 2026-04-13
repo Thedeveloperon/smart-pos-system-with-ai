@@ -3,6 +3,7 @@ import { ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import ManagerReportsDrawer from "@/components/admin/ManagerReportsDrawer";
 import BillingAdminWorkspace from "@/components/admin/BillingAdminWorkspace";
+import AiCreditInvoiceRequestsPanel from "@/components/admin/AiCreditInvoiceRequestsPanel";
 import { Button } from "@/components/ui/button";
 import {
   fetchAiPendingManualPayments,
@@ -189,6 +190,8 @@ const AdminConsole = ({ user, onSignOut }: AdminConsoleProps) => {
             </div>
           </div>
         </div>
+
+        <AiCreditInvoiceRequestsPanel />
 
         <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
           <div className="space-y-2">

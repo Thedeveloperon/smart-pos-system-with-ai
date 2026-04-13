@@ -246,6 +246,48 @@ public static class LicenseEndpoints
         .WithName("GetCustomerLicensePortal")
         .WithOpenApi();
 
+        license.MapGet("/account/ai-credit-invoices", [Authorize(Roles = SmartPosRoles.Owner)] async (
+            int? take,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var response = await licenseService.GetOwnerAiCreditInvoicesAsync(
+                    take ?? 40,
+                    cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization()
+        .WithName("GetOwnerAiCreditInvoices")
+        .WithOpenApi();
+
+        license.MapPost("/account/ai-credit-invoices", [Authorize(Roles = SmartPosRoles.Owner)] async (
+            OwnerAiCreditInvoiceCreateRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.CreateOwnerAiCreditInvoiceAsync(request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization()
+        .WithName("CreateOwnerAiCreditInvoice")
+        .WithOpenApi();
+
         license.MapPost("/account/licenses/devices/{device_code}/deactivate", [Authorize(Policy = SmartPosPolicies.ManagerOrOwner)] async (
             string device_code,
             CustomerSelfServiceDeviceDeactivationRequest request,
@@ -1004,6 +1046,77 @@ public static class LicenseEndpoints
         })
         .RequireAuthorization(SmartPosPolicies.SupportOrBilling)
         .WithName("AdminGetManualBillingInvoices")
+        .WithOpenApi();
+
+        admin.MapGet("/ai-credit-invoices", [Authorize(Policy = SmartPosPolicies.BillingApprover)] async (
+            int? take,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var response = await licenseService.GetAdminPendingAiCreditInvoicesAsync(
+                    take ?? 80,
+                    cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.BillingApprover)
+        .WithName("AdminGetPendingAiCreditInvoices")
+        .WithOpenApi();
+
+        admin.MapPost("/ai-credit-invoices/{invoice_id:guid}/approve", [Authorize(Policy = SmartPosPolicies.BillingApprover)] async (
+            Guid invoice_id,
+            AdminAiCreditInvoiceApproveRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.ApproveOwnerAiCreditInvoiceAsync(
+                    invoice_id,
+                    request,
+                    cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.BillingApprover)
+        .WithName("AdminApproveOwnerAiCreditInvoice")
+        .WithOpenApi();
+
+        admin.MapPost("/ai-credit-invoices/{invoice_id:guid}/reject", [Authorize(Policy = SmartPosPolicies.BillingApprover)] async (
+            Guid invoice_id,
+            AdminAiCreditInvoiceRejectRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.RejectOwnerAiCreditInvoiceAsync(
+                    invoice_id,
+                    request,
+                    cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.BillingApprover)
+        .WithName("AdminRejectOwnerAiCreditInvoice")
         .WithOpenApi();
 
         admin.MapPost("/billing/invoices", [Authorize(Policy = SmartPosPolicies.SupportOrBilling)] async (
