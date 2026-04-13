@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, CheckCircle2 } from "lucide-react";
+import { PageShell, SectionCard, StatusChip } from "@/components/portal/layout-primitives";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n/I18nProvider";
 import { trackMarketingEvent } from "@/lib/marketingAnalytics";
@@ -131,6 +132,7 @@ export default function StartPage() {
   const [ownerUsername, setOwnerUsername] = useState("");
   const [ownerFullName, setOwnerFullName] = useState("");
   const [ownerPassword, setOwnerPassword] = useState("");
+  const [ownerConfirmPassword, setOwnerConfirmPassword] = useState("");
 
   const [requestResult, setRequestResult] = useState<PaymentRequestResponse | null>(null);
   const [submitResult, setSubmitResult] = useState<PaymentSubmitResponse | null>(null);
@@ -176,6 +178,9 @@ export default function StartPage() {
     const normalizedOwnerPassword = ownerPassword.trim();
     if (normalizedOwnerPassword.length < 8) {
       throw new Error("Owner password must be at least 8 characters.");
+    }
+    if (ownerConfirmPassword.trim() !== normalizedOwnerPassword) {
+      throw new Error("Confirm password must match owner password.");
     }
 
     const normalizedDeviceCode = deviceCode.trim();
@@ -320,7 +325,7 @@ export default function StartPage() {
   };
 
   return (
-    <main className="app-shell px-4 py-10 md:py-12">
+    <PageShell>
       <div className="mx-auto w-full max-w-5xl space-y-6">
         <Link
           href={`/${locale}#pricing`}
@@ -330,7 +335,7 @@ export default function StartPage() {
           Back to Pricing
         </Link>
 
-        <section className="portal-hero space-y-2">
+        <SectionCard className="portal-hero space-y-2">
           <p className="portal-kicker">Owner Onboarding</p>
           <h1 className="text-2xl font-bold text-foreground md:text-3xl">Start SmartPOS</h1>
           <p className="text-sm text-muted-foreground">
@@ -344,129 +349,153 @@ export default function StartPage() {
           )}
 
           <form className="mt-6 grid gap-4 md:grid-cols-2" onSubmit={handleRequestCreate}>
-            <label className="space-y-1 md:col-span-2">
-              <span className="portal-kicker">Plan</span>
-              <select
-                className="field-shell"
-                value={planCode}
-                onChange={(event) => setPlanCode(normalizePlanCode(event.target.value))}
-              >
-                {planOptions.map((option) => (
-                  <option key={option.code} value={option.code}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="rounded-xl border border-border/70 bg-surface-muted p-4 md:col-span-2">
+              <div className="mb-3">
+                <p className="portal-kicker">Plan & Payment Setup</p>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="space-y-1">
+                  <span className="portal-kicker">Plan</span>
+                  <select
+                    className="field-shell"
+                    value={planCode}
+                    onChange={(event) => setPlanCode(normalizePlanCode(event.target.value))}
+                  >
+                    {planOptions.map((option) => (
+                      <option key={option.code} value={option.code}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-1">
+                  <span className="portal-kicker">Payment Method</span>
+                  <select
+                    className="field-shell"
+                    value={paymentMethod}
+                    onChange={(event) => setPaymentMethod(event.target.value as PaymentMethod)}
+                  >
+                    <option value="bank_deposit">Bank Deposit</option>
+                    <option value="cash">Cash</option>
+                  </select>
+                </label>
+                <label className="space-y-1 md:col-span-2">
+                  <span className="portal-kicker">POS Device Code {planCode !== "starter" ? "(required for paid plan)" : "(optional)"}</span>
+                  <input
+                    className="field-shell font-mono text-xs"
+                    value={deviceCode}
+                    onChange={(event) => setDeviceCode(event.target.value)}
+                    placeholder="adb6caf4-805d-4cfb-8f9b-45db1e8d63d4"
+                    required={planCode !== "starter"}
+                  />
+                </label>
+              </div>
+            </div>
 
-            <label className="space-y-1 md:col-span-2">
-              <span className="portal-kicker">Shop Name</span>
-              <input
-                className="field-shell"
-                value={shopName}
-                onChange={(event) => setShopName(event.target.value)}
-                placeholder="Nelu Grocery"
-                required
-              />
-            </label>
+            <div className="rounded-xl border border-border/70 bg-surface-muted p-4 md:col-span-2">
+              <div className="mb-3">
+                <p className="portal-kicker">Shop & Contact Information</p>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="space-y-1 md:col-span-2">
+                  <span className="portal-kicker">Shop Name</span>
+                  <input
+                    className="field-shell"
+                    value={shopName}
+                    onChange={(event) => setShopName(event.target.value)}
+                    placeholder="Nelu Grocery"
+                    required
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="portal-kicker">Contact Name</span>
+                  <input
+                    className="field-shell"
+                    value={contactName}
+                    onChange={(event) => setContactName(event.target.value)}
+                    placeholder="Owner name"
+                    required
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="portal-kicker">Email (optional)</span>
+                  <input
+                    type="email"
+                    className="field-shell"
+                    value={contactEmail}
+                    onChange={(event) => setContactEmail(event.target.value)}
+                    placeholder="owner@shop.lk"
+                  />
+                </label>
+                <label className="space-y-1 md:col-span-2">
+                  <span className="portal-kicker">Phone (optional)</span>
+                  <input
+                    className="field-shell"
+                    value={contactPhone}
+                    onChange={(event) => setContactPhone(event.target.value)}
+                    placeholder="+94..."
+                  />
+                </label>
+                <label className="space-y-1 md:col-span-2">
+                  <span className="portal-kicker">Notes (optional)</span>
+                  <textarea
+                    className="field-shell min-h-[96px] resize-y"
+                    value={notes}
+                    onChange={(event) => setNotes(event.target.value)}
+                    placeholder="Any billing details..."
+                  />
+                </label>
+              </div>
+            </div>
 
-            <label className="space-y-1 md:col-span-2">
-              <span className="portal-kicker">Device Code {planCode !== "starter" ? "" : "(optional)"}</span>
-              <input
-                className="field-shell font-mono text-xs"
-                value={deviceCode}
-                onChange={(event) => setDeviceCode(event.target.value)}
-                placeholder="adb6caf4-805d-4cfb-8f9b-45db1e8d63d4"
-                required={planCode !== "starter"}
-              />
-            </label>
-
-            <label className="space-y-1">
-              <span className="portal-kicker">Contact Name</span>
-              <input
-                className="field-shell"
-                value={contactName}
-                onChange={(event) => setContactName(event.target.value)}
-                placeholder="Owner name"
-                required
-              />
-            </label>
-
-            <label className="space-y-1">
-              <span className="portal-kicker">Payment Method</span>
-              <select
-                className="field-shell"
-                value={paymentMethod}
-                onChange={(event) => setPaymentMethod(event.target.value as PaymentMethod)}
-              >
-                <option value="bank_deposit">Bank Deposit</option>
-                <option value="cash">Cash</option>
-              </select>
-            </label>
-
-            <label className="space-y-1">
-              <span className="portal-kicker">Email (optional)</span>
-              <input
-                type="email"
-                className="field-shell"
-                value={contactEmail}
-                onChange={(event) => setContactEmail(event.target.value)}
-                placeholder="owner@shop.lk"
-              />
-            </label>
-
-            <label className="space-y-1">
-              <span className="portal-kicker">Phone (optional)</span>
-              <input
-                className="field-shell"
-                value={contactPhone}
-                onChange={(event) => setContactPhone(event.target.value)}
-                placeholder="+94..."
-              />
-            </label>
-
-            <label className="space-y-1 md:col-span-2">
-              <span className="portal-kicker">Notes (optional)</span>
-              <textarea
-                className="field-shell min-h-[96px] resize-y"
-                value={notes}
-                onChange={(event) => setNotes(event.target.value)}
-                placeholder="Any billing details..."
-              />
-            </label>
-
-            <label className="space-y-1">
-              <span className="portal-kicker">Owner Username</span>
-              <input
-                className="field-shell"
-                value={ownerUsername}
-                onChange={(event) => setOwnerUsername(event.target.value)}
-                placeholder="shopowner"
-                required
-              />
-            </label>
-
-            <label className="space-y-1">
-              <span className="portal-kicker">Owner Password</span>
-              <input
-                type="password"
-                className="field-shell"
-                value={ownerPassword}
-                onChange={(event) => setOwnerPassword(event.target.value)}
-                placeholder="At least 8 characters"
-                required
-              />
-            </label>
-
-            <label className="space-y-1 md:col-span-2">
-              <span className="portal-kicker">Owner Full Name (optional)</span>
-              <input
-                className="field-shell"
-                value={ownerFullName}
-                onChange={(event) => setOwnerFullName(event.target.value)}
-                placeholder="Shop Owner"
-              />
-            </label>
+            <div className="rounded-xl border border-border/70 bg-surface-muted p-4 md:col-span-2">
+              <div className="mb-3">
+                <p className="portal-kicker">Owner Account Credentials</p>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="space-y-1">
+                  <span className="portal-kicker">Owner Username</span>
+                  <input
+                    className="field-shell"
+                    value={ownerUsername}
+                    onChange={(event) => setOwnerUsername(event.target.value)}
+                    placeholder="shopowner"
+                    required
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="portal-kicker">Owner Full Name (optional)</span>
+                  <input
+                    className="field-shell"
+                    value={ownerFullName}
+                    onChange={(event) => setOwnerFullName(event.target.value)}
+                    placeholder="Shop Owner"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="portal-kicker">Owner Password</span>
+                  <input
+                    type="password"
+                    className="field-shell"
+                    value={ownerPassword}
+                    onChange={(event) => setOwnerPassword(event.target.value)}
+                    placeholder="At least 8 characters"
+                    required
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="portal-kicker">Confirm Password</span>
+                  <input
+                    type="password"
+                    className="field-shell"
+                    value={ownerConfirmPassword}
+                    onChange={(event) => setOwnerConfirmPassword(event.target.value)}
+                    placeholder="Re-enter owner password"
+                    required
+                  />
+                </label>
+              </div>
+            </div>
 
             {requestError && <p className="text-sm text-destructive md:col-span-2">{requestError}</p>}
 
@@ -476,10 +505,10 @@ export default function StartPage() {
               </Button>
             </div>
           </form>
-        </section>
+        </SectionCard>
 
         {requestResult && (
-          <section className="portal-surface space-y-4">
+          <SectionCard>
             <h2 className="text-xl font-semibold">Request Created</h2>
             <div className="grid gap-3 md:grid-cols-2">
               <div className="rounded-xl border border-border/70 bg-surface-muted p-3">
@@ -495,15 +524,18 @@ export default function StartPage() {
               </div>
             </div>
 
-            <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-1">
-              <p className="portal-kicker">Owner Account</p>
-              <p className="text-sm">
-                Username: <span className="font-semibold">{requestResult.owner_username || ownerUsername || "-"}</span>
-              </p>
-              <p className="text-sm">
-                Status: <span className="font-semibold">{toSentence(requestResult.owner_account_state || "created")}</span>
-              </p>
-            </div>
+              <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-1">
+                <p className="portal-kicker">Owner Account</p>
+                <p className="text-sm">
+                  Username: <span className="font-semibold">{requestResult.owner_username || ownerUsername || "-"}</span>
+                </p>
+                <p className="text-sm">
+                  Status:{" "}
+                  <StatusChip tone="info">
+                    {toSentence(requestResult.owner_account_state || "created")}
+                  </StatusChip>
+                </p>
+              </div>
 
             {!requestResult.requires_payment && (
               <div className="rounded-xl border border-success/35 bg-success/10 p-4 text-sm text-success">
@@ -516,6 +548,10 @@ export default function StartPage() {
                 <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-2">
                   <p className="portal-kicker">Invoice</p>
                   <p className="text-sm">Invoice Number: <span className="font-semibold">{requestResult.invoice.invoice_number}</span></p>
+                  <p className="text-sm">
+                    Invoice Status:{" "}
+                    <StatusChip tone="warning">{toSentence(requestResult.invoice.status)}</StatusChip>
+                  </p>
                   <p className="text-sm">Amount Due: <span className="font-semibold">{requestResult.amount_due} {requestResult.currency}</span></p>
                   <p className="text-sm">Due At: <span className="font-semibold">{formatDate(requestResult.invoice.due_at)}</span></p>
                   <p className="text-sm text-muted-foreground">{requestResult.instructions.message}</p>
@@ -563,7 +599,7 @@ export default function StartPage() {
               </>
             )}
 
-          </section>
+          </SectionCard>
         )}
 
         {submitResult && (
@@ -582,6 +618,6 @@ export default function StartPage() {
         )}
 
       </div>
-    </main>
+    </PageShell>
   );
 }

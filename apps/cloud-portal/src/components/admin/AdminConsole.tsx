@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import ManagerReportsDrawer from "@/components/admin/ManagerReportsDrawer";
 import BillingAdminWorkspace from "@/components/admin/BillingAdminWorkspace";
 import AiCreditInvoiceRequestsPanel from "@/components/admin/AiCreditInvoiceRequestsPanel";
+import { DataTableWrap, PageShell, SectionCard, StatusChip } from "@/components/portal/layout-primitives";
 import { Button } from "@/components/ui/button";
 import {
   fetchAiPendingManualPayments,
@@ -144,19 +145,19 @@ const AdminConsole = ({ user, onSignOut }: AdminConsoleProps) => {
   }
 
   return (
-    <div className="min-h-screen bg-background p-6">
+    <PageShell className="p-6">
       <div className="mx-auto w-full max-w-5xl space-y-5">
-        <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+        <SectionCard className="p-5">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="space-y-2">
               <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
                 <ShieldCheck className="h-4 w-4" />
                 Super Admin Console
               </div>
-              <h1 className="text-2xl font-bold tracking-tight">Licensing Control Plane</h1>
+              <h1 className="text-2xl font-bold tracking-tight">Operations Control Plane</h1>
               <p className="text-sm text-muted-foreground">
-                Signed in as <span className="font-medium">{user?.username}</span>. Use this page to verify AI credit
-                purchase requests and open full license manager controls.
+                Signed in as <span className="font-medium">{user?.username}</span>. Manage purchase approvals and open
+                the full license manager workspace.
               </p>
             </div>
 
@@ -189,13 +190,24 @@ const AdminConsole = ({ user, onSignOut }: AdminConsoleProps) => {
               </Button>
             </div>
           </div>
-        </div>
+        </SectionCard>
 
-        <AiCreditInvoiceRequestsPanel />
+        <SectionCard className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="portal-kicker">Purchase Approvals</p>
+              <h2 className="text-base font-semibold">Owner Invoice Queue</h2>
+            </div>
+            <StatusChip tone={pendingAiPayments.length > 0 ? "warning" : "neutral"}>
+              Pending {pendingAiPayments.length}
+            </StatusChip>
+          </div>
+          <AiCreditInvoiceRequestsPanel />
+        </SectionCard>
 
-        <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+        <SectionCard className="p-5">
           <div className="space-y-2">
-            <h2 className="text-base font-semibold">AI Credit Purchasing Requests</h2>
+            <h2 className="text-base font-semibold">AI Credit Manual Verification</h2>
             <p className="text-sm text-muted-foreground">
               Pending manual AI payments (`cash` / `bank_deposit`) with submitted reference details.
             </p>
@@ -219,7 +231,7 @@ const AdminConsole = ({ user, onSignOut }: AdminConsoleProps) => {
             </Button>
           </div>
 
-          <div className="mt-4 space-y-2">
+          <DataTableWrap className="mt-4 p-3">
             {isLoadingPendingAiPayments ? (
               <p className="text-sm text-muted-foreground">Loading pending requests...</p>
             ) : pendingAiPayments.length === 0 ? (
@@ -231,10 +243,8 @@ const AdminConsole = ({ user, onSignOut }: AdminConsoleProps) => {
                   className="rounded-md border border-border/70 bg-muted/20 p-3"
                 >
                   <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <span className="font-semibold text-foreground">{item.payment_status.replace("_", " ")}</span>
-                    <span className="rounded border border-border/70 bg-background px-1.5 py-0.5 text-muted-foreground">
-                      {item.payment_method.replace("_", " ")}
-                    </span>
+                    <StatusChip tone="neutral">{item.payment_status.replace("_", " ")}</StatusChip>
+                    <StatusChip tone="info">{item.payment_method.replace("_", " ")}</StatusChip>
                     <span className="text-muted-foreground">{new Date(item.created_at).toLocaleString()}</span>
                     <span className="ml-auto text-muted-foreground">
                       {item.credits.toFixed(0)} credits ({item.currency} {item.amount.toFixed(2)})
@@ -243,10 +253,10 @@ const AdminConsole = ({ user, onSignOut }: AdminConsoleProps) => {
                   <p className="mt-1 text-xs text-muted-foreground">
                     User: {item.target_full_name || item.target_username}
                     {item.target_full_name ? ` (${item.target_username})` : ""}
-                    {item.shop_name ? ` • Shop: ${item.shop_name}` : ""}
+                    {item.shop_name ? ` | Shop: ${item.shop_name}` : ""}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Submitted Ref: {item.submitted_reference || "-"} • External Ref: {item.external_reference}
+                    Submitted Ref: {item.submitted_reference || "-"} | External Ref: {item.external_reference}
                   </p>
                   <div className="mt-2 flex justify-end">
                     <Button
@@ -267,8 +277,8 @@ const AdminConsole = ({ user, onSignOut }: AdminConsoleProps) => {
                 </div>
               ))
             )}
-          </div>
-        </div>
+          </DataTableWrap>
+        </SectionCard>
       </div>
 
       <ManagerReportsDrawer
@@ -277,8 +287,9 @@ const AdminConsole = ({ user, onSignOut }: AdminConsoleProps) => {
         refreshToken={refreshToken}
         isSuperAdmin
       />
-    </div>
+    </PageShell>
   );
 };
 
 export default AdminConsole;
+

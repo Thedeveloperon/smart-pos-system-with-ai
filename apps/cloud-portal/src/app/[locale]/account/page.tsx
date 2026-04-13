@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Copy, CreditCard, Download, Eye, EyeOff, LogOut, MonitorSmartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PageShell, SectionCard, StatusChip } from "@/components/portal/layout-primitives";
 import { useI18n } from "@/i18n/I18nProvider";
 import { trackMarketingEvent } from "@/lib/marketingAnalytics";
 import {
@@ -342,10 +343,10 @@ function maskActivationKey(value: string) {
   }
 
   if (normalized.length <= 8) {
-    return "••••••••";
+    return "********";
   }
 
-  return `${normalized.slice(0, 4)}••••••${normalized.slice(-4)}`;
+  return `${normalized.slice(0, 4)}******${normalized.slice(-4)}`;
 }
 
 function generateAccountDeviceCode() {
@@ -963,6 +964,14 @@ export default function AccountPage() {
   ]);
 
   useEffect(() => {
+    if (!AccountAiTopUpEnabled || !authSession || !canViewLicensePortal) {
+      return;
+    }
+
+    void loadOwnerAiInvoices(true);
+  }, [authSession, canViewLicensePortal, loadOwnerAiInvoices]);
+
+  useEffect(() => {
     if (!AccountAiTopUpEnabled || !aiPendingCheckoutReference || !authSession || !canViewLicensePortal || aiTopUpUnavailable) {
       return;
     }
@@ -1145,6 +1154,7 @@ export default function AccountPage() {
 
       await loadLicensePortal(true);
       await loadAiBillingData();
+      await loadOwnerAiInvoices(true);
 
       trackMarketingEvent("marketing_account_logged_in", {
         locale,
@@ -1548,7 +1558,7 @@ export default function AccountPage() {
   );
 
   return (
-    <main className="app-shell px-4 py-10 md:py-12">
+    <PageShell>
       <div className="mx-auto w-full max-w-4xl space-y-6">
         <Link
           href={`/${locale}`}
@@ -1558,11 +1568,11 @@ export default function AccountPage() {
           Back to Home
         </Link>
 
-        <section className="portal-surface space-y-4">
+        <SectionCard>
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-foreground">My Account</h1>
             <p className="mt-2 text-sm text-muted-foreground">
-              Sign in with your owner/manager account to view license seats and manage devices. You can also use an activation key for direct access.
+              Sign in with your owner or manager cloud account to review subscription, AI credits, and purchase activity.
             </p>
           </div>
 
@@ -1576,7 +1586,7 @@ export default function AccountPage() {
                 Signed in as <span className="font-semibold">{authSession.full_name}</span> ({authSession.username})
               </p>
               <p className="text-xs text-muted-foreground">
-                Role: {authSession.role} · Device: {authSession.device_code} · Session expires:{" "}
+                Role: {authSession.role} | Session key: {authSession.device_code} | Session expires:{" "}
                 {formatDate(authSession.expires_at)}
               </p>
               {!canViewLicensePortal && (
@@ -1624,7 +1634,7 @@ export default function AccountPage() {
                   className="field-shell"
                   value={authPassword}
                   onChange={(event) => setAuthPassword(event.target.value)}
-                  placeholder="••••••••"
+                  placeholder=""
                   required
                 />
               </label>
@@ -1638,7 +1648,7 @@ export default function AccountPage() {
                 />
               </label>
               <label className="space-y-1">
-                <span className="portal-kicker">Device Code</span>
+                <span className="portal-kicker">Session Identifier (auto-generated)</span>
                 <input
                   className="field-shell font-mono"
                   value={accountDeviceCode}
@@ -1654,7 +1664,7 @@ export default function AccountPage() {
               </div>
             </form>
           )}
-        </section>
+        </SectionCard>
 
         {portalError && (
           <section className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
@@ -1664,8 +1674,8 @@ export default function AccountPage() {
 
         {portalData && (
           <>
-            <section className="portal-surface space-y-4">
-              <h2 className="text-xl font-semibold">Licensed Account</h2>
+            <SectionCard>
+              <h2 className="text-xl font-semibold">Commerce & Subscription Overview</h2>
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="rounded-xl border border-border/70 bg-surface-muted p-4">
                   <p className="portal-kicker">Shop</p>
@@ -1684,13 +1694,13 @@ export default function AccountPage() {
                 </div>
               </div>
               <p className="text-sm text-muted-foreground">
-                Plan: <span className="font-medium">{portalData.plan}</span> · Subscription:{" "}
-                <span className="font-medium capitalize">{toSentence(portalData.subscription_status)}</span>
+                Plan: <span className="font-medium">{portalData.plan}</span> | Subscription:{" "}
+                <StatusChip tone="info">{toSentence(portalData.subscription_status)}</StatusChip>
               </p>
-            </section>
+            </SectionCard>
 
             {AccountAiTopUpEnabled && (
-              <section className="portal-surface space-y-4">
+              <SectionCard>
                 <div>
                   <h2 className="text-xl font-semibold">AI Credits</h2>
                   <p className="mt-1 text-sm text-muted-foreground">
@@ -1743,7 +1753,7 @@ export default function AccountPage() {
                           ) : (
                             aiCreditPacks.map((pack) => (
                               <option key={pack.pack_code} value={pack.pack_code}>
-                                {pack.pack_code} · {formatCredits(pack.credits)} credits · {formatAmount(pack.price, pack.currency)}
+                                {pack.pack_code} | {formatCredits(pack.credits)} credits | {formatAmount(pack.price, pack.currency)}
                               </option>
                             ))
                           )}
@@ -1943,10 +1953,10 @@ export default function AccountPage() {
                               >
                                 <div>
                                   <p className="text-sm font-medium">
-                                    {item.invoice_number} · {item.pack_code} · {formatCredits(item.requested_credits)} credits
+                                    {item.invoice_number} | {item.pack_code} | {formatCredits(item.requested_credits)} credits
                                   </p>
                                   <p className="text-xs text-muted-foreground">
-                                    {toSentence(item.status)} · {formatAmount(item.amount_due, item.currency)} · {formatDate(item.created_at)}
+                                    {toSentence(item.status)} | {formatAmount(item.amount_due, item.currency)} | {formatDate(item.created_at)}
                                   </p>
                                   {item.reason && (
                                     <p className="text-xs text-destructive">Reason: {item.reason}</p>
@@ -1991,9 +2001,9 @@ export default function AccountPage() {
                         </p>
                         {aiCheckoutStatusItem && (
                           <p className="text-xs text-muted-foreground">
-                            {formatCredits(aiCheckoutStatusItem.credits)} credits ·{" "}
-                            {formatAmount(aiCheckoutStatusItem.amount, aiCheckoutStatusItem.currency)} ·{" "}
-                            {toSentence(aiCheckoutStatusItem.payment_method)} · Created {formatDate(aiCheckoutStatusItem.created_at)}
+                            {formatCredits(aiCheckoutStatusItem.credits)} credits |{" "}
+                            {formatAmount(aiCheckoutStatusItem.amount, aiCheckoutStatusItem.currency)} |{" "}
+                            {toSentence(aiCheckoutStatusItem.payment_method)} | Created {formatDate(aiCheckoutStatusItem.created_at)}
                           </p>
                         )}
                         {isPollingAiCheckoutStatus && (
@@ -2085,10 +2095,10 @@ export default function AccountPage() {
                                 >
                                   <div>
                                     <p className="text-sm font-medium">
-                                      {formatCredits(item.credits)} credits · {formatAmount(item.amount, item.currency)}
+                                      {formatCredits(item.credits)} credits | {formatAmount(item.amount, item.currency)}
                                     </p>
                                     <p className="text-xs text-muted-foreground">
-                                      {toSentence(item.payment_status)} · {toSentence(item.payment_method)} · {formatDate(item.created_at)}
+                                      {toSentence(item.payment_status)} | {toSentence(item.payment_method)} | {formatDate(item.created_at)}
                                     </p>
                                   </div>
                                   <p className="text-xs text-muted-foreground font-mono">
@@ -2114,14 +2124,14 @@ export default function AccountPage() {
                                 >
                                   <div>
                                     <p className="text-sm font-medium">
-                                      {toSentence(item.entry_type)} ·{" "}
+                                      {toSentence(item.entry_type)} |{" "}
                                       <span className={item.delta_credits >= 0 ? "text-emerald-700" : "text-amber-700"}>
                                         {item.delta_credits >= 0 ? "+" : ""}
                                         {formatCredits(item.delta_credits)} credits
                                       </span>
                                     </p>
                                     <p className="text-xs text-muted-foreground">
-                                      Balance after: {formatCredits(item.balance_after_credits)} · {formatDate(item.created_at_utc)}
+                                      Balance after: {formatCredits(item.balance_after_credits)} | {formatDate(item.created_at_utc)}
                                     </p>
                                   </div>
                                   <p className="text-xs text-muted-foreground font-mono">
@@ -2170,10 +2180,10 @@ export default function AccountPage() {
                             >
                               <div>
                                 <p className="text-sm font-medium">
-                                  {formatCredits(item.credits)} credits · {formatAmount(item.amount, item.currency)}
+                                  {formatCredits(item.credits)} credits | {formatAmount(item.amount, item.currency)}
                                 </p>
                                 <p className="text-xs text-muted-foreground">
-                                  {toSentence(item.payment_method)} · {toSentence(item.payment_status)} · {formatDate(item.created_at)}
+                                  {toSentence(item.payment_method)} | {toSentence(item.payment_status)} | {formatDate(item.created_at)}
                                 </p>
                                 {item.submitted_reference && (
                                   <p className="text-xs font-mono text-muted-foreground">
@@ -2191,53 +2201,65 @@ export default function AccountPage() {
                     )}
                   </>
                 )}
-              </section>
+              </SectionCard>
             )}
 
-            <section className="portal-surface space-y-4">
-              <h2 className="text-xl font-semibold">Devices</h2>
-              <div className="space-y-3">
-                {portalData.devices.length === 0 && (
-                  <p className="text-sm text-muted-foreground">No provisioned devices found for this shop yet.</p>
-                )}
-                {portalData.devices.map((device) => {
-                  const canDeactivate =
-                    portalData.can_deactivate_more_devices_today &&
-                    device.device_status.toLowerCase() === "active" &&
-                    !device.is_current_device;
-                  const isDeactivating = deactivatingDeviceCode === device.device_code;
-                  return (
-                    <div key={device.provisioned_device_id} className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-2">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-sm font-semibold">{device.device_name || device.device_code}</p>
-                        <p className="text-xs text-muted-foreground">{device.device_code}</p>
+            <SectionCard>
+              <details className="group rounded-xl border border-border/70 bg-surface-muted p-4">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-semibold">Provisioning & Device Diagnostics</h2>
+                    <p className="text-xs text-muted-foreground">
+                      Secondary controls for terminal deactivation and diagnostic checks.
+                    </p>
+                  </div>
+                  <StatusChip tone="neutral">
+                    {portalData.devices.length.toString()} device{portalData.devices.length === 1 ? "" : "s"}
+                  </StatusChip>
+                </summary>
+                <div className="mt-4 space-y-3">
+                  {portalData.devices.length === 0 && (
+                    <p className="text-sm text-muted-foreground">No provisioned devices found for this shop yet.</p>
+                  )}
+                  {portalData.devices.map((device) => {
+                    const canDeactivate =
+                      portalData.can_deactivate_more_devices_today &&
+                      device.device_status.toLowerCase() === "active" &&
+                      !device.is_current_device;
+                    const isDeactivating = deactivatingDeviceCode === device.device_code;
+                    return (
+                      <div key={device.provisioned_device_id} className="rounded-xl border border-border/70 bg-background p-4 space-y-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-sm font-semibold">{device.device_name || device.device_code}</p>
+                          <p className="text-xs text-muted-foreground">{device.device_code}</p>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Status: {toSentence(device.device_status)} | License: {toSentence(device.license_state)}
+                          {device.is_current_device ? " | Current session device" : ""}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Last heartbeat: {formatDate(device.last_heartbeat_at)} | Valid until: {formatDate(device.valid_until)}
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={!canDeactivate || isDeactivating}
+                          onClick={() => {
+                            void handleDeactivateDevice(device.device_code);
+                          }}
+                        >
+                          {isDeactivating ? "Deactivating..." : "Deactivate Device"}
+                        </Button>
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        Status: {toSentence(device.device_status)} · License: {toSentence(device.license_state)}
-                        {device.is_current_device ? " · Current session device" : ""}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        Last heartbeat: {formatDate(device.last_heartbeat_at)} · Valid until: {formatDate(device.valid_until)}
-                      </p>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        disabled={!canDeactivate || isDeactivating}
-                        onClick={() => {
-                          void handleDeactivateDevice(device.device_code);
-                        }}
-                      >
-                        {isDeactivating ? "Deactivating..." : "Deactivate Device"}
-                      </Button>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
+                    );
+                  })}
+                </div>
+              </details>
+            </SectionCard>
           </>
         )}
 
-        <section className="portal-surface space-y-5">
+        <SectionCard className="space-y-5">
           <div>
             <h2 className="text-xl font-semibold">Activation Key Access</h2>
             <p className="mt-2 text-sm text-muted-foreground">
@@ -2263,11 +2285,11 @@ export default function AccountPage() {
               {isLoadingAccess ? "Loading..." : "Load By Key"}
             </Button>
           </form>
-        </section>
+        </SectionCard>
 
         {accessData && (
           <>
-            <section className="portal-surface space-y-4">
+            <SectionCard>
               <h2 className="text-xl font-semibold">Activation Key</h2>
               <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-3">
                 <p className="portal-kicker">License Key</p>
@@ -2297,13 +2319,13 @@ export default function AccountPage() {
                 <p className="text-xs text-muted-foreground">
                   Activations: {accessData.activation_entitlement.activations_used} /{" "}
                   {accessData.activation_entitlement.max_activations}
-                  {" · "}Entitlement: {toSentence(accessData.entitlement_state)}
-                  {" · "}Expires: {formatDate(accessData.activation_entitlement.expires_at)}
+                  {" | "}Entitlement: {toSentence(accessData.entitlement_state)}
+                  {" | "}Expires: {formatDate(accessData.activation_entitlement.expires_at)}
                 </p>
               </div>
-            </section>
+            </SectionCard>
 
-            <section className="portal-surface space-y-4">
+            <SectionCard>
               <h2 className="text-xl font-semibold">Install SmartPOS</h2>
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-3">
@@ -2409,10 +2431,10 @@ export default function AccountPage() {
                 <p>2. Compare installer SHA-256 with the checksum shown above.</p>
                 <p>3. Do not run installer if checksum mismatch occurs.</p>
               </div>
-            </section>
+            </SectionCard>
           </>
         )}
       </div>
-    </main>
+    </PageShell>
   );
 }

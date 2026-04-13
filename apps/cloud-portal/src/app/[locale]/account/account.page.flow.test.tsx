@@ -369,7 +369,7 @@ describe("Account page authenticated flow", () => {
 
     await waitForCondition(() => portalCallCount >= 1);
     await waitForCondition(() => container.textContent?.includes("Signed in as") ?? false);
-    expect(container.textContent).toContain("Licensed Account");
+    expect(container.textContent).toContain("Commerce & Subscription Overview");
     expect(container.textContent).toContain("Counter POS");
 
     const deactivateButton = Array.from(container.querySelectorAll("button")).find(
@@ -568,7 +568,7 @@ describe("Account page authenticated flow", () => {
       await flushUi();
     });
 
-    await waitForCondition(() => container.textContent?.includes("Licensed Account") ?? false);
+    await waitForCondition(() => container.textContent?.includes("Commerce & Subscription Overview") ?? false);
 
     const topUpPackSelect = container.querySelector("select") as HTMLSelectElement | null;
     expect(topUpPackSelect).toBeTruthy();
@@ -762,7 +762,7 @@ describe("Account page authenticated flow", () => {
       await flushUi();
     });
 
-    await waitForCondition(() => container.textContent?.includes("Licensed Account") ?? false);
+    await waitForCondition(() => container.textContent?.includes("Commerce & Subscription Overview") ?? false);
 
     const manualToggleButton = Array.from(container.querySelectorAll("button")).find(
       (button) => button.textContent?.includes("Need Bank Transfer?"),
@@ -1087,7 +1087,8 @@ describe("Account page authenticated flow", () => {
     await waitForCondition(() => container.textContent?.includes("Signed in as") ?? false);
     expect(container.textContent).toContain("Role: cashier");
     expect(container.textContent).toContain("cannot access license management");
-    expect(container.textContent).not.toContain("Licensed Account");
+    expect(container.textContent).not.toContain("Commerce & Subscription Overview");
     expect(portalCallCount).toBe(0);
   });
 });
+
