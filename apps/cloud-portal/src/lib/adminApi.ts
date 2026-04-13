@@ -95,6 +95,105 @@ export type AiManualPaymentVerifyRequest = {
   external_reference?: string;
 };
 
+export type CloudProductType = "pos_subscription" | "ai_credit" | string;
+
+export type CloudProductRow = {
+  product_code: string;
+  product_name: string;
+  product_type: CloudProductType;
+  description?: string | null;
+  price: number;
+  currency: string;
+  billing_mode: string;
+  validity?: string | null;
+  default_quantity_or_credits: number;
+  active: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type CloudProductsResponse = {
+  generated_at: string;
+  count: number;
+  items: CloudProductRow[];
+};
+
+export type CloudProductUpsertRequest = {
+  product_code: string;
+  product_name: string;
+  product_type: CloudProductType;
+  description?: string;
+  price: number;
+  currency: string;
+  billing_mode: string;
+  validity?: string;
+  default_quantity_or_credits: number;
+  active?: boolean;
+};
+
+export type CloudPurchaseStatus =
+  | "draft"
+  | "submitted"
+  | "payment_pending"
+  | "paid"
+  | "pending_approval"
+  | "approved"
+  | "rejected"
+  | "assigned"
+  | "cancelled"
+  | string;
+
+export type CloudPurchaseItemRow = {
+  product_code: string;
+  product_name: string;
+  product_type: CloudProductType;
+  quantity: number;
+  amount: number;
+  currency: string;
+  credits?: number | null;
+};
+
+export type CloudPurchaseRow = {
+  purchase_id: string;
+  order_number: string;
+  shop_code: string;
+  status: CloudPurchaseStatus;
+  items: CloudPurchaseItemRow[];
+  total_amount: number;
+  currency: string;
+  note?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+  approved_by?: string | null;
+  rejected_by?: string | null;
+  assigned_by?: string | null;
+  assignment_id?: string | null;
+};
+
+export type CloudPurchasesResponse = {
+  generated_at: string;
+  count: number;
+  items: CloudPurchaseRow[];
+};
+
+export type CreateAccountCloudPurchaseRequest = {
+  items: Array<{
+    product_code: string;
+    quantity?: number;
+  }>;
+  note?: string;
+};
+
+export type CloudPurchaseActionRequest = {
+  actor_note: string;
+  reason_code?: string;
+};
+
+export type CloudPurchaseActionResponse = {
+  purchase: CloudPurchaseRow;
+  processed_at: string;
+};
+
 type DailySalesReportResponse = {
   from_date: string;
   to_date: string;
@@ -910,6 +1009,127 @@ export async function rejectAdminAiCreditInvoice(
       body: JSON.stringify(payload),
     },
   );
+}
+
+export async function fetchAccountCloudProducts(search?: string, take = 100) {
+  const normalizedTake = Math.max(1, Math.min(300, Math.trunc(take || 100)));
+  const query = new URLSearchParams();
+  query.set("take", normalizedTake.toString());
+  if (search?.trim()) {
+    query.set("search", search.trim());
+  }
+
+  return request<CloudProductsResponse>(`/api/account/products?${query.toString()}`);
+}
+
+export async function fetchAccountCloudPurchases(take = 80) {
+  const normalizedTake = Math.max(1, Math.min(300, Math.trunc(take || 80)));
+  return request<CloudPurchasesResponse>(`/api/account/purchases?take=${normalizedTake}`);
+}
+
+export async function createAccountCloudPurchase(payload: CreateAccountCloudPurchaseRequest) {
+  return request<CloudPurchaseRow>("/api/account/purchases", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchAdminCloudProducts(options?: { search?: string; includeInactive?: boolean; take?: number }) {
+  const normalizedTake = Math.max(1, Math.min(500, Math.trunc(options?.take || 120)));
+  const query = new URLSearchParams();
+  query.set("take", normalizedTake.toString());
+  if (options?.search?.trim()) {
+    query.set("search", options.search.trim());
+  }
+  if (options?.includeInactive) {
+    query.set("include_inactive", "true");
+  }
+
+  return request<CloudProductsResponse>(`/api/admin/cloud/products?${query.toString()}`);
+}
+
+export async function createAdminCloudProduct(payload: CloudProductUpsertRequest) {
+  return request<CloudProductRow>("/api/admin/cloud/products", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateAdminCloudProduct(productCode: string, payload: CloudProductUpsertRequest) {
+  return request<CloudProductRow>(`/api/admin/cloud/products/${encodeURIComponent(productCode)}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deactivateAdminCloudProduct(productCode: string) {
+  return request<CloudProductRow>(`/api/admin/cloud/products/${encodeURIComponent(productCode)}/deactivate`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({}),
+  });
+}
+
+export async function fetchAdminCloudPurchases(options?: { status?: string; take?: number }) {
+  const normalizedTake = Math.max(1, Math.min(400, Math.trunc(options?.take || 120)));
+  const query = new URLSearchParams();
+  query.set("take", normalizedTake.toString());
+  if (options?.status?.trim()) {
+    query.set("status", options.status.trim());
+  }
+
+  return request<CloudPurchasesResponse>(`/api/admin/cloud/purchases?${query.toString()}`);
+}
+
+export async function approveAdminCloudPurchase(purchaseId: string, payload: CloudPurchaseActionRequest) {
+  return request<CloudPurchaseActionResponse>(`/api/admin/cloud/purchases/${encodeURIComponent(purchaseId)}/approve`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function rejectAdminCloudPurchase(purchaseId: string, payload: CloudPurchaseActionRequest) {
+  return request<CloudPurchaseActionResponse>(`/api/admin/cloud/purchases/${encodeURIComponent(purchaseId)}/reject`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function assignAdminCloudPurchase(purchaseId: string, payload: CloudPurchaseActionRequest) {
+  return request<CloudPurchaseActionResponse>(`/api/admin/cloud/purchases/${encodeURIComponent(purchaseId)}/assign`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function revokeAdminCloudAssignment(assignmentId: string, payload: CloudPurchaseActionRequest) {
+  return request<CloudPurchaseActionResponse>(`/api/admin/cloud/assignments/${encodeURIComponent(assignmentId)}/revoke`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function fetchDailySalesReport(fromDate: Date | string = new Date(), toDate: Date | string = fromDate) {

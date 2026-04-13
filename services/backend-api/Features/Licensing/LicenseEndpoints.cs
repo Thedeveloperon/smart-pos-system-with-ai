@@ -634,6 +634,315 @@ public static class LicenseEndpoints
         .WithName("ResolveProtectedInstallerDownload")
         .WithOpenApi();
 
+        var cloudRegistration = app.MapGroup("/api/cloud")
+            .WithTags("Cloud Registration");
+
+        cloudRegistration.MapPost("/register", async (
+            CloudRegisterRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.CreateCloudRegistrationAsync(request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .AllowAnonymous()
+        .WithName("CreateCloudRegistration")
+        .WithOpenApi();
+
+        cloudRegistration.MapGet("/register/{request_id:guid}", async (
+            Guid request_id,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var response = await licenseService.GetCloudRegistrationStatusAsync(request_id, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .AllowAnonymous()
+        .WithName("GetCloudRegistrationStatus")
+        .WithOpenApi();
+
+        var accountProducts = app.MapGroup("/api/account/products")
+            .WithTags("Cloud Account Products")
+            .RequireAuthorization();
+
+        accountProducts.MapGet("", [Authorize(Roles = SmartPosRoles.Owner)] (
+            string? search,
+            int? take,
+            LicenseService licenseService) =>
+        {
+            var response = licenseService.GetCloudProducts(search, includeInactive: false, take ?? 100);
+            return Results.Ok(response);
+        })
+        .RequireAuthorization()
+        .WithName("GetOwnerCloudProducts")
+        .WithOpenApi();
+
+        var accountPurchases = app.MapGroup("/api/account/purchases")
+            .WithTags("Cloud Account Purchases")
+            .RequireAuthorization();
+
+        accountPurchases.MapGet("", [Authorize(Roles = SmartPosRoles.Owner)] async (
+            int? take,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var response = await licenseService.GetOwnerPurchasesAsync(take ?? 50, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization()
+        .WithName("GetOwnerCloudPurchases")
+        .WithOpenApi();
+
+        accountPurchases.MapPost("", [Authorize(Roles = SmartPosRoles.Owner)] async (
+            CloudPurchaseCreateRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.CreateOwnerPurchaseAsync(request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization()
+        .WithName("CreateOwnerCloudPurchase")
+        .WithOpenApi();
+
+        accountPurchases.MapGet("/{purchase_id:guid}", [Authorize(Roles = SmartPosRoles.Owner)] async (
+            Guid purchase_id,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var response = await licenseService.GetOwnerPurchaseByIdAsync(purchase_id, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization()
+        .WithName("GetOwnerCloudPurchaseById")
+        .WithOpenApi();
+
+        var cloudAdmin = app.MapGroup("/api/admin/cloud")
+            .WithTags("Cloud Commerce Admin")
+            .RequireAuthorization(SmartPosPolicies.SuperAdmin);
+
+        cloudAdmin.MapGet("/products", async (
+            string? search,
+            bool? include_inactive,
+            int? take,
+            LicenseService licenseService) =>
+        {
+            var response = licenseService.GetCloudProducts(search, include_inactive ?? false, take ?? 200);
+            return Results.Ok(response);
+        })
+        .WithName("AdminCloudGetProducts")
+        .WithOpenApi();
+
+        cloudAdmin.MapPost("/products", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+            CloudProductUpsertRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = licenseService.CreateCloudProduct(request);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .WithName("AdminCloudCreateProduct")
+        .WithOpenApi();
+
+        cloudAdmin.MapPut("/products/{product_code}", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+            string product_code,
+            CloudProductUpsertRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = licenseService.UpdateCloudProduct(product_code, request);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .WithName("AdminCloudUpdateProduct")
+        .WithOpenApi();
+
+        cloudAdmin.MapPost("/products/{product_code}/deactivate", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+            string product_code,
+            CloudProductDeactivateRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService) =>
+        {
+            _ = request;
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = licenseService.DeactivateCloudProduct(product_code);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .WithName("AdminCloudDeactivateProduct")
+        .WithOpenApi();
+
+        cloudAdmin.MapGet("/purchases", [Authorize(Policy = SmartPosPolicies.BillingApprover)] async (
+            string? status,
+            int? take,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var response = await licenseService.GetAdminCloudPurchasesAsync(status, take ?? 120, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.BillingApprover)
+        .WithName("AdminCloudGetPurchases")
+        .WithOpenApi();
+
+        cloudAdmin.MapPost("/purchases/{purchase_id:guid}/approve", [Authorize(Policy = SmartPosPolicies.BillingApprover)] async (
+            Guid purchase_id,
+            CloudPurchaseActionRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.ApproveCloudPurchaseAsync(purchase_id, request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.BillingApprover)
+        .WithName("AdminCloudApprovePurchase")
+        .WithOpenApi();
+
+        cloudAdmin.MapPost("/purchases/{purchase_id:guid}/reject", [Authorize(Policy = SmartPosPolicies.BillingApprover)] async (
+            Guid purchase_id,
+            CloudPurchaseActionRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.RejectCloudPurchaseAsync(purchase_id, request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.BillingApprover)
+        .WithName("AdminCloudRejectPurchase")
+        .WithOpenApi();
+
+        cloudAdmin.MapPost("/purchases/{purchase_id:guid}/assign", [Authorize(Policy = SmartPosPolicies.BillingApprover)] async (
+            Guid purchase_id,
+            CloudPurchaseActionRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.AssignCloudPurchaseAsync(purchase_id, request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.BillingApprover)
+        .WithName("AdminCloudAssignPurchase")
+        .WithOpenApi();
+
+        cloudAdmin.MapPost("/assignments/{assignment_id:guid}/revoke", [Authorize(Policy = SmartPosPolicies.BillingApprover)] async (
+            Guid assignment_id,
+            CloudAssignmentRevokeRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var response = await licenseService.RevokeCloudAssignmentAsync(assignment_id, request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.BillingApprover)
+        .WithName("AdminCloudRevokeAssignment")
+        .WithOpenApi();
+
         var admin = app.MapGroup("/api/admin/licensing")
             .WithTags("Licensing Admin")
             .RequireAuthorization(SmartPosPolicies.SuperAdmin);

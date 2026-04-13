@@ -1486,11 +1486,23 @@ public sealed class MarketingPaymentRequestCreateRequest
     [JsonPropertyName("shop_name")]
     public string? ShopName { get; set; }
 
+    [JsonPropertyName("shop_address")]
+    public string? ShopAddress { get; set; }
+
     [JsonPropertyName("shop_code")]
     public string? ShopCode { get; set; }
 
     [JsonPropertyName("device_code")]
     public string? DeviceCode { get; set; }
+
+    [JsonPropertyName("shop_contact_name")]
+    public string? ShopContactName { get; set; }
+
+    [JsonPropertyName("shop_contact_email")]
+    public string? ShopContactEmail { get; set; }
+
+    [JsonPropertyName("shop_contact_phone")]
+    public string? ShopContactPhone { get; set; }
 
     [JsonPropertyName("contact_name")]
     public string? ContactName { get; set; }
@@ -1528,8 +1540,20 @@ public sealed class MarketingPaymentRequestCreateRequest
     [JsonPropertyName("owner_full_name")]
     public string? OwnerFullName { get; set; }
 
+    [JsonPropertyName("owner_address")]
+    public string? OwnerAddress { get; set; }
+
+    [JsonPropertyName("owner_phone")]
+    public string? OwnerPhone { get; set; }
+
+    [JsonPropertyName("owner_email")]
+    public string? OwnerEmail { get; set; }
+
     [JsonPropertyName("owner_password")]
     public string? OwnerPassword { get; set; }
+
+    [JsonPropertyName("confirm_password")]
+    public string? ConfirmPassword { get; set; }
 }
 
 public sealed class MarketingPaymentInstructionsResponse
@@ -1609,6 +1633,9 @@ public sealed class MarketingPaymentRequestCreateResponse
     [JsonPropertyName("owner_account_state")]
     public string? OwnerAccountState { get; set; }
 
+    [JsonPropertyName("registration_status")]
+    public string? RegistrationStatus { get; set; }
+
     [JsonPropertyName("ai_credit_order")]
     public MarketingAiCreditOrderSummaryResponse? AiCreditOrder { get; set; }
 }
@@ -1644,6 +1671,9 @@ public sealed class MarketingStripeCheckoutSessionResponse
 
     [JsonPropertyName("owner_account_state")]
     public string? OwnerAccountState { get; set; }
+
+    [JsonPropertyName("registration_status")]
+    public string? RegistrationStatus { get; set; }
 
     [JsonPropertyName("checkout_session_id")]
     public string CheckoutSessionId { get; set; } = string.Empty;
@@ -2067,6 +2097,351 @@ public sealed class AdminAiCreditInvoiceActionResponse
 {
     [JsonPropertyName("invoice")]
     public required AiCreditInvoiceRowResponse Invoice { get; set; }
+
+    [JsonPropertyName("processed_at")]
+    public DateTimeOffset ProcessedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class CloudRegisterRequest
+{
+    [JsonPropertyName("shop_name")]
+    public string? ShopName { get; set; }
+
+    [JsonPropertyName("shop_address")]
+    public string? ShopAddress { get; set; }
+
+    [JsonPropertyName("shop_contact_name")]
+    public string? ShopContactName { get; set; }
+
+    [JsonPropertyName("shop_contact_phone")]
+    public string? ShopContactPhone { get; set; }
+
+    [JsonPropertyName("shop_contact_email")]
+    public string? ShopContactEmail { get; set; }
+
+    [JsonPropertyName("owner_full_name")]
+    public string? OwnerFullName { get; set; }
+
+    [JsonPropertyName("owner_address")]
+    public string? OwnerAddress { get; set; }
+
+    [JsonPropertyName("owner_phone")]
+    public string? OwnerPhone { get; set; }
+
+    [JsonPropertyName("owner_email")]
+    public string? OwnerEmail { get; set; }
+
+    [JsonPropertyName("username")]
+    public string? Username { get; set; }
+
+    [JsonPropertyName("password")]
+    public string? Password { get; set; }
+
+    [JsonPropertyName("confirm_password")]
+    public string? ConfirmPassword { get; set; }
+
+    [JsonPropertyName("plan_code")]
+    public string? PlanCode { get; set; }
+
+    [JsonPropertyName("payment_method")]
+    public string? PaymentMethod { get; set; }
+
+    [JsonPropertyName("currency")]
+    public string? Currency { get; set; }
+
+    [JsonPropertyName("locale")]
+    public string? Locale { get; set; }
+
+    [JsonPropertyName("campaign")]
+    public string? Campaign { get; set; }
+
+    [JsonPropertyName("notes")]
+    public string? Notes { get; set; }
+}
+
+public sealed class CloudRegisterResponse
+{
+    [JsonPropertyName("request_id")]
+    public Guid RequestId { get; set; }
+
+    [JsonPropertyName("shop_code")]
+    public string ShopCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("shop_name")]
+    public string ShopName { get; set; } = string.Empty;
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "pending_review";
+
+    [JsonPropertyName("registration_status")]
+    public string RegistrationStatus { get; set; } = "pending_review";
+
+    [JsonPropertyName("invoice_id")]
+    public Guid? InvoiceId { get; set; }
+
+    [JsonPropertyName("invoice_number")]
+    public string? InvoiceNumber { get; set; }
+
+    [JsonPropertyName("amount_due")]
+    public decimal AmountDue { get; set; }
+
+    [JsonPropertyName("currency")]
+    public string Currency { get; set; } = "LKR";
+
+    [JsonPropertyName("next_step")]
+    public string NextStep { get; set; } = "await_admin_review";
+
+    [JsonPropertyName("created_at")]
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class CloudRegisterStatusResponse
+{
+    [JsonPropertyName("request_id")]
+    public Guid RequestId { get; set; }
+
+    [JsonPropertyName("shop_code")]
+    public string ShopCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("shop_name")]
+    public string ShopName { get; set; } = string.Empty;
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "pending_review";
+
+    [JsonPropertyName("registration_status")]
+    public string RegistrationStatus { get; set; } = "pending_review";
+
+    [JsonPropertyName("invoice_id")]
+    public Guid? InvoiceId { get; set; }
+
+    [JsonPropertyName("invoice_number")]
+    public string? InvoiceNumber { get; set; }
+
+    [JsonPropertyName("amount_due")]
+    public decimal AmountDue { get; set; }
+
+    [JsonPropertyName("amount_paid")]
+    public decimal AmountPaid { get; set; }
+
+    [JsonPropertyName("currency")]
+    public string Currency { get; set; } = "LKR";
+
+    [JsonPropertyName("owner_username")]
+    public string? OwnerUsername { get; set; }
+
+    [JsonPropertyName("created_at")]
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("updated_at")]
+    public DateTimeOffset? UpdatedAt { get; set; }
+}
+
+public sealed class CloudProductUpsertRequest
+{
+    [JsonPropertyName("product_code")]
+    public string? ProductCode { get; set; }
+
+    [JsonPropertyName("product_name")]
+    public string? ProductName { get; set; }
+
+    [JsonPropertyName("product_type")]
+    public string? ProductType { get; set; }
+
+    [JsonPropertyName("description")]
+    public string? Description { get; set; }
+
+    [JsonPropertyName("price")]
+    public decimal Price { get; set; }
+
+    [JsonPropertyName("currency")]
+    public string? Currency { get; set; }
+
+    [JsonPropertyName("billing_mode")]
+    public string? BillingMode { get; set; }
+
+    [JsonPropertyName("validity")]
+    public string? Validity { get; set; }
+
+    [JsonPropertyName("default_quantity_or_credits")]
+    public decimal DefaultQuantityOrCredits { get; set; }
+
+    [JsonPropertyName("active")]
+    public bool Active { get; set; } = true;
+}
+
+public sealed class CloudProductDeactivateRequest
+{
+    [JsonPropertyName("actor_note")]
+    public string? ActorNote { get; set; }
+}
+
+public sealed class CloudProductRowResponse
+{
+    [JsonPropertyName("product_code")]
+    public string ProductCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("product_name")]
+    public string ProductName { get; set; } = string.Empty;
+
+    [JsonPropertyName("product_type")]
+    public string ProductType { get; set; } = "pos_subscription";
+
+    [JsonPropertyName("description")]
+    public string? Description { get; set; }
+
+    [JsonPropertyName("price")]
+    public decimal Price { get; set; }
+
+    [JsonPropertyName("currency")]
+    public string Currency { get; set; } = "USD";
+
+    [JsonPropertyName("billing_mode")]
+    public string BillingMode { get; set; } = "one_time";
+
+    [JsonPropertyName("validity")]
+    public string? Validity { get; set; }
+
+    [JsonPropertyName("default_quantity_or_credits")]
+    public decimal DefaultQuantityOrCredits { get; set; }
+
+    [JsonPropertyName("active")]
+    public bool Active { get; set; } = true;
+
+    [JsonPropertyName("is_system_seeded")]
+    public bool IsSystemSeeded { get; set; }
+
+    [JsonPropertyName("created_at")]
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("updated_at")]
+    public DateTimeOffset? UpdatedAt { get; set; }
+}
+
+public sealed class CloudProductsResponse
+{
+    [JsonPropertyName("generated_at")]
+    public DateTimeOffset GeneratedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("count")]
+    public int Count { get; set; }
+
+    [JsonPropertyName("items")]
+    public List<CloudProductRowResponse> Items { get; set; } = [];
+}
+
+public sealed class CloudPurchaseCreateItemRequest
+{
+    [JsonPropertyName("product_code")]
+    public string? ProductCode { get; set; }
+
+    [JsonPropertyName("quantity")]
+    public decimal Quantity { get; set; } = 1m;
+}
+
+public sealed class CloudPurchaseCreateRequest
+{
+    [JsonPropertyName("items")]
+    public List<CloudPurchaseCreateItemRequest> Items { get; set; } = [];
+
+    [JsonPropertyName("note")]
+    public string? Note { get; set; }
+}
+
+public sealed class CloudPurchaseActionRequest
+{
+    [JsonPropertyName("actor_note")]
+    public string? ActorNote { get; set; }
+
+    [JsonPropertyName("reason_code")]
+    public string? ReasonCode { get; set; }
+}
+
+public sealed class CloudAssignmentRevokeRequest
+{
+    [JsonPropertyName("actor_note")]
+    public string? ActorNote { get; set; }
+
+    [JsonPropertyName("reason_code")]
+    public string? ReasonCode { get; set; }
+}
+
+public sealed class CloudPurchaseItemResponse
+{
+    [JsonPropertyName("product_code")]
+    public string ProductCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("quantity")]
+    public decimal Quantity { get; set; }
+
+    [JsonPropertyName("credits")]
+    public decimal? Credits { get; set; }
+
+    [JsonPropertyName("amount")]
+    public decimal Amount { get; set; }
+
+    [JsonPropertyName("currency")]
+    public string Currency { get; set; } = "USD";
+}
+
+public sealed class CloudPurchaseRowResponse
+{
+    [JsonPropertyName("purchase_id")]
+    public Guid PurchaseId { get; set; }
+
+    [JsonPropertyName("order_number")]
+    public string OrderNumber { get; set; } = string.Empty;
+
+    [JsonPropertyName("shop_code")]
+    public string ShopCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "submitted";
+
+    [JsonPropertyName("items")]
+    public List<CloudPurchaseItemResponse> Items { get; set; } = [];
+
+    [JsonPropertyName("total_amount")]
+    public decimal TotalAmount { get; set; }
+
+    [JsonPropertyName("currency")]
+    public string Currency { get; set; } = "USD";
+
+    [JsonPropertyName("created_at")]
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("updated_at")]
+    public DateTimeOffset? UpdatedAt { get; set; }
+
+    [JsonPropertyName("approved_by")]
+    public string? ApprovedBy { get; set; }
+
+    [JsonPropertyName("rejected_by")]
+    public string? RejectedBy { get; set; }
+
+    [JsonPropertyName("assigned_by")]
+    public string? AssignedBy { get; set; }
+
+    [JsonPropertyName("assignment_id")]
+    public string? AssignmentId { get; set; }
+}
+
+public sealed class CloudPurchasesResponse
+{
+    [JsonPropertyName("generated_at")]
+    public DateTimeOffset GeneratedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonPropertyName("count")]
+    public int Count { get; set; }
+
+    [JsonPropertyName("items")]
+    public List<CloudPurchaseRowResponse> Items { get; set; } = [];
+}
+
+public sealed class CloudPurchaseActionResponse
+{
+    [JsonPropertyName("purchase")]
+    public required CloudPurchaseRowResponse Purchase { get; set; }
 
     [JsonPropertyName("processed_at")]
     public DateTimeOffset ProcessedAt { get; set; } = DateTimeOffset.UtcNow;
