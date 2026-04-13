@@ -6,6 +6,11 @@ import { ArrowLeft, Copy, CreditCard, Download, Eye, EyeOff, LogOut, MonitorSmar
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n/I18nProvider";
 import { trackMarketingEvent } from "@/lib/marketingAnalytics";
+import {
+  createOwnerAiCreditInvoice,
+  fetchOwnerAiCreditInvoices,
+  type AiCreditInvoiceRow,
+} from "@/lib/adminApi";
 
 const AccountDeviceCodeStorageKey = "smartpos_marketing_account_device_code_v1";
 const AccountAiPendingCheckoutReferenceStorageKey =
@@ -392,6 +397,12 @@ export default function AccountPage() {
   const [aiCreditLedger, setAiCreditLedger] = useState<AiCreditLedgerItemResponse[]>([]);
   const [aiBillingView, setAiBillingView] = useState<"payment_history" | "usage">("payment_history");
   const [aiPendingManualPayments, setAiPendingManualPayments] = useState<AiPendingManualPaymentItem[]>([]);
+  const [aiCreditInvoices, setAiCreditInvoices] = useState<AiCreditInvoiceRow[]>([]);
+  const [aiInvoiceNote, setAiInvoiceNote] = useState("");
+  const [isLoadingAiInvoices, setIsLoadingAiInvoices] = useState(false);
+  const [isCreatingAiInvoice, setIsCreatingAiInvoice] = useState(false);
+  const [aiInvoiceError, setAiInvoiceError] = useState<string | null>(null);
+  const [aiInvoiceMessage, setAiInvoiceMessage] = useState<string | null>(null);
   const [aiCheckoutStatusItem, setAiCheckoutStatusItem] = useState<AiPaymentHistoryItemResponse | null>(null);
   const [aiPendingCheckoutReference, setAiPendingCheckoutReference] = useState("");
   const [isPollingAiCheckoutStatus, setIsPollingAiCheckoutStatus] = useState(false);
@@ -401,6 +412,8 @@ export default function AccountPage() {
   const [isAiManualFallbackExpanded, setIsAiManualFallbackExpanded] = useState(false);
   const [aiManualPaymentMethod, setAiManualPaymentMethod] = useState<"cash" | "bank_deposit">("bank_deposit");
   const [aiManualBankReference, setAiManualBankReference] = useState("");
+  const [aiVerifyReference, setAiVerifyReference] = useState("");
+  const [isVerifyingAiReference, setIsVerifyingAiReference] = useState(false);
   const [aiPanelViewedTracked, setAiPanelViewedTracked] = useState(false);
 
   const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
@@ -641,6 +654,11 @@ export default function AccountPage() {
           setAiPaymentHistory([]);
           setAiCreditLedger([]);
           setAiPendingManualPayments([]);
+          setAiCreditInvoices([]);
+          setAiInvoiceError(null);
+          setAiInvoiceMessage(null);
+          setAiInvoiceNote("");
+          setAiVerifyReference("");
           setAiCheckoutStatusItem(null);
           setAiTopUpUnavailable(false);
           setAiCheckoutMessage(null);
@@ -663,6 +681,11 @@ export default function AccountPage() {
           setAiPaymentHistory([]);
           setAiCreditLedger([]);
           setAiPendingManualPayments([]);
+          setAiCreditInvoices([]);
+          setAiInvoiceError(null);
+          setAiInvoiceMessage(null);
+          setAiInvoiceNote("");
+          setAiVerifyReference("");
           clearPendingAiCheckoutTracking();
           setAiCheckoutMessage(null);
           resetAiManualFallbackState();
@@ -716,6 +739,11 @@ export default function AccountPage() {
           setAiPendingManualPayments(Array.isArray(pendingManual.items) ? pendingManual.items : []);
         } else {
           setAiPendingManualPayments([]);
+          setAiCreditInvoices([]);
+          setAiInvoiceError(null);
+          setAiInvoiceMessage(null);
+          setAiInvoiceNote("");
+          setAiVerifyReference("");
         }
         setSelectedAiPackCode((current) => {
           if (current && nextPacks.some((pack) => pack.pack_code === current)) {
@@ -748,6 +776,11 @@ export default function AccountPage() {
         setAiPaymentHistory([]);
         setAiCreditLedger([]);
         setAiPendingManualPayments([]);
+        setAiCreditInvoices([]);
+        setAiInvoiceError(null);
+        setAiInvoiceMessage(null);
+        setAiInvoiceNote("");
+        setAiVerifyReference("");
         setAiCheckoutStatusItem(null);
         setAiBillingError(error instanceof Error ? error.message : "Unable to load AI credit billing data.");
         setAiCheckoutMessage(null);
@@ -758,6 +791,37 @@ export default function AccountPage() {
       }
     },
     [aiPendingCheckoutReference, clearPendingAiCheckoutTracking, locale, resetAiManualFallbackState],
+  );
+
+  const loadOwnerAiInvoices = useCallback(
+    async (quiet = false) => {
+      if (!AccountAiTopUpEnabled || authSession?.role?.trim().toLowerCase() !== "owner") {
+        setAiCreditInvoices([]);
+        setAiInvoiceError(null);
+        setAiInvoiceMessage(null);
+        return;
+      }
+
+      setIsLoadingAiInvoices(true);
+      if (!quiet) {
+        setAiInvoiceError(null);
+      }
+
+      try {
+        const response = await fetchOwnerAiCreditInvoices(20);
+        setAiCreditInvoices(Array.isArray(response.items) ? response.items : []);
+      } catch (error) {
+        setAiCreditInvoices([]);
+        if (!quiet) {
+          setAiInvoiceError(
+            error instanceof Error ? error.message : "Unable to load AI credit invoices.",
+          );
+        }
+      } finally {
+        setIsLoadingAiInvoices(false);
+      }
+    },
+    [authSession?.role],
   );
 
 
@@ -802,6 +866,11 @@ export default function AccountPage() {
           setSelectedAiPackCode("");
           setAiPaymentHistory([]);
           setAiPendingManualPayments([]);
+          setAiCreditInvoices([]);
+          setAiInvoiceError(null);
+          setAiInvoiceMessage(null);
+          setAiInvoiceNote("");
+          setAiVerifyReference("");
           setAiTopUpUnavailable(false);
           setAiCheckoutMessage(null);
           clearPendingAiCheckoutTracking();
@@ -831,6 +900,11 @@ export default function AccountPage() {
           setSelectedAiPackCode("");
           setAiPaymentHistory([]);
           setAiPendingManualPayments([]);
+          setAiCreditInvoices([]);
+          setAiInvoiceError(null);
+          setAiInvoiceMessage(null);
+          setAiInvoiceNote("");
+          setAiVerifyReference("");
           setAiTopUpUnavailable(false);
           setAiCheckoutMessage(null);
           clearPendingAiCheckoutTracking();
@@ -858,6 +932,11 @@ export default function AccountPage() {
         setSelectedAiPackCode("");
         setAiPaymentHistory([]);
         setAiPendingManualPayments([]);
+        setAiCreditInvoices([]);
+        setAiInvoiceError(null);
+        setAiInvoiceMessage(null);
+        setAiInvoiceNote("");
+        setAiVerifyReference("");
         setAiTopUpUnavailable(false);
         setAiCheckoutMessage(null);
         clearPendingAiCheckoutTracking();
@@ -1046,6 +1125,11 @@ export default function AccountPage() {
         setSelectedAiPackCode("");
         setAiPaymentHistory([]);
         setAiPendingManualPayments([]);
+        setAiCreditInvoices([]);
+        setAiInvoiceError(null);
+        setAiInvoiceMessage(null);
+        setAiInvoiceNote("");
+        setAiVerifyReference("");
         setAiTopUpUnavailable(false);
         setAiCheckoutMessage(null);
         clearPendingAiCheckoutTracking();
@@ -1074,6 +1158,11 @@ export default function AccountPage() {
       setSelectedAiPackCode("");
       setAiPaymentHistory([]);
       setAiPendingManualPayments([]);
+      setAiCreditInvoices([]);
+      setAiInvoiceError(null);
+      setAiInvoiceMessage(null);
+      setAiInvoiceNote("");
+      setAiVerifyReference("");
       setAiTopUpUnavailable(false);
       setAiCheckoutMessage(null);
       clearPendingAiCheckoutTracking();
@@ -1102,6 +1191,11 @@ export default function AccountPage() {
       setSelectedAiPackCode("");
       setAiPaymentHistory([]);
       setAiPendingManualPayments([]);
+      setAiCreditInvoices([]);
+      setAiInvoiceError(null);
+      setAiInvoiceMessage(null);
+      setAiInvoiceNote("");
+      setAiVerifyReference("");
       setAiBillingError(null);
       setAiCheckoutMessage(null);
       setAiTopUpUnavailable(false);
@@ -1331,6 +1425,101 @@ export default function AccountPage() {
     }
   };
 
+  const handleCreateAiInvoice = async () => {
+    const normalizedPackCode = selectedAiPackCode.trim();
+    if (!normalizedPackCode) {
+      setAiInvoiceError("Select a credit pack first.");
+      return;
+    }
+
+    setIsCreatingAiInvoice(true);
+    setAiInvoiceError(null);
+    setAiInvoiceMessage(null);
+    try {
+      const created = await createOwnerAiCreditInvoice({
+        pack_code: normalizedPackCode,
+        note: aiInvoiceNote.trim() || undefined,
+      });
+
+      setAiInvoiceNote("");
+      setAiInvoiceMessage(
+        `Invoice ${created.invoice_number} created. Billing admin approval is required before credits are added.`,
+      );
+      trackMarketingEvent("marketing_account_ai_invoice_created", {
+        locale,
+        pack_code: created.pack_code,
+        invoice_id: created.invoice_id,
+        invoice_number: created.invoice_number,
+        amount_due: created.amount_due,
+        currency: created.currency,
+      });
+      await loadOwnerAiInvoices(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to create AI credit invoice.";
+      setAiInvoiceError(message);
+      trackMarketingEvent("marketing_account_ai_invoice_create_failed", {
+        locale,
+        pack_code: normalizedPackCode,
+        error: message.slice(0, 160),
+      });
+    } finally {
+      setIsCreatingAiInvoice(false);
+    }
+  };
+
+  const handleVerifyAiPaymentByReference = async () => {
+    const normalizedReference = aiVerifyReference.trim().toLowerCase();
+    if (!normalizedReference) {
+      setAiBillingError("Enter a submitted or external reference.");
+      return;
+    }
+
+    const matches = aiPendingManualPayments.filter((item) => {
+      const submittedReference = (item.submitted_reference || "").trim().toLowerCase();
+      const externalReference = (item.external_reference || "").trim().toLowerCase();
+      return submittedReference === normalizedReference || externalReference === normalizedReference;
+    });
+
+    if (matches.length === 0) {
+      setAiBillingError("No pending payment matched this reference.");
+      return;
+    }
+
+    if (matches.length > 1) {
+      setAiBillingError("Multiple pending payments matched this reference. Use the exact unique reference.");
+      return;
+    }
+
+    const targetPayment = matches[0];
+    setIsVerifyingAiReference(true);
+    setAiBillingError(null);
+    try {
+      const response = await fetch("/api/account/ai/payments/verify", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": crypto.randomUUID(),
+        },
+        body: JSON.stringify({
+          payment_id: targetPayment.payment_id,
+        }),
+      });
+
+      const payload = await parseApiPayload(response);
+      if (!response.ok) {
+        throw new Error(parseErrorMessage(payload));
+      }
+
+      setAiVerifyReference("");
+      setAiCheckoutMessage("Payment verified and credits were added.");
+      await loadAiBillingData();
+    } catch (error) {
+      setAiBillingError(error instanceof Error ? error.message : "Unable to verify payment by reference.");
+    } finally {
+      setIsVerifyingAiReference(false);
+    }
+  };
+
   const trackLicenseAction = useCallback(
     async (channel: string) => {
       const normalizedKey = resolvedActivationKey.trim();
@@ -1403,6 +1592,7 @@ export default function AccountPage() {
                     void (async () => {
                       await loadLicensePortal(true);
                       await loadAiBillingData();
+                      await loadOwnerAiInvoices(true);
                     })();
                   }}
                   disabled={(isLoadingPortal || isLoadingAiBilling) || !canViewLicensePortal}
@@ -1693,6 +1883,85 @@ export default function AccountPage() {
                       </div>
                     )}
 
+                    {authSession?.role?.trim().toLowerCase() === "owner" && (
+                      <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-3">
+                        <div className="space-y-1">
+                          <p className="portal-kicker">Create AI Credit Invoice</p>
+                          <p className="text-xs text-muted-foreground">
+                            Submit an invoice request for the selected pack. Billing admin or super admin approval will credit your wallet.
+                          </p>
+                        </div>
+
+                        <label className="space-y-1 block">
+                          <span className="portal-kicker">Owner Note (optional)</span>
+                          <textarea
+                            className="field-shell min-h-[84px]"
+                            value={aiInvoiceNote}
+                            onChange={(event) => setAiInvoiceNote(event.target.value)}
+                            placeholder="Add context for billing approval (optional)."
+                            maxLength={1000}
+                          />
+                        </label>
+
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={isCreatingAiInvoice || !selectedAiPackCode.trim()}
+                            onClick={() => {
+                              void handleCreateAiInvoice();
+                            }}
+                          >
+                            {isCreatingAiInvoice ? "Creating Invoice..." : "Create Invoice"}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={isLoadingAiInvoices}
+                            onClick={() => {
+                              void loadOwnerAiInvoices();
+                            }}
+                          >
+                            {isLoadingAiInvoices ? "Refreshing Invoices..." : "Refresh Invoices"}
+                          </Button>
+                        </div>
+
+                        {aiInvoiceError && (
+                          <p className="text-sm text-destructive">{aiInvoiceError}</p>
+                        )}
+                        {aiInvoiceMessage && (
+                          <p className="text-sm text-muted-foreground">{aiInvoiceMessage}</p>
+                        )}
+
+                        {aiCreditInvoices.length > 0 && (
+                          <div className="space-y-2">
+                            <p className="portal-kicker">Recent Invoice Requests</p>
+                            {aiCreditInvoices.slice(0, 10).map((item) => (
+                              <div
+                                key={item.invoice_id}
+                                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2"
+                              >
+                                <div>
+                                  <p className="text-sm font-medium">
+                                    {item.invoice_number} · {item.pack_code} · {formatCredits(item.requested_credits)} credits
+                                  </p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {toSentence(item.status)} · {formatAmount(item.amount_due, item.currency)} · {formatDate(item.created_at)}
+                                  </p>
+                                  {item.reason && (
+                                    <p className="text-xs text-destructive">Reason: {item.reason}</p>
+                                  )}
+                                </div>
+                                <span className="inline-flex h-8 items-center rounded-md border border-border/50 bg-muted px-3 text-xs text-muted-foreground">
+                                  {toSentence(item.status)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {aiBillingError && (
                       <p className="text-sm text-destructive">{aiBillingError}</p>
                     )}
@@ -1872,6 +2141,26 @@ export default function AccountPage() {
                         <p className="text-sm text-muted-foreground">
                           Manual AI credit purchases awaiting confirmation. Our team will verify your reference and release credits shortly.
                         </p>
+
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                          <input
+                            type="text"
+                            className="field-shell sm:flex-1"
+                            value={aiVerifyReference}
+                            onChange={(event) => setAiVerifyReference(event.target.value)}
+                            placeholder="Submitted ref or aicpay_... external ref"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={isVerifyingAiReference}
+                            onClick={() => {
+                              void handleVerifyAiPaymentByReference();
+                            }}
+                          >
+                            {isVerifyingAiReference ? "Verifying..." : "Verify by Reference"}
+                          </Button>
+                        </div>
 
                         <div className="space-y-2">
                           {aiPendingManualPayments.map((item) => (

@@ -45,6 +45,51 @@ export type AiPendingManualPaymentsResponse = {
   items: AiPendingManualPaymentItem[];
 };
 
+export type AiCreditInvoiceStatus = "pending" | "approved" | "rejected" | "settled" | string;
+
+export type AiCreditInvoiceRow = {
+  invoice_id: string;
+  invoice_number: string;
+  shop_code: string;
+  pack_code: string;
+  requested_credits: number;
+  amount_due: number;
+  currency: string;
+  status: AiCreditInvoiceStatus;
+  created_at: string;
+  updated_at?: string | null;
+  approved_at?: string | null;
+  approved_by?: string | null;
+  rejected_at?: string | null;
+  rejected_by?: string | null;
+  reason?: string | null;
+};
+
+export type AiCreditInvoicesResponse = {
+  generated_at: string;
+  count: number;
+  items: AiCreditInvoiceRow[];
+};
+
+export type CreateOwnerAiCreditInvoiceRequest = {
+  pack_code: string;
+  note?: string;
+};
+
+export type AdminAiCreditInvoiceApproveRequest = {
+  actor_note: string;
+};
+
+export type AdminAiCreditInvoiceRejectRequest = {
+  actor_note: string;
+  reason_code?: string;
+};
+
+export type AdminAiCreditInvoiceActionResponse = {
+  invoice: AiCreditInvoiceRow;
+  processed_at: string;
+};
+
 export type AiManualPaymentVerifyRequest = {
   payment_id?: string;
   external_reference?: string;
@@ -813,6 +858,58 @@ export async function verifyAiManualPayment(requestBody: AiManualPaymentVerifyRe
     },
     body: JSON.stringify(requestBody),
   });
+}
+
+export async function fetchOwnerAiCreditInvoices(take = 40) {
+  const normalizedTake = Math.max(1, Math.min(200, Math.trunc(take || 40)));
+  return request<AiCreditInvoicesResponse>(`/api/account/ai/invoices?take=${normalizedTake}`);
+}
+
+export async function createOwnerAiCreditInvoice(payload: CreateOwnerAiCreditInvoiceRequest) {
+  return request<AiCreditInvoiceRow>("/api/account/ai/invoices", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchAdminAiCreditInvoices(take = 80) {
+  const normalizedTake = Math.max(1, Math.min(300, Math.trunc(take || 80)));
+  return request<AiCreditInvoicesResponse>(`/api/admin/ai-credit-invoices?take=${normalizedTake}`);
+}
+
+export async function approveAdminAiCreditInvoice(
+  invoiceId: string,
+  payload: AdminAiCreditInvoiceApproveRequest,
+) {
+  return request<AdminAiCreditInvoiceActionResponse>(
+    `/api/admin/ai-credit-invoices/${encodeURIComponent(invoiceId)}/approve`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function rejectAdminAiCreditInvoice(
+  invoiceId: string,
+  payload: AdminAiCreditInvoiceRejectRequest,
+) {
+  return request<AdminAiCreditInvoiceActionResponse>(
+    `/api/admin/ai-credit-invoices/${encodeURIComponent(invoiceId)}/reject`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
 export async function fetchDailySalesReport(fromDate: Date | string = new Date(), toDate: Date | string = fromDate) {

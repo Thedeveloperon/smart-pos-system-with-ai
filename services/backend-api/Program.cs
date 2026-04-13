@@ -390,6 +390,17 @@ builder.Services.AddAuthorization(options =>
                        scope == SmartPosRoles.SecurityAdmin;
             });
     });
+    options.AddPolicy(SmartPosPolicies.BillingApprover, policy =>
+    {
+        policy.RequireRole(SmartPosRoles.SuperAdmin)
+            .RequireClaim("mfa_verified", "true")
+            .RequireAssertion(context =>
+            {
+                var scope = context.User.FindFirst("super_admin_scope")?.Value?.Trim().ToLowerInvariant();
+                return scope == SmartPosRoles.SuperAdmin ||
+                       scope == SmartPosRoles.BillingAdmin;
+            });
+    });
 });
 builder.Services.AddScoped<CheckoutService>();
 builder.Services.AddScoped<CashSessionService>();
