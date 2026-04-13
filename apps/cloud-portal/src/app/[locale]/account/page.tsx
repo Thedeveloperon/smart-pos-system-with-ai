@@ -8,9 +8,14 @@ import { PageShell, SectionCard, StatusChip } from "@/components/portal/layout-p
 import { useI18n } from "@/i18n/I18nProvider";
 import { trackMarketingEvent } from "@/lib/marketingAnalytics";
 import {
+  createAccountCloudPurchase,
   createOwnerAiCreditInvoice,
+  fetchAccountCloudProducts,
+  fetchAccountCloudPurchases,
   fetchOwnerAiCreditInvoices,
   type AiCreditInvoiceRow,
+  type CloudProductRow,
+  type CloudPurchaseRow,
 } from "@/lib/adminApi";
 
 const AccountDeviceCodeStorageKey = "smartpos_marketing_account_device_code_v1";

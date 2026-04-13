@@ -37,6 +37,7 @@ type PaymentRequestResponse = {
   };
   owner_username?: string | null;
   owner_account_state?: string | null;
+  registration_status?: string | null;
 };
 
 type PaymentSubmitResponse = {
@@ -123,7 +124,7 @@ export default function StartPage() {
 
   const [planCode, setPlanCode] = useState<PlanCode>("starter");
   const [shopName, setShopName] = useState("");
-  const [deviceCode, setDeviceCode] = useState("");
+  const [shopAddress, setShopAddress] = useState("");
   const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [contactPhone, setContactPhone] = useState("");
@@ -131,6 +132,9 @@ export default function StartPage() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("bank_deposit");
   const [ownerUsername, setOwnerUsername] = useState("");
   const [ownerFullName, setOwnerFullName] = useState("");
+  const [ownerAddress, setOwnerAddress] = useState("");
+  const [ownerEmail, setOwnerEmail] = useState("");
+  const [ownerPhone, setOwnerPhone] = useState("");
   const [ownerPassword, setOwnerPassword] = useState("");
   const [ownerConfirmPassword, setOwnerConfirmPassword] = useState("");
 
@@ -166,8 +170,12 @@ export default function StartPage() {
   }, [locale]);
 
   const buildMarketingRequestPayload = () => {
-    if (!contactEmail.trim() && !contactPhone.trim()) {
-      throw new Error("Provide at least an email or phone number.");
+    if (!shopAddress.trim()) {
+      throw new Error("Shop address is required.");
+    }
+
+    if (!contactEmail.trim()) {
+      throw new Error("Shop contact email is required.");
     }
 
     const normalizedOwnerUsername = ownerUsername.trim().toLowerCase();
@@ -183,25 +191,35 @@ export default function StartPage() {
       throw new Error("Confirm password must match owner password.");
     }
 
-    const normalizedDeviceCode = deviceCode.trim();
-    if (planCode !== "starter" && !normalizedDeviceCode) {
-      throw new Error("Device code is required for paid plans.");
+    if (!ownerAddress.trim()) {
+      throw new Error("Owner address is required.");
+    }
+
+    if (!ownerEmail.trim()) {
+      throw new Error("Owner email is required.");
     }
 
     return {
       shop_name: shopName,
-      device_code: normalizedDeviceCode || undefined,
+      shop_address: shopAddress.trim(),
+      shop_contact_name: contactName,
+      shop_contact_email: contactEmail.trim(),
+      shop_contact_phone: contactPhone || undefined,
       contact_name: contactName,
-      contact_email: contactEmail || undefined,
+      contact_email: contactEmail.trim(),
       contact_phone: contactPhone || undefined,
       plan_code: planCode,
       payment_method: paymentMethod,
       locale,
-      source: "website_pricing",
+      source: "cloud_registration_v1",
       notes: notes || undefined,
       owner_username: normalizedOwnerUsername,
       owner_full_name: ownerFullName.trim() || contactName,
+      owner_address: ownerAddress.trim(),
+      owner_email: ownerEmail.trim(),
+      owner_phone: ownerPhone.trim() || undefined,
       owner_password: normalizedOwnerPassword,
+      confirm_password: ownerConfirmPassword.trim(),
     };
   };
 
@@ -275,11 +293,6 @@ export default function StartPage() {
         );
       }
 
-      const normalizedDeviceCode = deviceCode.trim();
-      if (requestResult.requires_payment && !normalizedDeviceCode) {
-        throw new Error("Device code is required for paid plans.");
-      }
-
       const response = await fetch("/api/payment/submit", {
         method: "POST",
         headers: {
@@ -289,7 +302,6 @@ export default function StartPage() {
         body: JSON.stringify({
           invoice_id: requestResult.invoice.invoice_id,
           payment_method: paymentMethod,
-          device_code: normalizedDeviceCode || undefined,
           amount: parsedAmount,
           currency: requestResult.currency,
           bank_reference: normalizedReference,
@@ -379,16 +391,6 @@ export default function StartPage() {
                     <option value="cash">Cash</option>
                   </select>
                 </label>
-                <label className="space-y-1 md:col-span-2">
-                  <span className="portal-kicker">POS Device Code {planCode !== "starter" ? "(required for paid plan)" : "(optional)"}</span>
-                  <input
-                    className="field-shell font-mono text-xs"
-                    value={deviceCode}
-                    onChange={(event) => setDeviceCode(event.target.value)}
-                    placeholder="adb6caf4-805d-4cfb-8f9b-45db1e8d63d4"
-                    required={planCode !== "starter"}
-                  />
-                </label>
               </div>
             </div>
 
@@ -407,8 +409,18 @@ export default function StartPage() {
                     required
                   />
                 </label>
+                <label className="space-y-1 md:col-span-2">
+                  <span className="portal-kicker">Shop Address</span>
+                  <input
+                    className="field-shell"
+                    value={shopAddress}
+                    onChange={(event) => setShopAddress(event.target.value)}
+                    placeholder="No. 12, Main Street, Colombo"
+                    required
+                  />
+                </label>
                 <label className="space-y-1">
-                  <span className="portal-kicker">Contact Name</span>
+                  <span className="portal-kicker">Shop Contact Name</span>
                   <input
                     className="field-shell"
                     value={contactName}
@@ -418,22 +430,63 @@ export default function StartPage() {
                   />
                 </label>
                 <label className="space-y-1">
-                  <span className="portal-kicker">Email (optional)</span>
+                  <span className="portal-kicker">Shop Contact Email</span>
                   <input
                     type="email"
                     className="field-shell"
                     value={contactEmail}
                     onChange={(event) => setContactEmail(event.target.value)}
                     placeholder="owner@shop.lk"
+                    required
                   />
                 </label>
                 <label className="space-y-1 md:col-span-2">
-                  <span className="portal-kicker">Phone (optional)</span>
+                  <span className="portal-kicker">Shop Contact Phone (optional)</span>
                   <input
                     className="field-shell"
                     value={contactPhone}
                     onChange={(event) => setContactPhone(event.target.value)}
                     placeholder="+94..."
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="portal-kicker">Owner Full Name</span>
+                  <input
+                    className="field-shell"
+                    value={ownerFullName}
+                    onChange={(event) => setOwnerFullName(event.target.value)}
+                    placeholder="Shop Owner"
+                    required
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="portal-kicker">Owner Email</span>
+                  <input
+                    type="email"
+                    className="field-shell"
+                    value={ownerEmail}
+                    onChange={(event) => setOwnerEmail(event.target.value)}
+                    placeholder="owner.personal@shop.lk"
+                    required
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="portal-kicker">Owner Phone (optional)</span>
+                  <input
+                    className="field-shell"
+                    value={ownerPhone}
+                    onChange={(event) => setOwnerPhone(event.target.value)}
+                    placeholder="+94..."
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="portal-kicker">Owner Address</span>
+                  <input
+                    className="field-shell"
+                    value={ownerAddress}
+                    onChange={(event) => setOwnerAddress(event.target.value)}
+                    placeholder="Owner residence address"
+                    required
                   />
                 </label>
                 <label className="space-y-1 md:col-span-2">
@@ -461,15 +514,6 @@ export default function StartPage() {
                     onChange={(event) => setOwnerUsername(event.target.value)}
                     placeholder="shopowner"
                     required
-                  />
-                </label>
-                <label className="space-y-1">
-                  <span className="portal-kicker">Owner Full Name (optional)</span>
-                  <input
-                    className="field-shell"
-                    value={ownerFullName}
-                    onChange={(event) => setOwnerFullName(event.target.value)}
-                    placeholder="Shop Owner"
                   />
                 </label>
                 <label className="space-y-1">
@@ -532,7 +576,7 @@ export default function StartPage() {
                 <p className="text-sm">
                   Status:{" "}
                   <StatusChip tone="info">
-                    {toSentence(requestResult.owner_account_state || "created")}
+                    {toSentence(requestResult.registration_status || requestResult.owner_account_state || "pending_review")}
                   </StatusChip>
                 </p>
               </div>

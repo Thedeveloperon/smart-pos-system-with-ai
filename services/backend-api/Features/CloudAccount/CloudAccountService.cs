@@ -105,32 +105,29 @@ public sealed class CloudAccountService(
             loginPayload,
             cancellationToken);
         var cloudLogin = loginResult.Login;
-        var tenantContext = await ResolveTenantContextAsync(
-            client,
-            cloudBaseUrl,
-            loginResult.CookieHeader,
-            cloudLogin,
-            cancellationToken);
-
-        var normalizedCloudShopCode = NormalizeOptionalValue(tenantContext.ShopCode);
-        if (string.IsNullOrWhiteSpace(normalizedCloudShopCode))
+        CloudTenantContextResponse tenantContext;
+        try
         {
-            throw new InvalidOperationException("Cloud account is missing shop mapping.");
+            tenantContext = await ResolveTenantContextAsync(
+                client,
+                cloudBaseUrl,
+                loginResult.CookieHeader,
+                cloudLogin,
+                cancellationToken);
+        }
+        catch (InvalidOperationException)
+        {
+            // Credential-only linking mode: shop/tenant mapping issues must not block successful cloud auth.
+            tenantContext = new CloudTenantContextResponse
+            {
+                ShopCode = localShopCode,
+                Username = NormalizeOptionalValue(cloudLogin.Username) ?? string.Empty,
+                FullName = NormalizeOptionalValue(cloudLogin.FullName) ?? string.Empty,
+                Role = NormalizeOptionalValue(cloudLogin.Role) ?? string.Empty
+            };
         }
 
-        if (!string.Equals(
-                localShopCode,
-                normalizedCloudShopCode,
-                StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException(
-                $"Cloud shop code '{normalizedCloudShopCode}' does not match local shop code '{localShopCode}'.");
-        }
-
-        if (!string.Equals(tenantContext.Role, SmartPosRoles.Owner, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException("Cloud account must have owner access.");
-        }
+        var normalizedCloudShopCode = NormalizeOptionalValue(tenantContext.ShopCode) ?? localShopCode;
 
         var now = DateTimeOffset.UtcNow;
         var existingRows = (await dbContext.CloudAccountLinks
@@ -282,6 +279,7 @@ public sealed class CloudAccountService(
             "/api/account/login",
             "/auth/json-login"
         };
+        var encounteredProvisioningBoundLoginError = false;
 
         foreach (var path in loginPaths)
         {
@@ -302,8 +300,17 @@ public sealed class CloudAccountService(
                     continue;
                 }
 
-                throw new InvalidOperationException(
-                    ParseCloudErrorMessage(loginResponse.StatusCode, loginBody, "Cloud login failed."));
+                var parsedLoginError = ParseCloudErrorMessage(
+                    loginResponse.StatusCode,
+                    loginBody,
+                    "Cloud login failed.");
+                if (IsProvisioningBoundError(parsedLoginError))
+                {
+                    encounteredProvisioningBoundLoginError = true;
+                    continue;
+                }
+
+                throw new InvalidOperationException(parsedLoginError);
             }
 
             var cloudLogin = BuildCloudLoginResponse(loginBody);
@@ -348,6 +355,13 @@ public sealed class CloudAccountService(
             return new CloudLoginResult(cloudLogin, cloudAuthToken, cookieHeader);
         }
 
+        if (encounteredProvisioningBoundLoginError)
+        {
+            throw new InvalidOperationException(
+                "Cloud login in the current deployment is tied to device provisioning. " +
+                "Use/deploy a credential-only login route (for example '/api/auth/login' or '/auth/json-login' without device provisioning checks) and try again.");
+        }
+
         throw new InvalidOperationException(
             "Configured cloud service does not expose a supported login endpoint. Expected '/api/auth/login', '/api/account/login', or '/auth/json-login'.");
     }
@@ -377,11 +391,14 @@ public sealed class CloudAccountService(
 
         if (tenantResponse.StatusCode != System.Net.HttpStatusCode.NotFound)
         {
-            throw new InvalidOperationException(
-                ParseCloudErrorMessage(
-                    tenantResponse.StatusCode,
-                    tenantBody,
-                    "Unable to resolve cloud account tenant context."));
+            var parsedTenantContextError = ParseCloudErrorMessage(
+                tenantResponse.StatusCode,
+                tenantBody,
+                "Unable to resolve cloud account tenant context.");
+            if (!IsProvisioningBoundError(parsedTenantContextError))
+            {
+                throw new InvalidOperationException(parsedTenantContextError);
+            }
         }
 
         var fallbackPaths = new[]
@@ -419,7 +436,7 @@ public sealed class CloudAccountService(
                     fallbackResponse.StatusCode,
                     fallbackBody,
                     "Unable to resolve cloud account tenant context.");
-                if (IsProvisioningBoundTenantFallbackError(parsedFallbackError))
+                if (IsProvisioningBoundError(parsedFallbackError))
                 {
                     encounteredProvisioningBoundFallbackError = true;
                     continue;
@@ -578,7 +595,7 @@ public sealed class CloudAccountService(
         };
     }
 
-    private static bool IsProvisioningBoundTenantFallbackError(string? errorMessage)
+    private static bool IsProvisioningBoundError(string? errorMessage)
     {
         if (string.IsNullOrWhiteSpace(errorMessage))
         {

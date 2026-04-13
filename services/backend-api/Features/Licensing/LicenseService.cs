@@ -54,8 +54,10 @@ public sealed class LicenseService(
     private const string MarketingInvoiceMetadataPrefix = "MARKETING_REQUEST:";
     private const string MarketingPaymentSubmissionMetadataPrefix = "MARKETING_PAYMENT_SUBMISSION:";
     private const string OwnerAiCreditInvoiceMetadataPrefix = "OWNER_AI_CREDIT_INVOICE:";
+    private const string CloudPosPurchaseMetadataPrefix = "CLOUD_POS_PURCHASE:";
     private const string AiCreditOrderSettlementReferencePrefix = "ai_order";
     private const string CloudOwnerAccountAiCreditOrderSource = "cloud_owner_account";
+    private const string CloudPosPurchaseSource = "cloud_owner_purchase";
     private const int MarketingBankReferenceMaxLength = 128;
     private const string LocalOfflineMode = "LocalOffline";
     private const string OfflineLocalManualBatchEntitlementSource = "offline_local_batch_manual";
@@ -195,6 +197,23 @@ public sealed class LicenseService(
         Shop Shop,
         string RoleCode);
 
+    private sealed class CloudProductCatalogEntryState
+    {
+        public string ProductCode { get; set; } = string.Empty;
+        public string ProductName { get; set; } = string.Empty;
+        public string ProductType { get; set; } = "pos_subscription";
+        public string? Description { get; set; }
+        public decimal Price { get; set; }
+        public string Currency { get; set; } = "USD";
+        public string BillingMode { get; set; } = "one_time";
+        public string? Validity { get; set; }
+        public decimal DefaultQuantityOrCredits { get; set; } = 1m;
+        public bool Active { get; set; } = true;
+        public bool IsSystemSeeded { get; set; }
+        public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+        public DateTimeOffset? UpdatedAt { get; set; }
+    }
+
     private sealed class OwnerAiCreditInvoiceMetadataState
     {
         public string? PackCode { get; set; }
@@ -212,6 +231,37 @@ public sealed class LicenseService(
         public string? RejectedReasonCode { get; set; }
         public string? RejectedActorNote { get; set; }
     }
+
+    private sealed class CloudPosPurchaseMetadataState
+    {
+        public string? ProductCode { get; set; }
+        public string? ProductType { get; set; }
+        public string? InternalPlanCode { get; set; }
+        public string? BillingMode { get; set; }
+        public decimal? Quantity { get; set; }
+        public decimal? UnitPrice { get; set; }
+        public decimal? TotalAmount { get; set; }
+        public string? RequestedByUserId { get; set; }
+        public string? RequestedByUsername { get; set; }
+        public string? RequestedByFullName { get; set; }
+        public string? RequestedNote { get; set; }
+        public string? Status { get; set; }
+        public string? ApprovedBy { get; set; }
+        public DateTimeOffset? ApprovedAt { get; set; }
+        public string? RejectedBy { get; set; }
+        public DateTimeOffset? RejectedAt { get; set; }
+        public string? RejectedReasonCode { get; set; }
+        public string? AssignedBy { get; set; }
+        public DateTimeOffset? AssignedAt { get; set; }
+        public string? AssignmentId { get; set; }
+        public string? RevokedBy { get; set; }
+        public DateTimeOffset? RevokedAt { get; set; }
+        public string? RevokedReasonCode { get; set; }
+    }
+
+    private static readonly object CloudProductCatalogSync = new();
+    private static readonly Dictionary<string, CloudProductCatalogEntryState> CloudProductCatalogEntries =
+        new(StringComparer.OrdinalIgnoreCase);
 
     private static readonly JsonSerializerOptions TokenSerializerOptions = new()
     {
@@ -2140,6 +2190,864 @@ public sealed class LicenseService(
         return new AdminAiCreditInvoiceActionResponse
         {
             Invoice = MapAiCreditInvoiceRow(invoice, aiCreditOrder, shopCode),
+            ProcessedAt = now
+        };
+    }
+
+    public async Task<CloudRegisterResponse> CreateCloudRegistrationAsync(
+        CloudRegisterRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var created = await CreateMarketingPaymentRequestAsync(
+            new MarketingPaymentRequestCreateRequest
+            {
+                ShopName = request.ShopName,
+                ShopAddress = request.ShopAddress,
+                ShopContactName = request.ShopContactName,
+                ShopContactPhone = request.ShopContactPhone,
+                ShopContactEmail = request.ShopContactEmail,
+                ContactName = request.ShopContactName,
+                ContactPhone = request.ShopContactPhone,
+                ContactEmail = request.ShopContactEmail,
+                PlanCode = request.PlanCode,
+                PaymentMethod = request.PaymentMethod,
+                Currency = request.Currency,
+                Locale = request.Locale,
+                Campaign = request.Campaign,
+                Notes = request.Notes,
+                Source = "cloud_registration_v1",
+                OwnerUsername = request.Username,
+                OwnerFullName = request.OwnerFullName,
+                OwnerAddress = request.OwnerAddress,
+                OwnerEmail = request.OwnerEmail,
+                OwnerPhone = request.OwnerPhone,
+                OwnerPassword = request.Password,
+                ConfirmPassword = request.ConfirmPassword
+            },
+            cancellationToken);
+
+        Guid requestId;
+        if (created.Invoice is not null && created.Invoice.InvoiceId != Guid.Empty)
+        {
+            requestId = created.Invoice.InvoiceId;
+        }
+        else
+        {
+            var shopId = await dbContext.Shops
+                .AsNoTracking()
+                .Where(x => x.Code == created.ShopCode)
+                .Select(x => x.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+            requestId = shopId == Guid.Empty ? Guid.NewGuid() : shopId;
+        }
+
+        var registrationStatus = NormalizeOptionalValue(created.RegistrationStatus) ?? "pending_review";
+        return new CloudRegisterResponse
+        {
+            RequestId = requestId,
+            ShopCode = created.ShopCode,
+            ShopName = created.ShopName,
+            Status = registrationStatus,
+            RegistrationStatus = registrationStatus,
+            InvoiceId = created.Invoice?.InvoiceId,
+            InvoiceNumber = created.Invoice?.InvoiceNumber,
+            AmountDue = created.AmountDue,
+            Currency = created.Currency,
+            NextStep = created.NextStep,
+            CreatedAt = created.GeneratedAt
+        };
+    }
+
+    public async Task<CloudRegisterStatusResponse> GetCloudRegistrationStatusAsync(
+        Guid requestId,
+        CancellationToken cancellationToken)
+    {
+        if (requestId == Guid.Empty)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "request_id is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var invoice = await dbContext.ManualBillingInvoices
+            .AsNoTracking()
+            .Include(x => x.Shop)
+            .FirstOrDefaultAsync(x => x.Id == requestId, cancellationToken);
+
+        if (invoice is not null)
+        {
+            var subscription = await GetLatestSubscriptionAsync(invoice.ShopId, cancellationToken);
+            var registrationStatus = MapRegistrationStatusFromInvoice(invoice.Status, subscription?.Status);
+            return new CloudRegisterStatusResponse
+            {
+                RequestId = requestId,
+                ShopCode = invoice.Shop.Code,
+                ShopName = invoice.Shop.Name,
+                Status = registrationStatus,
+                RegistrationStatus = registrationStatus,
+                InvoiceId = invoice.Id,
+                InvoiceNumber = invoice.InvoiceNumber,
+                AmountDue = invoice.AmountDue,
+                AmountPaid = invoice.AmountPaid,
+                Currency = ResolveCurrency(invoice.Currency),
+                OwnerUsername = TryResolveJsonStringPropertyFromPrefixedMetadata(invoice.Notes, MarketingInvoiceMetadataPrefix, "owner_username"),
+                CreatedAt = invoice.CreatedAtUtc,
+                UpdatedAt = invoice.UpdatedAtUtc
+            };
+        }
+
+        var shop = await dbContext.Shops
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == requestId, cancellationToken);
+        if (shop is null)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Registration request was not found.",
+                StatusCodes.Status404NotFound);
+        }
+
+        var shopOwner = await (
+            from user in dbContext.Users.AsNoTracking()
+            join userRole in dbContext.UserRoles.AsNoTracking() on user.Id equals userRole.UserId
+            join role in dbContext.Roles.AsNoTracking() on userRole.RoleId equals role.Id
+            where user.StoreId == shop.Id &&
+                  user.IsActive &&
+                  role.Code.ToLower() == SmartPosRoles.Owner
+            select user)
+            .OrderBy(x => x.CreatedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
+        var latestSubscription = await GetLatestSubscriptionAsync(shop.Id, cancellationToken);
+        var fallbackStatus = latestSubscription?.Status == SubscriptionStatus.Active ? "approved" : "pending_review";
+        return new CloudRegisterStatusResponse
+        {
+            RequestId = requestId,
+            ShopCode = shop.Code,
+            ShopName = shop.Name,
+            Status = fallbackStatus,
+            RegistrationStatus = fallbackStatus,
+            Currency = "LKR",
+            OwnerUsername = shopOwner?.Username,
+            CreatedAt = shop.CreatedAtUtc,
+            UpdatedAt = shop.UpdatedAtUtc
+        };
+    }
+
+    public CloudProductsResponse GetCloudProducts(
+        string? search,
+        bool includeInactive,
+        int take)
+    {
+        EnsureCloudProductCatalogSeeded();
+        var normalizedTake = Math.Clamp(take <= 0 ? 100 : take, 1, 500);
+        var normalizedSearch = NormalizeOptionalValue(search)?.ToLowerInvariant();
+        List<CloudProductRowResponse> items;
+        lock (CloudProductCatalogSync)
+        {
+            items = CloudProductCatalogEntries.Values
+                .Where(x => includeInactive || x.Active)
+                .Where(x => string.IsNullOrWhiteSpace(normalizedSearch) ||
+                            x.ProductCode.ToLowerInvariant().Contains(normalizedSearch) ||
+                            x.ProductName.ToLowerInvariant().Contains(normalizedSearch) ||
+                            (x.Description ?? string.Empty).ToLowerInvariant().Contains(normalizedSearch))
+                .OrderBy(x => x.ProductType)
+                .ThenBy(x => x.ProductCode)
+                .Take(normalizedTake)
+                .Select(MapCloudProductRow)
+                .ToList();
+        }
+
+        return new CloudProductsResponse
+        {
+            GeneratedAt = DateTimeOffset.UtcNow,
+            Count = items.Count,
+            Items = items
+        };
+    }
+
+    public CloudProductRowResponse CreateCloudProduct(
+        CloudProductUpsertRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var normalized = NormalizeCloudProductUpsertRequest(request, null);
+        EnsureCloudProductCatalogSeeded();
+
+        lock (CloudProductCatalogSync)
+        {
+            if (CloudProductCatalogEntries.ContainsKey(normalized.ProductCode))
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.InvalidAdminRequest,
+                    $"Product '{normalized.ProductCode}' already exists.",
+                    StatusCodes.Status409Conflict);
+            }
+
+            normalized.IsSystemSeeded = false;
+            normalized.CreatedAt = DateTimeOffset.UtcNow;
+            normalized.UpdatedAt = normalized.CreatedAt;
+            CloudProductCatalogEntries[normalized.ProductCode] = normalized;
+            return MapCloudProductRow(normalized);
+        }
+    }
+
+    public CloudProductRowResponse UpdateCloudProduct(
+        string productCode,
+        CloudProductUpsertRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var normalizedProductCode = NormalizeCloudProductCode(productCode);
+        EnsureCloudProductCatalogSeeded();
+        lock (CloudProductCatalogSync)
+        {
+            if (!CloudProductCatalogEntries.TryGetValue(normalizedProductCode, out var existing))
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.InvalidAdminRequest,
+                    $"Product '{normalizedProductCode}' was not found.",
+                    StatusCodes.Status404NotFound);
+            }
+
+            var updated = NormalizeCloudProductUpsertRequest(request, existing);
+            updated.ProductCode = normalizedProductCode;
+            updated.IsSystemSeeded = existing.IsSystemSeeded;
+            updated.CreatedAt = existing.CreatedAt;
+            updated.UpdatedAt = DateTimeOffset.UtcNow;
+            CloudProductCatalogEntries[normalizedProductCode] = updated;
+            return MapCloudProductRow(updated);
+        }
+    }
+
+    public CloudProductRowResponse DeactivateCloudProduct(
+        string productCode)
+    {
+        var normalizedProductCode = NormalizeCloudProductCode(productCode);
+        EnsureCloudProductCatalogSeeded();
+        lock (CloudProductCatalogSync)
+        {
+            if (!CloudProductCatalogEntries.TryGetValue(normalizedProductCode, out var existing))
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.InvalidAdminRequest,
+                    $"Product '{normalizedProductCode}' was not found.",
+                    StatusCodes.Status404NotFound);
+            }
+
+            existing.Active = false;
+            existing.UpdatedAt = DateTimeOffset.UtcNow;
+            CloudProductCatalogEntries[normalizedProductCode] = existing;
+            return MapCloudProductRow(existing);
+        }
+    }
+
+    public async Task<CloudPurchaseActionResponse> CreateOwnerPurchaseAsync(
+        CloudPurchaseCreateRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        EnsureCloudProductCatalogSeeded();
+        if (request.Items.Count == 0)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "At least one purchase item is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var firstItem = request.Items[0];
+        var normalizedProductCode = NormalizeCloudProductCode(firstItem.ProductCode);
+        CloudProductCatalogEntryState product;
+        lock (CloudProductCatalogSync)
+        {
+            if (!CloudProductCatalogEntries.TryGetValue(normalizedProductCode, out product!))
+            {
+                throw new LicenseException(
+                    LicenseErrorCodes.InvalidAdminRequest,
+                    $"Product '{normalizedProductCode}' was not found.",
+                    StatusCodes.Status404NotFound);
+            }
+        }
+
+        if (!product.Active)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                $"Product '{normalizedProductCode}' is inactive.",
+                StatusCodes.Status409Conflict);
+        }
+
+        if (string.Equals(product.ProductType, "ai_credit", StringComparison.OrdinalIgnoreCase))
+        {
+            var packCode = ParseAiPackCodeFromCloudProductCode(product.ProductCode);
+            var created = await CreateOwnerAiCreditInvoiceAsync(
+                new OwnerAiCreditInvoiceCreateRequest
+                {
+                    PackCode = packCode,
+                    Note = request.Note
+                },
+                cancellationToken);
+
+            return new CloudPurchaseActionResponse
+            {
+                Purchase = MapOwnerAiInvoiceToCloudPurchase(created),
+                ProcessedAt = DateTimeOffset.UtcNow
+            };
+        }
+
+        if (!string.Equals(product.ProductType, "pos_subscription", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Unsupported product_type for purchase creation.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var quantity = firstItem.Quantity <= 0m ? 1m : decimal.Round(firstItem.Quantity, 2, MidpointRounding.AwayFromZero);
+        var ownerContext = await ResolveCurrentOwnerManagedShopContextAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        var invoice = new ManualBillingInvoice
+        {
+            ShopId = ownerContext.Shop.Id,
+            Shop = ownerContext.Shop,
+            InvoiceNumber = await ResolveManualBillingInvoiceNumberAsync(null, cancellationToken),
+            AmountDue = decimal.Round(product.Price * quantity, 2, MidpointRounding.AwayFromZero),
+            AmountPaid = 0m,
+            Currency = ResolveCurrency(product.Currency),
+            Status = ManualBillingInvoiceStatus.Open,
+            DueAtUtc = now.AddDays(7),
+            Notes = BuildCloudPosPurchaseNotes(new CloudPosPurchaseMetadataState
+            {
+                ProductCode = product.ProductCode,
+                ProductType = product.ProductType,
+                InternalPlanCode = ParseInternalPlanCodeFromCloudProductCode(product.ProductCode),
+                BillingMode = product.BillingMode,
+                Quantity = quantity,
+                UnitPrice = decimal.Round(product.Price, 2, MidpointRounding.AwayFromZero),
+                TotalAmount = decimal.Round(product.Price * quantity, 2, MidpointRounding.AwayFromZero),
+                RequestedByUserId = ownerContext.User.Id.ToString("D"),
+                RequestedByUsername = ownerContext.User.Username,
+                RequestedByFullName = ownerContext.User.FullName,
+                RequestedNote = NormalizeOptionalValue(request.Note),
+                Status = "pending_approval"
+            }),
+            CreatedBy = ownerContext.User.Username,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+
+        dbContext.ManualBillingInvoices.Add(invoice);
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = ownerContext.Shop.Id,
+            Action = "owner_pos_purchase_created",
+            Actor = ownerContext.User.Username,
+            Reason = "cloud_owner_purchase_created",
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                invoice_id = invoice.Id,
+                invoice_number = invoice.InvoiceNumber,
+                product_code = product.ProductCode,
+                quantity,
+                amount_due = invoice.AmountDue
+            }),
+            CreatedAtUtc = now
+        });
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new CloudPurchaseActionResponse
+        {
+            Purchase = MapCloudPosPurchaseRow(
+                invoice,
+                ownerContext.Shop.Code,
+                ParseCloudPosPurchaseMetadata(invoice.Notes)),
+            ProcessedAt = now
+        };
+    }
+
+    public async Task<CloudPurchasesResponse> GetOwnerPurchasesAsync(
+        int take,
+        CancellationToken cancellationToken)
+    {
+        var ownerContext = await ResolveCurrentOwnerManagedShopContextAsync(cancellationToken);
+        var normalizedTake = Math.Clamp(take <= 0 ? 40 : take, 1, 200);
+        var aiInvoices = await GetOwnerAiCreditInvoicesAsync(normalizedTake, cancellationToken);
+
+        var posInvoices = await dbContext.ManualBillingInvoices
+            .AsNoTracking()
+            .Where(x => x.ShopId == ownerContext.Shop.Id && x.Notes != null && x.Notes.StartsWith(CloudPosPurchaseMetadataPrefix))
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .Take(normalizedTake)
+            .ToListAsync(cancellationToken);
+
+        var items = aiInvoices.Items.Select(MapOwnerAiInvoiceToCloudPurchase)
+            .Concat(posInvoices.Select(x => MapCloudPosPurchaseRow(x, ownerContext.Shop.Code, ParseCloudPosPurchaseMetadata(x.Notes))))
+            .OrderByDescending(x => x.CreatedAt)
+            .Take(normalizedTake)
+            .ToList();
+
+        return new CloudPurchasesResponse
+        {
+            GeneratedAt = DateTimeOffset.UtcNow,
+            Count = items.Count,
+            Items = items
+        };
+    }
+
+    public async Task<CloudPurchaseRowResponse> GetOwnerPurchaseByIdAsync(
+        Guid purchaseId,
+        CancellationToken cancellationToken)
+    {
+        if (purchaseId == Guid.Empty)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "purchase_id is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var ownerContext = await ResolveCurrentOwnerManagedShopContextAsync(cancellationToken);
+        var aiOrder = await dbContext.AiCreditOrders
+            .AsNoTracking()
+            .Include(x => x.Invoice)
+            .FirstOrDefaultAsync(
+                x => x.InvoiceId == purchaseId &&
+                     x.ShopId == ownerContext.Shop.Id &&
+                     x.Source == CloudOwnerAccountAiCreditOrderSource,
+                cancellationToken);
+        if (aiOrder?.Invoice is not null)
+        {
+            return MapOwnerAiInvoiceToCloudPurchase(MapAiCreditInvoiceRow(aiOrder.Invoice, aiOrder, ownerContext.Shop.Code));
+        }
+
+        var invoice = await dbContext.ManualBillingInvoices
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                x => x.Id == purchaseId &&
+                     x.ShopId == ownerContext.Shop.Id &&
+                     x.Notes != null &&
+                     x.Notes.StartsWith(CloudPosPurchaseMetadataPrefix),
+                cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Purchase was not found.",
+                StatusCodes.Status404NotFound);
+        return MapCloudPosPurchaseRow(invoice, ownerContext.Shop.Code, ParseCloudPosPurchaseMetadata(invoice.Notes));
+    }
+
+    public async Task<CloudPurchasesResponse> GetAdminCloudPurchasesAsync(
+        string? status,
+        int take,
+        CancellationToken cancellationToken)
+    {
+        var normalizedTake = Math.Clamp(take <= 0 ? 80 : take, 1, 300);
+        var normalizedStatus = NormalizeOptionalValue(status)?.ToLowerInvariant();
+        var aiInvoices = await GetAdminPendingAiCreditInvoicesAsync(normalizedTake, cancellationToken);
+
+        var posInvoices = await dbContext.ManualBillingInvoices
+            .AsNoTracking()
+            .Include(x => x.Shop)
+            .Where(x => x.Notes != null && x.Notes.StartsWith(CloudPosPurchaseMetadataPrefix))
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .Take(normalizedTake)
+            .ToListAsync(cancellationToken);
+
+        var items = aiInvoices.Items
+            .Select(MapOwnerAiInvoiceToCloudPurchase)
+            .Concat(posInvoices.Select(x =>
+            {
+                var shopCode = x.Shop?.Code ?? ResolveShopCode(null);
+                return MapCloudPosPurchaseRow(x, shopCode, ParseCloudPosPurchaseMetadata(x.Notes));
+            }))
+            .Where(x => string.IsNullOrWhiteSpace(normalizedStatus) || x.Status == normalizedStatus)
+            .OrderByDescending(x => x.CreatedAt)
+            .Take(normalizedTake)
+            .ToList();
+
+        return new CloudPurchasesResponse
+        {
+            GeneratedAt = DateTimeOffset.UtcNow,
+            Count = items.Count,
+            Items = items
+        };
+    }
+
+    public async Task<CloudPurchaseActionResponse> ApproveCloudPurchaseAsync(
+        Guid purchaseId,
+        CloudPurchaseActionRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (purchaseId == Guid.Empty)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "purchase_id is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var actorNote = NormalizeOptionalValue(request.ActorNote);
+        if (string.IsNullOrWhiteSpace(actorNote))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "actor_note is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var aiOrder = await dbContext.AiCreditOrders
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.InvoiceId == purchaseId && x.Source == CloudOwnerAccountAiCreditOrderSource, cancellationToken);
+        if (aiOrder is not null)
+        {
+            var result = await ApproveOwnerAiCreditInvoiceAsync(
+                purchaseId,
+                new AdminAiCreditInvoiceApproveRequest { ActorNote = actorNote },
+                cancellationToken);
+            return new CloudPurchaseActionResponse
+            {
+                Purchase = MapOwnerAiInvoiceToCloudPurchase(result.Invoice),
+                ProcessedAt = result.ProcessedAt
+            };
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var actor = ResolveCurrentAdminActor();
+        var invoice = await dbContext.ManualBillingInvoices
+            .Include(x => x.Shop)
+            .FirstOrDefaultAsync(
+                x => x.Id == purchaseId &&
+                     x.Notes != null &&
+                     x.Notes.StartsWith(CloudPosPurchaseMetadataPrefix),
+                cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Purchase was not found.",
+                StatusCodes.Status404NotFound);
+
+        var metadata = ParseCloudPosPurchaseMetadata(invoice.Notes);
+        metadata.Status = "approved";
+        metadata.ApprovedBy = actor;
+        metadata.ApprovedAt = now;
+        invoice.UpdatedAtUtc = now;
+        invoice.Notes = BuildCloudPosPurchaseNotes(metadata);
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = invoice.ShopId,
+            Action = "cloud_pos_purchase_approved",
+            Actor = actor,
+            Reason = NormalizeReasonCode(request.ReasonCode) ?? "cloud_purchase_approved",
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                purchase_id = invoice.Id,
+                invoice_number = invoice.InvoiceNumber,
+                actor_note = actorNote
+            }),
+            CreatedAtUtc = now
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new CloudPurchaseActionResponse
+        {
+            Purchase = MapCloudPosPurchaseRow(invoice, invoice.Shop.Code, metadata),
+            ProcessedAt = now
+        };
+    }
+
+    public async Task<CloudPurchaseActionResponse> RejectCloudPurchaseAsync(
+        Guid purchaseId,
+        CloudPurchaseActionRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (purchaseId == Guid.Empty)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "purchase_id is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var actorNote = NormalizeOptionalValue(request.ActorNote);
+        if (string.IsNullOrWhiteSpace(actorNote))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "actor_note is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var aiOrder = await dbContext.AiCreditOrders
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.InvoiceId == purchaseId && x.Source == CloudOwnerAccountAiCreditOrderSource, cancellationToken);
+        if (aiOrder is not null)
+        {
+            var result = await RejectOwnerAiCreditInvoiceAsync(
+                purchaseId,
+                new AdminAiCreditInvoiceRejectRequest
+                {
+                    ActorNote = actorNote,
+                    ReasonCode = request.ReasonCode
+                },
+                cancellationToken);
+            return new CloudPurchaseActionResponse
+            {
+                Purchase = MapOwnerAiInvoiceToCloudPurchase(result.Invoice),
+                ProcessedAt = result.ProcessedAt
+            };
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var actor = ResolveCurrentAdminActor();
+        var normalizedReasonCode = NormalizeReasonCode(request.ReasonCode) ?? "cloud_purchase_rejected";
+        var invoice = await dbContext.ManualBillingInvoices
+            .Include(x => x.Shop)
+            .FirstOrDefaultAsync(
+                x => x.Id == purchaseId &&
+                     x.Notes != null &&
+                     x.Notes.StartsWith(CloudPosPurchaseMetadataPrefix),
+                cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Purchase was not found.",
+                StatusCodes.Status404NotFound);
+
+        var metadata = ParseCloudPosPurchaseMetadata(invoice.Notes);
+        metadata.Status = "rejected";
+        metadata.RejectedBy = actor;
+        metadata.RejectedAt = now;
+        metadata.RejectedReasonCode = normalizedReasonCode;
+        invoice.Status = ManualBillingInvoiceStatus.Canceled;
+        invoice.UpdatedAtUtc = now;
+        invoice.Notes = BuildCloudPosPurchaseNotes(metadata);
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = invoice.ShopId,
+            Action = "cloud_pos_purchase_rejected",
+            Actor = actor,
+            Reason = normalizedReasonCode,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                purchase_id = invoice.Id,
+                invoice_number = invoice.InvoiceNumber,
+                actor_note = actorNote
+            }),
+            CreatedAtUtc = now
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new CloudPurchaseActionResponse
+        {
+            Purchase = MapCloudPosPurchaseRow(invoice, invoice.Shop.Code, metadata),
+            ProcessedAt = now
+        };
+    }
+
+    public async Task<CloudPurchaseActionResponse> AssignCloudPurchaseAsync(
+        Guid purchaseId,
+        CloudPurchaseActionRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (purchaseId == Guid.Empty)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "purchase_id is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var actorNote = NormalizeOptionalValue(request.ActorNote);
+        if (string.IsNullOrWhiteSpace(actorNote))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "actor_note is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var aiOrder = await dbContext.AiCreditOrders
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.InvoiceId == purchaseId && x.Source == CloudOwnerAccountAiCreditOrderSource, cancellationToken);
+        if (aiOrder is not null)
+        {
+            var approved = await ApproveOwnerAiCreditInvoiceAsync(
+                purchaseId,
+                new AdminAiCreditInvoiceApproveRequest { ActorNote = actorNote },
+                cancellationToken);
+            var aiPurchase = MapOwnerAiInvoiceToCloudPurchase(approved.Invoice);
+            aiPurchase.AssignmentId = $"ai-credit-{purchaseId:D}";
+            aiPurchase.AssignedBy = ResolveCurrentAdminActor();
+            if (aiPurchase.Status == "approved")
+            {
+                aiPurchase.Status = "assigned";
+            }
+
+            return new CloudPurchaseActionResponse
+            {
+                Purchase = aiPurchase,
+                ProcessedAt = approved.ProcessedAt
+            };
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var actor = ResolveCurrentAdminActor();
+        var invoice = await dbContext.ManualBillingInvoices
+            .Include(x => x.Shop)
+            .FirstOrDefaultAsync(
+                x => x.Id == purchaseId &&
+                     x.Notes != null &&
+                     x.Notes.StartsWith(CloudPosPurchaseMetadataPrefix),
+                cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Purchase was not found.",
+                StatusCodes.Status404NotFound);
+
+        var metadata = ParseCloudPosPurchaseMetadata(invoice.Notes);
+        var assignmentId = metadata.AssignmentId ?? $"assign-{Guid.NewGuid():N}";
+        if (metadata.Status == "rejected")
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidPaymentStatus,
+                "Rejected purchases cannot be assigned.",
+                StatusCodes.Status409Conflict);
+        }
+
+        if (invoice.Status != ManualBillingInvoiceStatus.Paid)
+        {
+            var payment = await RecordManualPaymentAsAdminAsync(
+                new AdminManualBillingPaymentRecordRequest
+                {
+                    InvoiceId = invoice.Id,
+                    Method = "bank_deposit",
+                    Amount = invoice.AmountDue,
+                    Currency = invoice.Currency,
+                    BankReference = $"AUTO-ASSIGN-{invoice.Id.ToString("N")[..12]}",
+                    ReceivedAt = now,
+                    Notes = "Auto-recorded payment for cloud purchase assignment.",
+                    Actor = actor,
+                    ReasonCode = "cloud_purchase_assign_payment_recorded",
+                    ActorNote = actorNote
+                },
+                cancellationToken);
+
+            await VerifyManualPaymentAsAdminAsync(
+                payment.PaymentId,
+                new AdminManualBillingPaymentVerifyRequest
+                {
+                    Actor = actor,
+                    ReasonCode = NormalizeReasonCode(request.ReasonCode) ?? "cloud_purchase_assigned",
+                    ActorNote = actorNote,
+                    Plan = metadata.InternalPlanCode,
+                    ExtendDays = 30
+                },
+                cancellationToken);
+        }
+
+        metadata.Status = "assigned";
+        metadata.AssignedBy = actor;
+        metadata.AssignedAt = now;
+        metadata.AssignmentId = assignmentId;
+        invoice.UpdatedAtUtc = now;
+        invoice.Notes = BuildCloudPosPurchaseNotes(metadata);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new CloudPurchaseActionResponse
+        {
+            Purchase = MapCloudPosPurchaseRow(invoice, invoice.Shop.Code, metadata),
+            ProcessedAt = now
+        };
+    }
+
+    public async Task<CloudPurchaseActionResponse> RevokeCloudAssignmentAsync(
+        Guid assignmentId,
+        CloudAssignmentRevokeRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (assignmentId == Guid.Empty)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "assignment_id is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var actorNote = NormalizeOptionalValue(request.ActorNote);
+        if (string.IsNullOrWhiteSpace(actorNote))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "actor_note is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var actor = ResolveCurrentAdminActor();
+        var reasonCode = NormalizeReasonCode(request.ReasonCode) ?? "cloud_assignment_revoked";
+        var invoice = await dbContext.ManualBillingInvoices
+            .Include(x => x.Shop)
+            .FirstOrDefaultAsync(
+                x => x.Id == assignmentId &&
+                     x.Notes != null &&
+                     x.Notes.StartsWith(CloudPosPurchaseMetadataPrefix),
+                cancellationToken)
+            ?? throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Assignment was not found.",
+                StatusCodes.Status404NotFound);
+
+        var metadata = ParseCloudPosPurchaseMetadata(invoice.Notes);
+        if (!string.Equals(metadata.Status, "assigned", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Only assigned POS purchases can be revoked.",
+                StatusCodes.Status409Conflict);
+        }
+
+        var subscription = await GetLatestSubscriptionAsync(invoice.ShopId, cancellationToken);
+        if (subscription is not null)
+        {
+            await ReconcileSubscriptionStateAsync(
+                new SubscriptionReconciliationRequest
+                {
+                    ShopCode = invoice.Shop.Code,
+                    Plan = subscription.Plan,
+                    SubscriptionStatus = "canceled",
+                    Actor = actor,
+                    Reason = reasonCode
+                },
+                cancellationToken);
+        }
+
+        metadata.Status = "revoked";
+        metadata.RevokedBy = actor;
+        metadata.RevokedAt = now;
+        metadata.RevokedReasonCode = reasonCode;
+        invoice.UpdatedAtUtc = now;
+        invoice.Notes = BuildCloudPosPurchaseNotes(metadata);
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = invoice.ShopId,
+            Action = "cloud_purchase_assignment_revoked",
+            Actor = actor,
+            Reason = reasonCode,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                purchase_id = invoice.Id,
+                invoice_number = invoice.InvoiceNumber,
+                assignment_id = metadata.AssignmentId,
+                actor_note = actorNote
+            }),
+            CreatedAtUtc = now
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new CloudPurchaseActionResponse
+        {
+            Purchase = MapCloudPosPurchaseRow(invoice, invoice.Shop.Code, metadata),
             ProcessedAt = now
         };
     }
@@ -4895,18 +5803,40 @@ public sealed class LicenseService(
                 StatusCodes.Status400BadRequest);
         }
 
-        var contactName = NormalizeOptionalValue(request.ContactName);
+        var normalizedSource = NormalizeOptionalValue(request.Source) ?? "marketing_website";
+        var isCloudRegistrationFlow =
+            string.Equals(normalizedSource, "cloud_registration_v1", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalizedSource, "cloud_portal_registration", StringComparison.OrdinalIgnoreCase);
+
+        var shopAddress = NormalizeOptionalValue(request.ShopAddress);
+        if (isCloudRegistrationFlow && string.IsNullOrWhiteSpace(shopAddress))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "shop_address is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var contactName = NormalizeOptionalValue(request.ShopContactName) ?? NormalizeOptionalValue(request.ContactName);
         if (string.IsNullOrWhiteSpace(contactName))
         {
             throw new LicenseException(
                 LicenseErrorCodes.InvalidAdminRequest,
-                "contact_name is required.",
+                "shop_contact_name is required.",
                 StatusCodes.Status400BadRequest);
         }
 
-        var contactEmail = NormalizeOptionalValue(request.ContactEmail);
-        var contactPhone = NormalizeOptionalValue(request.ContactPhone);
-        if (string.IsNullOrWhiteSpace(contactEmail) && string.IsNullOrWhiteSpace(contactPhone))
+        var contactEmail = NormalizeOptionalValue(request.ShopContactEmail) ?? NormalizeOptionalValue(request.ContactEmail);
+        var contactPhone = NormalizeOptionalValue(request.ShopContactPhone) ?? NormalizeOptionalValue(request.ContactPhone);
+        if (isCloudRegistrationFlow && string.IsNullOrWhiteSpace(contactEmail))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "shop_contact_email is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        if (!isCloudRegistrationFlow && string.IsNullOrWhiteSpace(contactEmail) && string.IsNullOrWhiteSpace(contactPhone))
         {
             throw new LicenseException(
                 LicenseErrorCodes.InvalidAdminRequest,
@@ -4916,26 +5846,57 @@ public sealed class LicenseService(
 
         var quote = ResolveMarketingPlanQuote(request.PlanCode);
         var normalizedDeviceCode = NormalizeDeviceCode(request.DeviceCode);
-        if (quote.RequiresPayment && quote.AmountDue > 0m && string.IsNullOrWhiteSpace(normalizedDeviceCode))
-        {
-            throw new LicenseException(
-                LicenseErrorCodes.InvalidAdminRequest,
-                "device_code is required for paid plan onboarding.",
-                StatusCodes.Status400BadRequest);
-        }
 
         var paymentMethod = ResolveMarketingPaymentMethod(request.PaymentMethod);
         var normalizedCurrency = ResolveCurrency(request.Currency ?? quote.Currency);
-        var normalizedSource = NormalizeOptionalValue(request.Source) ?? "marketing_website";
         var normalizedCampaign = NormalizeOptionalValue(request.Campaign);
         var normalizedLocale = NormalizeOptionalValue(request.Locale);
         var customerNotes = NormalizeOptionalValue(request.Notes);
         var ownerUsername = ResolveMarketingOwnerUsername(request.OwnerUsername);
         var ownerPassword = ResolveMarketingOwnerPassword(request.OwnerPassword);
+        var ownerEmail = NormalizeOptionalValue(request.OwnerEmail);
+        if (isCloudRegistrationFlow && string.IsNullOrWhiteSpace(ownerEmail))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "owner_email is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var ownerAddress = NormalizeOptionalValue(request.OwnerAddress);
+        if (isCloudRegistrationFlow && string.IsNullOrWhiteSpace(ownerAddress))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "owner_address is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var ownerPhone = NormalizeOptionalValue(request.OwnerPhone);
+        var normalizedConfirmPassword = NormalizeOptionalValue(request.ConfirmPassword);
+        if (isCloudRegistrationFlow && string.IsNullOrWhiteSpace(normalizedConfirmPassword))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "confirm_password is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedConfirmPassword) &&
+            !string.Equals(ownerPassword, normalizedConfirmPassword, StringComparison.Ordinal))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "confirm_password does not match owner_password.",
+                StatusCodes.Status400BadRequest);
+        }
+
         var ownerFullName = ResolveMarketingOwnerFullName(request.OwnerFullName, contactName);
         var shopCode = string.IsNullOrWhiteSpace(request.ShopCode)
             ? await GenerateUniqueMarketingShopCodeAsync(shopName, cancellationToken)
             : NormalizeMarketingShopCode(request.ShopCode);
+
+        var registrationStatus = isCloudRegistrationFlow ? "pending_review" : null;
 
         if (!quote.RequiresPayment || quote.AmountDue <= 0m)
         {
@@ -4971,7 +5932,8 @@ public sealed class LicenseService(
                     ReferenceHint = "No payment reference required for free trial."
                 },
                 OwnerUsername = ownerAccount.User.Username,
-                OwnerAccountState = ownerAccount.AccountState
+                OwnerAccountState = registrationStatus ?? ownerAccount.AccountState,
+                RegistrationStatus = registrationStatus
             };
         }
 
@@ -4979,10 +5941,14 @@ public sealed class LicenseService(
             quote,
             paymentMethod,
             normalizedDeviceCode,
+            shopAddress,
             contactName,
             contactEmail,
             contactPhone,
             ownerUsername,
+            ownerEmail,
+            ownerAddress,
+            ownerPhone,
             normalizedSource,
             normalizedCampaign,
             normalizedLocale,
@@ -5045,7 +6011,8 @@ public sealed class LicenseService(
             },
             Instructions = BuildMarketingPaymentInstructions(paymentMethod),
             OwnerUsername = ownerAccountResult.User.Username,
-            OwnerAccountState = ownerAccountResult.AccountState
+            OwnerAccountState = registrationStatus ?? ownerAccountResult.AccountState,
+            RegistrationStatus = registrationStatus
         };
     }
 
@@ -5065,18 +6032,40 @@ public sealed class LicenseService(
                 StatusCodes.Status400BadRequest);
         }
 
-        var contactName = NormalizeOptionalValue(request.ContactName);
+        var normalizedSource = NormalizeOptionalValue(request.Source) ?? "marketing_website";
+        var isCloudRegistrationFlow =
+            string.Equals(normalizedSource, "cloud_registration_v1", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalizedSource, "cloud_portal_registration", StringComparison.OrdinalIgnoreCase);
+
+        var shopAddress = NormalizeOptionalValue(request.ShopAddress);
+        if (isCloudRegistrationFlow && string.IsNullOrWhiteSpace(shopAddress))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "shop_address is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var contactName = NormalizeOptionalValue(request.ShopContactName) ?? NormalizeOptionalValue(request.ContactName);
         if (string.IsNullOrWhiteSpace(contactName))
         {
             throw new LicenseException(
                 LicenseErrorCodes.InvalidAdminRequest,
-                "contact_name is required.",
+                "shop_contact_name is required.",
                 StatusCodes.Status400BadRequest);
         }
 
-        var contactEmail = NormalizeOptionalValue(request.ContactEmail);
-        var contactPhone = NormalizeOptionalValue(request.ContactPhone);
-        if (string.IsNullOrWhiteSpace(contactEmail) && string.IsNullOrWhiteSpace(contactPhone))
+        var contactEmail = NormalizeOptionalValue(request.ShopContactEmail) ?? NormalizeOptionalValue(request.ContactEmail);
+        var contactPhone = NormalizeOptionalValue(request.ShopContactPhone) ?? NormalizeOptionalValue(request.ContactPhone);
+        if (isCloudRegistrationFlow && string.IsNullOrWhiteSpace(contactEmail))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "shop_contact_email is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        if (!isCloudRegistrationFlow && string.IsNullOrWhiteSpace(contactEmail) && string.IsNullOrWhiteSpace(contactPhone))
         {
             throw new LicenseException(
                 LicenseErrorCodes.InvalidAdminRequest,
@@ -5095,13 +6084,50 @@ public sealed class LicenseService(
 
         var normalizedCurrency = ResolveCurrency(request.Currency ?? quote.Currency);
         var normalizedDeviceCode = NormalizeDeviceCode(request.DeviceCode);
-        var normalizedSource = NormalizeOptionalValue(request.Source) ?? "marketing_website";
         var normalizedCampaign = NormalizeOptionalValue(request.Campaign);
         var normalizedLocale = NormalizeOptionalValue(request.Locale);
         var customerNotes = NormalizeOptionalValue(request.Notes);
         var ownerUsername = ResolveMarketingOwnerUsername(request.OwnerUsername);
         var ownerPassword = ResolveMarketingOwnerPassword(request.OwnerPassword);
+        var ownerEmail = NormalizeOptionalValue(request.OwnerEmail);
+        if (isCloudRegistrationFlow && string.IsNullOrWhiteSpace(ownerEmail))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "owner_email is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var ownerAddress = NormalizeOptionalValue(request.OwnerAddress);
+        if (isCloudRegistrationFlow && string.IsNullOrWhiteSpace(ownerAddress))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "owner_address is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var ownerPhone = NormalizeOptionalValue(request.OwnerPhone);
+        var normalizedConfirmPassword = NormalizeOptionalValue(request.ConfirmPassword);
+        if (isCloudRegistrationFlow && string.IsNullOrWhiteSpace(normalizedConfirmPassword))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "confirm_password is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedConfirmPassword) &&
+            !string.Equals(ownerPassword, normalizedConfirmPassword, StringComparison.Ordinal))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "confirm_password does not match owner_password.",
+                StatusCodes.Status400BadRequest);
+        }
+
         var ownerFullName = ResolveMarketingOwnerFullName(request.OwnerFullName, contactName);
+        var registrationStatus = isCloudRegistrationFlow ? "pending_review" : null;
 
         var shopCode = string.IsNullOrWhiteSpace(request.ShopCode)
             ? await GenerateUniqueMarketingShopCodeAsync(shopName, cancellationToken)
@@ -5111,10 +6137,14 @@ public sealed class LicenseService(
             quote,
             paymentMethod: "stripe",
             normalizedDeviceCode,
+            shopAddress,
             contactName,
             contactEmail,
             contactPhone,
             ownerUsername,
+            ownerEmail,
+            ownerAddress,
+            ownerPhone,
             normalizedSource,
             normalizedCampaign,
             normalizedLocale,
@@ -5189,7 +6219,8 @@ public sealed class LicenseService(
                 DueAt = invoiceRow.DueAt
             },
             OwnerUsername = ownerAccountResult.User.Username,
-            OwnerAccountState = ownerAccountResult.AccountState,
+            OwnerAccountState = registrationStatus ?? ownerAccountResult.AccountState,
+            RegistrationStatus = registrationStatus,
             CheckoutSessionId = stripeSession.SessionId,
             CheckoutUrl = stripeSession.CheckoutUrl,
             ExpiresAt = stripeSession.ExpiresAt
@@ -5340,13 +6371,6 @@ public sealed class LicenseService(
         var normalizedNotes = NormalizeOptionalValue(request.Notes);
         var normalizedBankReference = NormalizeMarketingBankReference(request.BankReference);
         var normalizedDeviceCode = NormalizeDeviceCode(request.DeviceCode);
-        if (string.IsNullOrWhiteSpace(normalizedDeviceCode))
-        {
-            throw new LicenseException(
-                LicenseErrorCodes.InvalidAdminRequest,
-                "device_code is required for paid plan onboarding.",
-                StatusCodes.Status400BadRequest);
-        }
 
         var manualPaymentMethod = ParseManualBillingPaymentMethod(paymentMethod);
         var actorNote = "customer submitted payment details via marketing website";
@@ -5365,6 +6389,7 @@ public sealed class LicenseService(
             cancellationToken);
         var expectedDeviceCode = TryResolveDeviceCodeFromMarketingMetadata(invoice.Notes);
         if (!string.IsNullOrWhiteSpace(expectedDeviceCode) &&
+            !string.IsNullOrWhiteSpace(normalizedDeviceCode) &&
             !string.Equals(expectedDeviceCode, normalizedDeviceCode, StringComparison.OrdinalIgnoreCase))
         {
             throw new LicenseException(
@@ -9917,10 +10942,14 @@ public sealed class LicenseService(
         MarketingPlanQuote quote,
         string paymentMethod,
         string? deviceCode,
+        string? shopAddress,
         string? contactName,
         string? contactEmail,
         string? contactPhone,
         string ownerUsername,
+        string? ownerEmail,
+        string? ownerAddress,
+        string? ownerPhone,
         string source,
         string? campaign,
         string? locale,
@@ -9932,10 +10961,14 @@ public sealed class LicenseService(
             requested_internal_plan = quote.InternalPlanCode,
             requested_payment_method = paymentMethod,
             device_code = NormalizeDeviceCode(deviceCode),
+            shop_address = shopAddress,
             contact_name = contactName,
             contact_email = contactEmail,
             contact_phone = contactPhone,
             owner_username = ownerUsername,
+            owner_email = ownerEmail,
+            owner_address = ownerAddress,
+            owner_phone = ownerPhone,
             source,
             campaign,
             locale
@@ -10042,6 +11075,306 @@ public sealed class LicenseService(
             RejectedActorNote = NormalizeOptionalValue(metadata.RejectedActorNote)
         };
         return JsonSerializer.Serialize(normalized);
+    }
+
+    private static string BuildCloudPosPurchaseNotes(CloudPosPurchaseMetadataState metadata)
+    {
+        var metadataJson = SerializeCloudPosPurchaseMetadata(metadata);
+        var metadataLine = $"{CloudPosPurchaseMetadataPrefix}{metadataJson}";
+        var note = NormalizeOptionalValue(metadata.RequestedNote);
+        if (string.IsNullOrWhiteSpace(note))
+        {
+            return metadataLine;
+        }
+
+        return $"{metadataLine}\n{note}";
+    }
+
+    private static CloudPosPurchaseMetadataState ParseCloudPosPurchaseMetadata(string? notes)
+    {
+        var metadataJson = TryExtractMetadataJsonByPrefix(notes, CloudPosPurchaseMetadataPrefix);
+        if (string.IsNullOrWhiteSpace(metadataJson))
+        {
+            return new CloudPosPurchaseMetadataState();
+        }
+
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<CloudPosPurchaseMetadataState>(metadataJson);
+            if (parsed is null)
+            {
+                return new CloudPosPurchaseMetadataState();
+            }
+
+            parsed.ProductCode = NormalizeOptionalValue(parsed.ProductCode);
+            parsed.ProductType = NormalizeOptionalValue(parsed.ProductType);
+            parsed.InternalPlanCode = NormalizeOptionalValue(parsed.InternalPlanCode);
+            parsed.BillingMode = NormalizeOptionalValue(parsed.BillingMode);
+            parsed.RequestedByUserId = NormalizeOptionalValue(parsed.RequestedByUserId);
+            parsed.RequestedByUsername = NormalizeOptionalValue(parsed.RequestedByUsername);
+            parsed.RequestedByFullName = NormalizeOptionalValue(parsed.RequestedByFullName);
+            parsed.RequestedNote = NormalizeOptionalValue(parsed.RequestedNote);
+            parsed.Status = NormalizeOptionalValue(parsed.Status);
+            parsed.ApprovedBy = NormalizeOptionalValue(parsed.ApprovedBy);
+            parsed.RejectedBy = NormalizeOptionalValue(parsed.RejectedBy);
+            parsed.RejectedReasonCode = NormalizeOptionalValue(parsed.RejectedReasonCode);
+            parsed.AssignedBy = NormalizeOptionalValue(parsed.AssignedBy);
+            parsed.AssignmentId = NormalizeOptionalValue(parsed.AssignmentId);
+            parsed.RevokedBy = NormalizeOptionalValue(parsed.RevokedBy);
+            parsed.RevokedReasonCode = NormalizeOptionalValue(parsed.RevokedReasonCode);
+            return parsed;
+        }
+        catch (JsonException)
+        {
+            return new CloudPosPurchaseMetadataState();
+        }
+    }
+
+    private static string SerializeCloudPosPurchaseMetadata(CloudPosPurchaseMetadataState metadata)
+    {
+        var normalized = new CloudPosPurchaseMetadataState
+        {
+            ProductCode = NormalizeOptionalValue(metadata.ProductCode),
+            ProductType = NormalizeOptionalValue(metadata.ProductType),
+            InternalPlanCode = NormalizeOptionalValue(metadata.InternalPlanCode),
+            BillingMode = NormalizeOptionalValue(metadata.BillingMode),
+            Quantity = metadata.Quantity,
+            UnitPrice = metadata.UnitPrice,
+            TotalAmount = metadata.TotalAmount,
+            RequestedByUserId = NormalizeOptionalValue(metadata.RequestedByUserId),
+            RequestedByUsername = NormalizeOptionalValue(metadata.RequestedByUsername),
+            RequestedByFullName = NormalizeOptionalValue(metadata.RequestedByFullName),
+            RequestedNote = NormalizeOptionalValue(metadata.RequestedNote),
+            Status = NormalizeOptionalValue(metadata.Status),
+            ApprovedBy = NormalizeOptionalValue(metadata.ApprovedBy),
+            ApprovedAt = metadata.ApprovedAt,
+            RejectedBy = NormalizeOptionalValue(metadata.RejectedBy),
+            RejectedAt = metadata.RejectedAt,
+            RejectedReasonCode = NormalizeOptionalValue(metadata.RejectedReasonCode),
+            AssignedBy = NormalizeOptionalValue(metadata.AssignedBy),
+            AssignedAt = metadata.AssignedAt,
+            AssignmentId = NormalizeOptionalValue(metadata.AssignmentId),
+            RevokedBy = NormalizeOptionalValue(metadata.RevokedBy),
+            RevokedAt = metadata.RevokedAt,
+            RevokedReasonCode = NormalizeOptionalValue(metadata.RevokedReasonCode)
+        };
+        return JsonSerializer.Serialize(normalized);
+    }
+
+    private static string NormalizeCloudProductCode(string? productCode)
+    {
+        var normalized = NormalizeOptionalValue(productCode)?.ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "product_code is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        return normalized;
+    }
+
+    private string ParseAiPackCodeFromCloudProductCode(string productCode)
+    {
+        var normalized = NormalizeCloudProductCode(productCode);
+        if (normalized.StartsWith("ai_credit:", StringComparison.Ordinal))
+        {
+            return normalized["ai_credit:".Length..];
+        }
+
+        return normalized;
+    }
+
+    private string? ParseInternalPlanCodeFromCloudProductCode(string productCode)
+    {
+        var normalized = NormalizeCloudProductCode(productCode);
+        if (!normalized.StartsWith("pos_subscription:", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var marketingCode = normalized["pos_subscription:".Length..];
+        var quote = ResolveMarketingPlanQuote(marketingCode);
+        return quote.InternalPlanCode;
+    }
+
+    private void EnsureCloudProductCatalogSeeded()
+    {
+        lock (CloudProductCatalogSync)
+        {
+            foreach (var quote in MarketingPlanCatalog.Values)
+            {
+                var productCode = $"pos_subscription:{quote.MarketingPlanCode.ToLowerInvariant()}";
+                if (CloudProductCatalogEntries.ContainsKey(productCode))
+                {
+                    continue;
+                }
+
+                CloudProductCatalogEntries[productCode] = new CloudProductCatalogEntryState
+                {
+                    ProductCode = productCode,
+                    ProductName = $"{ToTitleCase(quote.MarketingPlanCode)} POS Plan",
+                    ProductType = "pos_subscription",
+                    Description = $"{quote.InternalPlanCode} subscription plan",
+                    Price = decimal.Round(quote.AmountDue, 2, MidpointRounding.AwayFromZero),
+                    Currency = ResolveCurrency(quote.Currency),
+                    BillingMode = "subscription",
+                    Validity = "30d",
+                    DefaultQuantityOrCredits = Math.Max(1, ResolveSeatLimitFromPlan(quote.InternalPlanCode)),
+                    Active = true,
+                    IsSystemSeeded = true,
+                    CreatedAt = DateTimeOffset.UtcNow
+                };
+            }
+
+            foreach (var pack in aiCreditPackCatalog.Values)
+            {
+                var packCode = NormalizeOptionalValue(pack.PackCode)?.ToLowerInvariant();
+                if (string.IsNullOrWhiteSpace(packCode))
+                {
+                    continue;
+                }
+
+                var productCode = $"ai_credit:{packCode}";
+                if (CloudProductCatalogEntries.ContainsKey(productCode))
+                {
+                    continue;
+                }
+
+                CloudProductCatalogEntries[productCode] = new CloudProductCatalogEntryState
+                {
+                    ProductCode = productCode,
+                    ProductName = $"AI Credit {pack.Credits:0.##}",
+                    ProductType = "ai_credit",
+                    Description = $"{pack.Credits:0.##} credits pack",
+                    Price = decimal.Round(pack.Price, 2, MidpointRounding.AwayFromZero),
+                    Currency = ResolveCurrency(pack.Currency),
+                    BillingMode = "one_time",
+                    Validity = null,
+                    DefaultQuantityOrCredits = RoundAiCredits(pack.Credits),
+                    Active = true,
+                    IsSystemSeeded = true,
+                    CreatedAt = DateTimeOffset.UtcNow
+                };
+            }
+        }
+    }
+
+    private CloudProductCatalogEntryState NormalizeCloudProductUpsertRequest(
+        CloudProductUpsertRequest request,
+        CloudProductCatalogEntryState? fallback)
+    {
+        var productCode = NormalizeCloudProductCode(request.ProductCode ?? fallback?.ProductCode);
+        var productName = NormalizeOptionalValue(request.ProductName ?? fallback?.ProductName);
+        if (string.IsNullOrWhiteSpace(productName))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "product_name is required.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var productType = NormalizeOptionalValue(request.ProductType ?? fallback?.ProductType)?.ToLowerInvariant();
+        if (productType is not ("pos_subscription" or "ai_credit"))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "product_type must be 'pos_subscription' or 'ai_credit'.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var billingMode = NormalizeOptionalValue(request.BillingMode ?? fallback?.BillingMode)?.ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(billingMode))
+        {
+            billingMode = productType == "pos_subscription" ? "subscription" : "one_time";
+        }
+
+        var defaultQuantity = request.DefaultQuantityOrCredits > 0m
+            ? request.DefaultQuantityOrCredits
+            : fallback?.DefaultQuantityOrCredits ?? 1m;
+        if (defaultQuantity <= 0m)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "default_quantity_or_credits must be greater than zero.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var price = request.Price > 0m
+            ? request.Price
+            : fallback?.Price ?? 0m;
+        if (price < 0m)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "price cannot be negative.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        return new CloudProductCatalogEntryState
+        {
+            ProductCode = productCode,
+            ProductName = productName,
+            ProductType = productType,
+            Description = NormalizeOptionalValue(request.Description ?? fallback?.Description),
+            Price = decimal.Round(price, 2, MidpointRounding.AwayFromZero),
+            Currency = ResolveCurrency(request.Currency ?? fallback?.Currency),
+            BillingMode = billingMode,
+            Validity = NormalizeOptionalValue(request.Validity ?? fallback?.Validity),
+            DefaultQuantityOrCredits = decimal.Round(defaultQuantity, 2, MidpointRounding.AwayFromZero),
+            Active = request.Active
+        };
+    }
+
+    private static CloudProductRowResponse MapCloudProductRow(CloudProductCatalogEntryState entry)
+    {
+        return new CloudProductRowResponse
+        {
+            ProductCode = entry.ProductCode,
+            ProductName = entry.ProductName,
+            ProductType = entry.ProductType,
+            Description = entry.Description,
+            Price = decimal.Round(entry.Price, 2, MidpointRounding.AwayFromZero),
+            Currency = ResolveCurrency(entry.Currency),
+            BillingMode = entry.BillingMode,
+            Validity = entry.Validity,
+            DefaultQuantityOrCredits = decimal.Round(entry.DefaultQuantityOrCredits, 2, MidpointRounding.AwayFromZero),
+            Active = entry.Active,
+            IsSystemSeeded = entry.IsSystemSeeded,
+            CreatedAt = entry.CreatedAt,
+            UpdatedAt = entry.UpdatedAt
+        };
+    }
+
+    private static string MapRegistrationStatusFromInvoice(ManualBillingInvoiceStatus invoiceStatus, SubscriptionStatus? subscriptionStatus)
+    {
+        if (subscriptionStatus == SubscriptionStatus.Active)
+        {
+            return "approved";
+        }
+
+        return invoiceStatus switch
+        {
+            ManualBillingInvoiceStatus.Paid => "pending_activation",
+            ManualBillingInvoiceStatus.Canceled => "rejected",
+            ManualBillingInvoiceStatus.Overdue => "pending_review",
+            _ => "pending_review"
+        };
+    }
+
+    private static string? TryResolveJsonStringPropertyFromPrefixedMetadata(
+        string? notes,
+        string prefix,
+        string propertyName)
+    {
+        var metadataJson = TryExtractMetadataJsonByPrefix(notes, prefix);
+        if (string.IsNullOrWhiteSpace(metadataJson))
+        {
+            return null;
+        }
+
+        return TryResolveJsonStringProperty(metadataJson, propertyName);
     }
 
     private static string? ResolveAccessDeliveryCustomerEmailCandidate(
@@ -11022,6 +12355,97 @@ public sealed class LicenseService(
             AiCreditOrderStatus.Rejected => "rejected",
             AiCreditOrderStatus.Settled => "settled",
             _ => "pending"
+        };
+    }
+
+    private static CloudPurchaseRowResponse MapOwnerAiInvoiceToCloudPurchase(AiCreditInvoiceRowResponse invoice)
+    {
+        var status = invoice.Status;
+        if (status == "settled")
+        {
+            status = "assigned";
+        }
+
+        return new CloudPurchaseRowResponse
+        {
+            PurchaseId = invoice.InvoiceId,
+            OrderNumber = invoice.InvoiceNumber,
+            ShopCode = invoice.ShopCode,
+            Status = status,
+            Items =
+            [
+                new CloudPurchaseItemResponse
+                {
+                    ProductCode = $"ai_credit:{invoice.PackCode}".ToLowerInvariant(),
+                    Quantity = 1m,
+                    Credits = invoice.RequestedCredits,
+                    Amount = decimal.Round(invoice.AmountDue, 2, MidpointRounding.AwayFromZero),
+                    Currency = ResolveCurrency(invoice.Currency)
+                }
+            ],
+            TotalAmount = decimal.Round(invoice.AmountDue, 2, MidpointRounding.AwayFromZero),
+            Currency = ResolveCurrency(invoice.Currency),
+            CreatedAt = invoice.CreatedAt,
+            UpdatedAt = invoice.UpdatedAt,
+            ApprovedBy = invoice.ApprovedBy,
+            RejectedBy = invoice.RejectedBy,
+            AssignedBy = status is "assigned" ? invoice.ApprovedBy : null,
+            AssignmentId = status is "assigned" ? $"ai-credit-{invoice.InvoiceId:D}" : null
+        };
+    }
+
+    private static CloudPurchaseRowResponse MapCloudPosPurchaseRow(
+        ManualBillingInvoice invoice,
+        string shopCode,
+        CloudPosPurchaseMetadataState metadata)
+    {
+        var status = NormalizeOptionalValue(metadata.Status)?.ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            status = invoice.Status switch
+            {
+                ManualBillingInvoiceStatus.Canceled => "rejected",
+                ManualBillingInvoiceStatus.Paid => "assigned",
+                _ => "pending_approval"
+            };
+        }
+
+        var quantity = metadata.Quantity.GetValueOrDefault(1m);
+        if (quantity <= 0m)
+        {
+            quantity = 1m;
+        }
+
+        var amount = metadata.TotalAmount.GetValueOrDefault(invoice.AmountDue);
+        if (amount <= 0m)
+        {
+            amount = invoice.AmountDue;
+        }
+
+        return new CloudPurchaseRowResponse
+        {
+            PurchaseId = invoice.Id,
+            OrderNumber = invoice.InvoiceNumber,
+            ShopCode = shopCode,
+            Status = status,
+            Items =
+            [
+                new CloudPurchaseItemResponse
+                {
+                    ProductCode = NormalizeOptionalValue(metadata.ProductCode) ?? "pos_subscription:unknown",
+                    Quantity = decimal.Round(quantity, 2, MidpointRounding.AwayFromZero),
+                    Amount = decimal.Round(amount, 2, MidpointRounding.AwayFromZero),
+                    Currency = ResolveCurrency(invoice.Currency)
+                }
+            ],
+            TotalAmount = decimal.Round(invoice.AmountDue, 2, MidpointRounding.AwayFromZero),
+            Currency = ResolveCurrency(invoice.Currency),
+            CreatedAt = invoice.CreatedAtUtc,
+            UpdatedAt = invoice.UpdatedAtUtc,
+            ApprovedBy = metadata.ApprovedBy,
+            RejectedBy = metadata.RejectedBy,
+            AssignedBy = metadata.AssignedBy,
+            AssignmentId = metadata.AssignmentId
         };
     }
 
@@ -13522,6 +14946,17 @@ public sealed class LicenseService(
     private static string? NormalizeOptionalValue(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static string ToTitleCase(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var normalized = value.Trim().ToLowerInvariant();
+        return CultureInfo.InvariantCulture.TextInfo.ToTitleCase(normalized);
     }
 
     private static string EscapeCsv(string? value)

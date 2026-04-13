@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import ManagerReportsDrawer from "@/components/admin/ManagerReportsDrawer";
-import BillingAdminWorkspace from "@/components/admin/BillingAdminWorkspace";
-import AiCreditInvoiceRequestsPanel from "@/components/admin/AiCreditInvoiceRequestsPanel";
+import CloudPurchaseQueuePanel from "@/components/admin/CloudPurchaseQueuePanel";
+import CloudProductCatalogPanel from "@/components/admin/CloudProductCatalogPanel";
 import { DataTableWrap, PageShell, SectionCard, StatusChip } from "@/components/portal/layout-primitives";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,6 +21,11 @@ type AdminConsoleProps = {
 const AdminConsole = ({ user, onSignOut }: AdminConsoleProps) => {
   const normalizedBackendRole = (user?.role || "").trim().toLowerCase();
   const isBillingAdmin = normalizedBackendRole === "billing_admin";
+  const canManageCatalog =
+    normalizedBackendRole === "super_admin" ||
+    normalizedBackendRole === "support" ||
+    normalizedBackendRole === "support_admin" ||
+    normalizedBackendRole === "security_admin";
   const [showReports, setShowReports] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
   const [verifyReference, setVerifyReference] = useState("");
@@ -45,12 +50,8 @@ const AdminConsole = ({ user, onSignOut }: AdminConsoleProps) => {
   }, []);
 
   useEffect(() => {
-    if (isBillingAdmin) {
-      return;
-    }
-
     void loadPendingAiPayments(true);
-  }, [isBillingAdmin, loadPendingAiPayments]);
+  }, [loadPendingAiPayments]);
 
   const handleVerifyAiPayment = useCallback(
     async (payload: { paymentId?: string; externalReference?: string }, clearReferenceInput = false) => {
@@ -133,17 +134,6 @@ const AdminConsole = ({ user, onSignOut }: AdminConsoleProps) => {
     );
   }, [handleVerifyAiPayment, pendingAiPayments, verifyReference]);
 
-  if (isBillingAdmin) {
-    return (
-      <BillingAdminWorkspace
-        username={user?.username}
-        onSignOut={() => {
-          void onSignOut();
-        }}
-      />
-    );
-  }
-
   return (
     <PageShell className="p-6">
       <div className="mx-auto w-full max-w-5xl space-y-5">
@@ -152,7 +142,7 @@ const AdminConsole = ({ user, onSignOut }: AdminConsoleProps) => {
             <div className="space-y-2">
               <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
                 <ShieldCheck className="h-4 w-4" />
-                Super Admin Console
+                {isBillingAdmin ? "Billing Admin Console" : "Super Admin Console"}
               </div>
               <h1 className="text-2xl font-bold tracking-tight">Operations Control Plane</h1>
               <p className="text-sm text-muted-foreground">
@@ -162,14 +152,6 @@ const AdminConsole = ({ user, onSignOut }: AdminConsoleProps) => {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  void loadPendingAiPayments();
-                }}
-              >
-                Refresh Requests
-              </Button>
               {!showReports && (
                 <Button
                   onClick={() => {
@@ -192,18 +174,11 @@ const AdminConsole = ({ user, onSignOut }: AdminConsoleProps) => {
           </div>
         </SectionCard>
 
-        <SectionCard className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="portal-kicker">Purchase Approvals</p>
-              <h2 className="text-base font-semibold">Owner Invoice Queue</h2>
-            </div>
-            <StatusChip tone={pendingAiPayments.length > 0 ? "warning" : "neutral"}>
-              Pending {pendingAiPayments.length}
-            </StatusChip>
-          </div>
-          <AiCreditInvoiceRequestsPanel />
-        </SectionCard>
+        <CloudPurchaseQueuePanel
+          heading={isBillingAdmin ? "Owner Purchase Approvals" : "Cloud Purchase Approvals"}
+        />
+
+        {canManageCatalog && <CloudProductCatalogPanel />}
 
         <SectionCard className="p-5">
           <div className="space-y-2">
