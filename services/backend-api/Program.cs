@@ -354,6 +354,19 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy(SmartPosPolicies.SuperAdmin, policy =>
         policy.RequireRole(SmartPosRoles.SuperAdmin)
             .RequireClaim("mfa_verified", "true"));
+    options.AddPolicy(SmartPosPolicies.SuperAdminOperator, policy =>
+    {
+        policy.RequireRole(SmartPosRoles.SuperAdmin)
+            .RequireClaim("mfa_verified", "true")
+            .RequireAssertion(context =>
+            {
+                var scope = context.User.FindFirst("super_admin_scope")?.Value?.Trim().ToLowerInvariant();
+                return scope == SmartPosRoles.SuperAdmin ||
+                       scope == SmartPosRoles.Support ||
+                       scope == SmartPosRoles.BillingAdmin ||
+                       scope == SmartPosRoles.SecurityAdmin;
+            });
+    });
     options.AddPolicy(SmartPosPolicies.SupportOrSecurity, policy =>
     {
         policy.RequireRole(SmartPosRoles.SuperAdmin)

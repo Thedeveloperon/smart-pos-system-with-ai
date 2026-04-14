@@ -24,6 +24,7 @@ const AdminConsole = ({ user, onSignOut }: AdminConsoleProps) => {
   const canManageCatalog =
     normalizedBackendRole === "super_admin" ||
     normalizedBackendRole === "support" ||
+    normalizedBackendRole === "billing_admin" ||
     normalizedBackendRole === "support_admin" ||
     normalizedBackendRole === "security_admin";
   const [showReports, setShowReports] = useState(false);

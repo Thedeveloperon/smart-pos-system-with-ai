@@ -772,7 +772,7 @@ public static class LicenseEndpoints
         .WithName("AdminCloudGetProducts")
         .WithOpenApi();
 
-        cloudAdmin.MapPost("/products", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+        cloudAdmin.MapPost("/products", [Authorize(Policy = SmartPosPolicies.SuperAdminOperator)] async (
             CloudProductUpsertRequest request,
             HttpContext httpContext,
             LicenseService licenseService) =>
@@ -788,11 +788,11 @@ public static class LicenseEndpoints
                 return ToErrorResult(ex);
             }
         })
-        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .RequireAuthorization(SmartPosPolicies.SuperAdminOperator)
         .WithName("AdminCloudCreateProduct")
         .WithOpenApi();
 
-        cloudAdmin.MapPut("/products/{product_code}", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+        cloudAdmin.MapPut("/products/{product_code}", [Authorize(Policy = SmartPosPolicies.SuperAdminOperator)] async (
             string product_code,
             CloudProductUpsertRequest request,
             HttpContext httpContext,
@@ -809,11 +809,11 @@ public static class LicenseEndpoints
                 return ToErrorResult(ex);
             }
         })
-        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .RequireAuthorization(SmartPosPolicies.SuperAdminOperator)
         .WithName("AdminCloudUpdateProduct")
         .WithOpenApi();
 
-        cloudAdmin.MapPost("/products/{product_code}/deactivate", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+        cloudAdmin.MapPost("/products/{product_code}/deactivate", [Authorize(Policy = SmartPosPolicies.SuperAdminOperator)] async (
             string product_code,
             CloudProductDeactivateRequest request,
             HttpContext httpContext,
@@ -831,7 +831,7 @@ public static class LicenseEndpoints
                 return ToErrorResult(ex);
             }
         })
-        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .RequireAuthorization(SmartPosPolicies.SuperAdminOperator)
         .WithName("AdminCloudDeactivateProduct")
         .WithOpenApi();
 
@@ -1052,7 +1052,7 @@ public static class LicenseEndpoints
         .WithName("AdminReactivateShop")
         .WithOpenApi();
 
-        admin.MapGet("/users", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+        admin.MapGet("/users", [Authorize(Policy = SmartPosPolicies.SuperAdminOperator)] async (
             string? shop_code,
             string? search,
             bool? include_inactive,
@@ -1075,11 +1075,11 @@ public static class LicenseEndpoints
                 return ToErrorResult(ex);
             }
         })
-        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .RequireAuthorization(SmartPosPolicies.SuperAdminOperator)
         .WithName("AdminGetShopUsers")
         .WithOpenApi();
 
-        admin.MapPost("/users", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+        admin.MapPost("/users", [Authorize(Policy = SmartPosPolicies.SuperAdminOperator)] async (
             AdminShopUserCreateRequest request,
             HttpContext httpContext,
             LicenseService licenseService,
@@ -1096,11 +1096,11 @@ public static class LicenseEndpoints
                 return ToErrorResult(ex);
             }
         })
-        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .RequireAuthorization(SmartPosPolicies.SuperAdminOperator)
         .WithName("AdminCreateShopUser")
         .WithOpenApi();
 
-        admin.MapPut("/users/{user_id:guid}", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+        admin.MapPut("/users/{user_id:guid}", [Authorize(Policy = SmartPosPolicies.SuperAdminOperator)] async (
             Guid user_id,
             AdminShopUserUpdateRequest request,
             HttpContext httpContext,
@@ -1118,11 +1118,11 @@ public static class LicenseEndpoints
                 return ToErrorResult(ex);
             }
         })
-        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .RequireAuthorization(SmartPosPolicies.SuperAdminOperator)
         .WithName("AdminUpdateShopUser")
         .WithOpenApi();
 
-        admin.MapDelete("/users/{user_id:guid}", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+        admin.MapDelete("/users/{user_id:guid}", [Authorize(Policy = SmartPosPolicies.SuperAdminOperator)] async (
             Guid user_id,
             HttpContext httpContext,
             LicenseService licenseService,
@@ -1141,11 +1141,11 @@ public static class LicenseEndpoints
                 return ToErrorResult(ex);
             }
         })
-        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .RequireAuthorization(SmartPosPolicies.SuperAdminOperator)
         .WithName("AdminDeactivateShopUser")
         .WithOpenApi();
 
-        admin.MapPost("/users/{user_id:guid}/reactivate", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+        admin.MapPost("/users/{user_id:guid}/reactivate", [Authorize(Policy = SmartPosPolicies.SuperAdminOperator)] async (
             Guid user_id,
             AdminShopUserReactivateRequest request,
             HttpContext httpContext,
@@ -1163,11 +1163,11 @@ public static class LicenseEndpoints
                 return ToErrorResult(ex);
             }
         })
-        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .RequireAuthorization(SmartPosPolicies.SuperAdminOperator)
         .WithName("AdminReactivateShopUser")
         .WithOpenApi();
 
-        admin.MapPost("/users/{user_id:guid}/reset-password", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+        admin.MapPost("/users/{user_id:guid}/reset-password", [Authorize(Policy = SmartPosPolicies.SuperAdminOperator)] async (
             Guid user_id,
             AdminShopUserPasswordResetRequest request,
             HttpContext httpContext,
@@ -1185,7 +1185,7 @@ public static class LicenseEndpoints
                 return ToErrorResult(ex);
             }
         })
-        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .RequireAuthorization(SmartPosPolicies.SuperAdminOperator)
         .WithName("AdminResetShopUserPassword")
         .WithOpenApi();
 
