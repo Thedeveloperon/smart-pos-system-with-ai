@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Features.AiChat;
@@ -340,12 +341,25 @@ public static class CloudAiRelayEndpoints
         SmartPosDbContext dbContext,
         CancellationToken cancellationToken)
     {
+        var authenticatedUserId = ResolveAuthenticatedUserId(httpContext.User);
+        if (authenticatedUserId.HasValue)
+        {
+            var authenticatedContext = await ResolveAuthenticatedRelayContextAsync(
+                dbContext,
+                authenticatedUserId.Value,
+                cancellationToken);
+            if (authenticatedContext is not null)
+            {
+                return authenticatedContext.Value;
+            }
+        }
+
         var token = licenseService.ResolveLicenseToken(httpContext, includeCookie: false);
         if (string.IsNullOrWhiteSpace(token))
         {
             throw new LicenseException(
-                LicenseErrorCodes.InvalidToken,
-                "X-License-Token header is required for cloud AI relay.",
+                AiRelayErrorCodes.CloudRelayContextResolutionFailed,
+                "Cloud AI relay requires either authenticated cloud credentials or X-License-Token.",
                 StatusCodes.Status401Unauthorized);
         }
 
@@ -379,6 +393,46 @@ public static class CloudAiRelayEndpoints
 
         var actorUserId = await ResolveRelayActorUserIdAsync(dbContext, tokenContext.ShopId, cancellationToken);
         return new CloudAiRelayRequestContext(tokenContext.ShopId, tokenContext.DeviceCode, actorUserId);
+    }
+
+    private static async Task<CloudAiRelayRequestContext?> ResolveAuthenticatedRelayContextAsync(
+        SmartPosDbContext dbContext,
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var user = await dbContext.Users
+            .AsNoTracking()
+            .Include(x => x.UserRoles)
+            .ThenInclude(x => x.Role)
+            .FirstOrDefaultAsync(x => x.Id == userId && x.IsActive, cancellationToken);
+        if (user is null)
+        {
+            throw new LicenseException(
+                AiRelayErrorCodes.CloudRelayContextResolutionFailed,
+                "Authenticated cloud user is not available for AI relay.",
+                StatusCodes.Status401Unauthorized);
+        }
+
+        if (!user.StoreId.HasValue || user.StoreId == Guid.Empty)
+        {
+            throw new LicenseException(
+                AiRelayErrorCodes.CloudRelayContextResolutionFailed,
+                "Authenticated cloud user is not mapped to a shop.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        if (!CanUseCloudAiRelay(user))
+        {
+            throw new LicenseException(
+                AiRelayErrorCodes.CloudRelayContextResolutionFailed,
+                "Authenticated cloud user role is not allowed for AI relay.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        return new CloudAiRelayRequestContext(
+            user.StoreId.Value,
+            DeviceCode: string.Empty,
+            ActorUserId: user.Id);
     }
 
     private static async Task<Guid> ResolveRelayActorUserIdAsync(
@@ -438,6 +492,33 @@ public static class CloudAiRelayEndpoints
         }
 
         return 50;
+    }
+
+    private static Guid? ResolveAuthenticatedUserId(ClaimsPrincipal principal)
+    {
+        if (principal?.Identity?.IsAuthenticated != true)
+        {
+            return null;
+        }
+
+        var userId = principal.FindFirstValue(ClaimTypes.NameIdentifier) ??
+                     principal.FindFirstValue("sub");
+        return Guid.TryParse(userId, out var parsed) ? parsed : null;
+    }
+
+    private static bool CanUseCloudAiRelay(AppUser user)
+    {
+        var roleCodes = user.UserRoles
+            .Select(x => x.Role.Code)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Trim().ToLowerInvariant())
+            .ToHashSet(StringComparer.Ordinal);
+
+        return roleCodes.Contains(SmartPosRoles.Owner) ||
+               roleCodes.Contains(SmartPosRoles.Manager) ||
+               roleCodes.Contains(SmartPosRoles.SuperAdmin) ||
+               roleCodes.Contains(SmartPosRoles.BillingAdmin) ||
+               roleCodes.Contains(SmartPosRoles.Support);
     }
 
     private static string ResolveIdempotencyKey(AiInsightRequestPayload request, HttpContext httpContext)

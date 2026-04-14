@@ -202,6 +202,27 @@ public sealed class CloudAccountService(
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<string?> TryGetLinkedAuthTokenAsync(CancellationToken cancellationToken)
+    {
+        var link = (await dbContext.CloudAccountLinks
+                .AsNoTracking()
+                .ToListAsync(cancellationToken))
+            .OrderByDescending(x => x.LinkedAtUtc.UtcDateTime.Ticks)
+            .FirstOrDefault();
+        if (link is null)
+        {
+            return null;
+        }
+
+        if (link.TokenExpiresAtUtc <= DateTimeOffset.UtcNow.AddSeconds(30))
+        {
+            return null;
+        }
+
+        var token = NormalizeOptionalValue(UnprotectSensitiveValue(link.CloudAuthToken));
+        return string.IsNullOrWhiteSpace(token) ? null : token;
+    }
+
     private async Task<string> ResolveLocalShopCodeAsync(CancellationToken cancellationToken)
     {
         var principal = httpContextAccessor.HttpContext?.User;
@@ -910,6 +931,38 @@ public sealed class CloudAccountService(
         return $"{EncryptedValuePrefix}{Base64UrlEncode(nonce)}.{Base64UrlEncode(ciphertextBytes)}.{Base64UrlEncode(tagBytes)}";
     }
 
+    private string UnprotectSensitiveValue(string? value)
+    {
+        var normalized = NormalizeOptionalValue(value);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return string.Empty;
+        }
+
+        if (!licenseOptions.EncryptSensitiveDataAtRest ||
+            !normalized.StartsWith(EncryptedValuePrefix, StringComparison.Ordinal))
+        {
+            return normalized;
+        }
+
+        var payload = normalized[EncryptedValuePrefix.Length..];
+        var segments = payload.Split('.', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length != 3)
+        {
+            throw new InvalidOperationException("Encrypted cloud account token payload is invalid.");
+        }
+
+        var nonce = Base64UrlDecode(segments[0]);
+        var ciphertext = Base64UrlDecode(segments[1]);
+        var tag = Base64UrlDecode(segments[2]);
+        var plaintext = new byte[ciphertext.Length];
+
+        var key = ResolveDataEncryptionKey();
+        using var aes = new AesGcm(key, 16);
+        aes.Decrypt(nonce, ciphertext, tag, plaintext);
+        return Encoding.UTF8.GetString(plaintext);
+    }
+
     private byte[] ResolveDataEncryptionKey()
     {
         var keyMaterial = ResolveDataEncryptionKeyMaterial();
@@ -936,6 +989,18 @@ public sealed class CloudAccountService(
             .TrimEnd('=')
             .Replace('+', '-')
             .Replace('/', '_');
+    }
+
+    private static byte[] Base64UrlDecode(string value)
+    {
+        var normalized = value.Replace('-', '+').Replace('_', '/');
+        var remainder = normalized.Length % 4;
+        if (remainder > 0)
+        {
+            normalized = normalized.PadRight(normalized.Length + (4 - remainder), '=');
+        }
+
+        return Convert.FromBase64String(normalized);
     }
 
     private static string? NormalizeOptionalValue(string? value)
