@@ -523,9 +523,11 @@ public sealed class AiChatService(
             return BuildUnsupportedAssistantMessage(grounding);
         }
 
-        var baseContent = string.IsNullOrWhiteSpace(companionContent)
-            ? modelContent
-            : companionContent;
+        // Prefer model output so cloud OpenAI responses remain visible in chat.
+        // Companion text is retained as a fallback for deterministic local blocks.
+        var baseContent = string.IsNullOrWhiteSpace(modelContent)
+            ? companionContent ?? string.Empty
+            : modelContent;
 
         if (grounding.MissingData.Count == 0)
         {
