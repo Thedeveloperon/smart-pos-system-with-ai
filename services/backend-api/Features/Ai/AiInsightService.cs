@@ -34,6 +34,74 @@ public sealed class AiInsightService(
     {
         PropertyNameCaseInsensitive = true
     };
+    private static readonly object StructuredInsightJsonSchema = new
+    {
+        type = "object",
+        additionalProperties = false,
+        required = new[]
+        {
+            "summary",
+            "recommended_actions",
+            "risks",
+            "missing_data",
+            "insufficient_data",
+            "confidence"
+        },
+        properties = new
+        {
+            summary = new
+            {
+                type = "string",
+                minLength = 1,
+                maxLength = 380
+            },
+            recommended_actions = new
+            {
+                type = "array",
+                minItems = 1,
+                maxItems = 5,
+                items = new
+                {
+                    type = "string",
+                    minLength = 1,
+                    maxLength = 220
+                }
+            },
+            risks = new
+            {
+                type = "array",
+                minItems = 0,
+                maxItems = 5,
+                items = new
+                {
+                    type = "string",
+                    minLength = 1,
+                    maxLength = 220
+                }
+            },
+            missing_data = new
+            {
+                type = "array",
+                minItems = 0,
+                maxItems = 8,
+                items = new
+                {
+                    type = "string",
+                    minLength = 1,
+                    maxLength = 220
+                }
+            },
+            insufficient_data = new
+            {
+                type = "boolean"
+            },
+            confidence = new
+            {
+                type = "string",
+                @enum = new[] { "low", "medium", "high" }
+            }
+        }
+    };
 
     public async Task<AiInsightEstimateResponse> EstimateInsightAsync(
         Guid userId,
@@ -251,7 +319,11 @@ public sealed class AiInsightService(
             var providerStopwatch = Stopwatch.StartNew();
 
             AiProviderResult providerResult;
-            if (posFacts.IsInsufficientData)
+            var useLocalInsufficientDataFallback =
+                posFacts.IsInsufficientData &&
+                string.Equals(provider, ProviderLocal, StringComparison.OrdinalIgnoreCase);
+
+            if (useLocalInsufficientDataFallback)
             {
                 providerResult = BuildInsufficientDataFallback(
                     provider,
@@ -516,6 +588,16 @@ public sealed class AiInsightService(
                                     text = groundedPrompt
                                 }
                             }
+                        }
+                    },
+                    text = new
+                    {
+                        format = new
+                        {
+                            type = "json_schema",
+                            name = "smartpos_insight_payload_v1",
+                            schema = StructuredInsightJsonSchema,
+                            strict = true
                         }
                     },
                     max_output_tokens = Math.Clamp(maxOutputTokens, 128, 2000)
