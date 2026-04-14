@@ -18,6 +18,9 @@ type CloudPurchaseQueuePanelProps = {
   heading?: string;
 };
 
+const PendingStatusFilterValue = "__pending_queue__";
+const queueStatuses = new Set(["pending", "pending_approval", "submitted", "paid", "payment_pending"]);
+
 function toSentence(value?: string | null) {
   return (value || "").replaceAll("_", " ").trim() || "-";
 }
@@ -31,12 +34,12 @@ function formatAmount(amount: number, currency: string) {
 
 function canApproveOrReject(status: string) {
   const normalized = status.trim().toLowerCase();
-  return normalized === "submitted" || normalized === "paid" || normalized === "pending_approval";
+  return queueStatuses.has(normalized);
 }
 
 const CloudPurchaseQueuePanel = ({ heading = "Purchase Queue" }: CloudPurchaseQueuePanelProps) => {
   const [items, setItems] = useState<CloudPurchaseRow[]>([]);
-  const [statusFilter, setStatusFilter] = useState("pending_approval");
+  const [statusFilter, setStatusFilter] = useState(PendingStatusFilterValue);
   const [isLoading, setIsLoading] = useState(false);
   const [submittingId, setSubmittingId] = useState<string | null>(null);
   const [actorNotes, setActorNotes] = useState<Record<string, string>>({});
@@ -45,11 +48,17 @@ const CloudPurchaseQueuePanel = ({ heading = "Purchase Queue" }: CloudPurchaseQu
   const load = useCallback(async () => {
     setIsLoading(true);
     try {
+      const statusForQuery = statusFilter === PendingStatusFilterValue ? undefined : statusFilter;
       const response = await fetchAdminCloudPurchases({
-        status: statusFilter,
+        status: statusForQuery,
         take: 150,
       });
-      setItems(Array.isArray(response.items) ? response.items : []);
+      const responseItems = Array.isArray(response.items) ? response.items : [];
+      if (statusFilter === PendingStatusFilterValue) {
+        setItems(responseItems.filter((item) => queueStatuses.has((item.status || "").trim().toLowerCase())));
+      } else {
+        setItems(responseItems);
+      }
     } catch (error) {
       console.error(error);
       toast.error(error instanceof Error ? error.message : "Failed to load purchase queue.");
@@ -62,10 +71,7 @@ const CloudPurchaseQueuePanel = ({ heading = "Purchase Queue" }: CloudPurchaseQu
     void load();
   }, [load]);
 
-  const pendingCount = useMemo(
-    () => items.filter((item) => item.status.trim().toLowerCase() === "pending_approval").length,
-    [items],
-  );
+  const pendingCount = useMemo(() => items.filter((item) => queueStatuses.has(item.status.trim().toLowerCase())).length, [items]);
 
   const resolveActorNote = useCallback((purchaseId: string) => actorNotes[purchaseId]?.trim() || "", [actorNotes]);
   const resolveReasonCode = useCallback((purchaseId: string) => reasonCodes[purchaseId]?.trim() || "", [reasonCodes]);
@@ -140,6 +146,8 @@ const CloudPurchaseQueuePanel = ({ heading = "Purchase Queue" }: CloudPurchaseQu
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value)}
           >
+            <option value={PendingStatusFilterValue}>Pending queue</option>
+            <option value="pending">Pending</option>
             <option value="pending_approval">Pending approval</option>
             <option value="approved">Approved</option>
             <option value="assigned">Assigned</option>
