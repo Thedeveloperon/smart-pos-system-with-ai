@@ -34,6 +34,11 @@ public sealed class AiChatStructuredResponseBuilder(
         var normalized = entities.NormalizedMessage;
         var outputLanguage = await ResolveOutputLanguageAsync(cancellationToken);
 
+        if (ShouldRenderProductStockSnapshot(normalized, classification.Intents, entities))
+        {
+            return await BuildProductStockSnapshotAsync(entities.Product!, outputLanguage, cancellationToken);
+        }
+
         if (ShouldRenderStockTable(normalized, classification.Intents))
         {
             return await BuildStockTableAsync(outputLanguage, cancellationToken);
@@ -115,6 +120,42 @@ public sealed class AiChatStructuredResponseBuilder(
                     "Structured stock snapshot generated from the latest low-stock report.",
                     "නවතම අඩු තොග වාර්තාවෙන් ව්‍යුහගත තොග සංක්ෂිප්තයක් නිර්මාණය කර ඇත.",
                     outputLanguage));
+    }
+
+    private async Task<AiChatStructuredResponseBuildResult> BuildProductStockSnapshotAsync(
+        AiChatEntityMatch product,
+        string outputLanguage,
+        CancellationToken cancellationToken)
+    {
+        var stockItem = await reportService.GetStockItemSnapshotAsync(product.Id, cancellationToken);
+        if (stockItem is null)
+        {
+            return await BuildStockTableAsync(outputLanguage, cancellationToken);
+        }
+
+        var row = new AiChatStockTableRowResponse
+        {
+            Item = stockItem.ProductName,
+            CurrentStock = stockItem.QuantityOnHand,
+            ReorderLevel = stockItem.ReorderLevel,
+            Status = ResolveStockStatus(stockItem.QuantityOnHand, stockItem.ReorderLevel)
+        };
+
+        var block = new AiChatMessageBlockResponse
+        {
+            Type = "stock_table",
+            StockTable = new AiChatStockTableBlockResponse
+            {
+                Title = "Product Stock Snapshot",
+                Rows = [row],
+                FooterNote = $"Stock value: {stockItem.StockValue:0.##}"
+            }
+        };
+
+        return new AiChatStructuredResponseBuildResult(
+            Blocks: [block],
+            CompanionContent:
+            $"{stockItem.ProductName} currently has {stockItem.QuantityOnHand:0.###} units on hand (reorder level {stockItem.ReorderLevel:0.###}).");
     }
 
     private async Task<AiChatStructuredResponseBuildResult> BuildSalesKpiAsync(
@@ -250,6 +291,42 @@ public sealed class AiChatStructuredResponseBuilder(
                    "inventory",
                    "තොග",
                    "ඉන්වෙන්ටරි");
+    }
+
+    private static bool ShouldRenderProductStockSnapshot(
+        string normalizedMessage,
+        IReadOnlyCollection<AiChatIntentType> intents,
+        AiChatResolvedEntities entities)
+    {
+        if (entities.Product is null || !intents.Contains(AiChatIntentType.Stock))
+        {
+            return false;
+        }
+
+        if (ContainsAny(
+            normalizedMessage,
+            "stock movement",
+            "movement",
+            "stock trend",
+            "item stock",
+            "stock status",
+            "movement of"))
+        {
+            return true;
+        }
+
+        return ContainsAny(
+            normalizedMessage,
+            "current stock",
+            "stock count",
+            "current stock count",
+            "how many",
+            "available",
+            "on hand",
+            "quantity",
+            "qty",
+            "in stock",
+            "stock of");
     }
 
     private static bool ShouldRenderSalesKpi(string normalizedMessage, IReadOnlyCollection<AiChatIntentType> intents)
