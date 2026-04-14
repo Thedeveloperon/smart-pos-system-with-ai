@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using SmartPos.Backend.Features.AiChat;
+using SmartPos.Backend.Features.CloudAccount;
 using SmartPos.Backend.Features.Licensing;
 using SmartPos.Backend.Security;
 
@@ -15,12 +16,14 @@ public sealed class AiCreditCloudRelayService(
     IOptions<AiInsightOptions> optionsAccessor,
     IHttpClientFactory httpClientFactory,
     LicenseService licenseService,
+    CloudAccountService cloudAccountService,
     AiCreditCloudRelayWalletCache walletCache,
     AiCreditCloudRelayMetrics relayMetrics,
     ILogger<AiCreditCloudRelayService> logger)
 {
     private const string CloudRelayClientName = "cloud-ai-relay";
     private const string LicenseTokenHeaderName = "X-License-Token";
+    private const string CloudAuthCookieName = "smartpos_auth";
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true
@@ -28,215 +31,215 @@ public sealed class AiCreditCloudRelayService(
 
     public bool IsEnabled => optionsAccessor.Value.CloudRelayEnabled;
 
-    public Task<AiWalletResponse> GetWalletAsync(
+    public async Task<AiWalletResponse> GetWalletAsync(
         HttpContext sourceContext,
         CancellationToken cancellationToken)
     {
-        var licenseToken = ResolveRequiredLicenseToken(sourceContext);
-        var cacheKey = BuildWalletCacheKey(licenseToken);
+        var authContext = await ResolveRelayAuthContextAsync(sourceContext, cancellationToken);
+        var cacheKey = BuildWalletCacheKey(authContext.CacheIdentity);
 
-        return RelayAsync<AiWalletResponse>(
+        return await RelayAsync<AiWalletResponse>(
             HttpMethod.Get,
             "cloud/v1/ai/wallet",
             body: null,
             sourceContext,
             endpointName: "wallet",
-            licenseToken,
+            authContext,
             cacheKey,
             allowCachedWalletFallback: true,
             cancellationToken);
     }
 
-    public Task<AiCreditPackListResponse> GetCreditPacksAsync(
+    public async Task<AiCreditPackListResponse> GetCreditPacksAsync(
         HttpContext sourceContext,
         CancellationToken cancellationToken)
     {
-        var licenseToken = ResolveRequiredLicenseToken(sourceContext);
+        var authContext = await ResolveRelayAuthContextAsync(sourceContext, cancellationToken);
 
-        return RelayAsync<AiCreditPackListResponse>(
+        return await RelayAsync<AiCreditPackListResponse>(
             HttpMethod.Get,
             "cloud/v1/ai/credit-packs",
             body: null,
             sourceContext,
             endpointName: "credit_packs",
-            licenseToken,
+            authContext,
             walletCacheKey: null,
             allowCachedWalletFallback: false,
             cancellationToken);
     }
 
-    public Task<AiInsightResponse> GenerateInsightAsync(
+    public async Task<AiInsightResponse> GenerateInsightAsync(
         AiInsightRequestPayload request,
         HttpContext sourceContext,
         CancellationToken cancellationToken)
     {
-        var licenseToken = ResolveRequiredLicenseToken(sourceContext);
+        var authContext = await ResolveRelayAuthContextAsync(sourceContext, cancellationToken);
 
-        return RelayAsync<AiInsightResponse>(
+        return await RelayAsync<AiInsightResponse>(
             HttpMethod.Post,
             "cloud/v1/ai/insights",
             request,
             sourceContext,
             endpointName: "insights",
-            licenseToken,
+            authContext,
             walletCacheKey: null,
             allowCachedWalletFallback: false,
             cancellationToken);
     }
 
-    public Task<AiInsightEstimateResponse> EstimateInsightAsync(
+    public async Task<AiInsightEstimateResponse> EstimateInsightAsync(
         AiInsightEstimateRequestPayload request,
         HttpContext sourceContext,
         CancellationToken cancellationToken)
     {
-        var licenseToken = ResolveRequiredLicenseToken(sourceContext);
+        var authContext = await ResolveRelayAuthContextAsync(sourceContext, cancellationToken);
 
-        return RelayAsync<AiInsightEstimateResponse>(
+        return await RelayAsync<AiInsightEstimateResponse>(
             HttpMethod.Post,
             "cloud/v1/ai/insights/estimate",
             request,
             sourceContext,
             endpointName: "insights_estimate",
-            licenseToken,
+            authContext,
             walletCacheKey: null,
             allowCachedWalletFallback: false,
             cancellationToken);
     }
 
-    public Task<AiInsightHistoryResponse> GetInsightHistoryAsync(
+    public async Task<AiInsightHistoryResponse> GetInsightHistoryAsync(
         int take,
         HttpContext sourceContext,
         CancellationToken cancellationToken)
     {
-        var licenseToken = ResolveRequiredLicenseToken(sourceContext);
+        var authContext = await ResolveRelayAuthContextAsync(sourceContext, cancellationToken);
         var normalizedTake = Math.Clamp(take, 1, 100);
 
-        return RelayAsync<AiInsightHistoryResponse>(
+        return await RelayAsync<AiInsightHistoryResponse>(
             HttpMethod.Get,
             $"cloud/v1/ai/insights/history?take={normalizedTake}",
             body: null,
             sourceContext,
             endpointName: "insights_history",
-            licenseToken,
+            authContext,
             walletCacheKey: null,
             allowCachedWalletFallback: false,
             cancellationToken);
     }
 
-    public Task<AiChatSessionSummaryResponse> CreateChatSessionAsync(
+    public async Task<AiChatSessionSummaryResponse> CreateChatSessionAsync(
         AiChatCreateSessionRequest request,
         HttpContext sourceContext,
         CancellationToken cancellationToken)
     {
-        var licenseToken = ResolveRequiredLicenseToken(sourceContext);
+        var authContext = await ResolveRelayAuthContextAsync(sourceContext, cancellationToken);
 
-        return RelayAsync<AiChatSessionSummaryResponse>(
+        return await RelayAsync<AiChatSessionSummaryResponse>(
             HttpMethod.Post,
             "cloud/v1/ai/chat/sessions",
             request,
             sourceContext,
             endpointName: "chat_create_session",
-            licenseToken,
+            authContext,
             walletCacheKey: null,
             allowCachedWalletFallback: false,
             cancellationToken);
     }
 
-    public Task<AiChatPostMessageResponse> PostChatMessageAsync(
+    public async Task<AiChatPostMessageResponse> PostChatMessageAsync(
         Guid sessionId,
         AiChatMessageCreateRequest request,
         HttpContext sourceContext,
         CancellationToken cancellationToken)
     {
-        var licenseToken = ResolveRequiredLicenseToken(sourceContext);
+        var authContext = await ResolveRelayAuthContextAsync(sourceContext, cancellationToken);
 
-        return RelayAsync<AiChatPostMessageResponse>(
+        return await RelayAsync<AiChatPostMessageResponse>(
             HttpMethod.Post,
             $"cloud/v1/ai/chat/sessions/{sessionId:D}/messages",
             request,
             sourceContext,
             endpointName: "chat_post_message",
-            licenseToken,
+            authContext,
             walletCacheKey: null,
             allowCachedWalletFallback: false,
             cancellationToken);
     }
 
-    public Task<AiChatSessionDetailResponse> GetChatSessionAsync(
+    public async Task<AiChatSessionDetailResponse> GetChatSessionAsync(
         Guid sessionId,
         int take,
         HttpContext sourceContext,
         CancellationToken cancellationToken)
     {
-        var licenseToken = ResolveRequiredLicenseToken(sourceContext);
+        var authContext = await ResolveRelayAuthContextAsync(sourceContext, cancellationToken);
         var normalizedTake = Math.Clamp(take, 1, 200);
 
-        return RelayAsync<AiChatSessionDetailResponse>(
+        return await RelayAsync<AiChatSessionDetailResponse>(
             HttpMethod.Get,
             $"cloud/v1/ai/chat/sessions/{sessionId:D}?take={normalizedTake}",
             body: null,
             sourceContext,
             endpointName: "chat_get_session",
-            licenseToken,
+            authContext,
             walletCacheKey: null,
             allowCachedWalletFallback: false,
             cancellationToken);
     }
 
-    public Task<AiChatHistoryResponse> GetChatHistoryAsync(
+    public async Task<AiChatHistoryResponse> GetChatHistoryAsync(
         int take,
         HttpContext sourceContext,
         CancellationToken cancellationToken)
     {
-        var licenseToken = ResolveRequiredLicenseToken(sourceContext);
+        var authContext = await ResolveRelayAuthContextAsync(sourceContext, cancellationToken);
         var normalizedTake = Math.Clamp(take, 1, 100);
 
-        return RelayAsync<AiChatHistoryResponse>(
+        return await RelayAsync<AiChatHistoryResponse>(
             HttpMethod.Get,
             $"cloud/v1/ai/chat/history?take={normalizedTake}",
             body: null,
             sourceContext,
             endpointName: "chat_history",
-            licenseToken,
+            authContext,
             walletCacheKey: null,
             allowCachedWalletFallback: false,
             cancellationToken);
     }
 
-    public Task<AiCheckoutSessionResponse> CreateCheckoutSessionAsync(
+    public async Task<AiCheckoutSessionResponse> CreateCheckoutSessionAsync(
         AiCheckoutSessionRequest request,
         HttpContext sourceContext,
         CancellationToken cancellationToken)
     {
-        var licenseToken = ResolveRequiredLicenseToken(sourceContext);
+        var authContext = await ResolveRelayAuthContextAsync(sourceContext, cancellationToken);
 
-        return RelayAsync<AiCheckoutSessionResponse>(
+        return await RelayAsync<AiCheckoutSessionResponse>(
             HttpMethod.Post,
             "cloud/v1/ai/payments/checkout",
             request,
             sourceContext,
             endpointName: "payments_checkout",
-            licenseToken,
+            authContext,
             walletCacheKey: null,
             allowCachedWalletFallback: false,
             cancellationToken);
     }
 
-    public Task<AiPaymentHistoryResponse> GetPaymentHistoryAsync(
+    public async Task<AiPaymentHistoryResponse> GetPaymentHistoryAsync(
         int take,
         HttpContext sourceContext,
         CancellationToken cancellationToken)
     {
-        var licenseToken = ResolveRequiredLicenseToken(sourceContext);
+        var authContext = await ResolveRelayAuthContextAsync(sourceContext, cancellationToken);
         var normalizedTake = Math.Clamp(take, 1, 100);
 
-        return RelayAsync<AiPaymentHistoryResponse>(
+        return await RelayAsync<AiPaymentHistoryResponse>(
             HttpMethod.Get,
             $"cloud/v1/ai/payments?take={normalizedTake}",
             body: null,
             sourceContext,
             endpointName: "payments_history",
-            licenseToken,
+            authContext,
             walletCacheKey: null,
             allowCachedWalletFallback: false,
             cancellationToken);
@@ -248,7 +251,7 @@ public sealed class AiCreditCloudRelayService(
         object? body,
         HttpContext sourceContext,
         string endpointName,
-        string licenseToken,
+        RelayAuthContext authContext,
         string? walletCacheKey,
         bool allowCachedWalletFallback,
         CancellationToken cancellationToken)
@@ -259,7 +262,8 @@ public sealed class AiCreditCloudRelayService(
             relativePath,
             body,
             sourceContext.Request,
-            licenseToken,
+            authContext.LicenseToken,
+            authContext.CloudAuthToken,
             options.CloudRelayBaseUrl);
         var httpClient = httpClientFactory.CreateClient(CloudRelayClientName);
         using var timeoutCts = BuildTimeoutCancellationTokenSource(options.CloudRelayTimeoutSeconds, cancellationToken);
@@ -391,18 +395,36 @@ public sealed class AiCreditCloudRelayService(
         }
     }
 
-    private string ResolveRequiredLicenseToken(HttpContext sourceContext)
+    private async Task<RelayAuthContext> ResolveRelayAuthContextAsync(
+        HttpContext sourceContext,
+        CancellationToken cancellationToken)
     {
-        var token = NormalizeOptionalValue(licenseService.ResolveLicenseToken(sourceContext));
-        if (!string.IsNullOrWhiteSpace(token))
+        string? cloudAuthToken = null;
+        try
         {
-            return token;
+            cloudAuthToken = NormalizeOptionalValue(
+                await cloudAccountService.TryGetLinkedAuthTokenAsync(cancellationToken));
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or CryptographicException or FormatException)
+        {
+            throw new AiRelayException(
+                AiRelayErrorCodes.CloudRelayContextResolutionFailed,
+                "Linked cloud account token could not be resolved. Please re-link the cloud account.",
+                StatusCodes.Status400BadRequest);
         }
 
-        throw new AiRelayException(
-            LicenseErrorCodes.InvalidToken,
-            "X-License-Token header or license cookie is required for AI cloud relay requests.",
-            StatusCodes.Status401Unauthorized);
+        var licenseToken = NormalizeOptionalValue(licenseService.ResolveLicenseToken(sourceContext));
+        var cacheIdentity = cloudAuthToken ?? licenseToken;
+
+        if (string.IsNullOrWhiteSpace(cacheIdentity))
+        {
+            throw new AiRelayException(
+                AiRelayErrorCodes.CloudRelayContextResolutionFailed,
+                "No linked cloud account token is available. Link the cloud account and try again.",
+                StatusCodes.Status401Unauthorized);
+        }
+
+        return new RelayAuthContext(licenseToken, cloudAuthToken, cacheIdentity);
     }
 
     private static HttpRequestMessage BuildCloudRequest(
@@ -410,7 +432,8 @@ public sealed class AiCreditCloudRelayService(
         string relativePath,
         object? body,
         HttpRequest sourceRequest,
-        string licenseToken,
+        string? licenseToken,
+        string? cloudAuthToken,
         string baseUrl)
     {
         var normalizedBaseUrl = NormalizeOptionalValue(baseUrl)
@@ -436,7 +459,16 @@ public sealed class AiCreditCloudRelayService(
             request.Headers.TryAddWithoutValidation(CloudWriteRequestContract.DeviceCodeHeaderName, resolvedDeviceId);
         }
 
-        request.Headers.TryAddWithoutValidation(LicenseTokenHeaderName, licenseToken);
+        if (!string.IsNullOrWhiteSpace(licenseToken))
+        {
+            request.Headers.TryAddWithoutValidation(LicenseTokenHeaderName, licenseToken);
+        }
+
+        if (!string.IsNullOrWhiteSpace(cloudAuthToken))
+        {
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", cloudAuthToken);
+            request.Headers.TryAddWithoutValidation("Cookie", $"{CloudAuthCookieName}={cloudAuthToken}");
+        }
 
         if (body is not null)
         {
@@ -565,9 +597,9 @@ public sealed class AiCreditCloudRelayService(
         return cts;
     }
 
-    private static string? BuildWalletCacheKey(string? licenseToken)
+    private static string? BuildWalletCacheKey(string? identityToken)
     {
-        var normalizedToken = NormalizeOptionalValue(licenseToken);
+        var normalizedToken = NormalizeOptionalValue(identityToken);
         if (string.IsNullOrWhiteSpace(normalizedToken))
         {
             return null;
@@ -581,6 +613,11 @@ public sealed class AiCreditCloudRelayService(
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
+
+    private sealed record RelayAuthContext(
+        string? LicenseToken,
+        string? CloudAuthToken,
+        string CacheIdentity);
 }
 
 public sealed class AiCreditCloudRelayWalletCache

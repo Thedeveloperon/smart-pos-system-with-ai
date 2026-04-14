@@ -6,6 +6,8 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
+using SmartPos.Backend.Domain;
+using SmartPos.Backend.Infrastructure;
 
 namespace SmartPos.Backend.IntegrationTests;
 
@@ -101,6 +103,44 @@ public sealed class AiCloudRelayProxyTests : IDisposable
 
         var fallbackPayload = await TestJson.ReadObjectAsync(fallbackResponse);
         Assert.Equal(44.0m, TestJson.GetDecimal(fallbackPayload, "available_credits"));
+    }
+
+    [Fact]
+    public async Task RelayEnabled_WhenCloudAccountIsLinked_ShouldForwardCloudAuthToken()
+    {
+        relayHandler.Enqueue(_ => JsonResponse(HttpStatusCode.OK, new
+        {
+            available_credits = 12.0m,
+            updated_at = DateTimeOffset.UtcNow
+        }));
+
+        using (var scope = appFactory.Services.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+            dbContext.CloudAccountLinks.RemoveRange(dbContext.CloudAccountLinks);
+            dbContext.CloudAccountLinks.Add(new CloudAccountLink
+            {
+                Id = Guid.NewGuid(),
+                CloudUsername = "owner",
+                CloudFullName = "Owner",
+                CloudRole = "owner",
+                CloudShopCode = "default",
+                CloudAuthToken = "cloud-auth-token-it",
+                TokenExpiresAtUtc = DateTimeOffset.UtcNow.AddHours(1),
+                LinkedAtUtc = DateTimeOffset.UtcNow
+            });
+            dbContext.SaveChanges();
+        }
+
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var response = await client.GetAsync("/api/ai/wallet");
+        response.EnsureSuccessStatusCode();
+
+        Assert.Single(relayHandler.CapturedRequests);
+        var relayRequest = relayHandler.CapturedRequests[0];
+        Assert.Equal("Bearer cloud-auth-token-it", relayRequest.Headers["Authorization"]);
+        Assert.Equal("smartpos_auth=cloud-auth-token-it", relayRequest.Headers["Cookie"]);
     }
 
     [Fact]
