@@ -871,7 +871,9 @@ public sealed class CloudAccountService(
     {
         var aiUrl = NormalizeOptionalValue(aiOptions.CloudRelayBaseUrl);
         var licenseUrl = NormalizeOptionalValue(licenseOptions.CloudRelayBaseUrl);
-        var candidate = aiUrl ?? licenseUrl;
+        // Cloud account login/tenant APIs are hosted on the account portal surface.
+        // Prefer licensing relay URL for account-link operations, then fall back to AI URL.
+        var candidate = licenseUrl ?? aiUrl;
         if (string.IsNullOrWhiteSpace(candidate) ||
             !Uri.TryCreate(candidate, UriKind.Absolute, out var uri))
         {
