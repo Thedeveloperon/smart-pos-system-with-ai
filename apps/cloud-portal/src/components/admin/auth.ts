@@ -114,4 +114,14 @@ export async function logoutAdmin() {
     },
     body: JSON.stringify({}),
   });
+
+  if (typeof window !== "undefined" && "caches" in window) {
+    try {
+      const cacheKeys = await caches.keys();
+      const smartPosCacheKeys = cacheKeys.filter((key) => key.startsWith("smartpos-web-"));
+      await Promise.all(smartPosCacheKeys.map((key) => caches.delete(key)));
+    } catch {
+      // Best-effort cache cleanup after sign-out.
+    }
+  }
 }

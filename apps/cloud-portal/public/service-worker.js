@@ -1,4 +1,4 @@
-const CACHE_VERSION = "smartpos-web-v1";
+const CACHE_VERSION = "smartpos-web-v2";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
@@ -48,6 +48,10 @@ const isNavigationRequest = (request) =>
   request.mode === "navigate" ||
   (request.method === "GET" && request.headers.get("accept")?.includes("text/html"));
 
+const shouldBypassCache = (url) =>
+  url.pathname.startsWith("/api/") ||
+  url.pathname.startsWith("/_next/data/");
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   if (request.method !== "GET") {
@@ -56,6 +60,11 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) {
+    return;
+  }
+
+  if (shouldBypassCache(url)) {
+    event.respondWith(fetch(request));
     return;
   }
 
