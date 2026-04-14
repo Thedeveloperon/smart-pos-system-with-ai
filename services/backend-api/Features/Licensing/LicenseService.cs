@@ -2574,12 +2574,26 @@ public sealed class LicenseService(
         var normalizedTake = Math.Clamp(take <= 0 ? 40 : take, 1, 200);
         var aiInvoices = await GetOwnerAiCreditInvoicesAsync(normalizedTake, cancellationToken);
 
-        var posInvoices = await dbContext.ManualBillingInvoices
-            .AsNoTracking()
-            .Where(x => x.ShopId == ownerContext.Shop.Id && x.Notes != null && x.Notes.StartsWith(CloudPosPurchaseMetadataPrefix))
-            .OrderByDescending(x => x.CreatedAtUtc)
-            .Take(normalizedTake)
-            .ToListAsync(cancellationToken);
+        List<ManualBillingInvoice> posInvoices;
+        if (dbContext.Database.IsSqlite())
+        {
+            posInvoices = (await dbContext.ManualBillingInvoices
+                    .AsNoTracking()
+                    .Where(x => x.ShopId == ownerContext.Shop.Id && x.Notes != null && x.Notes.StartsWith(CloudPosPurchaseMetadataPrefix))
+                    .ToListAsync(cancellationToken))
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Take(normalizedTake)
+                .ToList();
+        }
+        else
+        {
+            posInvoices = await dbContext.ManualBillingInvoices
+                .AsNoTracking()
+                .Where(x => x.ShopId == ownerContext.Shop.Id && x.Notes != null && x.Notes.StartsWith(CloudPosPurchaseMetadataPrefix))
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Take(normalizedTake)
+                .ToListAsync(cancellationToken);
+        }
 
         var items = aiInvoices.Items.Select(MapOwnerAiInvoiceToCloudPurchase)
             .Concat(posInvoices.Select(x => MapCloudPosPurchaseRow(x, ownerContext.Shop.Code, ParseCloudPosPurchaseMetadata(x.Notes))))
@@ -2645,13 +2659,28 @@ public sealed class LicenseService(
         var normalizedStatus = NormalizeOptionalValue(status)?.ToLowerInvariant();
         var aiInvoices = await GetAdminPendingAiCreditInvoicesAsync(normalizedTake, cancellationToken);
 
-        var posInvoices = await dbContext.ManualBillingInvoices
-            .AsNoTracking()
-            .Include(x => x.Shop)
-            .Where(x => x.Notes != null && x.Notes.StartsWith(CloudPosPurchaseMetadataPrefix))
-            .OrderByDescending(x => x.CreatedAtUtc)
-            .Take(normalizedTake)
-            .ToListAsync(cancellationToken);
+        List<ManualBillingInvoice> posInvoices;
+        if (dbContext.Database.IsSqlite())
+        {
+            posInvoices = (await dbContext.ManualBillingInvoices
+                    .AsNoTracking()
+                    .Include(x => x.Shop)
+                    .Where(x => x.Notes != null && x.Notes.StartsWith(CloudPosPurchaseMetadataPrefix))
+                    .ToListAsync(cancellationToken))
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Take(normalizedTake)
+                .ToList();
+        }
+        else
+        {
+            posInvoices = await dbContext.ManualBillingInvoices
+                .AsNoTracking()
+                .Include(x => x.Shop)
+                .Where(x => x.Notes != null && x.Notes.StartsWith(CloudPosPurchaseMetadataPrefix))
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Take(normalizedTake)
+                .ToListAsync(cancellationToken);
+        }
 
         var items = aiInvoices.Items
             .Select(MapOwnerAiInvoiceToCloudPurchase)

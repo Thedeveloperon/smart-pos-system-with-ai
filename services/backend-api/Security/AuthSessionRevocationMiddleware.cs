@@ -9,6 +9,8 @@ namespace SmartPos.Backend.Security;
 
 public sealed class AuthSessionRevocationMiddleware(RequestDelegate next)
 {
+    private const string CloudCommerceAuthModeVariable = "CloudCommerceAuthMode";
+
     public async Task InvokeAsync(
         HttpContext httpContext,
         SmartPosDbContext dbContext,
@@ -39,16 +41,27 @@ public sealed class AuthSessionRevocationMiddleware(RequestDelegate next)
         var userId = ParseGuid(
             httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier) ??
             httpContext.User.FindFirstValue(JwtRegisteredClaimNames.Sub));
-        var deviceId = ParseGuid(httpContext.User.FindFirstValue("device_id"));
+        var sessionId = ParseGuid(httpContext.User.FindFirstValue("session_id"));
         var sessionVersion = ParseSessionVersion(httpContext.User.FindFirstValue("auth_session_version"));
 
-        if (!userId.HasValue || !deviceId.HasValue || sessionVersion <= 0)
+        if (!userId.HasValue || !sessionId.HasValue || sessionVersion <= 0)
         {
             await RejectAsync(
                 httpContext,
                 jwtCookieOptions,
                 "AUTH_SESSION_INVALID",
                 "Authenticated session is invalid.");
+            return;
+        }
+
+        if (RequiresCredentialsOnlyCloudSession(httpContext.Request.Path) &&
+            sessionVersion < 2)
+        {
+            await RejectAsync(
+                httpContext,
+                jwtCookieOptions,
+                "AUTH_SESSION_UPGRADE_REQUIRED",
+                "Cloud commerce session expired. Please sign in again.");
             return;
         }
 
@@ -65,13 +78,13 @@ public sealed class AuthSessionRevocationMiddleware(RequestDelegate next)
             return;
         }
 
-        var device = await dbContext.Devices
+        var session = await dbContext.Devices
             .AsNoTracking()
             .FirstOrDefaultAsync(
-                x => x.Id == deviceId.Value &&
+                x => x.Id == sessionId.Value &&
                      x.AppUserId == userId.Value,
                 httpContext.RequestAborted);
-        if (device is null)
+        if (session is null)
         {
             await RejectAsync(
                 httpContext,
@@ -81,8 +94,8 @@ public sealed class AuthSessionRevocationMiddleware(RequestDelegate next)
             return;
         }
 
-        var expectedVersion = Math.Max(1, device.AuthSessionVersion);
-        if (sessionVersion != expectedVersion)
+        var expectedVersion = Math.Max(1, session.AuthSessionVersion);
+        if (session.AuthSessionRevokedAtUtc.HasValue || sessionVersion != expectedVersion)
         {
             await RejectAsync(
                 httpContext,
@@ -108,6 +121,31 @@ public sealed class AuthSessionRevocationMiddleware(RequestDelegate next)
     private static Guid? ParseGuid(string? value)
     {
         return Guid.TryParse(value, out var parsed) ? parsed : null;
+    }
+
+    private static bool RequiresCredentialsOnlyCloudSession(PathString path)
+    {
+        if (path.StartsWithSegments("/api/account", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWithSegments("/api/license/account", StringComparison.OrdinalIgnoreCase))
+        {
+            return IsCredentialsOnlyCloudModeEnabled();
+        }
+
+        return false;
+    }
+
+    private static bool IsCredentialsOnlyCloudModeEnabled()
+    {
+        var configured = Environment.GetEnvironmentVariable(CloudCommerceAuthModeVariable);
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            return true;
+        }
+
+        return !string.Equals(
+            configured.Trim(),
+            "legacy",
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task RejectAsync(

@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
 
   return forwardAccountRequest({
     request,
-    backendPath: `/api/ai/ledger?take=${normalizedTake}`,
+    backendPath: `/api/account/ai/ledger?take=${normalizedTake}`,
     method: "GET",
     includeIdempotencyKey: false,
   });

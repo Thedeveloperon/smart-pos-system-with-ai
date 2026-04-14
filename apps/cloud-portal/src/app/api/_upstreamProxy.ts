@@ -72,9 +72,7 @@ export async function forwardUpstreamRequest(options: ForwardUpstreamOptions) {
 
     const passthroughHeaders = [
       "accept",
-      "x-device-id",
       "x-pos-version",
-      "x-device-code",
       "x-license-token",
     ];
     for (const key of passthroughHeaders) {
