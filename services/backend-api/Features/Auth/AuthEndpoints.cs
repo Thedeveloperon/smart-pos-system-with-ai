@@ -43,13 +43,25 @@ public static class AuthEndpoints
                 {
                     Reason = "logout"
                 };
-                _ = authService.RevokeSessionAsync(
-                    httpContext.User,
-                    httpContext.User.FindFirst("terminal_id")?.Value ??
-                    httpContext.User.FindFirst("device_code")?.Value ??
-                    string.Empty,
-                    revokeRequest,
-                    cancellationToken);
+                var sessionIdValue = httpContext.User.FindFirst("session_id")?.Value;
+                if (Guid.TryParse(sessionIdValue, out var sessionId))
+                {
+                    _ = await authService.RevokeSessionByIdAsync(
+                        httpContext.User,
+                        sessionId,
+                        revokeRequest,
+                        cancellationToken);
+                }
+                else
+                {
+                    _ = await authService.RevokeSessionAsync(
+                        httpContext.User,
+                        httpContext.User.FindFirst("terminal_id")?.Value ??
+                        httpContext.User.FindFirst("device_code")?.Value ??
+                        string.Empty,
+                        revokeRequest,
+                        cancellationToken);
+                }
             }
             catch
             {

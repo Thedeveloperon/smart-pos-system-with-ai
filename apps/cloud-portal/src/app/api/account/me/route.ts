@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   return forwardAccountRequest({
     request,
-    backendPath: "/api/auth/me",
+    backendPath: "/api/account/me",
     method: "GET",
     includeIdempotencyKey: false,
   });

@@ -23,6 +23,18 @@ public sealed class LoginRequest
     public string? MfaCode { get; set; }
 }
 
+public sealed class AccountLoginRequest
+{
+    [JsonPropertyName("username")]
+    public string Username { get; set; } = string.Empty;
+
+    [JsonPropertyName("password")]
+    public string Password { get; set; } = string.Empty;
+
+    [JsonPropertyName("mfa_code")]
+    public string? MfaCode { get; set; }
+}
+
 public sealed class AuthSessionResponse
 {
     [JsonPropertyName("user_id")]
@@ -48,6 +60,39 @@ public sealed class AuthSessionResponse
 
     [JsonPropertyName("device_code")]
     public string DeviceCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("expires_at")]
+    public DateTimeOffset ExpiresAt { get; set; }
+
+    [JsonPropertyName("mfa_verified")]
+    public bool MfaVerified { get; set; }
+
+    [JsonPropertyName("auth_session_version")]
+    public int AuthSessionVersion { get; set; }
+}
+
+public sealed class AccountSessionResponse
+{
+    [JsonPropertyName("user_id")]
+    public Guid UserId { get; set; }
+
+    [JsonPropertyName("username")]
+    public string Username { get; set; } = string.Empty;
+
+    [JsonPropertyName("full_name")]
+    public string FullName { get; set; } = string.Empty;
+
+    [JsonPropertyName("role")]
+    public string Role { get; set; } = string.Empty;
+
+    [JsonPropertyName("session_id")]
+    public Guid SessionId { get; set; }
+
+    [JsonPropertyName("shop_id")]
+    public Guid? ShopId { get; set; }
+
+    [JsonPropertyName("shop_code")]
+    public string? ShopCode { get; set; }
 
     [JsonPropertyName("expires_at")]
     public DateTimeOffset ExpiresAt { get; set; }

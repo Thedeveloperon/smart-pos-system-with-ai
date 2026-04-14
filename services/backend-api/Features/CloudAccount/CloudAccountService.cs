@@ -88,15 +88,12 @@ public sealed class CloudAccountService(
         }
 
         var localShopCode = await ResolveLocalShopCodeAsync(cancellationToken);
-        var resolvedDeviceCode = ResolveLinkDeviceCode();
         var client = httpClientFactory.CreateClient(CloudAccountLinkClientName);
 
         var loginPayload = new
         {
             username = normalizedUsername,
-            password,
-            device_code = resolvedDeviceCode,
-            device_name = "SmartPOS Local Backend"
+            password
         };
 
         var loginResult = await LoginToCloudAsync(
@@ -884,21 +881,6 @@ public sealed class CloudAccountService(
 
         baseUrl = uri.ToString().TrimEnd('/');
         return true;
-    }
-
-    private string ResolveLinkDeviceCode()
-    {
-        var httpContext = httpContextAccessor.HttpContext;
-        if (httpContext is null)
-        {
-            return "LOCAL-CLOUD-LINK";
-        }
-
-        var resolved = NormalizeOptionalValue(httpContext.Request.Headers["X-Terminal-Id"].FirstOrDefault()) ??
-                       NormalizeOptionalValue(httpContext.Request.Headers["X-Device-Code"].FirstOrDefault()) ??
-                       NormalizeOptionalValue(httpContext.User.FindFirstValue("terminal_id")) ??
-                       NormalizeOptionalValue(httpContext.User.FindFirstValue("device_code"));
-        return string.IsNullOrWhiteSpace(resolved) ? "LOCAL-CLOUD-LINK" : resolved;
     }
 
     private string ProtectSensitiveValue(string? value)

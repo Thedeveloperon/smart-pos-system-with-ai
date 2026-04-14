@@ -69,7 +69,7 @@ describe("Account API proxy routes", () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it("login route forwards payload to backend and propagates auth cookie", async () => {
+  it("login route forwards credentials-only payload to backend and propagates auth cookie", async () => {
     vi.mocked(global.fetch).mockResolvedValueOnce(
       jsonResponse(
         {
@@ -92,7 +92,6 @@ describe("Account API proxy routes", () => {
       body: JSON.stringify({
         username: "owner",
         password: "owner123",
-        device_code: "MKTWEB-TEST",
       }),
     });
 
@@ -106,13 +105,12 @@ describe("Account API proxy routes", () => {
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
     const [url, init] = vi.mocked(global.fetch).mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("http://backend.test/api/auth/login");
+    expect(url).toBe("http://backend.test/api/account/login");
     expect(init.method).toBe("POST");
     expect(init.body).toBe(
       JSON.stringify({
         username: "owner",
         password: "owner123",
-        device_code: "MKTWEB-TEST",
       }),
     );
 
@@ -121,7 +119,7 @@ describe("Account API proxy routes", () => {
     expect(headers.get("Idempotency-Key")).toBeNull();
   });
 
-  it("login route falls back to legacy /api/account/login when /api/auth/login is unavailable", async () => {
+  it("login route falls back to legacy /api/auth/login when /api/account/login is unavailable", async () => {
     vi.mocked(global.fetch)
       .mockResolvedValueOnce(
         jsonResponse(
@@ -153,7 +151,6 @@ describe("Account API proxy routes", () => {
       body: JSON.stringify({
         username: "owner",
         password: "owner123",
-        device_code: "MKTWEB-TEST",
       }),
     });
 
@@ -166,24 +163,22 @@ describe("Account API proxy routes", () => {
 
     expect(global.fetch).toHaveBeenCalledTimes(2);
     const [firstUrl, firstInit] = vi.mocked(global.fetch).mock.calls[0] as [string, RequestInit];
-    expect(firstUrl).toBe("http://backend.test/api/auth/login");
+    expect(firstUrl).toBe("http://backend.test/api/account/login");
     expect(firstInit.method).toBe("POST");
     expect(firstInit.body).toBe(
       JSON.stringify({
         username: "owner",
         password: "owner123",
-        device_code: "MKTWEB-TEST",
       }),
     );
 
     const [secondUrl, secondInit] = vi.mocked(global.fetch).mock.calls[1] as [string, RequestInit];
-    expect(secondUrl).toBe("http://backend.test/api/account/login");
+    expect(secondUrl).toBe("http://backend.test/api/auth/login");
     expect(secondInit.method).toBe("POST");
     expect(secondInit.body).toBe(
       JSON.stringify({
         username: "owner",
         password: "owner123",
-        device_code: "MKTWEB-TEST",
       }),
     );
 
@@ -232,12 +227,18 @@ describe("Account API proxy routes", () => {
     expect(readHeaders(thirdInit).get("content-type")).toBe("application/json");
   });
 
-  it("session route forwards cookie to backend /api/auth/me", async () => {
+  it("session route forwards cookie to backend /api/account/me", async () => {
     vi.mocked(global.fetch).mockResolvedValueOnce(
       jsonResponse({
+        user_id: "11111111-1111-1111-1111-111111111111",
         username: "manager",
+        full_name: "Store Manager",
         role: "manager",
-        device_code: "MKTWEB-TEST",
+        session_id: "sess-01",
+        shop_code: "default",
+        expires_at: "2026-04-20T00:00:00Z",
+        mfa_verified: true,
+        auth_session_version: 1,
       }),
     );
 
@@ -257,7 +258,7 @@ describe("Account API proxy routes", () => {
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
     const [url, init] = vi.mocked(global.fetch).mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("http://backend.test/api/auth/me");
+    expect(url).toBe("http://backend.test/api/account/me");
     expect(init.method).toBe("GET");
 
     const headers = readHeaders(init);
@@ -437,7 +438,7 @@ describe("Account API proxy routes", () => {
 
     expect(global.fetch).toHaveBeenCalledTimes(2);
     const [walletUrl, walletInit] = vi.mocked(global.fetch).mock.calls[0] as [string, RequestInit];
-    expect(walletUrl).toBe("http://backend.test/api/ai/wallet");
+    expect(walletUrl).toBe("http://backend.test/api/account/ai/wallet");
     expect(walletInit.method).toBe("GET");
     expect(readHeaders(walletInit).get("cookie")).toContain("smartpos_auth=session-token");
     expect(readHeaders(walletInit).get("Idempotency-Key")).toBeNull();
@@ -469,7 +470,7 @@ describe("Account API proxy routes", () => {
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
     const [url, init] = vi.mocked(global.fetch).mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("http://backend.test/api/ai/payments?take=100");
+    expect(url).toBe("http://backend.test/api/account/ai/payments?take=100");
     expect(init.method).toBe("GET");
     expect(readHeaders(init).get("cookie")).toContain("smartpos_auth=session-token");
   });
@@ -494,7 +495,7 @@ describe("Account API proxy routes", () => {
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
     const [url, init] = vi.mocked(global.fetch).mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("http://backend.test/api/ai/ledger?take=200");
+    expect(url).toBe("http://backend.test/api/account/ai/ledger?take=200");
     expect(init.method).toBe("GET");
     expect(readHeaders(init).get("cookie")).toContain("smartpos_auth=session-token");
     expect(readHeaders(init).get("Idempotency-Key")).toBeNull();

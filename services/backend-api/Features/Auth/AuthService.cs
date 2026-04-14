@@ -179,7 +179,7 @@ public sealed class AuthService(
         user.LastLoginAtUtc = now;
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        var token = BuildToken(user, role, device, expiresAt, mfaVerified, superAdminScope);
+        var token = BuildToken(user, role, device, expiresAt, mfaVerified, superAdminScope, includeLegacyDeviceClaims: true);
         var session = new AuthSessionResponse
         {
             UserId = user.Id,
@@ -196,6 +196,66 @@ public sealed class AuthService(
         };
 
         return (token, session);
+    }
+
+    public async Task<(string Token, AccountSessionResponse Session)> LoginAccountAsync(
+        AccountLoginRequest request,
+        CancellationToken cancellationToken)
+    {
+        var delegatedRequest = new LoginRequest
+        {
+            Username = request.Username,
+            Password = request.Password,
+            MfaCode = request.MfaCode,
+            DeviceName = "Cloud Portal Session"
+        };
+        var (_, delegatedSession) = await LoginAsync(delegatedRequest, cancellationToken);
+
+        var user = await dbContext.Users
+            .Include(x => x.UserRoles)
+            .ThenInclude(x => x.Role)
+            .FirstOrDefaultAsync(x => x.Id == delegatedSession.UserId && x.IsActive, cancellationToken)
+            ?? throw new InvalidOperationException("Authenticated user is not available.");
+        var (resolvedRole, superAdminScope) = ResolveRoleAndScope(user);
+        var sessionEntity = await dbContext.Devices
+            .FirstOrDefaultAsync(
+                x => x.Id == delegatedSession.SessionId &&
+                     x.AppUserId == delegatedSession.UserId,
+                cancellationToken)
+            ?? throw new InvalidOperationException("Authenticated session is invalid.");
+        if (sessionEntity.AuthSessionVersion < 2)
+        {
+            sessionEntity.AuthSessionVersion = 2;
+            sessionEntity.LastAuthIssuedAtUtc = DateTimeOffset.UtcNow;
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        var token = BuildToken(
+            user,
+            resolvedRole,
+            sessionEntity,
+            delegatedSession.ExpiresAt,
+            delegatedSession.MfaVerified,
+            superAdminScope,
+            includeLegacyDeviceClaims: false);
+        var shop = user.StoreId.HasValue && user.StoreId.Value != Guid.Empty
+            ? await dbContext.Shops
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == user.StoreId.Value, cancellationToken)
+            : null;
+
+        return (token, new AccountSessionResponse
+        {
+            UserId = user.Id,
+            Username = user.Username,
+            FullName = user.FullName,
+            Role = resolvedRole,
+            SessionId = delegatedSession.SessionId,
+            ShopId = shop?.Id,
+            ShopCode = shop?.Code,
+            ExpiresAt = delegatedSession.ExpiresAt,
+            MfaVerified = delegatedSession.MfaVerified,
+            AuthSessionVersion = Math.Max(1, sessionEntity.AuthSessionVersion)
+        });
     }
 
     public async Task<AuthSessionResponse?> GetCurrentSessionAsync(
@@ -255,6 +315,71 @@ public sealed class AuthService(
             ExpiresAt = expiresAt,
             MfaVerified = mfaVerified,
             AuthSessionVersion = Math.Max(1, device.AuthSessionVersion)
+        };
+    }
+
+    public async Task<AccountSessionResponse?> GetCurrentAccountSessionAsync(
+        ClaimsPrincipal principal,
+        CancellationToken cancellationToken)
+    {
+        var userId = ParseGuid(
+            principal.FindFirstValue(ClaimTypes.NameIdentifier) ??
+            principal.FindFirstValue(JwtRegisteredClaimNames.Sub));
+        var sessionId = ParseGuid(principal.FindFirstValue("session_id"));
+        var role = principal.FindFirstValue(ClaimTypes.Role);
+        var expiresAtUnix = principal.FindFirstValue(JwtRegisteredClaimNames.Exp);
+        var mfaVerifiedClaim = principal.FindFirstValue("mfa_verified");
+        var mfaVerified = bool.TryParse(mfaVerifiedClaim, out var parsedMfaVerified) && parsedMfaVerified;
+
+        if (!userId.HasValue || !sessionId.HasValue || string.IsNullOrWhiteSpace(role))
+        {
+            return null;
+        }
+
+        var user = await dbContext.Users
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == userId.Value && x.IsActive, cancellationToken);
+        if (user is null)
+        {
+            return null;
+        }
+
+        var sessionEntity = await dbContext.Devices
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == sessionId.Value && x.AppUserId == user.Id, cancellationToken);
+        if (sessionEntity is null)
+        {
+            return null;
+        }
+
+        DateTimeOffset expiresAt;
+        if (long.TryParse(expiresAtUnix, out var expUnix))
+        {
+            expiresAt = DateTimeOffset.FromUnixTimeSeconds(expUnix);
+        }
+        else
+        {
+            expiresAt = DateTimeOffset.UtcNow;
+        }
+
+        var shop = user.StoreId.HasValue && user.StoreId.Value != Guid.Empty
+            ? await dbContext.Shops
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == user.StoreId.Value, cancellationToken)
+            : null;
+
+        return new AccountSessionResponse
+        {
+            UserId = user.Id,
+            Username = user.Username,
+            FullName = user.FullName,
+            Role = role,
+            SessionId = sessionEntity.Id,
+            ShopId = shop?.Id,
+            ShopCode = shop?.Code,
+            ExpiresAt = expiresAt,
+            MfaVerified = mfaVerified,
+            AuthSessionVersion = Math.Max(1, sessionEntity.AuthSessionVersion)
         };
     }
 
@@ -319,8 +444,8 @@ public sealed class AuthService(
         return new AuthSessionsResponse
         {
             GeneratedAt = DateTimeOffset.UtcNow,
-            CurrentTerminalId = rows.FirstOrDefault(x => x.Id == context.DeviceId)?.DeviceCode,
-            CurrentDeviceCode = rows.FirstOrDefault(x => x.Id == context.DeviceId)?.DeviceCode,
+            CurrentTerminalId = rows.FirstOrDefault(x => x.Id == context.SessionId)?.DeviceCode,
+            CurrentDeviceCode = rows.FirstOrDefault(x => x.Id == context.SessionId)?.DeviceCode,
             Items = rows.Select(x => new AuthSessionDeviceRow
             {
                 SessionId = x.Id,
@@ -328,7 +453,7 @@ public sealed class AuthService(
                 DeviceId = x.Id,
                 DeviceCode = x.DeviceCode,
                 DeviceName = x.Name,
-                IsCurrent = x.Id == context.DeviceId,
+                IsCurrent = x.Id == context.SessionId,
                 IsRevoked = x.AuthSessionRevokedAtUtc.HasValue,
                 AuthSessionVersion = Math.Max(1, x.AuthSessionVersion),
                 CreatedAt = x.CreatedAtUtc,
@@ -368,7 +493,7 @@ public sealed class AuthService(
         dbContext.AuditLogs.Add(new AuditLog
         {
             UserId = context.UserId,
-            DeviceId = context.DeviceId,
+            DeviceId = context.SessionId,
             Action = "auth_session_revoked",
             EntityName = "auth_session",
             EntityId = targetDevice.Id.ToString(),
@@ -391,7 +516,7 @@ public sealed class AuthService(
             TargetSessionId = targetDevice.Id,
             TargetTerminalId = targetDevice.DeviceCode,
             TargetDeviceCode = targetDevice.DeviceCode,
-            CurrentSessionRevoked = targetDevice.Id == context.DeviceId
+            CurrentSessionRevoked = targetDevice.Id == context.SessionId
         };
     }
 
@@ -418,7 +543,7 @@ public sealed class AuthService(
         dbContext.AuditLogs.Add(new AuditLog
         {
             UserId = context.UserId,
-            DeviceId = context.DeviceId,
+            DeviceId = context.SessionId,
             Action = "auth_session_revoked",
             EntityName = "auth_session",
             EntityId = targetDevice.Id.ToString(),
@@ -442,7 +567,7 @@ public sealed class AuthService(
             TargetSessionId = targetDevice.Id,
             TargetTerminalId = targetDevice.DeviceCode,
             TargetDeviceCode = targetDevice.DeviceCode,
-            CurrentSessionRevoked = targetDevice.Id == context.DeviceId
+            CurrentSessionRevoked = targetDevice.Id == context.SessionId
         };
     }
 
@@ -456,7 +581,7 @@ public sealed class AuthService(
         var now = DateTimeOffset.UtcNow;
         var reason = NormalizeOptionalValue(request.Reason) ?? "manual_revoke_other_sessions";
         var otherDevices = await dbContext.Devices
-            .Where(x => x.AppUserId == context.UserId && x.Id != context.DeviceId)
+            .Where(x => x.AppUserId == context.UserId && x.Id != context.SessionId)
             .ToListAsync(cancellationToken);
 
         foreach (var device in otherDevices)
@@ -469,10 +594,10 @@ public sealed class AuthService(
         dbContext.AuditLogs.Add(new AuditLog
         {
             UserId = context.UserId,
-            DeviceId = context.DeviceId,
+            DeviceId = context.SessionId,
             Action = "auth_session_revoke_others",
             EntityName = "auth_session",
-            EntityId = context.DeviceId.ToString(),
+            EntityId = context.SessionId.ToString(),
             AfterJson = JsonSerializer.Serialize(new
             {
                 revoked_count = otherDevices.Count,
@@ -500,7 +625,8 @@ public sealed class AuthService(
         Device device,
         DateTimeOffset expiresAt,
         bool mfaVerified,
-        string? superAdminScope)
+        string? superAdminScope,
+        bool includeLegacyDeviceClaims)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.SecretKey));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -512,13 +638,22 @@ public sealed class AuthService(
             new(ClaimTypes.Name, user.Username),
             new("full_name", user.FullName),
             new(ClaimTypes.Role, role),
-            new("device_id", device.Id.ToString()),
             new("session_id", device.Id.ToString()),
-            new("terminal_id", device.DeviceCode),
-            new("device_code", device.DeviceCode),
             new("mfa_verified", mfaVerified.ToString().ToLowerInvariant()),
             new("auth_session_version", Math.Max(1, device.AuthSessionVersion).ToString())
         };
+        if (user.StoreId.HasValue && user.StoreId.Value != Guid.Empty)
+        {
+            claims.Add(new Claim("shop_id", user.StoreId.Value.ToString()));
+        }
+
+        if (includeLegacyDeviceClaims)
+        {
+            claims.Add(new Claim("device_id", device.Id.ToString()));
+            claims.Add(new Claim("terminal_id", device.DeviceCode));
+            claims.Add(new Claim("device_code", device.DeviceCode));
+        }
+
         if (!string.IsNullOrWhiteSpace(superAdminScope))
         {
             claims.Add(new Claim("super_admin_scope", superAdminScope.Trim().ToLowerInvariant()));
@@ -945,7 +1080,11 @@ public sealed class AuthService(
             return $"ADMIN-WEB-{normalizedUsername}";
         }
 
-        throw new InvalidOperationException("terminal_id or device_code is required.");
+        var userKey = string.IsNullOrWhiteSpace(user.Username)
+            ? user.Id.ToString("N")[..8].ToUpperInvariant()
+            : user.Username.Trim().ToUpperInvariant();
+        var generated = $"WEB-SESSION-{userKey}-{Guid.NewGuid():N}";
+        return generated.Length <= 52 ? generated : generated[..52];
     }
 
     private static AuthContext? ResolveAuthContext(ClaimsPrincipal principal)
@@ -954,13 +1093,12 @@ public sealed class AuthService(
             principal.FindFirstValue(ClaimTypes.NameIdentifier) ??
             principal.FindFirstValue(JwtRegisteredClaimNames.Sub));
         var sessionId = ParseGuid(principal.FindFirstValue("session_id"));
-        var deviceCode = NormalizeOptionalValue(principal.FindFirstValue("terminal_id"));
         var versionClaim = principal.FindFirstValue("auth_session_version");
         var sessionVersion = int.TryParse(versionClaim, out var parsedVersion)
             ? Math.Max(1, parsedVersion)
             : 0;
 
-        if (!userId.HasValue || !sessionId.HasValue || string.IsNullOrWhiteSpace(deviceCode))
+        if (!userId.HasValue || !sessionId.HasValue)
         {
             return null;
         }
@@ -968,7 +1106,6 @@ public sealed class AuthService(
         return new AuthContext(
             userId.Value,
             sessionId.Value,
-            deviceCode,
             sessionVersion);
     }
 
@@ -987,8 +1124,7 @@ public sealed class AuthService(
 
     private sealed record AuthContext(
         Guid UserId,
-        Guid DeviceId,
-        string DeviceCode,
+        Guid SessionId,
         int SessionVersion);
 
     private sealed record AuthAnomalySignal(

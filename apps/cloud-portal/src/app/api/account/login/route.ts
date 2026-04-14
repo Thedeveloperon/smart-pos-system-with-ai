@@ -117,8 +117,15 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const body = JSON.stringify(payload);
-  const candidatePaths = ["/api/auth/login", "/api/account/login", "/auth/json-login"] as const;
+  const source = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+  const normalizedPayload = {
+    username: typeof source.username === "string" ? source.username : "",
+    password: typeof source.password === "string" ? source.password : "",
+    mfa_code: typeof source.mfa_code === "string" ? source.mfa_code : undefined,
+  };
+
+  const body = JSON.stringify(normalizedPayload);
+  const candidatePaths = ["/api/account/login", "/api/auth/login", "/auth/json-login"] as const;
   for (const backendPath of candidatePaths) {
     const upstreamResponse = await forwardAccountRequest({
       request,

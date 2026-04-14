@@ -2,14 +2,13 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Copy, CreditCard, Download, Eye, EyeOff, LogOut, MonitorSmartphone } from "lucide-react";
+import { ArrowLeft, LogOut, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageShell, SectionCard, StatusChip } from "@/components/portal/layout-primitives";
 import { useI18n } from "@/i18n/I18nProvider";
 import { trackMarketingEvent } from "@/lib/marketingAnalytics";
 import {
   createAccountCloudPurchase,
-  createOwnerAiCreditInvoice,
   fetchAccountCloudProducts,
   fetchAccountCloudPurchases,
   fetchOwnerAiCreditInvoices,
@@ -18,102 +17,22 @@ import {
   type CloudPurchaseRow,
 } from "@/lib/adminApi";
 
-const AccountDeviceCodeStorageKey = "smartpos_marketing_account_device_code_v1";
-const AccountAiPendingCheckoutReferenceStorageKey =
-  "smartpos_marketing_account_ai_pending_checkout_reference_v1";
-const AccountAiTopUpEnabled =
-  (process.env.NEXT_PUBLIC_ACCOUNT_AI_TOPUP_ENABLED || "true")
-    .trim()
-    .toLowerCase() === "true";
-const AccountAiManualFallbackEnabled =
-  (process.env.NEXT_PUBLIC_ACCOUNT_AI_TOPUP_MANUAL_FALLBACK_ENABLED || "true")
-    .trim()
-    .toLowerCase() === "true";
-const AiCheckoutPollingIntervalMs = process.env.NODE_ENV === "test" ? 40 : 2500;
-const AiCheckoutPollingMaxAttempts = process.env.NODE_ENV === "test" ? 4 : 8;
-const AiSupportEmail = "support@smartpos.lk";
-
-type LicenseAccessSuccessResponse = {
-  generated_at: string;
-  shop_id: string;
-  shop_code: string;
-  shop_name: string;
-  subscription_status: string;
-  plan: string;
-  seat_limit: number;
-  entitlement_state: string;
-  can_activate: boolean;
-  installer_download_url?: string | null;
-  installer_download_expires_at?: string | null;
-  installer_download_protected: boolean;
-  installer_checksum_sha256?: string | null;
-  activation_entitlement: {
-    activation_entitlement_key: string;
-    max_activations: number;
-    activations_used: number;
-    expires_at: string;
-    status: string;
-  };
-};
-
-type AuthSessionResponse = {
+type AccountSessionResponse = {
   user_id: string;
   username: string;
   full_name: string;
   role: string;
-  device_id: string;
-  device_code: string;
+  session_id: string;
+  shop_id?: string | null;
+  shop_code?: string | null;
   expires_at: string;
   mfa_verified: boolean;
-};
-
-type CustomerLicensePortalResponse = {
-  generated_at: string;
-  shop_id: string;
-  shop_code: string;
-  shop_name: string;
-  subscription_status: string;
-  plan: string;
-  seat_limit: number;
-  active_seats: number;
-  self_service_deactivation_limit_per_day: number;
-  self_service_deactivations_used_today: number;
-  self_service_deactivations_remaining_today: number;
-  can_deactivate_more_devices_today: boolean;
-  latest_activation_entitlement?: {
-    activation_entitlement_key: string;
-    max_activations: number;
-    activations_used: number;
-    expires_at: string;
-  } | null;
-  devices: Array<{
-    provisioned_device_id: string;
-    device_code: string;
-    device_name: string;
-    device_status: string;
-    license_state: string;
-    assigned_at: string;
-    last_heartbeat_at?: string | null;
-    valid_until?: string | null;
-    grace_until?: string | null;
-    is_current_device: boolean;
-  }>;
+  auth_session_version: number;
 };
 
 type AiWalletResponse = {
   available_credits: number;
   updated_at: string;
-};
-
-type AiCreditPackResponse = {
-  pack_code: string;
-  credits: number;
-  price: number;
-  currency: string;
-};
-
-type AiCreditPackListResponse = {
-  items: AiCreditPackResponse[];
 };
 
 type AiPaymentHistoryItemResponse = {
@@ -146,55 +65,12 @@ type AiCreditLedgerResponse = {
   items: AiCreditLedgerItemResponse[];
 };
 
-type AiPendingManualPaymentItem = {
-  payment_id: string;
-  target_username: string;
-  target_full_name?: string | null;
-  shop_name?: string | null;
-  payment_status: string;
-  payment_method: string;
-  credits: number;
-  amount: number;
-  currency: string;
-  external_reference: string;
-  submitted_reference?: string | null;
-  created_at: string;
-};
-
-type AiPendingManualPaymentsResponse = {
-  items: AiPendingManualPaymentItem[];
-};
-
-type AiCheckoutSessionResponse = {
-  payment_id: string;
-  payment_status: string;
-  payment_method: string;
-  provider: string;
-  pack_code: string;
-  credits: number;
-  amount: number;
-  currency: string;
-  external_reference: string;
-  checkout_url?: string | null;
-  created_at: string;
-};
-
-type AiCheckoutMethod = "card" | "cash" | "bank_deposit";
-
 type ApiErrorPayload = {
   error?: {
     code?: string;
     message?: string;
   };
   message?: string;
-};
-
-type BeforeInstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{
-    outcome: "accepted" | "dismissed";
-    platform: string;
-  }>;
 };
 
 function parseErrorMessage(payload: unknown): string {
@@ -231,6 +107,14 @@ function requireObjectPayload<T>(payload: unknown, errorMessage: string): T {
   return payload as T;
 }
 
+function toSentence(value?: string | null) {
+  if (!value) {
+    return "-";
+  }
+
+  return value.replaceAll("_", " ");
+}
+
 function formatDate(value?: string | null) {
   if (!value) {
     return "-";
@@ -242,77 +126,6 @@ function formatDate(value?: string | null) {
   }
 
   return parsed.toLocaleString();
-}
-
-function isPastDate(value?: string | null) {
-  if (!value) {
-    return false;
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return false;
-  }
-
-  return parsed.getTime() <= Date.now();
-}
-
-function toSentence(value?: string | null) {
-  if (!value) {
-    return "-";
-  }
-
-  return value.replaceAll("_", " ");
-}
-
-function normalizePaymentStatus(value?: string | null) {
-  return (value || "").trim().toLowerCase();
-}
-
-function isPaymentStatusProcessing(value?: string | null) {
-  const normalizedStatus = normalizePaymentStatus(value);
-  return (
-    normalizedStatus === "pending" ||
-    normalizedStatus === "processing" ||
-    normalizedStatus === "action_required" ||
-    normalizedStatus === "pending_verification"
-  );
-}
-
-function resolvePaymentStatusGuidance(value?: string | null) {
-  const normalizedStatus = normalizePaymentStatus(value);
-  if (!normalizedStatus) {
-    return "Payment status not available yet.";
-  }
-
-  switch (normalizedStatus) {
-    case "processing":
-    case "pending":
-      return "Payment is still processing with the provider.";
-    case "pending_verification":
-      return "Manual payment submitted. Credits will be added after verification.";
-    case "action_required":
-      return "Additional payment action is required. Retry checkout to continue.";
-    case "succeeded":
-      return "Payment completed successfully and credits are available.";
-    case "failed":
-      return "Payment failed. Retry checkout or switch payment method.";
-    case "canceled":
-      return "Payment was canceled before completion.";
-    case "refunded":
-      return "Payment was refunded and credits were reversed.";
-    default:
-      return "Payment status updated. Refresh billing data if needed.";
-  }
-}
-
-function buildAiSupportMailto(reference?: string | null) {
-  const normalizedReference = (reference || "").trim() || "not_provided";
-  const subject = encodeURIComponent("AI Credit Top-Up Support Request");
-  const body = encodeURIComponent(
-    `Please help with my AI credit payment.\nReference: ${normalizedReference}\nIssue: `,
-  );
-  return `mailto:${AiSupportEmail}?subject=${subject}&body=${body}`;
 }
 
 function formatCredits(value?: number | null) {
@@ -333,773 +146,188 @@ function formatAmount(value?: number | null, currency = "USD") {
   return `${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
 }
 
-function canAccessLicensePortal(role?: string | null) {
-  const normalizedRole = (role || "").trim().toLowerCase();
-  return normalizedRole === "owner" || normalizedRole === "manager";
+function canManageCommerce(role?: string | null) {
+  const normalized = (role || "").trim().toLowerCase();
+  return normalized === "owner";
 }
 
-const LicensePortalAccessDeniedMessage =
-  "Your role cannot access license management. Sign in as owner or manager.";
-
-function maskActivationKey(value: string) {
-  const normalized = value.trim();
-  if (!normalized) {
-    return "";
-  }
-
-  if (normalized.length <= 8) {
-    return "********";
-  }
-
-  return `${normalized.slice(0, 4)}******${normalized.slice(-4)}`;
-}
-
-function generateAccountDeviceCode() {
-  const randomPart = crypto.randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase();
-  return `MKTWEB-${randomPart}`;
-}
-
-function resolveStoredAccountDeviceCode() {
-  const existing = window.localStorage.getItem(AccountDeviceCodeStorageKey)?.trim();
-  if (existing) {
-    return existing;
-  }
-
-  const nextCode = generateAccountDeviceCode();
-  window.localStorage.setItem(AccountDeviceCodeStorageKey, nextCode);
-  return nextCode;
-}
+const OwnerOnlyMessage = "Only shop owners can create package and AI credit purchases.";
 
 export default function AccountPage() {
   const { locale } = useI18n();
 
-  const [activationKeyInput, setActivationKeyInput] = useState("");
-  const [accessData, setAccessData] = useState<LicenseAccessSuccessResponse | null>(null);
-  const [accessError, setAccessError] = useState<string | null>(null);
-  const [isLoadingAccess, setIsLoadingAccess] = useState(false);
-  const [isKeyVisible, setIsKeyVisible] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [checksumCopied, setChecksumCopied] = useState(false);
-
-  const [accountDeviceCode, setAccountDeviceCode] = useState("");
-  const [authSession, setAuthSession] = useState<AuthSessionResponse | null>(null);
-  const [portalData, setPortalData] = useState<CustomerLicensePortalResponse | null>(null);
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [portalError, setPortalError] = useState<string | null>(null);
+  const [authSession, setAuthSession] = useState<AccountSessionResponse | null>(null);
   const [authUsername, setAuthUsername] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authMfaCode, setAuthMfaCode] = useState("");
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [isHydratingSession, setIsHydratingSession] = useState(true);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const [isLoadingPortal, setIsLoadingPortal] = useState(false);
-  const [deactivatingDeviceCode, setDeactivatingDeviceCode] = useState<string | null>(null);
-  const [isLoadingAiBilling, setIsLoadingAiBilling] = useState(false);
-  const [isCreatingAiCheckout, setIsCreatingAiCheckout] = useState(false);
-  const [aiWallet, setAiWallet] = useState<AiWalletResponse | null>(null);
-  const [aiCreditPacks, setAiCreditPacks] = useState<AiCreditPackResponse[]>([]);
-  const [selectedAiPackCode, setSelectedAiPackCode] = useState("");
-  const [aiPaymentHistory, setAiPaymentHistory] = useState<AiPaymentHistoryItemResponse[]>([]);
-  const [aiCreditLedger, setAiCreditLedger] = useState<AiCreditLedgerItemResponse[]>([]);
-  const [aiBillingView, setAiBillingView] = useState<"payment_history" | "usage">("payment_history");
-  const [aiPendingManualPayments, setAiPendingManualPayments] = useState<AiPendingManualPaymentItem[]>([]);
-  const [aiCreditInvoices, setAiCreditInvoices] = useState<AiCreditInvoiceRow[]>([]);
-  const [aiInvoiceNote, setAiInvoiceNote] = useState("");
-  const [isLoadingAiInvoices, setIsLoadingAiInvoices] = useState(false);
-  const [isCreatingAiInvoice, setIsCreatingAiInvoice] = useState(false);
-  const [aiInvoiceError, setAiInvoiceError] = useState<string | null>(null);
-  const [aiInvoiceMessage, setAiInvoiceMessage] = useState<string | null>(null);
-  const [aiCheckoutStatusItem, setAiCheckoutStatusItem] = useState<AiPaymentHistoryItemResponse | null>(null);
-  const [aiPendingCheckoutReference, setAiPendingCheckoutReference] = useState("");
-  const [isPollingAiCheckoutStatus, setIsPollingAiCheckoutStatus] = useState(false);
-  const [aiBillingError, setAiBillingError] = useState<string | null>(null);
-  const [aiCheckoutMessage, setAiCheckoutMessage] = useState<string | null>(null);
-  const [aiTopUpUnavailable, setAiTopUpUnavailable] = useState(false);
-  const [isAiManualFallbackExpanded, setIsAiManualFallbackExpanded] = useState(false);
-  const [aiManualPaymentMethod, setAiManualPaymentMethod] = useState<"cash" | "bank_deposit">("bank_deposit");
-  const [aiManualBankReference, setAiManualBankReference] = useState("");
-  const [aiVerifyReference, setAiVerifyReference] = useState("");
-  const [isVerifyingAiReference, setIsVerifyingAiReference] = useState(false);
-  const [aiPanelViewedTracked, setAiPanelViewedTracked] = useState(false);
 
-  const [installPromptEvent, setInstallPromptEvent] = useState<BeforeInstallPromptEvent | null>(null);
-  const [isPwaInstalled, setIsPwaInstalled] = useState(false);
-  const [isPwaInstalling, setIsPwaInstalling] = useState(false);
+  const [products, setProducts] = useState<CloudProductRow[]>([]);
+  const [purchases, setPurchases] = useState<CloudPurchaseRow[]>([]);
+  const [aiInvoices, setAiInvoices] = useState<AiCreditInvoiceRow[]>([]);
+  const [wallet, setWallet] = useState<AiWalletResponse | null>(null);
+  const [aiLedger, setAiLedger] = useState<AiCreditLedgerItemResponse[]>([]);
+  const [aiPayments, setAiPayments] = useState<AiPaymentHistoryItemResponse[]>([]);
+  const [commerceError, setCommerceError] = useState<string | null>(null);
+  const [commerceMessage, setCommerceMessage] = useState<string | null>(null);
+  const [isLoadingCommerce, setIsLoadingCommerce] = useState(false);
 
-  const resolvedActivationKey = useMemo(
-    () =>
-      accessData?.activation_entitlement?.activation_entitlement_key?.trim() ||
-      activationKeyInput.trim(),
-    [accessData?.activation_entitlement?.activation_entitlement_key, activationKeyInput],
+  const [selectedProductCode, setSelectedProductCode] = useState("");
+  const [purchaseQuantity, setPurchaseQuantity] = useState("1");
+  const [purchaseNote, setPurchaseNote] = useState("");
+  const [isSubmittingPurchase, setIsSubmittingPurchase] = useState(false);
+
+  const canPurchase = canManageCommerce(authSession?.role);
+
+  const activeProducts = useMemo(
+    () => products.filter((product) => product.active),
+    [products],
   );
 
-  const displayedActivationKey = isKeyVisible
-    ? resolvedActivationKey
-    : maskActivationKey(resolvedActivationKey);
-  const canViewLicensePortal = canAccessLicensePortal(authSession?.role);
-  const installerDownloadUrl = (accessData?.installer_download_url || "").trim();
-  const installerChecksum = (accessData?.installer_checksum_sha256 || "").trim();
-  const installerLinkExpiresAt = accessData?.installer_download_expires_at;
-  const installerLinkExpired = isPastDate(installerLinkExpiresAt);
-  const installerDownloadAvailable = Boolean(installerDownloadUrl) && !installerLinkExpired;
-  const selectedAiPack = useMemo(
-    () => aiCreditPacks.find((pack) => pack.pack_code === selectedAiPackCode) || null,
-    [aiCreditPacks, selectedAiPackCode],
-  );
-  const aiStatusReference = aiCheckoutStatusItem?.external_reference || aiPendingCheckoutReference || null;
-  const aiSupportMailtoHref = useMemo(
-    () => buildAiSupportMailto(aiStatusReference),
-    [aiStatusReference],
-  );
-  const clearPendingAiCheckoutReference = useCallback(() => {
-    setAiPendingCheckoutReference("");
-    window.sessionStorage.removeItem(AccountAiPendingCheckoutReferenceStorageKey);
-  }, []);
-  const clearPendingAiCheckoutTracking = useCallback(() => {
-    setAiCheckoutStatusItem(null);
-    clearPendingAiCheckoutReference();
-  }, [clearPendingAiCheckoutReference]);
-  const resetAiManualFallbackState = useCallback(() => {
-    setIsAiManualFallbackExpanded(false);
-    setAiManualPaymentMethod("bank_deposit");
-    setAiManualBankReference("");
-  }, []);
-  const persistPendingAiCheckoutReference = useCallback((reference: string) => {
-    const normalizedReference = reference.trim();
-    if (!normalizedReference) {
-      clearPendingAiCheckoutTracking();
-      resetAiManualFallbackState();
-      return;
-    }
-
-    window.sessionStorage.setItem(
-      AccountAiPendingCheckoutReferenceStorageKey,
-      normalizedReference,
-    );
-    setAiPendingCheckoutReference(normalizedReference);
-  }, [clearPendingAiCheckoutTracking, resetAiManualFallbackState]);
-
-  useEffect(() => {
-    if (!AccountAiTopUpEnabled) {
-      return;
-    }
-
-    const storedReference = window.sessionStorage
-      .getItem(AccountAiPendingCheckoutReferenceStorageKey)
-      ?.trim();
-    if (!storedReference) {
-      return;
-    }
-
-    setAiPendingCheckoutReference(storedReference);
-    setAiCheckoutMessage("Resuming your recent AI credit checkout status...");
-    trackMarketingEvent("marketing_account_ai_checkout_returned", {
-      locale,
-      external_reference: storedReference,
-    });
-  }, [locale]);
-
-  useEffect(() => {
-    if (!AccountAiTopUpEnabled || !portalData || aiPanelViewedTracked || !canViewLicensePortal) {
-      return;
-    }
-
-    trackMarketingEvent("marketing_account_ai_topup_panel_viewed", {
-      locale,
-      shop_code: portalData.shop_code,
-      plan: portalData.plan,
-    });
-    setAiPanelViewedTracked(true);
-  }, [aiPanelViewedTracked, canViewLicensePortal, locale, portalData]);
-
-  useEffect(() => {
-    if (!portalData) {
-      setAiPanelViewedTracked(false);
-    }
-  }, [portalData]);
-
-  const loadAccess = useCallback(
-    async (activationEntitlementKey: string, source: "query" | "manual" | "portal") => {
-      const normalizedKey = activationEntitlementKey.trim();
-      if (!normalizedKey) {
-        setAccessError("Activation entitlement key is required.");
-        return;
-      }
-
-      setIsLoadingAccess(true);
-      setAccessError(null);
-
-      try {
-        const response = await fetch(
-          `/api/license/access-success?activation_entitlement_key=${encodeURIComponent(normalizedKey)}`,
-          {
-            method: "GET",
-            cache: "no-store",
-          },
-        );
-
-        const payload = await parseApiPayload(response);
-        if (!response.ok) {
-          throw new Error(parseErrorMessage(payload));
-        }
-
-        const data = requireObjectPayload<LicenseAccessSuccessResponse>(
-          payload,
-          "License access payload is empty.",
-        );
-        setAccessData(data);
-        setIsKeyVisible(false);
-        setCopied(false);
-        trackMarketingEvent("marketing_account_access_loaded", {
-          locale,
-          source,
-          shop_code: data.shop_code,
-          subscription_status: data.subscription_status,
-          plan: data.plan,
-        });
-      } catch (error) {
-        setAccessData(null);
-        setAccessError(error instanceof Error ? error.message : "Unable to load account access details.");
-      } finally {
-        setIsLoadingAccess(false);
-      }
-    },
-    [locale],
+  const selectedProduct = useMemo(
+    () => activeProducts.find((product) => product.product_code === selectedProductCode) || null,
+    [activeProducts, selectedProductCode],
   );
 
-  const loadLicensePortal = useCallback(
-    async (syncActivationKeyFromPortal: boolean) => {
-      setIsLoadingPortal(true);
-      setPortalError(null);
-      try {
-        const response = await fetch("/api/account/license-portal", {
-          method: "GET",
-          cache: "no-store",
-        });
+  const loadAccountSession = useCallback(async () => {
+    setIsHydratingSession(true);
+    try {
+      const response = await fetch("/api/account/me", {
+        method: "GET",
+        cache: "no-store",
+      });
 
-        const payload = await parseApiPayload(response);
-        if (response.status === 401) {
-          setAuthSession(null);
-          setPortalData(null);
-          setAccessData(null);
-          setPortalError("Your session expired. Please log in again.");
-          return;
-        }
-
-        if (!response.ok) {
-          throw new Error(parseErrorMessage(payload));
-        }
-
-        const data = requireObjectPayload<CustomerLicensePortalResponse>(
-          payload,
-          "License portal payload is empty.",
-        );
-        setPortalData(data);
-
-        const activationEntitlementKey = data.latest_activation_entitlement?.activation_entitlement_key?.trim();
-        if (syncActivationKeyFromPortal && activationEntitlementKey) {
-          setActivationKeyInput(activationEntitlementKey);
-          await loadAccess(activationEntitlementKey, "portal");
-        }
-
-        trackMarketingEvent("marketing_account_portal_loaded", {
-          locale,
-          shop_code: data.shop_code,
-          subscription_status: data.subscription_status,
-          plan: data.plan,
-          active_seats: data.active_seats,
-          seat_limit: data.seat_limit,
-        });
-      } catch (error) {
-        setPortalData(null);
-        setPortalError(error instanceof Error ? error.message : "Unable to load license portal.");
-      } finally {
-        setIsLoadingPortal(false);
-      }
-    },
-    [loadAccess, locale],
-  );
-
-  const loadAiBillingData = useCallback(
-    async (options?: { trackEvent?: boolean }): Promise<AiPaymentHistoryItemResponse[] | null> => {
-      if (!AccountAiTopUpEnabled) {
-        return null;
-      }
-
-      const shouldTrackEvent = options?.trackEvent ?? true;
-      setIsLoadingAiBilling(true);
-      setAiBillingError(null);
-      try {
-        const [walletResponse, packsResponse, paymentsResponse, ledgerResponse, pendingManualResponse] = await Promise.all([
-          fetch("/api/account/ai/wallet", { method: "GET", cache: "no-store" }),
-          fetch("/api/account/ai/credit-packs", { method: "GET", cache: "no-store" }),
-          fetch("/api/account/ai/payments?take=10", { method: "GET", cache: "no-store" }),
-          fetch("/api/account/ai/ledger?take=50", { method: "GET", cache: "no-store" }),
-          fetch("/api/account/ai/payments/pending-manual?take=40", { method: "GET", cache: "no-store" }),
-        ]);
-
-        const [walletPayload, packsPayload, paymentsPayload, ledgerPayload, pendingManualPayload] = await Promise.all([
-          parseApiPayload(walletResponse),
-          parseApiPayload(packsResponse),
-          parseApiPayload(paymentsResponse),
-          parseApiPayload(ledgerResponse),
-          parseApiPayload(pendingManualResponse),
-        ]);
-
-        if (
-          walletResponse.status === 401 ||
-          packsResponse.status === 401 ||
-          paymentsResponse.status === 401 ||
-          ledgerResponse.status === 401 ||
-          pendingManualResponse?.status === 401
-        ) {
-          setAuthSession(null);
-          setAiWallet(null);
-          setAiCreditPacks([]);
-          setSelectedAiPackCode("");
-          setAiPaymentHistory([]);
-          setAiCreditLedger([]);
-          setAiPendingManualPayments([]);
-          setAiCreditInvoices([]);
-          setAiInvoiceError(null);
-          setAiInvoiceMessage(null);
-          setAiInvoiceNote("");
-          setAiVerifyReference("");
-          setAiCheckoutStatusItem(null);
-          setAiTopUpUnavailable(false);
-          setAiCheckoutMessage(null);
-          resetAiManualFallbackState();
-          setAiBillingError("Your session expired. Please log in again.");
-          return null;
-        }
-
-        if (
-          walletResponse.status === 403 ||
-          packsResponse.status === 403 ||
-          paymentsResponse.status === 403 ||
-          ledgerResponse.status === 403 ||
-          pendingManualResponse?.status === 403
-        ) {
-          setAiTopUpUnavailable(true);
-          setAiWallet(null);
-          setAiCreditPacks([]);
-          setSelectedAiPackCode("");
-          setAiPaymentHistory([]);
-          setAiCreditLedger([]);
-          setAiPendingManualPayments([]);
-          setAiCreditInvoices([]);
-          setAiInvoiceError(null);
-          setAiInvoiceMessage(null);
-          setAiInvoiceNote("");
-          setAiVerifyReference("");
-          clearPendingAiCheckoutTracking();
-          setAiCheckoutMessage(null);
-          resetAiManualFallbackState();
-          return null;
-        }
-
-        if (!walletResponse.ok) {
-          throw new Error(parseErrorMessage(walletPayload));
-        }
-
-        if (!packsResponse.ok) {
-          throw new Error(parseErrorMessage(packsPayload));
-        }
-
-        if (!paymentsResponse.ok) {
-          throw new Error(parseErrorMessage(paymentsPayload));
-        }
-
-        if (!ledgerResponse.ok) {
-          throw new Error(parseErrorMessage(ledgerPayload));
-        }
-
-        const wallet = requireObjectPayload<AiWalletResponse>(walletPayload, "Wallet payload is empty.");
-        const packs = requireObjectPayload<AiCreditPackListResponse>(
-          packsPayload,
-          "AI credit packs payload is empty.",
-        );
-        const payments = requireObjectPayload<AiPaymentHistoryResponse>(
-          paymentsPayload,
-          "AI payment history payload is empty.",
-        );
-        const ledger = requireObjectPayload<AiCreditLedgerResponse>(
-          ledgerPayload,
-          "AI credit ledger payload is empty.",
-        );
-
-        const nextPacks = Array.isArray(packs.items) ? packs.items : [];
-        const nextPayments = Array.isArray(payments.items) ? payments.items : [];
-        const nextLedger = Array.isArray(ledger.items) ? ledger.items : [];
-
-        setAiTopUpUnavailable(false);
-        setAiWallet(wallet);
-        setAiCreditPacks(nextPacks);
-        setAiPaymentHistory(nextPayments);
-        setAiCreditLedger(nextLedger);
-        if (pendingManualResponse?.ok && pendingManualPayload) {
-          const pendingManual = requireObjectPayload<AiPendingManualPaymentsResponse>(
-            pendingManualPayload,
-            "AI pending manual payments payload is empty.",
-          );
-          setAiPendingManualPayments(Array.isArray(pendingManual.items) ? pendingManual.items : []);
-        } else {
-          setAiPendingManualPayments([]);
-          setAiCreditInvoices([]);
-          setAiInvoiceError(null);
-          setAiInvoiceMessage(null);
-          setAiInvoiceNote("");
-          setAiVerifyReference("");
-        }
-        setSelectedAiPackCode((current) => {
-          if (current && nextPacks.some((pack) => pack.pack_code === current)) {
-            return current;
-          }
-
-          return nextPacks[0]?.pack_code || "";
-        });
-
-        if (aiPendingCheckoutReference) {
-          const matchedCheckout = nextPayments.find(
-            (item) => item.external_reference === aiPendingCheckoutReference,
-          );
-          setAiCheckoutStatusItem(matchedCheckout || null);
-        }
-
-        if (shouldTrackEvent) {
-          trackMarketingEvent("marketing_account_ai_billing_loaded", {
-            locale,
-            credits_available: wallet.available_credits,
-            pack_count: nextPacks.length,
-          });
-        }
-
-        return nextPayments;
-      } catch (error) {
-        setAiWallet(null);
-        setAiCreditPacks([]);
-        setSelectedAiPackCode("");
-        setAiPaymentHistory([]);
-        setAiCreditLedger([]);
-        setAiPendingManualPayments([]);
-        setAiCreditInvoices([]);
-        setAiInvoiceError(null);
-        setAiInvoiceMessage(null);
-        setAiInvoiceNote("");
-        setAiVerifyReference("");
-        setAiCheckoutStatusItem(null);
-        setAiBillingError(error instanceof Error ? error.message : "Unable to load AI credit billing data.");
-        setAiCheckoutMessage(null);
-        resetAiManualFallbackState();
-        return null;
-      } finally {
-        setIsLoadingAiBilling(false);
-      }
-    },
-    [aiPendingCheckoutReference, clearPendingAiCheckoutTracking, locale, resetAiManualFallbackState],
-  );
-
-  const loadOwnerAiInvoices = useCallback(
-    async (quiet = false) => {
-      if (!AccountAiTopUpEnabled || authSession?.role?.trim().toLowerCase() !== "owner") {
-        setAiCreditInvoices([]);
-        setAiInvoiceError(null);
-        setAiInvoiceMessage(null);
-        return;
-      }
-
-      setIsLoadingAiInvoices(true);
-      if (!quiet) {
-        setAiInvoiceError(null);
-      }
-
-      try {
-        const response = await fetchOwnerAiCreditInvoices(20);
-        setAiCreditInvoices(Array.isArray(response.items) ? response.items : []);
-      } catch (error) {
-        setAiCreditInvoices([]);
-        if (!quiet) {
-          setAiInvoiceError(
-            error instanceof Error ? error.message : "Unable to load AI credit invoices.",
-          );
-        }
-      } finally {
-        setIsLoadingAiInvoices(false);
-      }
-    },
-    [authSession?.role],
-  );
-
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const activationEntitlementKey = (params.get("activation_entitlement_key") || "").trim();
-    if (activationEntitlementKey) {
-      setActivationKeyInput(activationEntitlementKey);
-      void loadAccess(activationEntitlementKey, "query");
-    }
-
-    if (activationEntitlementKey) {
-      params.delete("activation_entitlement_key");
-      const nextQuery = params.toString();
-      const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}`;
-      window.history.replaceState({}, "", nextUrl);
-    }
-
-    const deviceCode = resolveStoredAccountDeviceCode();
-    setAccountDeviceCode(deviceCode);
-
-    trackMarketingEvent("marketing_account_page_viewed", { locale });
-
-    let active = true;
-    const hydrateSession = async () => {
-      setIsHydratingSession(true);
-      try {
-        const response = await fetch("/api/account/me", {
-          method: "GET",
-          cache: "no-store",
-        });
-        const payload = await parseApiPayload(response);
-        if (!active) {
-          return;
-        }
-
-        if (response.status === 401) {
-          setAuthSession(null);
-          setPortalData(null);
-          setAiWallet(null);
-          setAiCreditPacks([]);
-          setSelectedAiPackCode("");
-          setAiPaymentHistory([]);
-          setAiPendingManualPayments([]);
-          setAiCreditInvoices([]);
-          setAiInvoiceError(null);
-          setAiInvoiceMessage(null);
-          setAiInvoiceNote("");
-          setAiVerifyReference("");
-          setAiTopUpUnavailable(false);
-          setAiCheckoutMessage(null);
-          clearPendingAiCheckoutTracking();
-          resetAiManualFallbackState();
-          return;
-        }
-
-        if (!response.ok) {
-          throw new Error(parseErrorMessage(payload));
-        }
-
-        const session = requireObjectPayload<AuthSessionResponse>(
-          payload,
-          "Session payload is empty.",
-        );
-        setAuthSession(session);
-        setAuthUsername(session.username);
-        if (session.device_code?.trim()) {
-          setAccountDeviceCode(session.device_code.trim());
-        }
-
-        if (!canAccessLicensePortal(session.role)) {
-          setPortalData(null);
-          setAccessData(null);
-          setAiWallet(null);
-          setAiCreditPacks([]);
-          setSelectedAiPackCode("");
-          setAiPaymentHistory([]);
-          setAiPendingManualPayments([]);
-          setAiCreditInvoices([]);
-          setAiInvoiceError(null);
-          setAiInvoiceMessage(null);
-          setAiInvoiceNote("");
-          setAiVerifyReference("");
-          setAiTopUpUnavailable(false);
-          setAiCheckoutMessage(null);
-          clearPendingAiCheckoutTracking();
-          resetAiManualFallbackState();
-          setPortalError(LicensePortalAccessDeniedMessage);
-          trackMarketingEvent("marketing_account_portal_access_denied", {
-            locale,
-            role: session.role,
-            source: "session_hydration",
-          });
-          return;
-        }
-
-        setPortalError(null);
-        await loadLicensePortal(true);
-        await loadAiBillingData();
-      } catch (error) {
-        if (!active) {
-          return;
-        }
+      const payload = await parseApiPayload(response);
+      if (response.status === 401) {
         setAuthSession(null);
-        setPortalData(null);
-        setAiWallet(null);
-        setAiCreditPacks([]);
-        setSelectedAiPackCode("");
-        setAiPaymentHistory([]);
-        setAiPendingManualPayments([]);
-        setAiCreditInvoices([]);
-        setAiInvoiceError(null);
-        setAiInvoiceMessage(null);
-        setAiInvoiceNote("");
-        setAiVerifyReference("");
-        setAiTopUpUnavailable(false);
-        setAiCheckoutMessage(null);
-        clearPendingAiCheckoutTracking();
-        resetAiManualFallbackState();
-        setAuthError(error instanceof Error ? error.message : "Unable to restore session.");
-      } finally {
-        if (active) {
-          setIsHydratingSession(false);
-        }
+        setAuthError(null);
+        return;
       }
-    };
 
-    void hydrateSession();
-    return () => {
-      active = false;
-    };
-  }, [
-    clearPendingAiCheckoutTracking,
-    loadAccess,
-    loadAiBillingData,
-    loadLicensePortal,
-    locale,
-    resetAiManualFallbackState,
-  ]);
+      if (!response.ok) {
+        throw new Error(parseErrorMessage(payload));
+      }
 
-  useEffect(() => {
-    if (!AccountAiTopUpEnabled || !authSession || !canViewLicensePortal) {
+      const session = requireObjectPayload<AccountSessionResponse>(payload, "Session payload is invalid.");
+      setAuthSession(session);
+      setAuthError(null);
+    } catch (error) {
+      setAuthSession(null);
+      setAuthError(error instanceof Error ? error.message : "Unable to restore account session.");
+    } finally {
+      setIsHydratingSession(false);
+    }
+  }, []);
+
+  const loadCommerceData = useCallback(async () => {
+    if (!authSession) {
+      setProducts([]);
+      setPurchases([]);
+      setAiInvoices([]);
+      setWallet(null);
+      setAiLedger([]);
+      setAiPayments([]);
       return;
     }
 
-    void loadOwnerAiInvoices(true);
-  }, [authSession, canViewLicensePortal, loadOwnerAiInvoices]);
+    setIsLoadingCommerce(true);
+    setCommerceError(null);
+
+    const ownerInvoicePromise = canPurchase
+      ? fetchOwnerAiCreditInvoices(80)
+      : Promise.resolve({ generated_at: new Date().toISOString(), count: 0, items: [] as AiCreditInvoiceRow[] });
+
+    const settled = await Promise.allSettled([
+      fetchAccountCloudProducts(undefined, 120),
+      fetchAccountCloudPurchases(80),
+      ownerInvoicePromise,
+      fetch("/api/account/ai/wallet", { method: "GET", cache: "no-store" }).then(async (response) => {
+        const payload = await parseApiPayload(response);
+        if (!response.ok) {
+          throw new Error(parseErrorMessage(payload));
+        }
+
+        return requireObjectPayload<AiWalletResponse>(payload, "Wallet payload is invalid.");
+      }),
+      fetch("/api/account/ai/ledger?take=30", { method: "GET", cache: "no-store" }).then(async (response) => {
+        const payload = await parseApiPayload(response);
+        if (!response.ok) {
+          throw new Error(parseErrorMessage(payload));
+        }
+
+        return requireObjectPayload<AiCreditLedgerResponse>(payload, "Ledger payload is invalid.");
+      }),
+      fetch("/api/account/ai/payments?take=30", { method: "GET", cache: "no-store" }).then(async (response) => {
+        const payload = await parseApiPayload(response);
+        if (!response.ok) {
+          throw new Error(parseErrorMessage(payload));
+        }
+
+        return requireObjectPayload<AiPaymentHistoryResponse>(payload, "Payment payload is invalid.");
+      }),
+    ]);
+
+    const [productsResult, purchasesResult, invoicesResult, walletResult, ledgerResult, paymentsResult] = settled;
+
+    if (productsResult.status === "fulfilled") {
+      const productItems = productsResult.value.items || [];
+      setProducts(productItems);
+      if (productItems.length > 0 && !selectedProductCode) {
+        setSelectedProductCode(productItems[0].product_code);
+      }
+    } else {
+      setCommerceError(productsResult.reason instanceof Error ? productsResult.reason.message : "Unable to load products.");
+    }
+
+    if (purchasesResult.status === "fulfilled") {
+      setPurchases(purchasesResult.value.items || []);
+    }
+
+    if (invoicesResult.status === "fulfilled") {
+      setAiInvoices(invoicesResult.value.items || []);
+    }
+
+    if (walletResult.status === "fulfilled") {
+      setWallet(walletResult.value);
+    }
+
+    if (ledgerResult.status === "fulfilled") {
+      setAiLedger(ledgerResult.value.items || []);
+    }
+
+    if (paymentsResult.status === "fulfilled") {
+      setAiPayments(paymentsResult.value.items || []);
+    }
+
+    setIsLoadingCommerce(false);
+  }, [authSession, canPurchase, selectedProductCode]);
 
   useEffect(() => {
-    if (!AccountAiTopUpEnabled || !aiPendingCheckoutReference || !authSession || !canViewLicensePortal || aiTopUpUnavailable) {
+    void loadAccountSession();
+  }, [loadAccountSession]);
+
+  useEffect(() => {
+    if (!authSession) {
       return;
     }
 
-    let cancelled = false;
-    const reconcileCheckoutStatus = async () => {
-      setIsPollingAiCheckoutStatus(true);
-      try {
-        for (let attempt = 0; attempt < AiCheckoutPollingMaxAttempts; attempt += 1) {
-          if (cancelled) {
-            return;
-          }
-
-          const payments = await loadAiBillingData({ trackEvent: false });
-          if (cancelled) {
-            return;
-          }
-
-          const matchedCheckout =
-            payments?.find((item) => item.external_reference === aiPendingCheckoutReference) || null;
-          if (matchedCheckout) {
-            setAiCheckoutStatusItem(matchedCheckout);
-
-            if (!isPaymentStatusProcessing(matchedCheckout.payment_status)) {
-              if (normalizePaymentStatus(matchedCheckout.payment_status) === "succeeded") {
-                setAiCheckoutMessage("AI credit top-up confirmed. Wallet balance has been updated.");
-              } else {
-                setAiCheckoutMessage(
-                  `Latest payment status: ${toSentence(matchedCheckout.payment_status)}.`,
-                );
-              }
-              trackMarketingEvent("marketing_account_ai_checkout_result", {
-                locale,
-                external_reference: matchedCheckout.external_reference,
-                payment_status: matchedCheckout.payment_status,
-                payment_method: matchedCheckout.payment_method,
-              });
-              clearPendingAiCheckoutReference();
-              return;
-            }
-          }
-
-          if (attempt < AiCheckoutPollingMaxAttempts - 1) {
-            await new Promise((resolve) => {
-              window.setTimeout(resolve, AiCheckoutPollingIntervalMs);
-            });
-          }
-        }
-
-        setAiCheckoutMessage(
-          "Payment is still processing. Use Refresh AI Billing in a few moments to check again.",
-        );
-        trackMarketingEvent("marketing_account_ai_checkout_result", {
-          locale,
-          external_reference: aiPendingCheckoutReference,
-          payment_status: "processing_timeout",
-        });
-      } finally {
-        if (!cancelled) {
-          setIsPollingAiCheckoutStatus(false);
-        }
-      }
-    };
-
-    void reconcileCheckoutStatus();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    aiPendingCheckoutReference,
-    aiTopUpUnavailable,
-    authSession,
-    canViewLicensePortal,
-    clearPendingAiCheckoutReference,
-    clearPendingAiCheckoutTracking,
-    loadAiBillingData,
-    locale,
-  ]);
-
-  useEffect(() => {
-    const standalone =
-      window.matchMedia("(display-mode: standalone)").matches ||
-      ("standalone" in navigator &&
-        Boolean((navigator as Navigator & { standalone?: boolean }).standalone));
-    setIsPwaInstalled(standalone);
-
-    const onBeforeInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setInstallPromptEvent(event as BeforeInstallPromptEvent);
-    };
-
-    const onAppInstalled = () => {
-      setIsPwaInstalled(true);
-      setInstallPromptEvent(null);
-      trackMarketingEvent("marketing_pwa_installed", { locale, source: "account_page" });
-    };
-
-    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
-    window.addEventListener("appinstalled", onAppInstalled);
-
-    return () => {
-      window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
-      window.removeEventListener("appinstalled", onAppInstalled);
-    };
-  }, [locale]);
-
-  const handleLookup = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    await loadAccess(activationKeyInput, "manual");
-  };
+    void loadCommerceData();
+  }, [authSession, loadCommerceData]);
 
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const username = authUsername.trim();
-    const password = authPassword;
-    const deviceCode = accountDeviceCode.trim() || resolveStoredAccountDeviceCode();
-    if (!username || !password || !deviceCode) {
-      setAuthError("Username, password, and device code are required.");
+    if (isLoggingIn) {
       return;
     }
 
     setIsLoggingIn(true);
     setAuthError(null);
+    setAuthMessage(null);
+
     try {
       const response = await fetch("/api/account/login", {
         method: "POST",
@@ -1107,11 +335,9 @@ export default function AccountPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          username,
-          password,
-          mfa_code: authMfaCode.trim() || undefined,
-          device_code: deviceCode,
-          device_name: "Marketing Account Web",
+          username: authUsername,
+          password: authPassword,
+          mfa_code: authMfaCode || undefined,
         }),
       });
 
@@ -1120,531 +346,154 @@ export default function AccountPage() {
         throw new Error(parseErrorMessage(payload));
       }
 
-      const session = requireObjectPayload<AuthSessionResponse>(
-        payload,
-        "Login response is empty.",
-      );
+      const session = requireObjectPayload<AccountSessionResponse>(payload, "Login response is invalid.");
       setAuthSession(session);
-      setAuthUsername(session.username);
       setAuthPassword("");
       setAuthMfaCode("");
-      setAccountDeviceCode(session.device_code || deviceCode);
-      setPortalError(null);
+      setAuthMessage("Signed in successfully.");
 
-      if (!canAccessLicensePortal(session.role)) {
-        setPortalData(null);
-        setAccessData(null);
-        setAiWallet(null);
-        setAiCreditPacks([]);
-        setSelectedAiPackCode("");
-        setAiPaymentHistory([]);
-        setAiPendingManualPayments([]);
-        setAiCreditInvoices([]);
-        setAiInvoiceError(null);
-        setAiInvoiceMessage(null);
-        setAiInvoiceNote("");
-        setAiVerifyReference("");
-        setAiTopUpUnavailable(false);
-        setAiCheckoutMessage(null);
-        clearPendingAiCheckoutTracking();
-        resetAiManualFallbackState();
-        setPortalError(LicensePortalAccessDeniedMessage);
-        trackMarketingEvent("marketing_account_portal_access_denied", {
-          locale,
-          role: session.role,
-          source: "manual_login",
-        });
-        return;
-      }
-
-      await loadLicensePortal(true);
-      await loadAiBillingData();
-      await loadOwnerAiInvoices(true);
-
-      trackMarketingEvent("marketing_account_logged_in", {
+      trackMarketingEvent("marketing_account_signin_success", {
         locale,
         role: session.role,
+        shop_code: session.shop_code || "unknown",
       });
     } catch (error) {
-      setAuthSession(null);
-      setPortalData(null);
-      setAiWallet(null);
-      setAiCreditPacks([]);
-      setSelectedAiPackCode("");
-      setAiPaymentHistory([]);
-      setAiPendingManualPayments([]);
-      setAiCreditInvoices([]);
-      setAiInvoiceError(null);
-      setAiInvoiceMessage(null);
-      setAiInvoiceNote("");
-      setAiVerifyReference("");
-      setAiTopUpUnavailable(false);
-      setAiCheckoutMessage(null);
-      clearPendingAiCheckoutTracking();
-      resetAiManualFallbackState();
-      setAuthError(error instanceof Error ? error.message : "Unable to log in.");
+      const message = error instanceof Error ? error.message : "Unable to sign in.";
+      setAuthError(message);
+      trackMarketingEvent("marketing_account_signin_failed", {
+        locale,
+        reason: message,
+      });
     } finally {
       setIsLoggingIn(false);
     }
   };
 
   const handleLogout = async () => {
+    if (isLoggingOut) {
+      return;
+    }
+
     setIsLoggingOut(true);
     setAuthError(null);
+
     try {
       await fetch("/api/account/logout", {
         method: "POST",
       });
+    } finally {
       setAuthSession(null);
-      setPortalData(null);
-      setPortalError(null);
-      setAccessData(null);
-      setIsKeyVisible(false);
-      setCopied(false);
-      setAiWallet(null);
-      setAiCreditPacks([]);
-      setSelectedAiPackCode("");
-      setAiPaymentHistory([]);
-      setAiPendingManualPayments([]);
-      setAiCreditInvoices([]);
-      setAiInvoiceError(null);
-      setAiInvoiceMessage(null);
-      setAiInvoiceNote("");
-      setAiVerifyReference("");
-      setAiBillingError(null);
-      setAiCheckoutMessage(null);
-      setAiTopUpUnavailable(false);
-      clearPendingAiCheckoutTracking();
-      resetAiManualFallbackState();
-      trackMarketingEvent("marketing_account_logged_out", { locale });
-    } finally {
+      setProducts([]);
+      setPurchases([]);
+      setAiInvoices([]);
+      setWallet(null);
+      setAiLedger([]);
+      setAiPayments([]);
       setIsLoggingOut(false);
+      setAuthMessage("Signed out.");
     }
   };
 
-  const handleCopyActivationKey = async () => {
-    const value = resolvedActivationKey.trim();
-    if (!value) {
+  const handleRefresh = async () => {
+    if (!authSession) {
       return;
     }
 
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
-      trackMarketingEvent("marketing_account_activation_key_copied", { locale });
-      void trackLicenseAction("activation_key_copy");
-    } catch {
-      setAccessError("Could not copy key. Please copy it manually.");
-    }
+    setCommerceMessage(null);
+    await loadCommerceData();
+    setCommerceMessage("Commerce data refreshed.");
   };
 
-  const handleCopyChecksum = async () => {
-    const checksum = installerChecksum.trim();
-    if (!checksum) {
+  const handleCreatePurchase = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!canPurchase || !selectedProductCode || isSubmittingPurchase) {
       return;
     }
 
+    const parsedQuantity = Number(purchaseQuantity);
+    const normalizedQuantity = Number.isFinite(parsedQuantity)
+      ? Math.max(1, Math.min(1000, Math.trunc(parsedQuantity)))
+      : 1;
+
+    setIsSubmittingPurchase(true);
+    setCommerceError(null);
+    setCommerceMessage(null);
+
     try {
-      await navigator.clipboard.writeText(checksum);
-      setChecksumCopied(true);
-      setTimeout(() => setChecksumCopied(false), 1200);
-      trackMarketingEvent("marketing_installer_checksum_copied", { locale });
-      void trackLicenseAction("installer_checksum_copy");
-    } catch {
-      setAccessError("Could not copy checksum. Please copy it manually.");
-    }
-  };
-
-  const handleInstallPwa = async () => {
-    if (!installPromptEvent) {
-      return;
-    }
-
-    setIsPwaInstalling(true);
-    try {
-      await installPromptEvent.prompt();
-      const choice = await installPromptEvent.userChoice;
-      trackMarketingEvent("marketing_pwa_install_prompt_result", {
-        locale,
-        source: "account_page",
-        outcome: choice.outcome,
-        platform: choice.platform,
-      });
-      if (choice.outcome === "accepted") {
-        setInstallPromptEvent(null);
-      }
-    } finally {
-      setIsPwaInstalling(false);
-    }
-  };
-
-  const handleDeactivateDevice = async (deviceCode: string) => {
-    const normalizedDeviceCode = deviceCode.trim();
-    if (!normalizedDeviceCode) {
-      return;
-    }
-
-    setDeactivatingDeviceCode(normalizedDeviceCode);
-    setPortalError(null);
-    try {
-      const response = await fetch(
-        `/api/account/license-portal/devices/${encodeURIComponent(normalizedDeviceCode)}/deactivate`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Idempotency-Key": crypto.randomUUID(),
+      await createAccountCloudPurchase({
+        items: [
+          {
+            product_code: selectedProductCode,
+            quantity: normalizedQuantity,
           },
-          body: JSON.stringify({
-            reason: "customer_self_service",
-          }),
-        },
-      );
-
-      const payload = await parseApiPayload(response);
-      if (!response.ok) {
-        throw new Error(parseErrorMessage(payload));
-      }
-
-      trackMarketingEvent("marketing_account_device_deactivated", {
-        locale,
-        device_code: normalizedDeviceCode,
+        ],
+        note: purchaseNote.trim() || undefined,
       });
-      await loadLicensePortal(true);
+
+      setCommerceMessage("Purchase request submitted. Billing admin approval is required.");
+      setPurchaseNote("");
+      await loadCommerceData();
+
+      trackMarketingEvent("marketing_account_cloud_purchase_created", {
+        locale,
+        product_code: selectedProductCode,
+        quantity: normalizedQuantity,
+      });
     } catch (error) {
-      setPortalError(error instanceof Error ? error.message : "Unable to deactivate device.");
+      setCommerceError(error instanceof Error ? error.message : "Unable to create purchase.");
     } finally {
-      setDeactivatingDeviceCode(null);
+      setIsSubmittingPurchase(false);
     }
   };
-
-  const handleAiCheckout = async (paymentMethod: AiCheckoutMethod) => {
-    if (!AccountAiTopUpEnabled || aiTopUpUnavailable) {
-      return;
-    }
-
-    const packCode = selectedAiPackCode.trim();
-    if (!packCode) {
-      setAiBillingError("Select a credit pack first.");
-      return;
-    }
-
-    const normalizedMethod = paymentMethod;
-    const bankReference = aiManualBankReference.trim();
-
-    if (normalizedMethod === "cash" && !bankReference) {
-      setAiBillingError("Reference is required for cash manual payments.");
-      return;
-    }
-
-    if (normalizedMethod === "bank_deposit" && !bankReference) {
-      setAiBillingError("Bank reference is required for bank transfer.");
-      return;
-    }
-
-    setIsCreatingAiCheckout(true);
-    setAiBillingError(null);
-    setAiCheckoutMessage(null);
-    trackMarketingEvent("marketing_account_ai_checkout_started", {
-      locale,
-      pack_code: packCode,
-      payment_method: normalizedMethod,
-    });
-    try {
-      const requestPayload: Record<string, string> = {
-        pack_code: packCode,
-        payment_method: normalizedMethod,
-      };
-      if (normalizedMethod !== "card") {
-        requestPayload.bank_reference = bankReference;
-      }
-
-      const response = await fetch("/api/account/ai/payments/checkout", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Idempotency-Key": crypto.randomUUID(),
-        },
-        body: JSON.stringify(requestPayload),
-      });
-
-      const payload = await parseApiPayload(response);
-      if (!response.ok) {
-        throw new Error(parseErrorMessage(payload));
-      }
-
-      const checkout = requireObjectPayload<AiCheckoutSessionResponse>(
-        payload,
-        "AI checkout response is empty.",
-      );
-
-      trackMarketingEvent("marketing_account_ai_checkout_created", {
-        locale,
-        pack_code: checkout.pack_code,
-        amount: checkout.amount,
-        currency: checkout.currency,
-        payment_status: checkout.payment_status,
-        payment_method: checkout.payment_method,
-      });
-
-      const checkoutReference = checkout.external_reference?.trim();
-      if (checkoutReference) {
-        persistPendingAiCheckoutReference(checkoutReference);
-      }
-      setAiCheckoutStatusItem({
-        payment_id: checkout.payment_id,
-        payment_status: checkout.payment_status,
-        payment_method: checkout.payment_method,
-        provider: checkout.provider,
-        credits: checkout.credits,
-        amount: checkout.amount,
-        currency: checkout.currency,
-        external_reference: checkoutReference || checkout.payment_id,
-        created_at: checkout.created_at,
-        completed_at: null,
-      });
-
-      if (checkout.checkout_url?.trim()) {
-        setAiCheckoutMessage("Redirecting to secure checkout...");
-        window.location.href = checkout.checkout_url.trim();
-        return;
-      }
-
-      const returnedStatus = normalizePaymentStatus(checkout.payment_status);
-      if (returnedStatus === "pending_verification" || normalizedMethod !== "card") {
-        setAiCheckoutMessage(
-          "Manual payment request submitted. Your credits will be added after billing verification.",
-        );
-      } else {
-        setAiCheckoutMessage(
-          "Checkout session was created without a redirect URL. Please complete payment using the provided reference or contact support.",
-        );
-      }
-
-      if (normalizedMethod !== "card") {
-        setIsAiManualFallbackExpanded(false);
-        setAiManualBankReference("");
-      }
-      await loadAiBillingData();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unable to start AI credit checkout.";
-      setAiBillingError(message);
-      trackMarketingEvent("marketing_account_ai_checkout_failed", {
-        locale,
-        payment_method: normalizedMethod,
-        error: message.slice(0, 160),
-      });
-    } finally {
-      setIsCreatingAiCheckout(false);
-    }
-  };
-
-  const handleCreateAiInvoice = async () => {
-    const normalizedPackCode = selectedAiPackCode.trim();
-    if (!normalizedPackCode) {
-      setAiInvoiceError("Select a credit pack first.");
-      return;
-    }
-
-    setIsCreatingAiInvoice(true);
-    setAiInvoiceError(null);
-    setAiInvoiceMessage(null);
-    try {
-      const created = await createOwnerAiCreditInvoice({
-        pack_code: normalizedPackCode,
-        note: aiInvoiceNote.trim() || undefined,
-      });
-
-      setAiInvoiceNote("");
-      setAiInvoiceMessage(
-        `Invoice ${created.invoice_number} created. Billing admin approval is required before credits are added.`,
-      );
-      trackMarketingEvent("marketing_account_ai_invoice_created", {
-        locale,
-        pack_code: created.pack_code,
-        invoice_id: created.invoice_id,
-        invoice_number: created.invoice_number,
-        amount_due: created.amount_due,
-        currency: created.currency,
-      });
-      await loadOwnerAiInvoices(true);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unable to create AI credit invoice.";
-      setAiInvoiceError(message);
-      trackMarketingEvent("marketing_account_ai_invoice_create_failed", {
-        locale,
-        pack_code: normalizedPackCode,
-        error: message.slice(0, 160),
-      });
-    } finally {
-      setIsCreatingAiInvoice(false);
-    }
-  };
-
-  const handleVerifyAiPaymentByReference = async () => {
-    const normalizedReference = aiVerifyReference.trim().toLowerCase();
-    if (!normalizedReference) {
-      setAiBillingError("Enter a submitted or external reference.");
-      return;
-    }
-
-    const matches = aiPendingManualPayments.filter((item) => {
-      const submittedReference = (item.submitted_reference || "").trim().toLowerCase();
-      const externalReference = (item.external_reference || "").trim().toLowerCase();
-      return submittedReference === normalizedReference || externalReference === normalizedReference;
-    });
-
-    if (matches.length === 0) {
-      setAiBillingError("No pending payment matched this reference.");
-      return;
-    }
-
-    if (matches.length > 1) {
-      setAiBillingError("Multiple pending payments matched this reference. Use the exact unique reference.");
-      return;
-    }
-
-    const targetPayment = matches[0];
-    setIsVerifyingAiReference(true);
-    setAiBillingError(null);
-    try {
-      const response = await fetch("/api/account/ai/payments/verify", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Idempotency-Key": crypto.randomUUID(),
-        },
-        body: JSON.stringify({
-          payment_id: targetPayment.payment_id,
-        }),
-      });
-
-      const payload = await parseApiPayload(response);
-      if (!response.ok) {
-        throw new Error(parseErrorMessage(payload));
-      }
-
-      setAiVerifyReference("");
-      setAiCheckoutMessage("Payment verified and credits were added.");
-      await loadAiBillingData();
-    } catch (error) {
-      setAiBillingError(error instanceof Error ? error.message : "Unable to verify payment by reference.");
-    } finally {
-      setIsVerifyingAiReference(false);
-    }
-  };
-
-  const trackLicenseAction = useCallback(
-    async (channel: string) => {
-      const normalizedKey = resolvedActivationKey.trim();
-      if (!normalizedKey) {
-        return;
-      }
-
-      try {
-        await fetch("/api/license/download-track", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Idempotency-Key": crypto.randomUUID(),
-          },
-          body: JSON.stringify({
-            activation_entitlement_key: normalizedKey,
-            source: "marketing_account_page",
-            channel,
-          }),
-        });
-      } catch {
-        // Best-effort audit tracking.
-      }
-    },
-    [resolvedActivationKey],
-  );
 
   return (
     <PageShell>
-      <div className="mx-auto w-full max-w-4xl space-y-6">
-        <Link
-          href={`/${locale}`}
-          className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <ArrowLeft size={16} />
-          Back to Home
-        </Link>
+      <div className="space-y-6">
+        <div>
+          <Link href={`/${locale}`} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+            <ArrowLeft size={16} />
+            Back to Home
+          </Link>
+        </div>
 
-        <SectionCard>
-          <div>
-            <h1 className="text-2xl md:text-3xl font-bold text-foreground">My Account</h1>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Sign in with your owner or manager cloud account to review subscription, AI credits, and purchase activity.
+        <SectionCard className="space-y-4">
+          <div className="space-y-2">
+            <p className="portal-kicker">Cloud Commerce Account</p>
+            <h1 className="text-4xl font-semibold tracking-tight">My Account</h1>
+            <p className="text-sm text-muted-foreground">
+              Sign in with your cloud owner account to purchase POS plans and AI credits.
             </p>
           </div>
 
-          {isHydratingSession && (
-            <p className="text-sm text-muted-foreground">Checking existing session...</p>
-          )}
+          {isHydratingSession && <p className="text-sm text-muted-foreground">Checking your session...</p>}
 
-          {authSession ? (
-            <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-3">
-              <p className="text-sm">
-                Signed in as <span className="font-semibold">{authSession.full_name}</span> ({authSession.username})
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Role: {authSession.role} | Session key: {authSession.device_code} | Session expires:{" "}
-                {formatDate(authSession.expires_at)}
-              </p>
-              {!canViewLicensePortal && (
-                <p className="text-xs text-muted-foreground">
-                  License management is restricted to owner and manager roles.
-                </p>
-              )}
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    void (async () => {
-                      await loadLicensePortal(true);
-                      await loadAiBillingData();
-                      await loadOwnerAiInvoices(true);
-                    })();
-                  }}
-                  disabled={(isLoadingPortal || isLoadingAiBilling) || !canViewLicensePortal}
-                >
-                  {isLoadingPortal ? "Refreshing..." : "Refresh Account"}
-                </Button>
-                <Button type="button" variant="outline" onClick={handleLogout} disabled={isLoggingOut}>
-                  <LogOut size={16} />
-                  {isLoggingOut ? "Signing out..." : "Sign Out"}
-                </Button>
-              </div>
-            </div>
-          ) : (
+          {!isHydratingSession && !authSession && (
             <form className="grid gap-3 md:grid-cols-2" onSubmit={handleLogin}>
-              <label className="space-y-1">
+              <label className="space-y-1 block">
                 <span className="portal-kicker">Username</span>
                 <input
                   className="field-shell"
                   value={authUsername}
                   onChange={(event) => setAuthUsername(event.target.value)}
-                  placeholder="owner"
+                  autoComplete="username"
                   required
                 />
               </label>
-              <label className="space-y-1">
+
+              <label className="space-y-1 block">
                 <span className="portal-kicker">Password</span>
                 <input
-                  type="password"
                   className="field-shell"
+                  type="password"
                   value={authPassword}
                   onChange={(event) => setAuthPassword(event.target.value)}
-                  placeholder=""
+                  autoComplete="current-password"
                   required
                 />
               </label>
-              <label className="space-y-1">
-                <span className="portal-kicker">MFA Code (optional)</span>
+
+              <label className="space-y-1 block md:col-span-2">
+                <span className="portal-kicker">MFA Code (Optional)</span>
                 <input
                   className="field-shell"
                   value={authMfaCode}
@@ -1652,789 +501,222 @@ export default function AccountPage() {
                   placeholder="123456"
                 />
               </label>
-              <label className="space-y-1">
-                <span className="portal-kicker">Session Identifier (auto-generated)</span>
-                <input
-                  className="field-shell font-mono"
-                  value={accountDeviceCode}
-                  onChange={(event) => setAccountDeviceCode(event.target.value.toUpperCase())}
-                  required
-                />
-              </label>
-              {authError && <p className="text-sm text-destructive md:col-span-2">{authError}</p>}
+
+              {authError && <p className="md:col-span-2 text-sm text-destructive">{authError}</p>}
+
               <div className="md:col-span-2">
-                <Button type="submit" variant="hero" disabled={isLoggingIn || isHydratingSession}>
-                  {isLoggingIn ? "Signing in..." : "Sign In"}
+                <Button type="submit" variant="hero" disabled={isLoggingIn}>
+                  {isLoggingIn ? "Signing In..." : "Sign In"}
                 </Button>
               </div>
             </form>
           )}
+
+          {authSession && (
+            <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-3">
+              <p className="text-sm">
+                Signed in as <span className="font-semibold">{authSession.full_name}</span> ({authSession.username})
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Role: {authSession.role} | Session ID: {authSession.session_id} | Expires: {formatDate(authSession.expires_at)}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Shop: {authSession.shop_code || "-"}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" onClick={() => void handleRefresh()} disabled={isLoadingCommerce}>
+                  <RefreshCw size={16} />
+                  {isLoadingCommerce ? "Refreshing..." : "Refresh Account"}
+                </Button>
+                <Button type="button" variant="outline" onClick={() => void handleLogout()} disabled={isLoggingOut}>
+                  <LogOut size={16} />
+                  {isLoggingOut ? "Signing Out..." : "Sign Out"}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {authMessage && <p className="text-sm text-emerald-700">{authMessage}</p>}
         </SectionCard>
 
-        {portalError && (
-          <section className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
-            {portalError}
-          </section>
-        )}
-
-        {portalData && (
+        {authSession && (
           <>
-            <SectionCard>
-              <h2 className="text-xl font-semibold">Commerce & Subscription Overview</h2>
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="rounded-xl border border-border/70 bg-surface-muted p-4">
-                  <p className="portal-kicker">Shop</p>
-                  <p className="mt-1 text-sm font-semibold">{portalData.shop_name}</p>
-                  <p className="text-xs text-muted-foreground">{portalData.shop_code}</p>
+            <SectionCard className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="portal-kicker">AI Wallet</p>
+                  <h2 className="text-xl font-semibold">Credits Overview</h2>
                 </div>
-                <div className="rounded-xl border border-border/70 bg-surface-muted p-4">
-                  <p className="portal-kicker">Seats</p>
-                  <p className="mt-1 text-sm">
-                    Active: <span className="font-semibold">{portalData.active_seats}</span> /{" "}
-                    <span className="font-semibold">{portalData.seat_limit}</span>
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Deactivations left today: {portalData.self_service_deactivations_remaining_today}
-                  </p>
+                <StatusChip tone="neutral">{wallet ? `${formatCredits(wallet.available_credits)} credits` : "-"}</StatusChip>
+              </div>
+
+              {commerceError && <p className="text-sm text-destructive">{commerceError}</p>}
+              {commerceMessage && <p className="text-sm text-emerald-700">{commerceMessage}</p>}
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-2">
+                  <p className="text-sm font-semibold">Recent Wallet Activity</p>
+                  {aiLedger.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No credit ledger entries yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {aiLedger.slice(0, 6).map((item, index) => (
+                        <div key={`${item.created_at_utc}-${item.entry_type}-${index}`} className="rounded-md border border-border px-3 py-2">
+                          <p className="text-sm font-medium">
+                            {toSentence(item.entry_type)} | {item.delta_credits >= 0 ? "+" : ""}{formatCredits(item.delta_credits)}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Balance: {formatCredits(item.balance_after_credits)} | {formatDate(item.created_at_utc)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-2">
+                  <p className="text-sm font-semibold">Recent AI Payments</p>
+                  {aiPayments.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No payment records yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {aiPayments.slice(0, 6).map((item) => (
+                        <div key={item.payment_id} className="rounded-md border border-border px-3 py-2">
+                          <p className="text-sm font-medium">
+                            {formatCredits(item.credits)} credits | {formatAmount(item.amount, item.currency)}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {toSentence(item.payment_status)} | {toSentence(item.payment_method)} | {formatDate(item.created_at)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
-              <p className="text-sm text-muted-foreground">
-                Plan: <span className="font-medium">{portalData.plan}</span> | Subscription:{" "}
-                <StatusChip tone="info">{toSentence(portalData.subscription_status)}</StatusChip>
-              </p>
             </SectionCard>
 
-            {AccountAiTopUpEnabled && (
-              <SectionCard>
-                <div>
-                  <h2 className="text-xl font-semibold">AI Credits</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Buy AI credits for ongoing insights after setup. Card checkout is recommended for instant top-up.
-                  </p>
-                </div>
-
-                {isLoadingAiBilling && !aiWallet && (
-                  <p className="text-sm text-muted-foreground">Loading AI credit billing data...</p>
-                )}
-
-                {aiTopUpUnavailable && (
-                  <p className="text-sm text-muted-foreground">
-                    AI credit purchase is unavailable for this account or role.
-                  </p>
-                )}
-
-                {!aiTopUpUnavailable && (
-                  <>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div className="rounded-xl border border-border/70 bg-surface-muted p-4">
-                        <p className="portal-kicker">Available Credits</p>
-                        <p className="mt-1 text-lg font-semibold">
-                          {formatCredits(aiWallet?.available_credits)} credits
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Last updated: {formatDate(aiWallet?.updated_at)}
-                        </p>
-                      </div>
-
-                      <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-2">
-                        <p className="portal-kicker">Top-Up Pack</p>
-                        <select
-                          className="field-shell"
-                          value={selectedAiPackCode}
-                          onChange={(event) => {
-                            const nextPackCode = event.target.value;
-                            setSelectedAiPackCode(nextPackCode);
-                            if (nextPackCode) {
-                              trackMarketingEvent("marketing_account_ai_pack_selected", {
-                                locale,
-                                pack_code: nextPackCode,
-                              });
-                            }
-                          }}
-                          disabled={aiCreditPacks.length === 0 || isCreatingAiCheckout}
-                        >
-                          {aiCreditPacks.length === 0 ? (
-                            <option value="">No packs available</option>
-                          ) : (
-                            aiCreditPacks.map((pack) => (
-                              <option key={pack.pack_code} value={pack.pack_code}>
-                                {pack.pack_code} | {formatCredits(pack.credits)} credits | {formatAmount(pack.price, pack.currency)}
-                              </option>
-                            ))
-                          )}
-                        </select>
-                        {selectedAiPack && (
-                          <div className="space-y-1">
-                            <p className="text-xs text-muted-foreground">
-                              You will add <span className="font-semibold">{formatCredits(selectedAiPack.credits)}</span> credits for{" "}
-                              <span className="font-semibold">{formatAmount(selectedAiPack.price, selectedAiPack.currency)}</span>.
-                            </p>
-                            {typeof aiWallet?.available_credits === "number" && (
-                              <p className="text-xs text-muted-foreground">
-                                Estimated balance after top-up:{" "}
-                                <span className="font-semibold">
-                                  {formatCredits(aiWallet.available_credits + selectedAiPack.credits)} credits
-                                </span>
-                              </p>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        variant="hero"
-                        disabled={isCreatingAiCheckout || !selectedAiPackCode.trim()}
-                        onClick={() => {
-                          void handleAiCheckout("card");
-                        }}
-                      >
-                        <CreditCard size={16} />
-                        {isCreatingAiCheckout ? "Opening Checkout..." : "Pay with Card"}
-                      </Button>
-                      {AccountAiManualFallbackEnabled && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={isCreatingAiCheckout || !selectedAiPackCode.trim()}
-                          onClick={() => {
-                            setIsAiManualFallbackExpanded((value) => !value);
-                            setAiManualPaymentMethod("bank_deposit");
-                            trackMarketingEvent("marketing_account_ai_manual_fallback_toggled", {
-                              locale,
-                            });
-                          }}
-                        >
-                          Need Bank Transfer?
-                        </Button>
-                      )}
-                      <Button
-                        type="button"
-                        variant="outline"
-                        disabled={isLoadingAiBilling || isCreatingAiCheckout}
-                        onClick={() => {
-                          void loadAiBillingData();
-                        }}
-                      >
-                        {isLoadingAiBilling ? "Refreshing AI Billing..." : "Refresh AI Billing"}
-                      </Button>
-                    </div>
-
-                    {AccountAiManualFallbackEnabled && isAiManualFallbackExpanded && (
-                      <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-3">
-                        <div className="space-y-1">
-                          <p className="portal-kicker">
-                            Manual Payment Fallback
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            Use this only when card checkout is unavailable. Credits are added after billing verification.
-                          </p>
-                        </div>
-
-                        <div className="flex flex-wrap gap-3">
-                          <label className="inline-flex items-center gap-2 text-sm">
-                            <input
-                              type="radio"
-                              name="ai_manual_payment_method"
-                              value="bank_deposit"
-                              checked={aiManualPaymentMethod === "bank_deposit"}
-                              onChange={() => setAiManualPaymentMethod("bank_deposit")}
-                            />
-                            Bank Deposit
-                          </label>
-                          <label className="inline-flex items-center gap-2 text-sm">
-                            <input
-                              type="radio"
-                              name="ai_manual_payment_method"
-                              value="cash"
-                              checked={aiManualPaymentMethod === "cash"}
-                              onChange={() => setAiManualPaymentMethod("cash")}
-                            />
-                            Cash
-                          </label>
-                        </div>
-
-                        <div className="grid gap-3">
-                          <label className="space-y-1">
-                            <span className="portal-kicker">
-                              Reference
-                            </span>
-                            <input
-                              className="field-shell"
-                              value={aiManualBankReference}
-                              onChange={(event) => setAiManualBankReference(event.target.value)}
-                              placeholder={aiManualPaymentMethod === "cash" ? "CASH-REF-001" : "BANK-REF-001"}
-                            />
-                          </label>
-                        </div>
-
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            disabled={isCreatingAiCheckout || !selectedAiPackCode.trim()}
-                            onClick={() => {
-                              void handleAiCheckout(aiManualPaymentMethod);
-                            }}
-                          >
-                            {isCreatingAiCheckout ? "Submitting..." : "Submit Manual Payment"}
-                          </Button>
-                          <a
-                            className="inline-flex items-center rounded-md border border-border px-3 py-2 text-sm hover:bg-accent"
-                            href={aiSupportMailtoHref}
-                            onClick={() => {
-                              trackMarketingEvent("marketing_account_ai_support_contact_clicked", {
-                                locale,
-                                source: "manual_fallback",
-                                external_reference: aiStatusReference || undefined,
-                              });
-                            }}
-                          >
-                            Contact Support
-                          </a>
-                        </div>
-                      </div>
-                    )}
-
-                    {authSession?.role?.trim().toLowerCase() === "owner" && (
-                      <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-3">
-                        <div className="space-y-1">
-                          <p className="portal-kicker">Create AI Credit Invoice</p>
-                          <p className="text-xs text-muted-foreground">
-                            Submit an invoice request for the selected pack. Billing admin or super admin approval will credit your wallet.
-                          </p>
-                        </div>
-
-                        <label className="space-y-1 block">
-                          <span className="portal-kicker">Owner Note (optional)</span>
-                          <textarea
-                            className="field-shell min-h-[84px]"
-                            value={aiInvoiceNote}
-                            onChange={(event) => setAiInvoiceNote(event.target.value)}
-                            placeholder="Add context for billing approval (optional)."
-                            maxLength={1000}
-                          />
-                        </label>
-
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            disabled={isCreatingAiInvoice || !selectedAiPackCode.trim()}
-                            onClick={() => {
-                              void handleCreateAiInvoice();
-                            }}
-                          >
-                            {isCreatingAiInvoice ? "Creating Invoice..." : "Create Invoice"}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            disabled={isLoadingAiInvoices}
-                            onClick={() => {
-                              void loadOwnerAiInvoices();
-                            }}
-                          >
-                            {isLoadingAiInvoices ? "Refreshing Invoices..." : "Refresh Invoices"}
-                          </Button>
-                        </div>
-
-                        {aiInvoiceError && (
-                          <p className="text-sm text-destructive">{aiInvoiceError}</p>
-                        )}
-                        {aiInvoiceMessage && (
-                          <p className="text-sm text-muted-foreground">{aiInvoiceMessage}</p>
-                        )}
-
-                        {aiCreditInvoices.length > 0 && (
-                          <div className="space-y-2">
-                            <p className="portal-kicker">Recent Invoice Requests</p>
-                            {aiCreditInvoices.slice(0, 10).map((item) => (
-                              <div
-                                key={item.invoice_id}
-                                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2"
-                              >
-                                <div>
-                                  <p className="text-sm font-medium">
-                                    {item.invoice_number} | {item.pack_code} | {formatCredits(item.requested_credits)} credits
-                                  </p>
-                                  <p className="text-xs text-muted-foreground">
-                                    {toSentence(item.status)} | {formatAmount(item.amount_due, item.currency)} | {formatDate(item.created_at)}
-                                  </p>
-                                  {item.reason && (
-                                    <p className="text-xs text-destructive">Reason: {item.reason}</p>
-                                  )}
-                                </div>
-                                <span className="inline-flex h-8 items-center rounded-md border border-border/50 bg-muted px-3 text-xs text-muted-foreground">
-                                  {toSentence(item.status)}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {aiBillingError && (
-                      <p className="text-sm text-destructive">{aiBillingError}</p>
-                    )}
-                    {aiCheckoutMessage && (
-                      <p className="text-sm text-muted-foreground">{aiCheckoutMessage}</p>
-                    )}
-
-                    {(aiCheckoutStatusItem || aiPendingCheckoutReference || isPollingAiCheckoutStatus) && (
-                      <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-1">
-                        <p className="portal-kicker">
-                          Latest Checkout Status
-                        </p>
-                        <p className="text-sm">
-                          Status:{" "}
-                          <span className="font-semibold">
-                            {toSentence(
-                              aiCheckoutStatusItem?.payment_status ||
-                                (isPollingAiCheckoutStatus ? "processing" : "pending"),
-                            )}
-                          </span>
-                        </p>
-                        <p className="text-xs text-muted-foreground font-mono break-all">
-                          Reference: {aiCheckoutStatusItem?.external_reference || aiPendingCheckoutReference || "-"}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {resolvePaymentStatusGuidance(aiCheckoutStatusItem?.payment_status)}
-                        </p>
-                        {aiCheckoutStatusItem && (
-                          <p className="text-xs text-muted-foreground">
-                            {formatCredits(aiCheckoutStatusItem.credits)} credits |{" "}
-                            {formatAmount(aiCheckoutStatusItem.amount, aiCheckoutStatusItem.currency)} |{" "}
-                            {toSentence(aiCheckoutStatusItem.payment_method)} | Created {formatDate(aiCheckoutStatusItem.created_at)}
-                          </p>
-                        )}
-                        {isPollingAiCheckoutStatus && (
-                          <p className="text-xs text-muted-foreground">
-                            Checking payment confirmation...
-                          </p>
-                        )}
-                        {!isPollingAiCheckoutStatus &&
-                          normalizePaymentStatus(aiCheckoutStatusItem?.payment_status) !== "succeeded" && (
-                            <div className="flex flex-wrap gap-2 pt-1">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                disabled={isCreatingAiCheckout || !selectedAiPackCode.trim()}
-                                onClick={() => {
-                                  void handleAiCheckout("card");
-                                }}
-                              >
-                                Retry Card Payment
-                              </Button>
-                              {AccountAiManualFallbackEnabled && (
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  disabled={isCreatingAiCheckout || !selectedAiPackCode.trim()}
-                                  onClick={() => {
-                                    setIsAiManualFallbackExpanded(true);
-                                    setAiManualPaymentMethod("bank_deposit");
-                                    trackMarketingEvent("marketing_account_ai_manual_fallback_toggled", {
-                                      locale,
-                                      source: "status_panel",
-                                    });
-                                  }}
-                                >
-                                  Switch to Bank Transfer
-                                </Button>
-                              )}
-                              <a
-                                className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent"
-                                href={aiSupportMailtoHref}
-                                onClick={() => {
-                                  trackMarketingEvent("marketing_account_ai_support_contact_clicked", {
-                                    locale,
-                                    source: "status_panel",
-                                    external_reference: aiStatusReference || undefined,
-                                  });
-                                }}
-                              >
-                                Contact Support
-                              </a>
-                            </div>
-                          )}
-                      </div>
-                    )}
-
-                    <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="portal-kicker">Billing Activity</p>
-                        <div className="inline-flex rounded-md border border-border/70 bg-background p-1">
-                          <button
-                            type="button"
-                            className={`rounded px-2 py-1 text-xs ${aiBillingView === "payment_history" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent"}`}
-                            onClick={() => setAiBillingView("payment_history")}
-                          >
-                            Payment History
-                          </button>
-                          <button
-                            type="button"
-                            className={`rounded px-2 py-1 text-xs ${aiBillingView === "usage" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent"}`}
-                            onClick={() => setAiBillingView("usage")}
-                          >
-                            Usage
-                          </button>
-                        </div>
-                      </div>
-
-                      {aiBillingView === "payment_history" && (
-                        <>
-                          {aiPaymentHistory.length === 0 ? (
-                            <p className="text-sm text-muted-foreground">No AI credit payments found yet.</p>
-                          ) : (
-                            <div className="space-y-2">
-                              {aiPaymentHistory.slice(0, 8).map((item) => (
-                                <div
-                                  key={item.payment_id}
-                                  className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2"
-                                >
-                                  <div>
-                                    <p className="text-sm font-medium">
-                                      {formatCredits(item.credits)} credits | {formatAmount(item.amount, item.currency)}
-                                    </p>
-                                    <p className="text-xs text-muted-foreground">
-                                      {toSentence(item.payment_status)} | {toSentence(item.payment_method)} | {formatDate(item.created_at)}
-                                    </p>
-                                  </div>
-                                  <p className="text-xs text-muted-foreground font-mono">
-                                    {item.external_reference || item.payment_id}
-                                  </p>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </>
-                      )}
-
-                      {aiBillingView === "usage" && (
-                        <>
-                          {aiCreditLedger.length === 0 ? (
-                            <p className="text-sm text-muted-foreground">No AI credit usage entries yet.</p>
-                          ) : (
-                            <div className="space-y-2">
-                              {aiCreditLedger.slice(0, 12).map((item, index) => (
-                                <div
-                                  key={`${item.created_at_utc}-${item.entry_type}-${item.reference || index}`}
-                                  className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2"
-                                >
-                                  <div>
-                                    <p className="text-sm font-medium">
-                                      {toSentence(item.entry_type)} |{" "}
-                                      <span className={item.delta_credits >= 0 ? "text-emerald-700" : "text-amber-700"}>
-                                        {item.delta_credits >= 0 ? "+" : ""}
-                                        {formatCredits(item.delta_credits)} credits
-                                      </span>
-                                    </p>
-                                    <p className="text-xs text-muted-foreground">
-                                      Balance after: {formatCredits(item.balance_after_credits)} | {formatDate(item.created_at_utc)}
-                                    </p>
-                                  </div>
-                                  <p className="text-xs text-muted-foreground font-mono">
-                                    {(item.reference || item.description || "-").toString()}
-                                  </p>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-
-                    {canViewLicensePortal && aiPendingManualPayments.length > 0 && (
-                      <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-3">
-                        <p className="portal-kicker">Pending Verifications</p>
-                        <p className="text-sm text-muted-foreground">
-                          Manual AI credit purchases awaiting confirmation. Our team will verify your reference and release credits shortly.
-                        </p>
-
-                        <div className="flex flex-col gap-2 sm:flex-row">
-                          <input
-                            type="text"
-                            className="field-shell sm:flex-1"
-                            value={aiVerifyReference}
-                            onChange={(event) => setAiVerifyReference(event.target.value)}
-                            placeholder="Submitted ref or aicpay_... external ref"
-                          />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            disabled={isVerifyingAiReference}
-                            onClick={() => {
-                              void handleVerifyAiPaymentByReference();
-                            }}
-                          >
-                            {isVerifyingAiReference ? "Verifying..." : "Verify by Reference"}
-                          </Button>
-                        </div>
-
-                        <div className="space-y-2">
-                          {aiPendingManualPayments.map((item) => (
-                            <div
-                              key={item.payment_id}
-                              className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2"
-                            >
-                              <div>
-                                <p className="text-sm font-medium">
-                                  {formatCredits(item.credits)} credits | {formatAmount(item.amount, item.currency)}
-                                </p>
-                                <p className="text-xs text-muted-foreground">
-                                  {toSentence(item.payment_method)} | {toSentence(item.payment_status)} | {formatDate(item.created_at)}
-                                </p>
-                                {item.submitted_reference && (
-                                  <p className="text-xs font-mono text-muted-foreground">
-                                    Ref: {item.submitted_reference}
-                                  </p>
-                                )}
-                              </div>
-                              <span className="inline-flex h-8 items-center rounded-md border border-border/50 bg-muted px-3 text-xs text-muted-foreground">
-                                Awaiting admin
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
-              </SectionCard>
-            )}
-
-            <SectionCard>
-              <details className="group rounded-xl border border-border/70 bg-surface-muted p-4">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-lg font-semibold">Provisioning & Device Diagnostics</h2>
-                    <p className="text-xs text-muted-foreground">
-                      Secondary controls for terminal deactivation and diagnostic checks.
-                    </p>
-                  </div>
-                  <StatusChip tone="neutral">
-                    {portalData.devices.length.toString()} device{portalData.devices.length === 1 ? "" : "s"}
-                  </StatusChip>
-                </summary>
-                <div className="mt-4 space-y-3">
-                  {portalData.devices.length === 0 && (
-                    <p className="text-sm text-muted-foreground">No provisioned devices found for this shop yet.</p>
-                  )}
-                  {portalData.devices.map((device) => {
-                    const canDeactivate =
-                      portalData.can_deactivate_more_devices_today &&
-                      device.device_status.toLowerCase() === "active" &&
-                      !device.is_current_device;
-                    const isDeactivating = deactivatingDeviceCode === device.device_code;
-                    return (
-                      <div key={device.provisioned_device_id} className="rounded-xl border border-border/70 bg-background p-4 space-y-2">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <p className="text-sm font-semibold">{device.device_name || device.device_code}</p>
-                          <p className="text-xs text-muted-foreground">{device.device_code}</p>
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                          Status: {toSentence(device.device_status)} | License: {toSentence(device.license_state)}
-                          {device.is_current_device ? " | Current session device" : ""}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Last heartbeat: {formatDate(device.last_heartbeat_at)} | Valid until: {formatDate(device.valid_until)}
-                        </p>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={!canDeactivate || isDeactivating}
-                          onClick={() => {
-                            void handleDeactivateDevice(device.device_code);
-                          }}
-                        >
-                          {isDeactivating ? "Deactivating..." : "Deactivate Device"}
-                        </Button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </details>
-            </SectionCard>
-          </>
-        )}
-
-        <SectionCard className="space-y-5">
-          <div>
-            <h2 className="text-xl font-semibold">Activation Key Access</h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Use this if you already have an activation entitlement key from payment success/email.
-            </p>
-          </div>
-
-          <form className="space-y-3" onSubmit={handleLookup}>
-            <label className="space-y-1 block">
-              <span className="portal-kicker">
-                Activation Entitlement Key
-              </span>
-              <input
-                className="field-shell font-mono"
-                value={activationKeyInput}
-                onChange={(event) => setActivationKeyInput(event.target.value)}
-                placeholder="SPK-..."
-                required
-              />
-            </label>
-            {accessError && <p className="text-sm text-destructive">{accessError}</p>}
-            <Button type="submit" variant="hero" disabled={isLoadingAccess}>
-              {isLoadingAccess ? "Loading..." : "Load By Key"}
-            </Button>
-          </form>
-        </SectionCard>
-
-        {accessData && (
-          <>
-            <SectionCard>
-              <h2 className="text-xl font-semibold">Activation Key</h2>
-              <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-3">
-                <p className="portal-kicker">License Key</p>
-                <p className="font-mono text-sm break-all">{displayedActivationKey || "-"}</p>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() =>
-                      setIsKeyVisible((value) => {
-                        const nextValue = !value;
-                        if (!value && nextValue) {
-                          void trackLicenseAction("activation_key_reveal");
-                        }
-                        return nextValue;
-                      })
-                    }
-                  >
-                    {isKeyVisible ? <EyeOff size={16} /> : <Eye size={16} />}
-                    {isKeyVisible ? "Hide" : "Reveal"}
-                  </Button>
-                  <Button type="button" variant="outline" onClick={handleCopyActivationKey}>
-                    <Copy size={16} />
-                    {copied ? "Copied" : "Copy Key"}
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Activations: {accessData.activation_entitlement.activations_used} /{" "}
-                  {accessData.activation_entitlement.max_activations}
-                  {" | "}Entitlement: {toSentence(accessData.entitlement_state)}
-                  {" | "}Expires: {formatDate(accessData.activation_entitlement.expires_at)}
+            <SectionCard className="space-y-4">
+              <div>
+                <p className="portal-kicker">Purchase</p>
+                <h2 className="text-xl font-semibold">Buy POS Plans or AI Credit Packages</h2>
+                <p className="text-sm text-muted-foreground">
+                  Purchases are credential-based and do not require device provisioning.
                 </p>
               </div>
+
+              {!canPurchase && (
+                <p className="text-sm text-muted-foreground">{OwnerOnlyMessage}</p>
+              )}
+
+              {canPurchase && (
+                <form className="grid gap-3 md:grid-cols-2" onSubmit={handleCreatePurchase}>
+                  <label className="space-y-1 block md:col-span-2">
+                    <span className="portal-kicker">Product</span>
+                    <select
+                      className="field-shell"
+                      value={selectedProductCode}
+                      onChange={(event) => setSelectedProductCode(event.target.value)}
+                      required
+                    >
+                      {activeProducts.length === 0 && <option value="">No active products</option>}
+                      {activeProducts.map((product) => (
+                        <option key={product.product_code} value={product.product_code}>
+                          {product.product_name} ({product.product_code}) | {formatAmount(product.price, product.currency)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="space-y-1 block">
+                    <span className="portal-kicker">Quantity</span>
+                    <input
+                      className="field-shell"
+                      type="number"
+                      min={1}
+                      max={1000}
+                      value={purchaseQuantity}
+                      onChange={(event) => setPurchaseQuantity(event.target.value)}
+                      required
+                    />
+                  </label>
+
+                  <label className="space-y-1 block">
+                    <span className="portal-kicker">Note (Optional)</span>
+                    <input
+                      className="field-shell"
+                      value={purchaseNote}
+                      onChange={(event) => setPurchaseNote(event.target.value)}
+                      placeholder="Invoice note for billing team"
+                    />
+                  </label>
+
+                  <div className="md:col-span-2 flex items-center gap-2">
+                    <Button type="submit" variant="hero" disabled={!selectedProductCode || isSubmittingPurchase}>
+                      {isSubmittingPurchase ? "Submitting..." : "Create Purchase Request"}
+                    </Button>
+                    {selectedProduct && (
+                      <span className="text-xs text-muted-foreground">
+                        Type: {toSentence(selectedProduct.product_type)} | Billing: {toSentence(selectedProduct.billing_mode)}
+                      </span>
+                    )}
+                  </div>
+                </form>
+              )}
             </SectionCard>
 
-            <SectionCard>
-              <h2 className="text-xl font-semibold">Install SmartPOS</h2>
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-3">
-                  <p className="text-sm font-semibold">Desktop Installer</p>
-                  <p className="text-xs text-muted-foreground">
-                    Recommended for production stores using local data storage on each device.
-                  </p>
-                  <Button
-                    type="button"
-                    variant="hero"
-                    disabled={!installerDownloadAvailable}
-                    onClick={() => {
-                      if (!installerDownloadAvailable || !installerDownloadUrl) {
-                        return;
-                      }
-
-                      trackMarketingEvent("marketing_installer_download_clicked", {
-                        locale,
-                        shop_code: accessData.shop_code,
-                        protected_link: accessData.installer_download_protected,
-                      });
-                      void trackLicenseAction("installer_download");
-                      window.open(installerDownloadUrl, "_blank", "noopener,noreferrer");
-                    }}
-                  >
-                    <Download size={16} />
-                    Download Installer
-                  </Button>
-                  {!installerDownloadUrl && (
-                    <p className="text-xs text-muted-foreground">
-                      Installer link is not available yet. Contact support if payment was already verified.
-                    </p>
-                  )}
-                  {installerLinkExpiresAt && (
-                    <p className="text-xs text-muted-foreground">
-                      Link expires at: {formatDate(installerLinkExpiresAt)}
-                    </p>
-                  )}
-                  {installerLinkExpired && (
-                    <p className="text-xs text-destructive">
-                      Installer link has expired. Refresh the account page or contact support for a new signed link.
-                    </p>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    {accessData.installer_download_protected
-                      ? "Protected signed link is enabled."
-                      : "Protected signed link is disabled. Enable protected links before production rollout."}
-                  </p>
-                  {installerChecksum ? (
-                    <div className="space-y-2">
-                      <p className="text-xs text-muted-foreground break-all">SHA-256: {installerChecksum}</p>
-                      <Button type="button" variant="outline" size="sm" onClick={() => void handleCopyChecksum()}>
-                        <Copy size={14} />
-                        {checksumCopied ? "Checksum Copied" : "Copy Checksum"}
-                      </Button>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-destructive">
-                      Installer checksum is not configured. Contact support before installing in production.
-                    </p>
-                  )}
+            <SectionCard className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="portal-kicker">History</p>
+                  <h2 className="text-xl font-semibold">Purchases & AI Credit Invoices</h2>
                 </div>
-
-                <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-3">
-                  <p className="text-sm font-semibold">PWA Install</p>
-                  <p className="text-xs text-muted-foreground">
-                    Optional browser-based install. Use this for quick onboarding or lightweight setups.
-                  </p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={isPwaInstalled || !installPromptEvent || isPwaInstalling}
-                    onClick={() => {
-                      void handleInstallPwa();
-                    }}
-                  >
-                    <MonitorSmartphone size={16} />
-                    {isPwaInstalled
-                      ? "PWA Installed"
-                      : isPwaInstalling
-                        ? "Opening Install Prompt..."
-                        : installPromptEvent
-                          ? "Install PWA"
-                          : "Install Prompt Unavailable"}
-                  </Button>
-                  {!installPromptEvent && !isPwaInstalled && (
-                    <p className="text-xs text-muted-foreground">
-                      If no install prompt appears, open this page in Chrome/Edge and use browser menu {"->"}{" "}
-                      Install app.
-                    </p>
-                  )}
-                  <div className="space-y-1 rounded-md border border-border p-3 text-xs text-muted-foreground">
-                    <p className="font-medium text-foreground">Platform Notes</p>
-                    <p>Windows/macOS/Linux: use Desktop Installer for full local storage and offline operation.</p>
-                    <p>Android: PWA install works best in Chrome.</p>
-                    <p>iOS: use Safari Share {"->"} Add to Home Screen (limited offline/background support).</p>
-                  </div>
-                </div>
+                <StatusChip tone="neutral">{purchases.length + aiInvoices.length} records</StatusChip>
               </div>
-              <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-2 text-xs text-muted-foreground">
-                <p className="font-medium text-foreground">Installer Verification</p>
-                <p>1. Download from this account page only.</p>
-                <p>2. Compare installer SHA-256 with the checksum shown above.</p>
-                <p>3. Do not run installer if checksum mismatch occurs.</p>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-2">
+                  <p className="text-sm font-semibold">Purchase Orders</p>
+                  {purchases.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No purchases yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {purchases.slice(0, 10).map((purchase) => (
+                        <div key={purchase.purchase_id} className="rounded-md border border-border px-3 py-2">
+                          <p className="text-sm font-medium">
+                            {purchase.order_number} | {toSentence(purchase.status)}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {formatAmount(purchase.total_amount, purchase.currency)} | {formatDate(purchase.created_at)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-2">
+                  <p className="text-sm font-semibold">AI Credit Invoices</p>
+                  {aiInvoices.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No AI credit invoices yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {aiInvoices.slice(0, 10).map((invoice) => (
+                        <div key={invoice.invoice_id} className="rounded-md border border-border px-3 py-2">
+                          <p className="text-sm font-medium">
+                            {invoice.invoice_number} | {toSentence(invoice.status)}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Pack: {invoice.pack_code} | Credits: {formatCredits(invoice.requested_credits)} | {formatAmount(invoice.amount_due, invoice.currency)}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Updated: {formatDate(invoice.updated_at || invoice.created_at)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </SectionCard>
           </>

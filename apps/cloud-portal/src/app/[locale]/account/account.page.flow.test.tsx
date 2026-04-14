@@ -16,31 +16,6 @@ function jsonResponse(payload: unknown, init?: ResponseInit) {
   });
 }
 
-function getHeaderValue(headers: HeadersInit | undefined, key: string) {
-  if (!headers) {
-    return null;
-  }
-
-  const normalizedKey = key.toLowerCase();
-  if (headers instanceof Headers) {
-    return headers.get(key);
-  }
-
-  if (Array.isArray(headers)) {
-    const row = headers.find(([headerKey]) => headerKey.toLowerCase() === normalizedKey);
-    return row?.[1] ?? null;
-  }
-
-  const mapped = headers as Record<string, string>;
-  const direct = mapped[key];
-  if (typeof direct === "string") {
-    return direct;
-  }
-
-  const matchedKey = Object.keys(mapped).find((candidate) => candidate.toLowerCase() === normalizedKey);
-  return matchedKey ? mapped[matchedKey] : null;
-}
-
 function normalizeFetchUrl(url: string) {
   const parsed = url.startsWith("http")
     ? new URL(url)
@@ -69,15 +44,6 @@ function setInputValue(input: HTMLInputElement, value: string) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-function setSelectValue(select: HTMLSelectElement, value: string) {
-  const descriptor = Object.getOwnPropertyDescriptor(
-    window.HTMLSelectElement.prototype,
-    "value",
-  );
-  descriptor?.set?.call(select, value);
-  select.dispatchEvent(new Event("change", { bubbles: true }));
-}
-
 async function flushUi() {
   await Promise.resolve();
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -98,7 +64,7 @@ async function waitForCondition(predicate: () => boolean, timeoutMs = 1500) {
   throw new Error("Condition was not met before timeout.");
 }
 
-describe("Account page authenticated flow", () => {
+describe("Account page credentials-only commerce flow", () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -106,7 +72,6 @@ describe("Account page authenticated flow", () => {
     vi.stubGlobal("fetch", vi.fn());
     window.localStorage.clear();
     window.sessionStorage.clear();
-    window.localStorage.setItem("smartpos_marketing_account_device_code_v1", "MKTWEB-TESTDEV");
     window.history.replaceState({}, "", "/en/account");
 
     container = document.createElement("div");
@@ -129,14 +94,9 @@ describe("Account page authenticated flow", () => {
     }
   });
 
-  it("signs in, loads portal, and deactivates a device with refreshed state", async () => {
-    let portalCallCount = 0;
+  it("signs in with credentials and loads commerce panels without device UI", async () => {
     vi.mocked(global.fetch).mockImplementation(async (input, init) => {
-      const rawRequestUrl = resolveRequestUrl(input);
-      const parsedRequestUrl = rawRequestUrl.startsWith("http")
-        ? new URL(rawRequestUrl)
-        : new URL(rawRequestUrl, "http://localhost");
-      const requestUrl = `${parsedRequestUrl.pathname}${parsedRequestUrl.search}`;
+      const requestUrl = normalizeFetchUrl(resolveRequestUrl(input));
 
       if (requestUrl === "/api/account/me") {
         return jsonResponse({ message: "Unauthorized" }, { status: 401 });
@@ -145,86 +105,75 @@ describe("Account page authenticated flow", () => {
       if (requestUrl === "/api/account/login") {
         return jsonResponse({
           user_id: "11111111-1111-1111-1111-111111111111",
-          username: "manager",
-          full_name: "Manager",
-          role: "manager",
-          device_id: "22222222-2222-2222-2222-222222222222",
-          device_code: "MKTWEB-TESTDEV",
-          expires_at: "2026-04-08T00:00:00Z",
+          username: "owner",
+          full_name: "Store Owner",
+          role: "owner",
+          session_id: "sess-01",
+          shop_id: "33333333-3333-3333-3333-333333333333",
+          shop_code: "default",
+          expires_at: "2026-04-20T00:00:00Z",
           mfa_verified: true,
+          auth_session_version: 1,
         });
       }
 
-      if (requestUrl === "/api/account/license-portal") {
-        portalCallCount += 1;
-        if (portalCallCount === 1) {
-          return jsonResponse({
-            generated_at: "2026-04-07T10:00:00Z",
-            shop_id: "33333333-3333-3333-3333-333333333333",
-            shop_code: "default",
-            shop_name: "Integration Test Shop",
-            subscription_status: "active",
-            plan: "growth",
-            seat_limit: 5,
-            active_seats: 2,
-            self_service_deactivation_limit_per_day: 2,
-            self_service_deactivations_used_today: 0,
-            self_service_deactivations_remaining_today: 2,
-            can_deactivate_more_devices_today: true,
-            latest_activation_entitlement: {
-              activation_entitlement_key: "SPK-TEST-KEY-123456",
-              max_activations: 3,
-              activations_used: 1,
-              expires_at: "2026-05-07T00:00:00Z",
-            },
-            devices: [
-              {
-                provisioned_device_id: "44444444-4444-4444-4444-444444444444",
-                device_code: "DEV-A",
-                device_name: "Counter POS",
-                device_status: "active",
-                license_state: "active",
-                assigned_at: "2026-04-01T00:00:00Z",
-                last_heartbeat_at: "2026-04-07T09:59:00Z",
-                valid_until: "2026-05-01T00:00:00Z",
-                grace_until: null,
-                is_current_device: false,
-              },
-            ],
-          });
-        }
-
+      if (requestUrl === "/api/account/products?take=120") {
         return jsonResponse({
-          generated_at: "2026-04-07T10:01:00Z",
-          shop_id: "33333333-3333-3333-3333-333333333333",
-          shop_code: "default",
-          shop_name: "Integration Test Shop",
-          subscription_status: "active",
-          plan: "growth",
-          seat_limit: 5,
-          active_seats: 1,
-          self_service_deactivation_limit_per_day: 2,
-          self_service_deactivations_used_today: 1,
-          self_service_deactivations_remaining_today: 1,
-          can_deactivate_more_devices_today: true,
-          latest_activation_entitlement: {
-            activation_entitlement_key: "SPK-TEST-KEY-123456",
-            max_activations: 3,
-            activations_used: 1,
-            expires_at: "2026-05-07T00:00:00Z",
-          },
-          devices: [
+          generated_at: "2026-04-13T00:00:00Z",
+          count: 1,
+          items: [
             {
-              provisioned_device_id: "44444444-4444-4444-4444-444444444444",
-              device_code: "DEV-A",
-              device_name: "Counter POS",
-              device_status: "revoked",
-              license_state: "revoked",
-              assigned_at: "2026-04-01T00:00:00Z",
-              last_heartbeat_at: "2026-04-07T09:59:00Z",
-              valid_until: "2026-05-01T00:00:00Z",
-              grace_until: null,
-              is_current_device: false,
+              product_code: "ai_pack_100",
+              product_name: "AI Credit Pack 100",
+              product_type: "ai_credit",
+              description: "",
+              price: 5,
+              currency: "USD",
+              billing_mode: "one_time",
+              validity: null,
+              default_quantity_or_credits: 100,
+              active: true,
+            },
+          ],
+        });
+      }
+
+      if (requestUrl === "/api/account/purchases?take=80") {
+        return jsonResponse({
+          generated_at: "2026-04-13T00:00:00Z",
+          count: 1,
+          items: [
+            {
+              purchase_id: "pur-01",
+              order_number: "PO-001",
+              shop_code: "default",
+              status: "pending_approval",
+              items: [],
+              total_amount: 5,
+              currency: "USD",
+              note: null,
+              created_at: "2026-04-13T00:00:00Z",
+            },
+          ],
+        });
+      }
+
+      if (requestUrl === "/api/account/ai/invoices?take=80") {
+        return jsonResponse({
+          generated_at: "2026-04-13T00:00:00Z",
+          count: 1,
+          items: [
+            {
+              invoice_id: "inv-01",
+              invoice_number: "INV-001",
+              shop_code: "default",
+              pack_code: "ai_pack_100",
+              requested_credits: 100,
+              amount_due: 5,
+              currency: "USD",
+              status: "pending",
+              created_at: "2026-04-13T00:00:00Z",
+              updated_at: "2026-04-13T00:00:00Z",
             },
           ],
         });
@@ -232,93 +181,44 @@ describe("Account page authenticated flow", () => {
 
       if (requestUrl === "/api/account/ai/wallet") {
         return jsonResponse({
-          available_credits: 520,
-          updated_at: "2026-04-07T10:00:00Z",
+          available_credits: 220,
+          updated_at: "2026-04-13T00:00:00Z",
         });
       }
 
-      if (requestUrl === "/api/account/ai/credit-packs") {
+      if (requestUrl === "/api/account/ai/ledger?take=30") {
         return jsonResponse({
           items: [
             {
-              pack_code: "pack_100",
-              credits: 100,
-              price: 5,
-              currency: "USD",
-            },
-            {
-              pack_code: "pack_500",
-              credits: 500,
-              price: 20,
-              currency: "USD",
+              entry_type: "credit",
+              delta_credits: 100,
+              balance_after_credits: 220,
+              created_at_utc: "2026-04-13T00:00:00Z",
             },
           ],
         });
       }
 
-      if (requestUrl.startsWith("/api/account/ai/ledger?take=")) {
-        return jsonResponse({
-          items: [],
-        });
-      }
-
-      if (requestUrl.startsWith("/api/account/ai/payments?take=")) {
+      if (requestUrl === "/api/account/ai/payments?take=30") {
         return jsonResponse({
           items: [
             {
-              payment_id: "55555555-5555-5555-5555-555555555555",
+              payment_id: "pay-01",
               payment_status: "succeeded",
               payment_method: "card",
               provider: "stripe",
-              credits: 500,
-              amount: 20,
+              credits: 100,
+              amount: 5,
               currency: "USD",
-              external_reference: "ai_checkout_ref_001",
-              created_at: "2026-04-07T09:00:00Z",
-              completed_at: "2026-04-07T09:01:00Z",
+              external_reference: "ref-01",
+              created_at: "2026-04-13T00:00:00Z",
+              completed_at: "2026-04-13T00:01:00Z",
             },
           ],
         });
       }
 
-      if (requestUrl.startsWith("/api/account/ai/payments/pending-manual?take=")) {
-        return jsonResponse({
-          items: [],
-        });
-      }
-
-      if (requestUrl.startsWith("/api/license/access-success?activation_entitlement_key=")) {
-        return jsonResponse({
-          generated_at: "2026-04-07T10:00:00Z",
-          shop_id: "33333333-3333-3333-3333-333333333333",
-          shop_code: "default",
-          shop_name: "Integration Test Shop",
-          subscription_status: "active",
-          plan: "growth",
-          seat_limit: 5,
-          entitlement_state: "active",
-          can_activate: true,
-          installer_download_url: "https://downloads.smartpos.test/installer.exe",
-          installer_download_expires_at: "2026-04-08T00:00:00Z",
-          installer_download_protected: true,
-          installer_checksum_sha256: "abc123",
-          activation_entitlement: {
-            activation_entitlement_key: "SPK-TEST-KEY-123456",
-            max_activations: 3,
-            activations_used: 1,
-            expires_at: "2026-05-07T00:00:00Z",
-            status: "active",
-          },
-        });
-      }
-
-      if (requestUrl === "/api/account/license-portal/devices/DEV-A/deactivate") {
-        return jsonResponse({
-          status: "revoked",
-        });
-      }
-
-      throw new Error(`Unexpected fetch URL: ${rawRequestUrl}`);
+      throw new Error(`Unexpected fetch URL: ${requestUrl}`);
     });
 
     await act(async () => {
@@ -337,21 +237,15 @@ describe("Account page authenticated flow", () => {
       return Boolean(signInButton) && !signInButton!.disabled;
     });
 
-    const usernameInput = container.querySelector('input[placeholder="owner"]') as HTMLInputElement | null;
+    const usernameInput = container.querySelector('input[autocomplete="username"]') as HTMLInputElement | null;
     const passwordInput = container.querySelector('input[type="password"]') as HTMLInputElement | null;
-    const deviceCodeInput = Array.from(container.querySelectorAll("input")).find(
-      (element) => element.getAttribute("placeholder") === null && element.value.includes("MKTWEB-"),
-    ) as HTMLInputElement | undefined;
 
     expect(usernameInput).toBeTruthy();
     expect(passwordInput).toBeTruthy();
-    expect(deviceCodeInput).toBeTruthy();
-    expect(deviceCodeInput?.value).toBe("MKTWEB-TESTDEV");
 
     await act(async () => {
-      setInputValue(usernameInput!, "manager");
-      setInputValue(passwordInput!, "manager123");
-      setInputValue(deviceCodeInput!, "MKTWEB-TESTDEV");
+      setInputValue(usernameInput!, "owner");
+      setInputValue(passwordInput!, "owner123");
 
       const loginForm = usernameInput!.closest("form");
       if (!loginForm) {
@@ -361,607 +255,109 @@ describe("Account page authenticated flow", () => {
       await flushUi();
     });
 
-    await waitForCondition(() =>
-      vi
-        .mocked(global.fetch)
-        .mock.calls.some(([url]) => normalizeFetchUrl(String(url)) === "/api/account/login"),
-    );
-
-    await waitForCondition(() => portalCallCount >= 1);
     await waitForCondition(() => container.textContent?.includes("Signed in as") ?? false);
-    expect(container.textContent).toContain("Commerce & Subscription Overview");
-    expect(container.textContent).toContain("Counter POS");
+    expect(container.textContent).toContain("Buy POS Plans or AI Credit Packages");
+    expect(container.textContent).toContain("Purchases & AI Credit Invoices");
+    expect(container.textContent).not.toContain("Device is not provisioned");
+    expect(container.textContent).not.toContain("Activation Key Access");
 
-    const deactivateButton = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent?.trim() === "Deactivate Device",
-    );
-    expect(deactivateButton).toBeTruthy();
-
-    await act(async () => {
-      deactivateButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await flushUi();
-    });
-
-    await waitForCondition(() => container.textContent?.includes("Status: revoked") ?? false);
-    expect(container.textContent).toContain("Signed in as");
-    expect(portalCallCount).toBe(2);
-
-    const deactivateRequest = vi
+    const loginRequest = vi
       .mocked(global.fetch)
-      .mock.calls.find(([url]) => normalizeFetchUrl(String(url)) === "/api/account/license-portal/devices/DEV-A/deactivate");
-    expect(deactivateRequest).toBeTruthy();
-    const init = deactivateRequest?.[1] as RequestInit;
-    expect(init.method).toBe("POST");
-    expect(init.body).toBe(JSON.stringify({ reason: "customer_self_service" }));
-    expect(getHeaderValue(init.headers, "content-type")).toBe("application/json");
-    expect(getHeaderValue(init.headers, "Idempotency-Key")).toBeTruthy();
+      .mock.calls.find(([url]) => normalizeFetchUrl(String(url)) === "/api/account/login");
+    expect(loginRequest).toBeTruthy();
+    const loginBody = JSON.parse(String((loginRequest?.[1] as RequestInit).body));
+    expect(loginBody.username).toBe("owner");
+    expect(loginBody.password).toBe("owner123");
+    expect("device_code" in loginBody).toBe(false);
   });
 
-  it("creates AI checkout and reconciles checkout status to succeeded", async () => {
-    let paymentHistoryCallCount = 0;
+  it("creates purchase request as owner without device dependency", async () => {
     vi.mocked(global.fetch).mockImplementation(async (input, init) => {
-      const rawRequestUrl = resolveRequestUrl(input);
-      const requestUrl = normalizeFetchUrl(rawRequestUrl);
+      const requestUrl = normalizeFetchUrl(resolveRequestUrl(input));
 
       if (requestUrl === "/api/account/me") {
         return jsonResponse({
           user_id: "11111111-1111-1111-1111-111111111111",
-          username: "manager",
-          full_name: "Manager",
-          role: "manager",
-          device_id: "22222222-2222-2222-2222-222222222222",
-          device_code: "MKTWEB-TESTDEV",
-          expires_at: "2026-04-08T00:00:00Z",
+          username: "owner",
+          full_name: "Store Owner",
+          role: "owner",
+          session_id: "sess-02",
+          shop_id: "33333333-3333-3333-3333-333333333333",
+          shop_code: "default",
+          expires_at: "2026-04-20T00:00:00Z",
           mfa_verified: true,
+          auth_session_version: 1,
         });
       }
 
-      if (requestUrl === "/api/account/license-portal") {
+      if (requestUrl === "/api/account/products?take=120") {
         return jsonResponse({
-          generated_at: "2026-04-07T10:00:00Z",
-          shop_id: "33333333-3333-3333-3333-333333333333",
-          shop_code: "default",
-          shop_name: "Integration Test Shop",
-          subscription_status: "active",
-          plan: "growth",
-          seat_limit: 5,
-          active_seats: 2,
-          self_service_deactivation_limit_per_day: 2,
-          self_service_deactivations_used_today: 0,
-          self_service_deactivations_remaining_today: 2,
-          can_deactivate_more_devices_today: true,
-          latest_activation_entitlement: {
-            activation_entitlement_key: "SPK-TEST-KEY-123456",
-            max_activations: 3,
-            activations_used: 1,
-            expires_at: "2026-05-07T00:00:00Z",
-          },
-          devices: [],
-        });
-      }
-
-      if (requestUrl === "/api/account/ai/wallet") {
-        return jsonResponse({
-          available_credits: 620,
-          updated_at: "2026-04-07T10:00:00Z",
-        });
-      }
-
-      if (requestUrl === "/api/account/ai/credit-packs") {
-        return jsonResponse({
+          generated_at: "2026-04-13T00:00:00Z",
+          count: 1,
           items: [
             {
-              pack_code: "pack_500",
-              credits: 500,
-              price: 20,
-              currency: "USD",
-            },
-          ],
-        });
-      }
-
-      if (requestUrl.startsWith("/api/account/ai/ledger?take=")) {
-        return jsonResponse({
-          items: [],
-        });
-      }
-
-      if (requestUrl.startsWith("/api/account/ai/payments?take=")) {
-        paymentHistoryCallCount += 1;
-        if (paymentHistoryCallCount === 1) {
-          return jsonResponse({ items: [] });
-        }
-
-        if (paymentHistoryCallCount === 2) {
-          return jsonResponse({
-            items: [
-              {
-                payment_id: "55555555-5555-5555-5555-555555555555",
-                payment_status: "pending",
-                payment_method: "card",
-                provider: "stripe",
-                credits: 500,
-                amount: 20,
-                currency: "USD",
-                external_reference: "ai_checkout_ref_001",
-                created_at: "2026-04-07T10:01:00Z",
-                completed_at: null,
-              },
-            ],
-          });
-        }
-
-        return jsonResponse({
-          items: [
-            {
-              payment_id: "55555555-5555-5555-5555-555555555555",
-              payment_status: "succeeded",
-              payment_method: "card",
-              provider: "stripe",
-              credits: 500,
-              amount: 20,
-              currency: "USD",
-              external_reference: "ai_checkout_ref_001",
-              created_at: "2026-04-07T10:01:00Z",
-              completed_at: "2026-04-07T10:02:00Z",
-            },
-          ],
-        });
-      }
-
-      if (requestUrl.startsWith("/api/account/ai/payments/pending-manual?take=")) {
-        return jsonResponse({
-          items: [],
-        });
-      }
-
-      if (requestUrl === "/api/account/ai/payments/checkout") {
-        return jsonResponse({
-          payment_id: "55555555-5555-5555-5555-555555555555",
-          payment_status: "pending",
-          payment_method: "card",
-          provider: "stripe",
-          pack_code: "pack_500",
-          credits: 500,
-          amount: 20,
-          currency: "USD",
-          external_reference: "ai_checkout_ref_001",
-          checkout_url: null,
-          created_at: "2026-04-07T10:01:00Z",
-        });
-      }
-
-      if (requestUrl.startsWith("/api/license/access-success?activation_entitlement_key=")) {
-        return jsonResponse({
-          generated_at: "2026-04-07T10:00:00Z",
-          shop_id: "33333333-3333-3333-3333-333333333333",
-          shop_code: "default",
-          shop_name: "Integration Test Shop",
-          subscription_status: "active",
-          plan: "growth",
-          seat_limit: 5,
-          entitlement_state: "active",
-          can_activate: true,
-          installer_download_url: "https://downloads.smartpos.test/installer.exe",
-          installer_download_expires_at: "2026-04-08T00:00:00Z",
-          installer_download_protected: true,
-          installer_checksum_sha256: "abc123",
-          activation_entitlement: {
-            activation_entitlement_key: "SPK-TEST-KEY-123456",
-            max_activations: 3,
-            activations_used: 1,
-            expires_at: "2026-05-07T00:00:00Z",
-            status: "active",
-          },
-        });
-      }
-
-      throw new Error(`Unexpected fetch URL: ${rawRequestUrl}`);
-    });
-
-    await act(async () => {
-      root.render(
-        <I18nProvider locale="en" messages={{}}>
-          <AccountPage />
-        </I18nProvider>,
-      );
-      await flushUi();
-    });
-
-    await waitForCondition(() => container.textContent?.includes("Commerce & Subscription Overview") ?? false);
-
-    const topUpPackSelect = container.querySelector("select") as HTMLSelectElement | null;
-    expect(topUpPackSelect).toBeTruthy();
-
-    await act(async () => {
-      setSelectValue(topUpPackSelect!, "pack_500");
-      await flushUi();
-    });
-
-    const payWithCardButton = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent?.includes("Pay with Card"),
-    );
-    expect(payWithCardButton).toBeTruthy();
-
-    await act(async () => {
-      payWithCardButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await flushUi();
-    });
-
-    await waitForCondition(() =>
-      vi
-        .mocked(global.fetch)
-        .mock.calls.some(([url]) => normalizeFetchUrl(String(url)) === "/api/account/ai/payments/checkout"),
-    );
-
-    const checkoutRequest = vi
-      .mocked(global.fetch)
-      .mock.calls.find(([url]) => normalizeFetchUrl(String(url)) === "/api/account/ai/payments/checkout");
-    expect(checkoutRequest).toBeTruthy();
-
-    const checkoutInit = checkoutRequest?.[1] as RequestInit;
-    expect(checkoutInit.method).toBe("POST");
-    expect(checkoutInit.body).toBe(
-      JSON.stringify({
-        pack_code: "pack_500",
-        payment_method: "card",
-      }),
-    );
-    expect(getHeaderValue(checkoutInit.headers, "content-type")).toBe("application/json");
-    expect(getHeaderValue(checkoutInit.headers, "Idempotency-Key")).toBeTruthy();
-
-    await waitForCondition(() => container.textContent?.includes("Latest Checkout Status") ?? false);
-    await waitForCondition(() => container.textContent?.includes("Status: succeeded") ?? false);
-    expect(container.textContent).toContain("AI credit top-up confirmed. Wallet balance has been updated.");
-    expect(paymentHistoryCallCount).toBeGreaterThanOrEqual(3);
-  });
-
-  it("submits manual bank transfer checkout from account fallback section", async () => {
-    vi.mocked(global.fetch).mockImplementation(async (input, init) => {
-      const rawRequestUrl = resolveRequestUrl(input);
-      const requestUrl = normalizeFetchUrl(rawRequestUrl);
-
-      if (requestUrl === "/api/account/me") {
-        return jsonResponse({
-          user_id: "11111111-1111-1111-1111-111111111111",
-          username: "manager",
-          full_name: "Manager",
-          role: "manager",
-          device_id: "22222222-2222-2222-2222-222222222222",
-          device_code: "MKTWEB-TESTDEV",
-          expires_at: "2026-04-08T00:00:00Z",
-          mfa_verified: true,
-        });
-      }
-
-      if (requestUrl === "/api/account/license-portal") {
-        return jsonResponse({
-          generated_at: "2026-04-07T10:00:00Z",
-          shop_id: "33333333-3333-3333-3333-333333333333",
-          shop_code: "default",
-          shop_name: "Integration Test Shop",
-          subscription_status: "active",
-          plan: "growth",
-          seat_limit: 5,
-          active_seats: 2,
-          self_service_deactivation_limit_per_day: 2,
-          self_service_deactivations_used_today: 0,
-          self_service_deactivations_remaining_today: 2,
-          can_deactivate_more_devices_today: true,
-          latest_activation_entitlement: {
-            activation_entitlement_key: "SPK-TEST-KEY-123456",
-            max_activations: 3,
-            activations_used: 1,
-            expires_at: "2026-05-07T00:00:00Z",
-          },
-          devices: [],
-        });
-      }
-
-      if (requestUrl === "/api/account/ai/wallet") {
-        return jsonResponse({
-          available_credits: 120,
-          updated_at: "2026-04-07T10:00:00Z",
-        });
-      }
-
-      if (requestUrl === "/api/account/ai/credit-packs") {
-        return jsonResponse({
-          items: [
-            {
-              pack_code: "pack_100",
-              credits: 100,
+              product_code: "ai_pack_100",
+              product_name: "AI Credit Pack 100",
+              product_type: "ai_credit",
+              description: "",
               price: 5,
               currency: "USD",
+              billing_mode: "one_time",
+              validity: null,
+              default_quantity_or_credits: 100,
+              active: true,
             },
           ],
         });
       }
 
-      if (requestUrl.startsWith("/api/account/ai/ledger?take=")) {
-        return jsonResponse({
-          items: [],
-        });
+      if (requestUrl === "/api/account/purchases?take=80") {
+        return jsonResponse({ generated_at: "2026-04-13T00:00:00Z", count: 0, items: [] });
       }
 
-      if (requestUrl.startsWith("/api/account/ai/payments?take=")) {
-        return jsonResponse({
-          items: [
-            {
-              payment_id: "55555555-5555-5555-5555-555555555555",
-              payment_status: "pending_verification",
-              payment_method: "bank_deposit",
-              provider: "manual",
-              credits: 100,
-              amount: 5,
-              currency: "USD",
-              external_reference: "ai_checkout_manual_ref_001",
-              created_at: "2026-04-07T10:01:00Z",
-              completed_at: null,
-            },
-          ],
-        });
-      }
-
-      if (requestUrl.startsWith("/api/account/ai/payments/pending-manual?take=")) {
-        return jsonResponse({
-          items: [],
-        });
-      }
-
-      if (requestUrl === "/api/account/ai/payments/checkout") {
-        return jsonResponse({
-          payment_id: "55555555-5555-5555-5555-555555555555",
-          payment_status: "pending_verification",
-          payment_method: "bank_deposit",
-          provider: "manual",
-          pack_code: "pack_100",
-          credits: 100,
-          amount: 5,
-          currency: "USD",
-          external_reference: "ai_checkout_manual_ref_001",
-          checkout_url: null,
-          created_at: "2026-04-07T10:01:00Z",
-        });
-      }
-
-      if (requestUrl.startsWith("/api/license/access-success?activation_entitlement_key=")) {
-        return jsonResponse({
-          generated_at: "2026-04-07T10:00:00Z",
-          shop_id: "33333333-3333-3333-3333-333333333333",
-          shop_code: "default",
-          shop_name: "Integration Test Shop",
-          subscription_status: "active",
-          plan: "growth",
-          seat_limit: 5,
-          entitlement_state: "active",
-          can_activate: true,
-          installer_download_url: "https://downloads.smartpos.test/installer.exe",
-          installer_download_expires_at: "2026-04-08T00:00:00Z",
-          installer_download_protected: true,
-          installer_checksum_sha256: "abc123",
-          activation_entitlement: {
-            activation_entitlement_key: "SPK-TEST-KEY-123456",
-            max_activations: 3,
-            activations_used: 1,
-            expires_at: "2026-05-07T00:00:00Z",
-            status: "active",
-          },
-        });
-      }
-
-      throw new Error(`Unexpected fetch URL: ${rawRequestUrl}`);
-    });
-
-    await act(async () => {
-      root.render(
-        <I18nProvider locale="en" messages={{}}>
-          <AccountPage />
-        </I18nProvider>,
-      );
-      await flushUi();
-    });
-
-    await waitForCondition(() => container.textContent?.includes("Commerce & Subscription Overview") ?? false);
-
-    const manualToggleButton = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent?.includes("Need Bank Transfer?"),
-    );
-    expect(manualToggleButton).toBeTruthy();
-
-    await act(async () => {
-      manualToggleButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await flushUi();
-    });
-
-    const referenceInput = container.querySelector(
-      'input[placeholder="BANK-REF-001"]',
-    ) as HTMLInputElement | null;
-    expect(referenceInput).toBeTruthy();
-
-    await act(async () => {
-      setInputValue(referenceInput!, "BD-TEST-1001");
-      await flushUi();
-    });
-
-    const submitManualPaymentButton = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent?.includes("Submit Manual Payment"),
-    );
-    expect(submitManualPaymentButton).toBeTruthy();
-
-    await act(async () => {
-      submitManualPaymentButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await flushUi();
-    });
-
-    await waitForCondition(() =>
-      vi
-        .mocked(global.fetch)
-        .mock.calls.some(([url]) => normalizeFetchUrl(String(url)) === "/api/account/ai/payments/checkout"),
-    );
-
-    const checkoutRequest = vi
-      .mocked(global.fetch)
-      .mock.calls.find(([url]) => normalizeFetchUrl(String(url)) === "/api/account/ai/payments/checkout");
-    expect(checkoutRequest).toBeTruthy();
-
-    const checkoutInit = checkoutRequest?.[1] as RequestInit;
-    expect(checkoutInit.method).toBe("POST");
-    expect(checkoutInit.body).toBe(
-      JSON.stringify({
-        pack_code: "pack_100",
-        payment_method: "bank_deposit",
-        bank_reference: "BD-TEST-1001",
-      }),
-    );
-    expect(getHeaderValue(checkoutInit.headers, "content-type")).toBe("application/json");
-    expect(getHeaderValue(checkoutInit.headers, "Idempotency-Key")).toBeTruthy();
-
-    await waitForCondition(() =>
-      container.textContent?.includes("Manual payment request submitted. Your credits will be added after billing verification.") ?? false,
-    );
-    expect(container.textContent).toContain("Status: pending verification");
-  });
-
-  it("verifies pending manual payment by reference from the account page card", async () => {
-    let pendingManualCallCount = 0;
-    const pendingPaymentId = "77777777-7777-7777-7777-777777777777";
-    vi.mocked(global.fetch).mockImplementation(async (input, init) => {
-      const rawRequestUrl = resolveRequestUrl(input);
-      const requestUrl = normalizeFetchUrl(rawRequestUrl);
-
-      if (requestUrl === "/api/account/me") {
-        return jsonResponse({
-          user_id: "11111111-1111-1111-1111-111111111111",
-          username: "manager",
-          full_name: "Manager",
-          role: "manager",
-          device_id: "22222222-2222-2222-2222-222222222222",
-          device_code: "MKTWEB-TESTDEV",
-          expires_at: "2026-04-08T00:00:00Z",
-          mfa_verified: true,
-        });
-      }
-
-      if (requestUrl === "/api/account/license-portal") {
-        return jsonResponse({
-          generated_at: "2026-04-07T10:00:00Z",
-          shop_id: "33333333-3333-3333-3333-333333333333",
-          shop_code: "default",
-          shop_name: "Integration Test Shop",
-          subscription_status: "active",
-          plan: "growth",
-          seat_limit: 5,
-          active_seats: 2,
-          self_service_deactivation_limit_per_day: 2,
-          self_service_deactivations_used_today: 0,
-          self_service_deactivations_remaining_today: 2,
-          can_deactivate_more_devices_today: true,
-          latest_activation_entitlement: {
-            activation_entitlement_key: "SPK-TEST-KEY-123456",
-            max_activations: 3,
-            activations_used: 1,
-            expires_at: "2026-05-07T00:00:00Z",
-          },
-          devices: [],
-        });
+      if (requestUrl === "/api/account/ai/invoices?take=80") {
+        return jsonResponse({ generated_at: "2026-04-13T00:00:00Z", count: 0, items: [] });
       }
 
       if (requestUrl === "/api/account/ai/wallet") {
-        return jsonResponse({
-          available_credits: 120,
-          updated_at: "2026-04-07T10:00:00Z",
-        });
+        return jsonResponse({ available_credits: 0, updated_at: "2026-04-13T00:00:00Z" });
       }
 
-      if (requestUrl === "/api/account/ai/credit-packs") {
-        return jsonResponse({
-          items: [
-            {
-              pack_code: "pack_100",
-              credits: 100,
-              price: 5,
-              currency: "USD",
-            },
-          ],
-        });
-      }
-
-      if (requestUrl.startsWith("/api/account/ai/payments?take=")) {
-        return jsonResponse({
-          items: [],
-        });
-      }
-
-      if (requestUrl.startsWith("/api/account/ai/ledger?take=")) {
-        return jsonResponse({
-          items: [],
-        });
-      }
-
-      if (requestUrl.startsWith("/api/account/ai/payments/pending-manual?take=")) {
-        pendingManualCallCount += 1;
-        if (pendingManualCallCount === 1) {
-          return jsonResponse({
-            items: [
-              {
-                payment_id: pendingPaymentId,
-                target_username: "manager",
-                target_full_name: "Manager",
-                shop_name: "Integration Test Shop",
-                payment_status: "pending_verification",
-                payment_method: "bank_deposit",
-                credits: 100,
-                amount: 5,
-                currency: "USD",
-                external_reference: "aicpay_ref_001",
-                submitted_reference: "BD-REF-1001",
-                created_at: "2026-04-07T10:01:00Z",
-              },
-            ],
-          });
-        }
-
+      if (requestUrl === "/api/account/ai/ledger?take=30") {
         return jsonResponse({ items: [] });
       }
 
-      if (requestUrl === "/api/account/ai/payments/verify") {
+      if (requestUrl === "/api/account/ai/payments?take=30") {
+        return jsonResponse({ items: [] });
+      }
+
+      if (requestUrl === "/api/account/purchases") {
         const requestInit = init as RequestInit;
         expect(requestInit.method).toBe("POST");
-        expect(getHeaderValue(requestInit.headers, "content-type")).toBe("application/json");
-        expect(requestInit.body).toBe(JSON.stringify({ payment_id: pendingPaymentId }));
         return jsonResponse({
-          payment_id: pendingPaymentId,
-          payment_status: "succeeded",
-        });
-      }
-
-      if (requestUrl.startsWith("/api/license/access-success?activation_entitlement_key=")) {
-        return jsonResponse({
-          generated_at: "2026-04-07T10:00:00Z",
-          shop_id: "33333333-3333-3333-3333-333333333333",
+          purchase_id: "pur-02",
+          order_number: "PO-002",
           shop_code: "default",
-          shop_name: "Integration Test Shop",
-          subscription_status: "active",
-          plan: "growth",
-          seat_limit: 5,
-          entitlement_state: "active",
-          can_activate: true,
-          installer_download_url: "https://downloads.smartpos.test/installer.exe",
-          installer_download_expires_at: "2026-04-08T00:00:00Z",
-          installer_download_protected: true,
-          installer_checksum_sha256: "abc123",
-          activation_entitlement: {
-            activation_entitlement_key: "SPK-TEST-KEY-123456",
-            max_activations: 3,
-            activations_used: 1,
-            expires_at: "2026-05-07T00:00:00Z",
-            status: "active",
-          },
+          status: "submitted",
+          items: [
+            {
+              product_code: "ai_pack_100",
+              product_name: "AI Credit Pack 100",
+              product_type: "ai_credit",
+              quantity: 2,
+              amount: 10,
+              currency: "USD",
+              credits: 200,
+            },
+          ],
+          total_amount: 10,
+          currency: "USD",
+          note: "April invoice",
+          created_at: "2026-04-13T00:00:00Z",
         });
       }
 
-      throw new Error(`Unexpected fetch URL: ${rawRequestUrl}`);
+      throw new Error(`Unexpected fetch URL: ${requestUrl}`);
     });
 
     await act(async () => {
@@ -973,75 +369,95 @@ describe("Account page authenticated flow", () => {
       await flushUi();
     });
 
-    await waitForCondition(() => container.textContent?.includes("Pending Verifications") ?? false);
-    expect(container.textContent).toContain("BD-REF-1001");
+    await waitForCondition(() => container.textContent?.includes("Buy POS Plans or AI Credit Packages") ?? false);
 
-    const referenceInput = container.querySelector(
-      'input[placeholder="Submitted ref or aicpay_... external ref"]',
-    ) as HTMLInputElement | null;
-    expect(referenceInput).toBeTruthy();
+    const quantityInput = container.querySelector('input[type="number"]') as HTMLInputElement | null;
+    const noteInput = container.querySelector('input[placeholder="Invoice note for billing team"]') as HTMLInputElement | null;
+    expect(quantityInput).toBeTruthy();
+    expect(noteInput).toBeTruthy();
 
     await act(async () => {
-      setInputValue(referenceInput!, "BD-REF-1001");
+      setInputValue(quantityInput!, "2");
+      setInputValue(noteInput!, "April invoice");
       await flushUi();
     });
 
-    const verifyByReferenceButton = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent?.trim() === "Verify by Reference",
-    );
-    expect(verifyByReferenceButton).toBeTruthy();
+    const submitButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Create Purchase Request",
+    ) as HTMLButtonElement | undefined;
+    expect(submitButton).toBeTruthy();
 
     await act(async () => {
-      verifyByReferenceButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      submitButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await flushUi();
     });
 
     await waitForCondition(() =>
       vi
         .mocked(global.fetch)
-        .mock.calls.some(([url]) => normalizeFetchUrl(String(url)) === "/api/account/ai/payments/verify"),
+        .mock.calls.some(([url]) => normalizeFetchUrl(String(url)) === "/api/account/purchases"),
     );
-    await waitForCondition(() => container.textContent?.includes("Payment verified and credits were added.") ?? false);
-    expect(pendingManualCallCount).toBeGreaterThanOrEqual(2);
+
+    const purchaseRequest = vi
+      .mocked(global.fetch)
+      .mock.calls.find(([url]) => normalizeFetchUrl(String(url)) === "/api/account/purchases");
+    expect(purchaseRequest).toBeTruthy();
+    const requestBody = JSON.parse(String((purchaseRequest?.[1] as RequestInit).body));
+    expect(requestBody).toEqual({
+      items: [
+        {
+          product_code: "ai_pack_100",
+          quantity: 2,
+        },
+      ],
+      note: "April invoice",
+    });
+
+    await waitForCondition(() =>
+      container.textContent?.includes("Purchase request submitted. Billing admin approval is required.") ?? false,
+    );
   });
 
-  it("shows role-based access denied message for cashier login without calling portal API", async () => {
-    let portalCallCount = 0;
+  it("shows owner-only commerce restriction for cashier role", async () => {
     vi.mocked(global.fetch).mockImplementation(async (input) => {
-      const rawRequestUrl = resolveRequestUrl(input);
-      const requestUrl = normalizeFetchUrl(rawRequestUrl);
+      const requestUrl = normalizeFetchUrl(resolveRequestUrl(input));
 
       if (requestUrl === "/api/account/me") {
-        return jsonResponse({ message: "Unauthorized" }, { status: 401 });
-      }
-
-      if (requestUrl === "/api/account/login") {
         return jsonResponse({
           user_id: "11111111-1111-1111-1111-111111111111",
           username: "cashier",
           full_name: "Cashier User",
           role: "cashier",
-          device_id: "22222222-2222-2222-2222-222222222222",
-          device_code: "MKTWEB-TESTDEV",
-          expires_at: "2026-04-08T00:00:00Z",
+          session_id: "sess-03",
+          shop_id: "33333333-3333-3333-3333-333333333333",
+          shop_code: "default",
+          expires_at: "2026-04-20T00:00:00Z",
           mfa_verified: true,
+          auth_session_version: 1,
         });
       }
 
-      if (requestUrl === "/api/account/license-portal") {
-        portalCallCount += 1;
-        return jsonResponse(
-          {
-            error: {
-              code: "FORBIDDEN",
-              message: "Requires manager or owner role.",
-            },
-          },
-          { status: 403 },
-        );
+      if (requestUrl === "/api/account/products?take=120") {
+        return jsonResponse({ generated_at: "2026-04-13T00:00:00Z", count: 0, items: [] });
       }
 
-      throw new Error(`Unexpected fetch URL: ${rawRequestUrl}`);
+      if (requestUrl === "/api/account/purchases?take=80") {
+        return jsonResponse({ generated_at: "2026-04-13T00:00:00Z", count: 0, items: [] });
+      }
+
+      if (requestUrl === "/api/account/ai/wallet") {
+        return jsonResponse({ available_credits: 0, updated_at: "2026-04-13T00:00:00Z" });
+      }
+
+      if (requestUrl === "/api/account/ai/ledger?take=30") {
+        return jsonResponse({ items: [] });
+      }
+
+      if (requestUrl === "/api/account/ai/payments?take=30") {
+        return jsonResponse({ items: [] });
+      }
+
+      throw new Error(`Unexpected fetch URL: ${requestUrl}`);
     });
 
     await act(async () => {
@@ -1053,42 +469,13 @@ describe("Account page authenticated flow", () => {
       await flushUi();
     });
 
-    await waitForCondition(() => {
-      const signInButton = Array.from(container.querySelectorAll("button")).find(
-        (button) => button.textContent?.trim() === "Sign In",
-      ) as HTMLButtonElement | undefined;
-      return Boolean(signInButton) && !signInButton!.disabled;
-    });
-
-    const usernameInput = container.querySelector('input[placeholder="owner"]') as HTMLInputElement | null;
-    const passwordInput = container.querySelector('input[type="password"]') as HTMLInputElement | null;
-    const deviceCodeInput = Array.from(container.querySelectorAll("input")).find(
-      (element) => element.getAttribute("placeholder") === null && element.value.includes("MKTWEB-"),
-    ) as HTMLInputElement | undefined;
-
-    expect(usernameInput).toBeTruthy();
-    expect(passwordInput).toBeTruthy();
-    expect(deviceCodeInput).toBeTruthy();
-
-    await act(async () => {
-      setInputValue(usernameInput!, "cashier");
-      setInputValue(passwordInput!, "cashier123");
-      setInputValue(deviceCodeInput!, "MKTWEB-TESTDEV");
-
-      const loginForm = usernameInput!.closest("form");
-      if (!loginForm) {
-        throw new Error("Login form not found.");
-      }
-
-      loginForm.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-      await flushUi();
-    });
-
     await waitForCondition(() => container.textContent?.includes("Signed in as") ?? false);
-    expect(container.textContent).toContain("Role: cashier");
-    expect(container.textContent).toContain("cannot access license management");
-    expect(container.textContent).not.toContain("Commerce & Subscription Overview");
-    expect(portalCallCount).toBe(0);
+    expect(container.textContent).toContain("Only shop owners can create package and AI credit purchases.");
+    expect(container.textContent).not.toContain("Create Purchase Request");
+
+    const invoiceCalls = vi
+      .mocked(global.fetch)
+      .mock.calls.filter(([url]) => normalizeFetchUrl(String(url)).startsWith("/api/account/ai/invoices?"));
+    expect(invoiceCalls.length).toBe(0);
   });
 });
-

@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
 
   return forwardAccountRequest({
     request,
-    backendPath: `/api/ai/payments?take=${normalizedTake}`,
+    backendPath: `/api/account/ai/payments?take=${normalizedTake}`,
     method: "GET",
     includeIdempotencyKey: false,
   });
