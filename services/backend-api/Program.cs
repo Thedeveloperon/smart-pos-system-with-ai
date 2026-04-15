@@ -500,13 +500,29 @@ builder.Services.AddHttpClient("ops-alert-delivery");
 builder.Services.AddSingleton<BasicTextOcrProvider>();
 builder.Services.AddSingleton<TesseractOcrProvider>();
 builder.Services.AddSingleton<OpenAiVisionOcrProvider>();
+builder.Services.AddSingleton<CloudRelayOcrProvider>();
 builder.Services.AddSingleton<IOcrProviderCore>(serviceProvider =>
 {
+    var configuration = serviceProvider.GetRequiredService<IConfiguration>();
     var purchasingOptions = serviceProvider.GetRequiredService<IOptions<PurchasingOptions>>().Value;
+    var aiOptions = serviceProvider.GetRequiredService<IOptions<AiInsightOptions>>().Value;
     var configuredProvider = purchasingOptions.OcrProvider?.Trim();
+    var cloudRelayConfigured = aiOptions.CloudRelayEnabled &&
+                               !string.IsNullOrWhiteSpace(aiOptions.CloudRelayBaseUrl);
+    var localOpenAiKeyConfigured = IsPurchasingOpenAiKeyConfigured(configuration, purchasingOptions);
+
+    if (string.Equals(configuredProvider, "cloud-relay", StringComparison.OrdinalIgnoreCase))
+    {
+        return serviceProvider.GetRequiredService<CloudRelayOcrProvider>();
+    }
 
     if (string.Equals(configuredProvider, "openai", StringComparison.OrdinalIgnoreCase))
     {
+        if (cloudRelayConfigured && !localOpenAiKeyConfigured)
+        {
+            return serviceProvider.GetRequiredService<CloudRelayOcrProvider>();
+        }
+
         return serviceProvider.GetRequiredService<OpenAiVisionOcrProvider>();
     }
 
@@ -538,6 +554,23 @@ builder.Services.AddSingleton<IOcrProviderCore>(serviceProvider =>
 });
 builder.Services.AddSingleton<IOcrProvider, ResilientOcrProvider>();
 builder.Services.AddSingleton<IBillMalwareScanner, NoOpBillMalwareScanner>();
+
+static bool IsPurchasingOpenAiKeyConfigured(IConfiguration configuration, PurchasingOptions options)
+{
+    var envName = string.IsNullOrWhiteSpace(options.OpenAiApiKeyEnvironmentVariable)
+        ? "OPENAI_API_KEY"
+        : options.OpenAiApiKeyEnvironmentVariable.Trim();
+    var envValue = Environment.GetEnvironmentVariable(envName);
+    if (!string.IsNullOrWhiteSpace(envValue))
+    {
+        return true;
+    }
+
+    var configuredValue = configuration[$"{PurchasingOptions.SectionName}:OpenAiApiKey"] ??
+                          configuration["OPENAI_API_KEY"] ??
+                          options.OpenAiApiKey;
+    return !string.IsNullOrWhiteSpace(configuredValue);
+}
 
 string NormalizePostgresConnectionString(string connectionString)
 {
@@ -731,6 +764,7 @@ app.MapAccountEndpoints();
 app.MapLicensingEndpoints();
 app.MapCloudV1Endpoints();
 app.MapCloudAiRelayEndpoints();
+app.MapCloudPurchaseRelayEndpoints();
 app.MapRecoveryEndpoints();
 app.MapDeviceActionProofEndpoints();
 app.MapAiSuggestionEndpoints();
