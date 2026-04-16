@@ -316,93 +316,96 @@ export default function AccountPage() {
 
   const ownerDashboard = (
     <div className="space-y-6">
-      <SectionCard className="rounded-[18px] p-6 shadow-sm">
-        <div className="space-y-2">
-          <p className="portal-kicker">Cloud Commerce Account</p>
-          <h1 className="text-4xl font-semibold tracking-tight">My Account</h1>
-          <p className="text-sm text-muted-foreground">
-            Sign in with your cloud owner account to purchase POS plans and AI credits.
-          </p>
-        </div>
+      <div className="space-y-1">
+        <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
+        <p className="text-sm text-muted-foreground">
+          Welcome back, {ownerDisplayName.split(" ")[0] || "there"}. Here&apos;s your shop overview.
+        </p>
+      </div>
 
-        <div className="mt-6 rounded-2xl border border-border/70 bg-surface-muted/50 p-4">
-          <p className="text-sm">
-            Signed in as <span className="font-semibold">{authSession?.full_name}</span> ({authSession?.username})
-          </p>
-          <p className="mt-2 text-xs text-muted-foreground">
-            Role: {authSession?.role} | Session ID: {authSession?.session_id} | Expires: {formatDate(authSession?.expires_at)}
-          </p>
-          <p className="mt-2 text-xs text-muted-foreground">Shop: {authSession?.shop_code || "-"}</p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={() => void handleRefresh()} disabled={isLoadingCommerce}>
-              <RefreshCw size={16} />
-              {isLoadingCommerce ? "Refreshing..." : "Refresh Account"}
-            </Button>
-            <Button type="button" variant="outline" onClick={() => void handleLogout()} disabled={isLoggingOut}>
-              <LogOut size={16} />
-              {isLoggingOut ? "Signing Out..." : "Sign Out"}
-            </Button>
-          </div>
-        </div>
-
-        {authMessage && <p className="mt-4 text-sm text-emerald-700">{authMessage}</p>}
-      </SectionCard>
-
-      <SectionCard className="space-y-4 rounded-[18px] p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="portal-kicker">AI Wallet</p>
-            <h2 className="text-xl font-semibold">Credits Overview</h2>
-          </div>
-          <StatusChip tone="neutral">{wallet ? `${formatCredits(wallet.available_credits)} credits` : "-"}</StatusChip>
-        </div>
-
-        {commerceError && <p className="text-sm text-destructive">{commerceError}</p>}
-        {commerceMessage && <p className="text-sm text-emerald-700">{commerceMessage}</p>}
-
-        <div className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-2">
-            <p className="text-sm font-semibold">Recent Wallet Activity</p>
-            {aiLedger.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No credit ledger entries yet.</p>
-            ) : (
-              <div className="space-y-2">
-                {aiLedger.slice(0, 6).map((item, index) => (
-                  <div key={`${item.created_at_utc}-${item.entry_type}-${index}`} className="rounded-md border border-border px-3 py-2">
-                    <p className="text-sm font-medium">
-                      {toSentence(item.entry_type)} | {item.delta_credits >= 0 ? "+" : ""}
-                      {formatCredits(item.delta_credits)}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Balance: {formatCredits(item.balance_after_credits)} | {formatDate(item.created_at_utc)}
-                    </p>
-                  </div>
-                ))}
+      <div className="grid gap-4 xl:grid-cols-4">
+        {[
+          {
+            label: "Shop Status",
+            value: "Active",
+            valueClass: "text-emerald-700",
+            icon: ShoppingBag,
+          },
+          {
+            label: "Active Subscriptions",
+            value: String(
+              purchases.filter((purchase) => ["approved", "paid", "assigned"].includes(purchase.status)).length || 1,
+            ),
+            icon: Package,
+          },
+          {
+            label: "AI Credits Balance",
+            value: wallet ? formatCredits(wallet.available_credits) : "0",
+            icon: ShoppingCart,
+          },
+          {
+            label: "Pending Orders",
+            value: String(
+              purchases.filter((purchase) =>
+                ["draft", "submitted", "payment_pending", "pending_approval"].includes(purchase.status),
+              ).length,
+            ),
+            icon: Clock3,
+          },
+        ].map((card) => {
+          const Icon = card.icon;
+          return (
+            <SectionCard key={card.label} className="rounded-[16px] p-5 shadow-sm">
+              <div className="flex items-start justify-between gap-4">
+                <p className="text-sm text-muted-foreground">{card.label}</p>
+                <Icon className="h-4 w-4 text-muted-foreground" />
               </div>
-            )}
-          </div>
+              <p className={["mt-2 text-3xl font-semibold tracking-tight", card.valueClass || ""].join(" ")}>
+                {card.value}
+              </p>
+            </SectionCard>
+          );
+        })}
+      </div>
 
-          <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-2">
-            <p className="text-sm font-semibold">Recent AI Payments</p>
-            {aiPayments.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No payment records yet.</p>
-            ) : (
-              <div className="space-y-2">
-                {aiPayments.slice(0, 6).map((item) => (
-                  <div key={item.payment_id} className="rounded-md border border-border px-3 py-2">
-                    <p className="text-sm font-medium">
-                      {formatCredits(item.credits)} credits | {formatAmount(item.amount, item.currency)}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {toSentence(item.payment_status)} | {toSentence(item.payment_method)} | {formatDate(item.created_at)}
-                    </p>
+      <div className="space-y-3">
+        <h2 className="text-xl font-semibold">Recent Purchases</h2>
+        <SectionCard className="overflow-hidden rounded-[16px] p-0 shadow-sm">
+          {purchases.length === 0 ? (
+            <div className="px-4 py-8 text-sm text-muted-foreground">No purchases yet.</div>
+          ) : (
+            <div className="divide-y divide-border/70">
+              {purchases.slice(0, 4).map((purchase) => {
+                const primaryItem = purchase.items[0]?.product_name || "Purchase";
+                const secondaryText = purchase.items.map((item) => item.product_name).join(", ");
+                const statusClass =
+                  purchase.status === "approved" || purchase.status === "paid" || purchase.status === "assigned"
+                    ? "bg-sky-100 text-sky-700 border-sky-200"
+                    : purchase.status === "rejected"
+                      ? "bg-red-100 text-red-700 border-red-200"
+                      : purchase.status === "draft"
+                        ? "bg-slate-100 text-slate-600 border-slate-200"
+                        : "bg-emerald-100 text-emerald-700 border-emerald-200";
+
+                return (
+                  <div key={purchase.purchase_id} className="flex items-center justify-between gap-4 px-4 py-4">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold">{purchase.order_number}</p>
+                      <p className="text-xs text-muted-foreground">{secondaryText || primaryItem}</p>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <p className="text-sm font-medium">{formatAmount(purchase.total_amount, purchase.currency)}</p>
+                      <span className={["inline-flex rounded-md border px-2 py-0.5 text-xs font-medium", statusClass].join(" ")}>
+                        {toSentence(purchase.status)}
+                      </span>
+                    </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </SectionCard>
+                );
+              })}
+            </div>
+          )}
+        </SectionCard>
+      </div>
     </div>
   );
 
@@ -1056,8 +1059,7 @@ export default function AccountPage() {
           </Link>
         </div>
 
-        <SectionCard className="space-y-6 rounded-[28px] p-6 sm:p-8">
-          {!authSession && (
+        {!authSession && (
             <div className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
               <div className="flex flex-col justify-between rounded-[24px] border border-border/70 bg-surface-muted/60 p-6">
                 <div className="space-y-4">
@@ -1178,43 +1180,6 @@ export default function AccountPage() {
             </div>
           )}
 
-          {authSession && (
-            <>
-              <div className="space-y-2">
-                <p className="portal-kicker">Cloud Commerce Account</p>
-                <h1 className="text-4xl font-semibold tracking-tight">My Account</h1>
-                <p className="text-sm text-muted-foreground">
-                  Sign in with your cloud owner account to purchase POS plans and AI credits.
-                </p>
-              </div>
-
-              <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-3">
-                <p className="text-sm">
-                  Signed in as <span className="font-semibold">{authSession.full_name}</span> ({authSession.username})
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Role: {authSession.role} | Session ID: {authSession.session_id} | Expires: {formatDate(authSession.expires_at)}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Shop: {authSession.shop_code || "-"}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <Button type="button" variant="outline" onClick={() => void handleRefresh()} disabled={isLoadingCommerce}>
-                    <RefreshCw size={16} />
-                    {isLoadingCommerce ? "Refreshing..." : "Refresh Account"}
-                  </Button>
-                  <Button type="button" variant="outline" onClick={() => void handleLogout()} disabled={isLoggingOut}>
-                    <LogOut size={16} />
-                    {isLoggingOut ? "Signing Out..." : "Sign Out"}
-                  </Button>
-                </div>
-              </div>
-            </>
-          )}
-
-          {authMessage && <p className="text-sm text-emerald-700">{authMessage}</p>}
-        </SectionCard>
-
         {authSession && (
           <div
             className={[
@@ -1306,9 +1271,15 @@ export default function AccountPage() {
                 >
                   {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
                 </button>
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Clock3 className="h-4 w-4" />
-                  <span className="text-sm">Owner Account</span>
+                <div className="flex items-center gap-3 text-muted-foreground">
+                  <div className="flex items-center gap-2">
+                    <Clock3 className="h-4 w-4" />
+                    <span className="text-sm">Owner Account</span>
+                  </div>
+                  <Button type="button" variant="outline" size="sm" onClick={() => void handleLogout()} disabled={isLoggingOut}>
+                    <LogOut size={16} />
+                    {isLoggingOut ? "Signing Out..." : "Sign Out"}
+                  </Button>
                 </div>
               </header>
 
