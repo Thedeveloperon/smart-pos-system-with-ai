@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, LogOut, RefreshCw } from "lucide-react";
+import { ArrowLeft, KeyRound, LogOut, RefreshCw, ShieldCheck, ShoppingBag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageShell, SectionCard, StatusChip } from "@/components/portal/layout-primitives";
 import { useI18n } from "@/i18n/I18nProvider";
@@ -466,84 +466,160 @@ export default function AccountPage() {
           </Link>
         </div>
 
-        <SectionCard className="space-y-4">
-          <div className="space-y-2">
-            <p className="portal-kicker">Cloud Commerce Account</p>
-            <h1 className="text-4xl font-semibold tracking-tight">My Account</h1>
-            <p className="text-sm text-muted-foreground">
-              Sign in with your cloud owner account to purchase POS plans and AI credits.
-            </p>
-          </div>
+        <SectionCard className="space-y-6 rounded-[28px] p-6 sm:p-8">
+          {!authSession && (
+            <div className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
+              <div className="flex flex-col justify-between rounded-[24px] border border-border/70 bg-surface-muted/60 p-6">
+                <div className="space-y-4">
+                  <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm">
+                    <ShoppingBag className="h-7 w-7" />
+                  </div>
 
-          {isHydratingSession && <p className="text-sm text-muted-foreground">Checking your session...</p>}
+                  <div className="space-y-2">
+                    <p className="portal-kicker">Cloud Commerce Account</p>
+                    <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">My Account</h1>
+                    <p className="max-w-xl text-sm text-muted-foreground sm:text-base">
+                      Sign in with your cloud owner account to purchase POS plans and AI credits.
+                    </p>
+                  </div>
 
-          {!isHydratingSession && !authSession && (
-            <form className="grid gap-3 md:grid-cols-2" onSubmit={handleLogin}>
-              <label className="space-y-1 block">
-                <span className="portal-kicker">Username</span>
-                <input
-                  className="field-shell"
-                  value={authUsername}
-                  onChange={(event) => setAuthUsername(event.target.value)}
-                  autoComplete="username"
-                  required
-                />
-              </label>
+                  <div className="rounded-2xl border border-border/70 bg-background/70 p-4 text-sm text-muted-foreground">
+                    <p className="font-medium text-foreground">What you can do here</p>
+                    <ul className="mt-2 space-y-1.5">
+                      <li>• Buy POS plans and AI credit packs</li>
+                      <li>• Review wallet balance and recent activity</li>
+                      <li>• Track purchase history and payment status</li>
+                    </ul>
+                  </div>
+                </div>
 
-              <label className="space-y-1 block">
-                <span className="portal-kicker">Password</span>
-                <input
-                  className="field-shell"
-                  type="password"
-                  value={authPassword}
-                  onChange={(event) => setAuthPassword(event.target.value)}
-                  autoComplete="current-password"
-                  required
-                />
-              </label>
-
-              <label className="space-y-1 block md:col-span-2">
-                <span className="portal-kicker">MFA Code (Optional)</span>
-                <input
-                  className="field-shell"
-                  value={authMfaCode}
-                  onChange={(event) => setAuthMfaCode(event.target.value)}
-                  placeholder="123456"
-                />
-              </label>
-
-              {authError && <p className="md:col-span-2 text-sm text-destructive">{authError}</p>}
-
-              <div className="md:col-span-2">
-                <Button type="submit" variant="hero" disabled={isLoggingIn}>
-                  {isLoggingIn ? "Signing In..." : "Sign In"}
-                </Button>
+                <div className="mt-6 grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-2xl border border-border/70 bg-background/60 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Secure</p>
+                    <p className="mt-2 text-sm font-medium">Session-based sign-in</p>
+                  </div>
+                  <div className="rounded-2xl border border-border/70 bg-background/60 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Linked</p>
+                    <p className="mt-2 text-sm font-medium">Cloud owner account</p>
+                  </div>
+                  <div className="rounded-2xl border border-border/70 bg-background/60 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Fast</p>
+                    <p className="mt-2 text-sm font-medium">Wallet and billing access</p>
+                  </div>
+                </div>
               </div>
-            </form>
+
+              <div className="rounded-[24px] border border-border/70 bg-background/80 p-6 shadow-sm">
+                <div className="space-y-6">
+                  <div className="flex items-start gap-3">
+                    <div className="rounded-2xl bg-primary/10 p-3 text-primary">
+                      <ShieldCheck className="h-6 w-6" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Sign In</p>
+                      <p className="text-sm text-muted-foreground">
+                        Use your cloud owner account to access POS plans and AI credits.
+                      </p>
+                    </div>
+                  </div>
+
+                  {isHydratingSession ? (
+                    <p className="text-sm text-muted-foreground">Checking your session...</p>
+                  ) : (
+                    <form className="space-y-4" onSubmit={handleLogin}>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <label className="space-y-1 block">
+                          <span className="portal-kicker">Username</span>
+                          <input
+                            className="field-shell"
+                            value={authUsername}
+                            onChange={(event) => setAuthUsername(event.target.value)}
+                            autoComplete="username"
+                            required
+                          />
+                        </label>
+
+                        <label className="space-y-1 block">
+                          <span className="portal-kicker">Password</span>
+                          <input
+                            className="field-shell"
+                            type="password"
+                            value={authPassword}
+                            onChange={(event) => setAuthPassword(event.target.value)}
+                            autoComplete="current-password"
+                            required
+                          />
+                        </label>
+                      </div>
+
+                      <label className="space-y-1 block">
+                        <span className="portal-kicker">MFA Code (Optional)</span>
+                        <input
+                          className="field-shell"
+                          value={authMfaCode}
+                          onChange={(event) => setAuthMfaCode(event.target.value)}
+                          placeholder="123456"
+                        />
+                      </label>
+
+                      {authError && (
+                        <div className="rounded-2xl border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                          {authError}
+                        </div>
+                      )}
+
+                      <Button type="submit" variant="hero" className="w-full" disabled={isLoggingIn}>
+                        {isLoggingIn ? "Signing In..." : "Sign In"}
+                      </Button>
+                    </form>
+                  )}
+
+                  <div className="rounded-2xl border border-border/70 bg-surface-muted/60 p-4 text-xs text-muted-foreground">
+                    <div className="flex items-start gap-2">
+                      <KeyRound className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                      <p>
+                        MFA is optional for the cloud account screen. If you are using super-admin credentials,
+                        enter the 6-digit code that your setup expects.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
 
           {authSession && (
-            <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-3">
-              <p className="text-sm">
-                Signed in as <span className="font-semibold">{authSession.full_name}</span> ({authSession.username})
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Role: {authSession.role} | Session ID: {authSession.session_id} | Expires: {formatDate(authSession.expires_at)}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Shop: {authSession.shop_code || "-"}
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="outline" onClick={() => void handleRefresh()} disabled={isLoadingCommerce}>
-                  <RefreshCw size={16} />
-                  {isLoadingCommerce ? "Refreshing..." : "Refresh Account"}
-                </Button>
-                <Button type="button" variant="outline" onClick={() => void handleLogout()} disabled={isLoggingOut}>
-                  <LogOut size={16} />
-                  {isLoggingOut ? "Signing Out..." : "Sign Out"}
-                </Button>
+            <>
+              <div className="space-y-2">
+                <p className="portal-kicker">Cloud Commerce Account</p>
+                <h1 className="text-4xl font-semibold tracking-tight">My Account</h1>
+                <p className="text-sm text-muted-foreground">
+                  Sign in with your cloud owner account to purchase POS plans and AI credits.
+                </p>
               </div>
-            </div>
+
+              <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-3">
+                <p className="text-sm">
+                  Signed in as <span className="font-semibold">{authSession.full_name}</span> ({authSession.username})
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Role: {authSession.role} | Session ID: {authSession.session_id} | Expires: {formatDate(authSession.expires_at)}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Shop: {authSession.shop_code || "-"}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" onClick={() => void handleRefresh()} disabled={isLoadingCommerce}>
+                    <RefreshCw size={16} />
+                    {isLoadingCommerce ? "Refreshing..." : "Refresh Account"}
+                  </Button>
+                  <Button type="button" variant="outline" onClick={() => void handleLogout()} disabled={isLoggingOut}>
+                    <LogOut size={16} />
+                    {isLoggingOut ? "Signing Out..." : "Sign Out"}
+                  </Button>
+                </div>
+              </div>
+            </>
           )}
 
           {authMessage && <p className="text-sm text-emerald-700">{authMessage}</p>}

@@ -5,6 +5,8 @@ export interface AppUser {
   displayName: string;
   role: UserRole;
   backendRole: string;
+  sessionId?: string;
+  sessionExpiresAt?: string;
 }
 
 export const mapBackendRoleToUserRole = (role: string): UserRole => {

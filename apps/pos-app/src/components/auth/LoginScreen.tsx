@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { AlertCircle, ShoppingBag } from "lucide-react";
+import { AlertCircle, ArrowLeft, KeyRound, ShoppingBag, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "./AuthContext";
@@ -41,111 +41,171 @@ const LoginScreen = ({ mode = "pos" }: LoginScreenProps) => {
   const isAdminMode = mode === "admin";
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <div className="w-full max-w-sm space-y-8">
-        <div className="text-center space-y-2">
-          <div className="mx-auto w-14 h-14 rounded-2xl bg-primary flex items-center justify-center">
-            <ShoppingBag className="h-7 w-7 text-primary-foreground" />
-          </div>
-          <h1 className="text-2xl font-bold tracking-tight">SmartPOS Lanka</h1>
-        </div>
-
-        <div className="rounded-2xl border border-border bg-card p-6 pos-shadow-md space-y-6">
-          <div>
-            <h2 className="text-xl font-bold">Sign In</h2>
-            <p className="text-sm text-muted-foreground mt-1">
+    <div className="min-h-screen px-4 py-4 sm:px-6 lg:px-8">
+      <div className="mx-auto flex min-h-[calc(100vh-2rem)] w-full max-w-7xl items-center justify-center">
+        <div className="grid w-full gap-6 lg:grid-cols-[1.05fr_0.95fr]">
+          <div className="flex flex-col justify-between rounded-3xl border border-border/80 bg-card/90 p-6 shadow-sm sm:p-8">
+            <div className="space-y-4">
               {isAdminMode ? (
-                <>
-                  Super admin access only:{" "}
-                  <code className="text-primary font-medium">support_admin</code>,{" "}
-                  <code className="text-primary font-medium">billing_admin</code>, or{" "}
-                  <code className="text-primary font-medium">security_admin</code>.
-                </>
+                <a
+                  href="/"
+                  className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Back to Home
+                </a>
               ) : (
-                <>
-                  Use the seeded backend users:{" "}
-                  <code className="text-primary font-medium">owner</code>,{" "}
-                  <code className="text-primary font-medium">manager</code>, or{" "}
-                  <code className="text-primary font-medium">cashier</code>.
-                </>
+                <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-primary">
+                  SmartPOS Lanka
+                </div>
               )}
-            </p>
+
+              <div className="space-y-3">
+                <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm">
+                  {isAdminMode ? <ShieldCheck className="h-7 w-7" /> : <ShoppingBag className="h-7 w-7" />}
+                </div>
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+                    {isAdminMode ? "Cloud Commerce Account" : "POS Access"}
+                  </p>
+                  <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+                    {isAdminMode ? "My Account" : "Sign In"}
+                  </h1>
+                  <p className="max-w-xl text-sm text-muted-foreground sm:text-base">
+                    {isAdminMode
+                      ? "Sign in with your cloud owner account to purchase POS plans and AI credits."
+                      : "Use your seeded POS credentials to access the cashier, manager, or owner workspace."}
+                  </p>
+                </div>
+              </div>
+
+              {isAdminMode ? (
+                <div className="rounded-2xl border border-border/80 bg-muted/20 p-4 text-sm text-muted-foreground">
+                  <p className="font-medium text-foreground">Super admin access</p>
+                  <p className="mt-1">
+                    Use <span className="font-medium text-foreground">support_admin</span>,{" "}
+                    <span className="font-medium text-foreground">billing_admin</span>, or{" "}
+                    <span className="font-medium text-foreground">security_admin</span>.
+                  </p>
+                  <p className="mt-2 flex flex-wrap gap-2">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-background px-2.5 py-1 text-xs text-foreground">
+                      <KeyRound className="h-3.5 w-3.5" />
+                      MFA required
+                    </span>
+                    <span className="inline-flex items-center rounded-full bg-background px-2.5 py-1 text-xs text-foreground">
+                      Static code: {STATIC_SUPER_ADMIN_MFA_CODE}
+                    </span>
+                  </p>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-border/80 bg-muted/20 p-4 text-sm text-muted-foreground">
+                  <p className="font-medium text-foreground">Seeded users</p>
+                  <p className="mt-1">
+                    <code className="font-medium text-foreground">owner123</code>,{" "}
+                    <code className="font-medium text-foreground">manager123</code>, and{" "}
+                    <code className="font-medium text-foreground">cashier123</code>.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-8 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-border/70 bg-background/60 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Security</p>
+                <p className="mt-2 text-sm font-medium">Protected sign-in flow</p>
+              </div>
+              <div className="rounded-2xl border border-border/70 bg-background/60 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Role aware</p>
+                <p className="mt-2 text-sm font-medium">Admin and POS paths split</p>
+              </div>
+              <div className="rounded-2xl border border-border/70 bg-background/60 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Cloud linked</p>
+                <p className="mt-2 text-sm font-medium">Uses the existing backend session</p>
+              </div>
+            </div>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Username</label>
-              <Input
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="Enter username"
-                className="h-11 rounded-xl bg-muted/50"
-                autoFocus
-              />
-            </div>
+          <div className="rounded-3xl border border-border/80 bg-card/95 p-6 shadow-sm sm:p-8">
+            <form onSubmit={handleSubmit} className="space-y-5">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2 sm:col-span-1">
+                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                    Username
+                  </label>
+                  <Input
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="Enter username"
+                    className="h-12 rounded-2xl bg-muted/40"
+                    autoFocus
+                  />
+                </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Password</label>
-              <Input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter password"
-                className="h-11 rounded-xl bg-muted/50"
-              />
-            </div>
+                <div className="space-y-2 sm:col-span-1">
+                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                    Password
+                  </label>
+                  <Input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Enter password"
+                    className="h-12 rounded-2xl bg-muted/40"
+                  />
+                </div>
+              </div>
 
-            {isAdminMode && (
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">
-                  MFA Code (Super Admin): {STATIC_SUPER_ADMIN_MFA_CODE}
+                <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                  MFA Code {isAdminMode ? "(Optional)" : "(Super Admin)"}
                 </label>
                 <Input
                   value={mfaCode}
                   onChange={(e) => setMfaCode(e.target.value)}
-                  placeholder="6-digit code"
-                  className="h-11 rounded-xl bg-muted/50"
+                  placeholder={isAdminMode ? "123456" : "6-digit code"}
+                  className="h-12 rounded-2xl bg-muted/40"
                   inputMode="numeric"
                 />
               </div>
-            )}
 
-            {error && (
-              <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 rounded-xl px-3 py-2">
-                <AlertCircle className="h-4 w-4 shrink-0" />
-                {error}
-              </div>
-            )}
+              {error && (
+                <div className="flex items-start gap-2 rounded-2xl border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
 
-            <Button
-              type="submit"
-              variant="pos-primary"
-              size="xl"
-              className="w-full rounded-xl"
-              disabled={!username.trim() || !password.trim() || loading}
-            >
-              {loading ? "Signing in..." : "Sign In"}
-            </Button>
-          </form>
+              <Button
+                type="submit"
+                variant="pos-primary"
+                size="xl"
+                className="w-full rounded-2xl"
+                disabled={!username.trim() || !password.trim() || loading}
+              >
+                {loading ? "Signing in..." : "Sign In"}
+              </Button>
+
+              <p className="text-xs text-muted-foreground">
+                {isAdminMode ? "Signed out." : "Use the POS account associated with this installation."}
+              </p>
+            </form>
+
+            {isAdminMode ? (
+              <p className="mt-6 text-xs leading-6 text-muted-foreground">
+                Super admin seeded credentials:
+                <code className="font-medium text-foreground"> support_admin / support123</code>,
+                <code className="font-medium text-foreground"> billing_admin / billing123</code>, and
+                <code className="font-medium text-foreground"> security_admin / security123</code>.
+                Primary portal: <code className="font-medium text-foreground">{MARKETING_ADMIN_LOGIN_URL}</code>.
+              </p>
+            ) : (
+              <p className="mt-6 text-xs leading-6 text-muted-foreground">
+                Super admin portal is on the website:{" "}
+                <code className="font-medium text-foreground">{MARKETING_ADMIN_LOGIN_URL}</code>.
+              </p>
+            )}
+          </div>
         </div>
-
-        {isAdminMode ? (
-          <p className="text-center text-xs text-muted-foreground">
-            Super admin seeded credentials (MFA required):
-            <code className="font-medium"> support_admin / support123</code>,
-            <code className="font-medium"> billing_admin / billing123</code>,
-            <code className="font-medium"> security_admin / security123</code>.
-            Static MFA code: <code className="font-medium">{STATIC_SUPER_ADMIN_MFA_CODE}</code>.
-            Primary portal: <code className="font-medium"> {MARKETING_ADMIN_LOGIN_URL}</code>.
-          </p>
-        ) : (
-          <p className="text-center text-xs text-muted-foreground">
-            Passwords are the seeded values: <code className="font-medium">owner123</code>,{" "}
-            <code className="font-medium">manager123</code>, and{" "}
-            <code className="font-medium">cashier123</code>. Super admin portal is on the website:{" "}
-            <code className="font-medium">{MARKETING_ADMIN_LOGIN_URL}</code>.
-          </p>
-        )}
       </div>
     </div>
   );

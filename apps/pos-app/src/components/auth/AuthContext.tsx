@@ -18,12 +18,14 @@ export const useAuth = () => {
   return ctx;
 };
 
-function toAppUser(session: { username: string; full_name: string; role: string }): AppUser {
+function toAppUser(session: { username: string; full_name: string; role: string; session_id?: string; expires_at: string }): AppUser {
   return {
     username: session.username,
     displayName: session.full_name,
     role: mapBackendRoleToUserRole(session.role),
     backendRole: session.role,
+    sessionId: session.session_id,
+    sessionExpiresAt: session.expires_at,
   };
 }
 
