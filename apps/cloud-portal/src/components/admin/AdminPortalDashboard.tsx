@@ -1,6 +1,7 @@
 "use client";
 
 import { type ElementType, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Bell,
   ChevronDown,
@@ -33,6 +34,7 @@ import {
   type CloudProductRow,
   type CloudPurchaseRow,
 } from "@/lib/adminApi";
+import { defaultLocale } from "@/i18n/config";
 import type { AdminSession } from "./auth";
 
 type AdminPortalDashboardProps = {
@@ -128,8 +130,10 @@ function AdminSectionHeader({
 }
 
 export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDashboardProps) {
+  const router = useRouter();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activeSection, setActiveSection] = useState<SectionId>("overview");
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [products, setProducts] = useState<CloudProductRow[]>([]);
   const [purchases, setPurchases] = useState<CloudPurchaseRow[]>([]);
@@ -283,33 +287,83 @@ export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDas
     }
   };
 
+  const goToOwnerView = () => {
+    setViewMenuOpen(false);
+    router.push(`/${defaultLocale}`);
+  };
+
+  const goToAdminView = () => {
+    setViewMenuOpen(false);
+    router.push("/admin");
+  };
+
   return (
     <div className="min-h-screen bg-[#f7f8fb] text-slate-950">
-      <div className="grid min-h-screen lg:grid-cols-[230px_minmax(0,1fr)]">
-        <aside className="border-r border-slate-200 bg-slate-50">
+      <div
+        className={[
+          "grid min-h-screen transition-[grid-template-columns] duration-300",
+          sidebarCollapsed ? "lg:grid-cols-[72px_minmax(0,1fr)]" : "lg:grid-cols-[230px_minmax(0,1fr)]",
+        ].join(" ")}
+      >
+        <aside className="border-r border-slate-200 bg-slate-50 transition-all duration-300">
           <div className="flex h-full flex-col">
-            <div className="flex items-center gap-3 border-b border-slate-200 px-4 py-4">
+            <div className={["flex items-center border-b border-slate-200 py-4", sidebarCollapsed ? "justify-center px-2" : "gap-3 px-4"].join(" ")}>
               <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-900 text-white">
                 <Monitor className="h-4 w-4" />
               </div>
-              <div>
+              <div className={sidebarCollapsed ? "hidden" : ""}>
                 <p className="text-sm font-semibold">Cloud Portal</p>
                 <p className="text-xs text-slate-500">v1.0</p>
               </div>
             </div>
 
-            <div className="px-4 py-4">
-              <button className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm">
+            <div className={["relative py-4", sidebarCollapsed ? "px-2" : "px-4"].join(" ")}>
+              <button
+                type="button"
+                onClick={() => setViewMenuOpen((current) => !current)}
+                className={[
+                  "flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white py-2 text-sm shadow-sm",
+                  sidebarCollapsed ? "px-2" : "px-3",
+                ].join(" ")}
+              >
                 <span className="flex items-center gap-2">
-                  <Users className="h-4 w-4 text-slate-600" />
-                  Admin View
+                  <Shield className="h-4 w-4 text-slate-600" />
+                  <span className={sidebarCollapsed ? "hidden" : ""}>Admin View</span>
                 </span>
-                <ChevronDown className="h-4 w-4 text-slate-500" />
+                <ChevronDown className={["h-4 w-4 text-slate-500", sidebarCollapsed ? "hidden" : ""].join(" ")} />
               </button>
+
+              {viewMenuOpen && (
+                <div
+                  className={[
+                    "absolute top-[calc(100%+0.5rem)] z-20 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg",
+                    sidebarCollapsed ? "left-2 right-2" : "left-4 right-4",
+                  ].join(" ")}
+                >
+                  <button
+                    type="button"
+                    onClick={goToOwnerView}
+                    className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm text-slate-700 hover:bg-slate-50"
+                  >
+                    <Users className="h-4 w-4" />
+                    Owner View
+                  </button>
+                  <button
+                    type="button"
+                    onClick={goToAdminView}
+                    className="flex w-full items-center gap-2 border-t border-slate-100 px-4 py-3 text-left text-sm text-slate-700 hover:bg-slate-50"
+                  >
+                    <Shield className="h-4 w-4" />
+                    Admin View
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="px-2">
-              <p className="px-3 pb-2 text-xs font-medium uppercase tracking-[0.2em] text-slate-500">Administration</p>
+              <p className={["pb-2 text-xs font-medium uppercase tracking-[0.2em] text-slate-500", sidebarCollapsed ? "px-2 text-center" : "px-3"].join(" ")}>
+                {sidebarCollapsed ? "" : "Administration"}
+              </p>
               <nav className="space-y-1">
                 {navItems.map((item) => {
                   const Icon = item.icon;
@@ -319,24 +373,26 @@ export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDas
                       key={item.id}
                       onClick={() => setActiveSection(item.id)}
                       className={[
-                        "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition",
+                        "flex w-full items-center rounded-lg py-2 text-sm transition",
+                        sidebarCollapsed ? "justify-center px-2" : "gap-3 px-3",
                         active ? "bg-slate-200 font-medium" : "hover:bg-slate-100",
                       ].join(" ")}
+                      title={item.label}
                     >
                       <Icon className="h-4 w-4 text-slate-600" />
-                      <span>{item.label}</span>
+                      <span className={sidebarCollapsed ? "hidden" : ""}>{item.label}</span>
                     </button>
                   );
                 })}
               </nav>
             </div>
 
-            <div className="mt-auto border-t border-slate-200 px-4 py-4">
+            <div className={["mt-auto border-t border-slate-200 py-4", sidebarCollapsed ? "px-2" : "px-4"].join(" ")}>
               <div className="flex items-center gap-3">
                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-200 text-xs font-semibold text-slate-700">
                   {initials(user.full_name)}
                 </div>
-                <div>
+                <div className={sidebarCollapsed ? "hidden" : ""}>
                   <p className="text-sm font-medium">{user.full_name}</p>
                   <p className="text-xs text-slate-500">Super Admin</p>
                 </div>
