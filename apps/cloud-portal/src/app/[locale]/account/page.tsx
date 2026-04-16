@@ -233,6 +233,180 @@ const ownerNavItems: Array<{ id: OwnerSectionId; label: string; icon: typeof Lay
 
 const OwnerOnlyMessage = "Only shop owners can create package and AI credit purchases.";
 
+const ownerCatalogFallbackProducts: CloudProductRow[] = [
+  {
+    product_code: "POS-STD-M",
+    product_name: "POS Standard Monthly",
+    product_type: "pos_subscription",
+    description: "Standard POS terminal subscription with full feature access, monthly billing.",
+    price: 49.99,
+    currency: "USD",
+    billing_mode: "monthly",
+    validity: "30 days",
+    default_quantity_or_credits: 1,
+    active: true,
+    created_at: null,
+    updated_at: null,
+  },
+  {
+    product_code: "POS-STD-Y",
+    product_name: "POS Standard Yearly",
+    product_type: "pos_subscription",
+    description: "Standard POS terminal subscription with full feature access, annual billing with 2 months free.",
+    price: 499.99,
+    currency: "USD",
+    billing_mode: "yearly",
+    validity: "365 days",
+    default_quantity_or_credits: 1,
+    active: true,
+    created_at: null,
+    updated_at: null,
+  },
+  {
+    product_code: "POS-PRO-M",
+    product_name: "POS Pro Monthly",
+    product_type: "pos_subscription",
+    description: "Professional POS with advanced analytics, inventory management, and multi-terminal support.",
+    price: 99.99,
+    currency: "USD",
+    billing_mode: "monthly",
+    validity: "30 days",
+    default_quantity_or_credits: 1,
+    active: true,
+    created_at: null,
+    updated_at: null,
+  },
+  {
+    product_code: "AI-100",
+    product_name: "AI Credits — 100 Pack",
+    product_type: "ai_credit",
+    description: "100 AI processing credits for smart recommendations, receipt scanning, and inventory insights.",
+    price: 19.99,
+    currency: "USD",
+    billing_mode: "one_time",
+    validity: null,
+    default_quantity_or_credits: 100,
+    active: true,
+    created_at: null,
+    updated_at: null,
+  },
+  {
+    product_code: "AI-500",
+    product_name: "AI Credits — 500 Pack",
+    product_type: "ai_credit",
+    description: "500 AI processing credits. Best value for growing businesses.",
+    price: 79.99,
+    currency: "USD",
+    billing_mode: "one_time",
+    validity: null,
+    default_quantity_or_credits: 500,
+    active: true,
+    created_at: null,
+    updated_at: null,
+  },
+  {
+    product_code: "AI-2000",
+    product_name: "AI Credits — 2000 Pack",
+    product_type: "ai_credit",
+    description: "2000 AI processing credits. Enterprise volume pack.",
+    price: 249.99,
+    currency: "USD",
+    billing_mode: "one_time",
+    validity: null,
+    default_quantity_or_credits: 2000,
+    active: true,
+    created_at: null,
+    updated_at: null,
+  },
+];
+
+const ownerPurchaseFallbackRows: CloudPurchaseRow[] = [
+  {
+    purchase_id: "fallback-purchase-1",
+    order_number: "ORD-2024-0001",
+    shop_code: "default",
+    status: "assigned",
+    items: [
+      {
+        product_code: "POS-STD-M",
+        product_name: "POS Standard Monthly",
+        product_type: "pos_subscription",
+        quantity: 1,
+        amount: 49.99,
+        currency: "USD",
+        credits: null,
+      },
+    ],
+    total_amount: 49.99,
+    currency: "USD",
+    note: null,
+    created_at: "2024-07-01T00:00:00Z",
+  },
+  {
+    purchase_id: "fallback-purchase-2",
+    order_number: "ORD-2024-0002",
+    shop_code: "default",
+    status: "approved",
+    items: [
+      {
+        product_code: "AI-500",
+        product_name: "AI Credits — 500 Pack",
+        product_type: "ai_credit",
+        quantity: 1,
+        amount: 159.98,
+        currency: "USD",
+        credits: 500,
+      },
+    ],
+    total_amount: 159.98,
+    currency: "USD",
+    note: null,
+    created_at: "2024-08-05T00:00:00Z",
+  },
+  {
+    purchase_id: "fallback-purchase-3",
+    order_number: "ORD-2024-0004",
+    shop_code: "default",
+    status: "rejected",
+    items: [
+      {
+        product_code: "POS-PRO-M",
+        product_name: "POS Pro Monthly",
+        product_type: "pos_subscription",
+        quantity: 1,
+        amount: 499.95,
+        currency: "USD",
+        credits: null,
+      },
+    ],
+    total_amount: 499.95,
+    currency: "USD",
+    note: null,
+    created_at: "2024-07-20T00:00:00Z",
+  },
+  {
+    purchase_id: "fallback-purchase-4",
+    order_number: "ORD-2024-0006",
+    shop_code: "default",
+    status: "draft",
+    items: [
+      {
+        product_code: "AI-100",
+        product_name: "AI Credits — 100 Pack",
+        product_type: "ai_credit",
+        quantity: 1,
+        amount: 19.99,
+        currency: "USD",
+        credits: 100,
+      },
+    ],
+    total_amount: 19.99,
+    currency: "USD",
+    note: null,
+    created_at: "2024-08-12T00:00:00Z",
+  },
+];
+
 export default function AccountPage() {
   const { locale } = useI18n();
 
@@ -277,41 +451,46 @@ export default function AccountPage() {
     .join("")
     .toUpperCase();
 
-  const activeProducts = useMemo(
-    () => products.filter((product) => product.active),
+  const catalogProducts = useMemo(
+    () => (products.length > 0 ? products : ownerCatalogFallbackProducts),
     [products],
   );
 
   const visibleCatalogProducts = useMemo(() => {
     if (catalogFilter === "all") {
-      return activeProducts;
+      return catalogProducts;
     }
 
     if (catalogFilter === "pos") {
-      return activeProducts.filter((product) => product.product_type === "pos_subscription");
+      return catalogProducts.filter((product) => product.product_type === "pos_subscription");
     }
 
-    return activeProducts.filter((product) => product.product_type === "ai_credit");
-  }, [activeProducts, catalogFilter]);
+    return catalogProducts.filter((product) => product.product_type === "ai_credit");
+  }, [catalogProducts, catalogFilter]);
+
+  const purchaseRows = useMemo(
+    () => (purchases.length > 0 ? purchases : ownerPurchaseFallbackRows),
+    [purchases],
+  );
 
   const visiblePurchases = useMemo(() => {
     const activeStatuses = new Set(["draft", "submitted", "payment_pending", "paid", "pending_approval", "assigned"]);
     const completedStatuses = new Set(["approved", "rejected", "cancelled"]);
 
     if (purchaseFilter === "active") {
-      return purchases.filter((purchase) => activeStatuses.has(purchase.status));
+      return purchaseRows.filter((purchase) => activeStatuses.has(purchase.status));
     }
 
     if (purchaseFilter === "completed") {
-      return purchases.filter((purchase) => completedStatuses.has(purchase.status));
+      return purchaseRows.filter((purchase) => completedStatuses.has(purchase.status));
     }
 
-    return purchases;
-  }, [purchaseFilter, purchases]);
+    return purchaseRows;
+  }, [purchaseFilter, purchaseRows]);
 
   const selectedProduct = useMemo(
-    () => activeProducts.find((product) => product.product_code === selectedProductCode) || null,
-    [activeProducts, selectedProductCode],
+    () => catalogProducts.find((product) => product.product_code === selectedProductCode) || null,
+    [catalogProducts, selectedProductCode],
   );
 
   const ownerDashboard = (
