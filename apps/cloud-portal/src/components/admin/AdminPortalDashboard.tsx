@@ -289,7 +289,7 @@ export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDas
 
   const goToOwnerView = () => {
     setViewMenuOpen(false);
-    router.push(`/${defaultLocale}`);
+    router.push(`/${defaultLocale}/account`);
   };
 
   const goToAdminView = () => {
