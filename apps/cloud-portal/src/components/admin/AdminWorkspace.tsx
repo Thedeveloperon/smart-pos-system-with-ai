@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import AdminConsole from "./AdminConsole";
+import AdminPortalDashboard from "./AdminPortalDashboard";
 import { bootstrapAdminSession, isSuperAdminRole, logoutAdmin, type AdminSession } from "./auth";
 
 function Unauthorized({ onSignOut }: { onSignOut: () => Promise<void> }) {
@@ -93,5 +93,5 @@ export default function AdminWorkspace() {
     return <Unauthorized onSignOut={handleSignOut} />;
   }
 
-  return <AdminConsole user={session} onSignOut={handleSignOut} />;
+  return <AdminPortalDashboard user={session} onSignOut={handleSignOut} />;
 }
