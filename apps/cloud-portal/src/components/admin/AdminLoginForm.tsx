@@ -68,83 +68,92 @@ export default function AdminLoginForm() {
 
   if (isHydrating) {
     return (
-      <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.12),_transparent_32%),linear-gradient(180deg,_#f8fafc_0%,_#eef2ff_100%)] flex items-center justify-center p-4">
+      <main className="min-h-screen bg-[#f5f7fa] flex items-center justify-center p-4 text-slate-900">
         <p className="text-sm text-slate-500">Loading admin session...</p>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.14),_transparent_32%),radial-gradient(circle_at_bottom_right,_rgba(59,130,246,0.12),_transparent_30%),linear-gradient(180deg,_#f8fafc_0%,_#eef2ff_100%)] px-4 py-8 text-slate-900">
-      <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl overflow-hidden rounded-[32px] border border-slate-200/80 bg-white/80 shadow-[0_24px_80px_rgba(15,23,42,0.10)] backdrop-blur md:grid-cols-[1.1fr_0.9fr]">
-        <div className="flex flex-col justify-between bg-slate-950 p-8 text-white md:p-10">
-          <div className="space-y-6">
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-emerald-300">
+    <main className="min-h-screen bg-[#f5f7fa] px-4 py-8 text-slate-900">
+      <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_50px_rgba(15,23,42,0.10)] md:grid-cols-[1.02fr_0.98fr]">
+        <section className="flex flex-col justify-between bg-[#eef2f5] px-8 py-8 md:px-10 md:py-10">
+          <div className="space-y-8">
+            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white px-4 py-2 text-sm font-medium text-emerald-600">
               <ShieldCheck className="h-4 w-4" />
               Super-admin access
             </div>
 
-            <div className="space-y-4">
-              <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-emerald-400/15 text-emerald-300">
+            <div className="space-y-5">
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-500 shadow-sm">
                 <Store className="h-8 w-8" />
               </div>
-              <div>
-                <p className="text-xs uppercase tracking-[0.24em] text-slate-400">SmartPOS Admin</p>
-                <h1 className="mt-2 text-4xl font-semibold tracking-tight">Operations control plane</h1>
-                <p className="mt-4 max-w-xl text-sm leading-6 text-slate-300">
-                  Sign in with a support, billing, or security admin account to manage approvals, shops, users,
-                  and live catalog operations.
+              <div className="space-y-3">
+                <p className="text-xs uppercase tracking-[0.28em] text-slate-500">SmartPOS Admin</p>
+                <h1 className="max-w-xl text-4xl font-semibold tracking-tight text-slate-950">Operations control plane</h1>
+                <p className="max-w-xl text-sm leading-7 text-slate-600">
+                  Sign in with a support, billing, or security admin account to manage approvals, shops, users, and live
+                  catalog operations.
                 </p>
               </div>
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3">
-            {["Purchase approvals", "Shop management", "User administration"].map((label) => (
-              <div key={label} className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Module</p>
-                <p className="mt-2 text-sm font-medium text-white">{label}</p>
+          <div className="grid gap-4 sm:grid-cols-3">
+            {[
+              { label: "Purchase approvals", icon: "✓" },
+              { label: "Shop management", icon: "◫" },
+              { label: "User administration", icon: "◔" },
+            ].map((item) => (
+              <div key={item.label} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Module</p>
+                <div className="mt-4 flex items-start gap-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-50 text-emerald-500">
+                    {item.icon}
+                  </div>
+                  <p className="text-sm font-semibold text-slate-950">{item.label}</p>
+                </div>
               </div>
             ))}
           </div>
-        </div>
+        </section>
 
-        <div className="flex items-center justify-center p-6 md:p-10">
+        <section className="flex items-center justify-center bg-white px-6 py-10 md:px-10">
           <div className="w-full max-w-md">
-            <div className="mb-6 space-y-2">
-              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+            <div className="mb-7 space-y-3">
+              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-medium text-emerald-600">
                 <Sparkles className="h-3.5 w-3.5" />
                 Administrative sign-in
               </div>
               <h2 className="text-3xl font-semibold tracking-tight text-slate-950">Sign in</h2>
-              <p className="text-sm leading-6 text-slate-500">
-                Super-admin access only: <code className="font-medium text-slate-900">support_admin</code>,{" "}
-                <code className="font-medium text-slate-900">billing_admin</code>,{" "}
-                <code className="font-medium text-slate-900">security_admin</code>.
+              <p className="text-sm leading-6 text-slate-600">
+                Super-admin access only: <code className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-900">support_admin</code>,{" "}
+                <code className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-900">billing_admin</code>,{" "}
+                <code className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-900">security_admin</code>.
               </p>
             </div>
 
-            <div className="rounded-[28px] border border-slate-200/80 bg-white p-6 shadow-[0_18px_50px_rgba(15,23,42,0.08)]">
-              <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-[0_14px_38px_rgba(15,23,42,0.07)]">
+              <form onSubmit={handleSubmit} className="space-y-5">
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">Username</label>
+                  <label className="text-sm font-medium text-slate-950">Username</label>
                   <Input
                     value={username}
                     onChange={(inputEvent) => setUsername(inputEvent.target.value)}
                     placeholder="Enter username"
-                    className="h-12 rounded-2xl border-slate-200 bg-slate-50"
+                    className="h-12 rounded-2xl border-slate-200 bg-white"
                     autoFocus
                   />
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">Password</label>
+                  <label className="text-sm font-medium text-slate-950">Password</label>
                   <Input
                     type="password"
                     value={password}
                     onChange={(inputEvent) => setPassword(inputEvent.target.value)}
                     placeholder="Enter password"
-                    className="h-12 rounded-2xl border-slate-200 bg-slate-50"
+                    className="h-12 rounded-2xl border-slate-200 bg-white"
                   />
                 </div>
 
@@ -157,8 +166,7 @@ export default function AdminLoginForm() {
 
                 <Button
                   type="submit"
-                  className="h-12 w-full rounded-2xl"
-                  variant="hero"
+                  className="h-12 w-full rounded-2xl bg-gradient-to-r from-emerald-500 to-emerald-300 text-slate-950 shadow-none hover:from-emerald-600 hover:to-emerald-400"
                   disabled={!username.trim() || !password.trim() || loading}
                 >
                   {loading ? "Signing in..." : "Sign in"}
@@ -167,7 +175,7 @@ export default function AdminLoginForm() {
               </form>
             </div>
           </div>
-        </div>
+        </section>
       </div>
     </main>
   );
