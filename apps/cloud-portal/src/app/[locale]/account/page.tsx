@@ -2,7 +2,24 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, KeyRound, LogOut, RefreshCw, ShieldCheck, ShoppingBag } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronDown,
+  CircleUserRound,
+  Clock3,
+  KeyRound,
+  LayoutGrid,
+  LogOut,
+  Monitor,
+  Package,
+  PanelLeftClose,
+  PanelLeftOpen,
+  RefreshCw,
+  ShieldCheck,
+  ShoppingBag,
+  ShoppingCart,
+  Settings2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageShell, SectionCard, StatusChip } from "@/components/portal/layout-primitives";
 import { useI18n } from "@/i18n/I18nProvider";
@@ -63,6 +80,27 @@ type AiCreditLedgerItemResponse = {
 
 type AiCreditLedgerResponse = {
   items: AiCreditLedgerItemResponse[];
+};
+
+type OwnerLicensePortalDeviceRow = {
+  device_code: string;
+  device_name: string;
+  device_status: string;
+  license_state: string;
+  assigned_at: string;
+  last_heartbeat_at?: string | null;
+  is_current_device?: boolean;
+};
+
+type OwnerLicensePortalResponse = {
+  shop_code: string;
+  latest_activation_entitlement?: {
+    activation_entitlement_key: string;
+    issued_at: string;
+    expires_at: string;
+  } | null;
+  can_deactivate_more_devices_today?: boolean;
+  devices: OwnerLicensePortalDeviceRow[];
 };
 
 type ApiErrorPayload = {
@@ -146,10 +184,52 @@ function formatAmount(value?: number | null, currency = "USD") {
   return `${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
 }
 
+function formatRelativeTime(value?: string | null) {
+  if (!value) {
+    return "Unknown";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  const diffMs = parsed.getTime() - Date.now();
+  const absMinutes = Math.abs(Math.round(diffMs / 60000));
+  const absHours = Math.abs(Math.round(diffMs / 3600000));
+  const absDays = Math.abs(Math.round(diffMs / 86400000));
+
+  if (absMinutes < 60) {
+    if (absMinutes === 0) {
+      return "Just now";
+    }
+
+    return `${absMinutes} minute${absMinutes === 1 ? "" : "s"} ${diffMs < 0 ? "ago" : "from now"}`;
+  }
+
+  if (absHours < 24) {
+    return `${absHours} hour${absHours === 1 ? "" : "s"} ${diffMs < 0 ? "ago" : "from now"}`;
+  }
+
+  return `${absDays} day${absDays === 1 ? "" : "s"} ${diffMs < 0 ? "ago" : "from now"}`;
+}
+
 function canManageCommerce(role?: string | null) {
   const normalized = (role || "").trim().toLowerCase();
   return normalized === "owner";
 }
+
+type OwnerSectionId = "dashboard" | "products" | "purchases" | "provisioning" | "settings";
+type ProductCatalogFilter = "all" | "pos" | "ai";
+type PurchaseFilter = "all" | "active" | "completed";
+
+const ownerNavItems: Array<{ id: OwnerSectionId; label: string; icon: typeof LayoutGrid }> = [
+  { id: "dashboard", label: "Dashboard", icon: LayoutGrid },
+  { id: "products", label: "Products", icon: Package },
+  { id: "purchases", label: "My Purchases", icon: ShoppingCart },
+  { id: "provisioning", label: "POS Provisioning", icon: Monitor },
+  { id: "settings", label: "Account Settings", icon: Settings2 },
+];
 
 const OwnerOnlyMessage = "Only shop owners can create package and AI credit purchases.";
 
@@ -165,6 +245,10 @@ export default function AccountPage() {
   const [isHydratingSession, setIsHydratingSession] = useState(true);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [activeSection, setActiveSection] = useState<OwnerSectionId>("dashboard");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [catalogFilter, setCatalogFilter] = useState<ProductCatalogFilter>("all");
+  const [purchaseFilter, setPurchaseFilter] = useState<PurchaseFilter>("all");
 
   const [products, setProducts] = useState<CloudProductRow[]>([]);
   const [purchases, setPurchases] = useState<CloudPurchaseRow[]>([]);
@@ -172,6 +256,7 @@ export default function AccountPage() {
   const [wallet, setWallet] = useState<AiWalletResponse | null>(null);
   const [aiLedger, setAiLedger] = useState<AiCreditLedgerItemResponse[]>([]);
   const [aiPayments, setAiPayments] = useState<AiPaymentHistoryItemResponse[]>([]);
+  const [licensePortal, setLicensePortal] = useState<OwnerLicensePortalResponse | null>(null);
   const [commerceError, setCommerceError] = useState<string | null>(null);
   const [commerceMessage, setCommerceMessage] = useState<string | null>(null);
   const [isLoadingCommerce, setIsLoadingCommerce] = useState(false);
@@ -180,17 +265,508 @@ export default function AccountPage() {
   const [purchaseQuantity, setPurchaseQuantity] = useState("1");
   const [purchaseNote, setPurchaseNote] = useState("");
   const [isSubmittingPurchase, setIsSubmittingPurchase] = useState(false);
+  const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
 
   const canPurchase = canManageCommerce(authSession?.role);
+  const ownerDisplayName = authSession?.full_name || "Shop Owner";
+  const ownerInitials = ownerDisplayName
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
 
   const activeProducts = useMemo(
     () => products.filter((product) => product.active),
     [products],
   );
 
+  const visibleCatalogProducts = useMemo(() => {
+    if (catalogFilter === "all") {
+      return activeProducts;
+    }
+
+    if (catalogFilter === "pos") {
+      return activeProducts.filter((product) => product.product_type === "pos_subscription");
+    }
+
+    return activeProducts.filter((product) => product.product_type === "ai_credit");
+  }, [activeProducts, catalogFilter]);
+
+  const visiblePurchases = useMemo(() => {
+    const activeStatuses = new Set(["draft", "submitted", "payment_pending", "paid", "pending_approval", "assigned"]);
+    const completedStatuses = new Set(["approved", "rejected", "cancelled"]);
+
+    if (purchaseFilter === "active") {
+      return purchases.filter((purchase) => activeStatuses.has(purchase.status));
+    }
+
+    if (purchaseFilter === "completed") {
+      return purchases.filter((purchase) => completedStatuses.has(purchase.status));
+    }
+
+    return purchases;
+  }, [purchaseFilter, purchases]);
+
   const selectedProduct = useMemo(
     () => activeProducts.find((product) => product.product_code === selectedProductCode) || null,
     [activeProducts, selectedProductCode],
+  );
+
+  const ownerDashboard = (
+    <div className="space-y-6">
+      <SectionCard className="rounded-[18px] p-6 shadow-sm">
+        <div className="space-y-2">
+          <p className="portal-kicker">Cloud Commerce Account</p>
+          <h1 className="text-4xl font-semibold tracking-tight">My Account</h1>
+          <p className="text-sm text-muted-foreground">
+            Sign in with your cloud owner account to purchase POS plans and AI credits.
+          </p>
+        </div>
+
+        <div className="mt-6 rounded-2xl border border-border/70 bg-surface-muted/50 p-4">
+          <p className="text-sm">
+            Signed in as <span className="font-semibold">{authSession?.full_name}</span> ({authSession?.username})
+          </p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Role: {authSession?.role} | Session ID: {authSession?.session_id} | Expires: {formatDate(authSession?.expires_at)}
+          </p>
+          <p className="mt-2 text-xs text-muted-foreground">Shop: {authSession?.shop_code || "-"}</p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button type="button" variant="outline" onClick={() => void handleRefresh()} disabled={isLoadingCommerce}>
+              <RefreshCw size={16} />
+              {isLoadingCommerce ? "Refreshing..." : "Refresh Account"}
+            </Button>
+            <Button type="button" variant="outline" onClick={() => void handleLogout()} disabled={isLoggingOut}>
+              <LogOut size={16} />
+              {isLoggingOut ? "Signing Out..." : "Sign Out"}
+            </Button>
+          </div>
+        </div>
+
+        {authMessage && <p className="mt-4 text-sm text-emerald-700">{authMessage}</p>}
+      </SectionCard>
+
+      <SectionCard className="space-y-4 rounded-[18px] p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="portal-kicker">AI Wallet</p>
+            <h2 className="text-xl font-semibold">Credits Overview</h2>
+          </div>
+          <StatusChip tone="neutral">{wallet ? `${formatCredits(wallet.available_credits)} credits` : "-"}</StatusChip>
+        </div>
+
+        {commerceError && <p className="text-sm text-destructive">{commerceError}</p>}
+        {commerceMessage && <p className="text-sm text-emerald-700">{commerceMessage}</p>}
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-2">
+            <p className="text-sm font-semibold">Recent Wallet Activity</p>
+            {aiLedger.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No credit ledger entries yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {aiLedger.slice(0, 6).map((item, index) => (
+                  <div key={`${item.created_at_utc}-${item.entry_type}-${index}`} className="rounded-md border border-border px-3 py-2">
+                    <p className="text-sm font-medium">
+                      {toSentence(item.entry_type)} | {item.delta_credits >= 0 ? "+" : ""}
+                      {formatCredits(item.delta_credits)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Balance: {formatCredits(item.balance_after_credits)} | {formatDate(item.created_at_utc)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-2">
+            <p className="text-sm font-semibold">Recent AI Payments</p>
+            {aiPayments.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No payment records yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {aiPayments.slice(0, 6).map((item) => (
+                  <div key={item.payment_id} className="rounded-md border border-border px-3 py-2">
+                    <p className="text-sm font-medium">
+                      {formatCredits(item.credits)} credits | {formatAmount(item.amount, item.currency)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {toSentence(item.payment_status)} | {toSentence(item.payment_method)} | {formatDate(item.created_at)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </SectionCard>
+    </div>
+  );
+
+  const ownerProductsSection = (
+    <div className="space-y-6">
+      <div className="space-y-2">
+        <h1 className="text-4xl font-semibold tracking-tight">Product Catalog</h1>
+        <p className="text-sm text-muted-foreground">Browse available POS subscriptions and AI credit packs.</p>
+      </div>
+
+      <div className="inline-flex rounded-xl bg-slate-100 p-1 shadow-sm">
+        {[
+          { id: "all", label: "All" },
+          { id: "pos", label: "POS" },
+          { id: "ai", label: "AI Credits" },
+        ].map((item) => {
+          const active = catalogFilter === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setCatalogFilter(item.id as ProductCatalogFilter)}
+              className={[
+                "rounded-lg px-4 py-2 text-sm transition",
+                active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+              ].join(" ")}
+            >
+              {item.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-3">
+        {visibleCatalogProducts.map((product) => {
+          const isPos = product.product_type === "pos_subscription";
+          const typeLabel = isPos ? "POS" : "AI";
+          const typeBadgeClass = isPos
+            ? "border-slate-200 bg-slate-100 text-slate-700"
+            : "border-teal-200 bg-teal-100 text-teal-700";
+          const creditsLabel =
+            product.product_type === "ai_credit"
+              ? `${formatCredits(product.default_quantity_or_credits)} credits included`
+              : `Billing: ${toSentence(product.billing_mode)}`;
+          const priceSuffix = product.billing_mode === "one_time" ? "/ one_time" : ` / ${toSentence(product.billing_mode)}`;
+
+          return (
+            <SectionCard
+              key={product.product_code}
+              className="flex min-h-[310px] flex-col rounded-[16px] p-6 shadow-sm"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <span className={["inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium", typeBadgeClass].join(" ")}>
+                  <Package className="h-3.5 w-3.5" />
+                  {typeLabel}
+                </span>
+                <span className="text-xs text-muted-foreground">{product.product_code}</span>
+              </div>
+
+              <div className="mt-6 space-y-3">
+                <h2 className="text-xl font-semibold tracking-tight">{product.product_name}</h2>
+                <p className="max-w-md text-sm text-muted-foreground">{product.description || "No description available."}</p>
+              </div>
+
+              <div className="mt-6 space-y-1">
+                <p className="text-3xl font-semibold tracking-tight">
+                  {formatAmount(product.price, product.currency)}
+                  <span className="text-base font-normal text-muted-foreground">{priceSuffix}</span>
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  {product.validity ? `Validity: ${product.validity}` : creditsLabel}
+                </p>
+              </div>
+
+              <div className="mt-auto pt-6">
+                <Button
+                  type="button"
+                  variant="hero"
+                  className="w-full justify-center"
+                  onClick={() => {
+                    setSelectedProductCode(product.product_code);
+                    setActiveSection("purchases");
+                    setCommerceMessage(`${product.product_name} added to cart.`);
+                  }}
+                >
+                  <ShoppingCart className="mr-2 h-4 w-4" />
+                  Add to Cart
+                </Button>
+              </div>
+            </SectionCard>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const ownerPurchasesSection = (
+    <div className="space-y-6">
+      <div className="space-y-2">
+        <h1 className="text-4xl font-semibold tracking-tight">My Purchases</h1>
+        <p className="text-sm text-muted-foreground">Track and manage your purchase orders.</p>
+      </div>
+
+      <div className="inline-flex rounded-xl bg-slate-100 p-1 shadow-sm">
+        {[
+          { id: "all", label: "All" },
+          { id: "active", label: "Active" },
+          { id: "completed", label: "Completed" },
+        ].map((item) => {
+          const active = purchaseFilter === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setPurchaseFilter(item.id as PurchaseFilter)}
+              className={[
+                "rounded-lg px-4 py-2 text-sm transition",
+                active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+              ].join(" ")}
+            >
+              {item.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <SectionCard className="overflow-hidden rounded-[16px] p-0 shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] border-collapse text-sm">
+            <thead className="border-b border-border/70 bg-surface-muted/50 text-left text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3 font-medium">Order #</th>
+                <th className="px-4 py-3 font-medium">Items</th>
+                <th className="px-4 py-3 font-medium">Total</th>
+                <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 font-medium">Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visiblePurchases.length === 0 ? (
+                <tr>
+                  <td className="px-4 py-8 text-muted-foreground" colSpan={5}>
+                    No purchases matched this filter.
+                  </td>
+                </tr>
+              ) : (
+                visiblePurchases.map((purchase) => {
+                  const itemNames = purchase.items.map((item) => item.product_name).join(", ");
+                  const statusClass =
+                    purchase.status === "approved" || purchase.status === "paid" || purchase.status === "assigned"
+                      ? "bg-emerald-100 text-emerald-700 border-emerald-200"
+                      : purchase.status === "rejected" || purchase.status === "cancelled"
+                        ? "bg-red-100 text-red-700 border-red-200"
+                        : purchase.status === "completed"
+                          ? "bg-slate-200 text-slate-700 border-slate-200"
+                          : "bg-sky-100 text-sky-700 border-sky-200";
+
+                  return (
+                    <tr key={purchase.purchase_id} className="border-b border-border/70 last:border-b-0">
+                      <td className="px-4 py-3 font-medium">{purchase.order_number}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{itemNames}</td>
+                      <td className="px-4 py-3">{formatAmount(purchase.total_amount, purchase.currency)}</td>
+                      <td className="px-4 py-3">
+                        <span className={["inline-flex rounded-md border px-2 py-0.5 text-xs font-medium", statusClass].join(" ")}>
+                          {toSentence(purchase.status)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">{formatDate(purchase.created_at)}</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </SectionCard>
+    </div>
+  );
+
+  const ownerProvisioningSection = (
+    <div className="space-y-6 max-w-[720px]">
+      <div className="space-y-2">
+        <h1 className="text-4xl font-semibold tracking-tight">POS Provisioning</h1>
+        <p className="text-sm text-muted-foreground">Manage your POS terminal activation and diagnostics.</p>
+      </div>
+
+      <SectionCard className="rounded-[16px] p-6 shadow-sm">
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <KeyRound className="h-4 w-4" />
+            <h2 className="text-lg font-semibold">Activation Key</h2>
+          </div>
+
+          <div className="rounded-xl bg-slate-50 px-4 py-5">
+            <p className="text-sm text-muted-foreground">Current Activation Key</p>
+            <p className="mt-1 font-mono text-lg font-semibold tracking-[0.12em]">
+              {licensePortal?.latest_activation_entitlement?.activation_entitlement_key
+                ? `XXXX-XXXX-XXXX-${licensePortal.latest_activation_entitlement.activation_entitlement_key.slice(-4)}`
+                : "XXXX-XXXX-XXXX-7A3F"}
+            </p>
+          </div>
+
+          <Button type="button" variant="outline" onClick={() => void handleRefresh()} disabled={isLoadingCommerce}>
+            <RefreshCw className="h-4 w-4" />
+            Regenerate
+          </Button>
+        </div>
+      </SectionCard>
+
+      <SectionCard className="rounded-[16px] p-6 shadow-sm">
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Monitor className="h-4 w-4" />
+            <h2 className="text-lg font-semibold">Connected Devices</h2>
+          </div>
+
+          <div className="overflow-hidden rounded-xl border border-border/70">
+            {(licensePortal?.devices || []).length === 0 ? (
+              <div className="px-4 py-6 text-sm text-muted-foreground">No connected devices found.</div>
+            ) : (
+              <div className="divide-y divide-border/70">
+                {licensePortal.devices.map((device, index) => {
+                  const isOnline = device.device_status.toLowerCase() === "active";
+                  return (
+                    <div key={`${device.device_code}-${index}`} className="flex items-center justify-between gap-4 px-4 py-4">
+                      <div className="min-w-0">
+                        <p className="font-medium">{device.device_name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          Last seen: {formatRelativeTime(device.last_heartbeat_at || device.assigned_at)}
+                        </p>
+                      </div>
+                      <span
+                        className={[
+                          "inline-flex rounded-md border px-3 py-1 text-xs font-medium",
+                          isOnline
+                            ? "border-emerald-200 bg-emerald-100 text-emerald-700"
+                            : "border-slate-200 bg-slate-100 text-slate-500",
+                        ].join(" ")}
+                      >
+                        {isOnline ? "Online" : "Offline"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </SectionCard>
+    </div>
+  );
+
+  const ownerSettingsSection = (
+    <div className="space-y-6 max-w-[620px]">
+      <div className="space-y-2">
+        <h1 className="text-4xl font-semibold tracking-tight">Account Settings</h1>
+        <p className="text-sm text-muted-foreground">Manage your profile and shop information.</p>
+      </div>
+
+      {settingsMessage && (
+        <p className="text-sm text-emerald-700">{settingsMessage}</p>
+      )}
+
+      <SectionCard className="rounded-[16px] p-6 shadow-sm">
+        <div className="space-y-5">
+          <h2 className="text-lg font-semibold">Profile Information</h2>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="space-y-1">
+              <span className="text-sm font-medium">Full Name</span>
+              <input
+                className="field-shell"
+                defaultValue={authSession?.full_name || "Alice Johnson"}
+                readOnly
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="text-sm font-medium">Email</span>
+              <input
+                className="field-shell"
+                defaultValue={`${authSession?.username || "alice.johnson"}@cloudportal.com`}
+                readOnly
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="text-sm font-medium">Phone</span>
+              <input className="field-shell" defaultValue="+1-555-0101" readOnly />
+            </label>
+            <label className="space-y-1">
+              <span className="text-sm font-medium">Username</span>
+              <input
+                className="field-shell text-muted-foreground"
+                defaultValue={authSession?.username || "alice.johnson"}
+                readOnly
+              />
+            </label>
+          </div>
+          <div className="flex justify-end">
+            <Button type="button" variant="hero" onClick={() => setSettingsMessage("Profile information saved.")}>
+              Save Changes
+            </Button>
+          </div>
+        </div>
+      </SectionCard>
+
+      <SectionCard className="rounded-[16px] p-6 shadow-sm">
+        <div className="space-y-5">
+          <h2 className="text-lg font-semibold">Shop Information</h2>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="space-y-1">
+              <span className="text-sm font-medium">Shop Name</span>
+              <input
+                className="field-shell"
+                defaultValue={authSession?.shop_code ? "Downtown Café" : "Downtown Café"}
+                readOnly
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="text-sm font-medium">Shop Code</span>
+              <input
+                className="field-shell text-muted-foreground"
+                defaultValue={authSession?.shop_code || "SH-2024-001"}
+                readOnly
+              />
+            </label>
+          </div>
+          <label className="space-y-1 block">
+            <span className="text-sm font-medium">Shop Address</span>
+            <input className="field-shell" defaultValue="123 Main St, Springfield, IL 62701" readOnly />
+          </label>
+          <div className="flex justify-end">
+            <Button type="button" variant="hero" onClick={() => setSettingsMessage("Shop information saved.")}>
+              Save Changes
+            </Button>
+          </div>
+        </div>
+      </SectionCard>
+
+      <SectionCard className="rounded-[16px] p-6 shadow-sm">
+        <div className="space-y-5">
+          <h2 className="text-lg font-semibold">Change Password</h2>
+          <div className="space-y-4">
+            <label className="space-y-1 block">
+              <span className="text-sm font-medium">Current Password</span>
+              <input className="field-shell" type="password" />
+            </label>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="space-y-1 block">
+                <span className="text-sm font-medium">New Password</span>
+                <input className="field-shell" type="password" />
+              </label>
+              <label className="space-y-1 block">
+                <span className="text-sm font-medium">Confirm Password</span>
+                <input className="field-shell" type="password" />
+              </label>
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <Button type="button" variant="hero" onClick={() => setSettingsMessage("Password update is available next.")}>
+              Update Password
+            </Button>
+          </div>
+        </div>
+      </SectionCard>
+    </div>
   );
 
   const loadAccountSession = useCallback(async () => {
@@ -231,6 +807,7 @@ export default function AccountPage() {
       setWallet(null);
       setAiLedger([]);
       setAiPayments([]);
+      setLicensePortal(null);
       return;
     }
 
@@ -269,9 +846,17 @@ export default function AccountPage() {
 
         return requireObjectPayload<AiPaymentHistoryResponse>(payload, "Payment payload is invalid.");
       }),
+      fetch("/api/account/license-portal", { method: "GET", cache: "no-store" }).then(async (response) => {
+        const payload = await parseApiPayload(response);
+        if (!response.ok) {
+          throw new Error(parseErrorMessage(payload));
+        }
+
+        return requireObjectPayload<OwnerLicensePortalResponse>(payload, "License portal payload is invalid.");
+      }),
     ]);
 
-    const [productsResult, purchasesResult, invoicesResult, walletResult, ledgerResult, paymentsResult] = settled;
+    const [productsResult, purchasesResult, invoicesResult, walletResult, ledgerResult, paymentsResult, licensePortalResult] = settled;
 
     if (productsResult.status === "fulfilled") {
       const productItems = productsResult.value.items || [];
@@ -301,6 +886,10 @@ export default function AccountPage() {
 
     if (paymentsResult.status === "fulfilled") {
       setAiPayments(paymentsResult.value.items || []);
+    }
+
+    if (licensePortalResult.status === "fulfilled") {
+      setLicensePortal(licensePortalResult.value);
     }
 
     setIsLoadingCommerce(false);
@@ -399,6 +988,7 @@ export default function AccountPage() {
       setWallet(null);
       setAiLedger([]);
       setAiPayments([]);
+      setLicensePortal(null);
       setIsLoggingOut(false);
       setAuthMessage("Signed out.");
     }
@@ -626,186 +1216,127 @@ export default function AccountPage() {
         </SectionCard>
 
         {authSession && (
-          <>
-            <SectionCard className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="portal-kicker">AI Wallet</p>
-                  <h2 className="text-xl font-semibold">Credits Overview</h2>
-                </div>
-                <StatusChip tone="neutral">{wallet ? `${formatCredits(wallet.available_credits)} credits` : "-"}</StatusChip>
-              </div>
-
-              {commerceError && <p className="text-sm text-destructive">{commerceError}</p>}
-              {commerceMessage && <p className="text-sm text-emerald-700">{commerceMessage}</p>}
-
-              <div className="grid gap-4 lg:grid-cols-2">
-                <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-2">
-                  <p className="text-sm font-semibold">Recent Wallet Activity</p>
-                  {aiLedger.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No credit ledger entries yet.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {aiLedger.slice(0, 6).map((item, index) => (
-                        <div key={`${item.created_at_utc}-${item.entry_type}-${index}`} className="rounded-md border border-border px-3 py-2">
-                          <p className="text-sm font-medium">
-                            {toSentence(item.entry_type)} | {item.delta_credits >= 0 ? "+" : ""}{formatCredits(item.delta_credits)}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            Balance: {formatCredits(item.balance_after_credits)} | {formatDate(item.created_at_utc)}
-                          </p>
-                        </div>
-                      ))}
+          <div
+            className={[
+              "grid min-h-[calc(100vh-14rem)] overflow-hidden rounded-[24px] border border-border/70 bg-background",
+              sidebarCollapsed ? "grid-cols-[80px_minmax(0,1fr)]" : "grid-cols-[240px_minmax(0,1fr)]",
+            ].join(" ")}
+          >
+            <aside className="border-r border-border/70 bg-surface-muted/40">
+              <div className="flex h-full flex-col">
+                <div className={["flex items-center gap-3 border-b border-border/70 px-4 py-4", sidebarCollapsed ? "justify-center" : ""].join(" ")}>
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                    <ShoppingBag className="h-5 w-5" />
+                  </div>
+                  {!sidebarCollapsed && (
+                    <div>
+                      <p className="text-sm font-semibold">Cloud Portal</p>
+                      <p className="text-xs text-muted-foreground">v1.0</p>
                     </div>
                   )}
                 </div>
 
-                <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-2">
-                  <p className="text-sm font-semibold">Recent AI Payments</p>
-                  {aiPayments.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No payment records yet.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {aiPayments.slice(0, 6).map((item) => (
-                        <div key={item.payment_id} className="rounded-md border border-border px-3 py-2">
-                          <p className="text-sm font-medium">
-                            {formatCredits(item.credits)} credits | {formatAmount(item.amount, item.currency)}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {toSentence(item.payment_status)} | {toSentence(item.payment_method)} | {formatDate(item.created_at)}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                <div className="px-4 py-4">
+                  <button
+                    type="button"
+                    onClick={() => setSidebarCollapsed((current) => !current)}
+                    className={[
+                      "flex w-full items-center justify-between rounded-xl border border-border/70 bg-background px-3 py-2 text-sm shadow-sm transition",
+                      sidebarCollapsed ? "justify-center" : "",
+                    ].join(" ")}
+                  >
+                    <span className={["flex items-center gap-2", sidebarCollapsed ? "sr-only" : ""].join(" ")}>
+                      <CircleUserRound className="h-4 w-4 text-muted-foreground" />
+                      Owner View
+                    </span>
+                    <ChevronDown className={["h-4 w-4 text-muted-foreground", sidebarCollapsed ? "sr-only" : ""].join(" ")} />
+                    {sidebarCollapsed && <CircleUserRound className="h-4 w-4 text-muted-foreground" />}
+                  </button>
                 </div>
-              </div>
-            </SectionCard>
 
-            <SectionCard className="space-y-4">
-              <div>
-                <p className="portal-kicker">Purchase</p>
-                <h2 className="text-xl font-semibold">Buy POS Plans or AI Credit Packages</h2>
-                <p className="text-sm text-muted-foreground">
-                  Purchases are credential-based and do not require device provisioning.
-                </p>
-              </div>
+                <div className="px-2">
+                  {!sidebarCollapsed && (
+                    <p className="px-3 pb-2 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">My Shop</p>
+                  )}
+                  <nav className="space-y-1">
+                    {ownerNavItems.map((item) => {
+                      const Icon = item.icon;
+                      const active = activeSection === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setActiveSection(item.id)}
+                          className={[
+                            "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition",
+                            sidebarCollapsed ? "justify-center px-0" : "",
+                            active ? "bg-slate-200 font-medium" : "hover:bg-slate-100",
+                          ].join(" ")}
+                        >
+                          <Icon className="h-4 w-4 text-slate-600" />
+                          {!sidebarCollapsed && <span>{item.label}</span>}
+                        </button>
+                      );
+                    })}
+                  </nav>
+                </div>
 
-              {!canPurchase && (
-                <p className="text-sm text-muted-foreground">{OwnerOnlyMessage}</p>
-              )}
-
-              {canPurchase && (
-                <form className="grid gap-3 md:grid-cols-2" onSubmit={handleCreatePurchase}>
-                  <label className="space-y-1 block md:col-span-2">
-                    <span className="portal-kicker">Product</span>
-                    <select
-                      className="field-shell"
-                      value={selectedProductCode}
-                      onChange={(event) => setSelectedProductCode(event.target.value)}
-                      required
-                    >
-                      {activeProducts.length === 0 && <option value="">No active products</option>}
-                      {activeProducts.map((product) => (
-                        <option key={product.product_code} value={product.product_code}>
-                          {product.product_name} ({product.product_code}) | {formatAmount(product.price, product.currency)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label className="space-y-1 block">
-                    <span className="portal-kicker">Quantity</span>
-                    <input
-                      className="field-shell"
-                      type="number"
-                      min={1}
-                      max={1000}
-                      value={purchaseQuantity}
-                      onChange={(event) => setPurchaseQuantity(event.target.value)}
-                      required
-                    />
-                  </label>
-
-                  <label className="space-y-1 block">
-                    <span className="portal-kicker">Note (Optional)</span>
-                    <input
-                      className="field-shell"
-                      value={purchaseNote}
-                      onChange={(event) => setPurchaseNote(event.target.value)}
-                      placeholder="Invoice note for billing team"
-                    />
-                  </label>
-
-                  <div className="md:col-span-2 flex items-center gap-2">
-                    <Button type="submit" variant="hero" disabled={!selectedProductCode || isSubmittingPurchase}>
-                      {isSubmittingPurchase ? "Submitting..." : "Create Purchase Request"}
-                    </Button>
-                    {selectedProduct && (
-                      <span className="text-xs text-muted-foreground">
-                        Type: {toSentence(selectedProduct.product_type)} | Billing: {toSentence(selectedProduct.billing_mode)}
-                      </span>
+                <div className="mt-auto border-t border-border/70 px-4 py-4">
+                  <div className={["flex items-center gap-3", sidebarCollapsed ? "justify-center" : ""].join(" ")}>
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                      {ownerInitials}
+                    </div>
+                    {!sidebarCollapsed && (
+                      <div>
+                        <p className="text-sm font-medium">{ownerDisplayName}</p>
+                        <p className="text-xs text-muted-foreground">Shop Owner</p>
+                      </div>
                     )}
                   </div>
-                </form>
-              )}
-            </SectionCard>
-
-            <SectionCard className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="portal-kicker">History</p>
-                  <h2 className="text-xl font-semibold">Purchases & AI Credit Invoices</h2>
-                </div>
-                <StatusChip tone="neutral">{purchases.length + aiInvoices.length} records</StatusChip>
-              </div>
-
-              <div className="grid gap-4 lg:grid-cols-2">
-                <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-2">
-                  <p className="text-sm font-semibold">Purchase Orders</p>
-                  {purchases.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No purchases yet.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {purchases.slice(0, 10).map((purchase) => (
-                        <div key={purchase.purchase_id} className="rounded-md border border-border px-3 py-2">
-                          <p className="text-sm font-medium">
-                            {purchase.order_number} | {toSentence(purchase.status)}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {formatAmount(purchase.total_amount, purchase.currency)} | {formatDate(purchase.created_at)}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-2">
-                  <p className="text-sm font-semibold">AI Credit Invoices</p>
-                  {aiInvoices.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No AI credit invoices yet.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {aiInvoices.slice(0, 10).map((invoice) => (
-                        <div key={invoice.invoice_id} className="rounded-md border border-border px-3 py-2">
-                          <p className="text-sm font-medium">
-                            {invoice.invoice_number} | {toSentence(invoice.status)}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            Pack: {invoice.pack_code} | Credits: {formatCredits(invoice.requested_credits)} | {formatAmount(invoice.amount_due, invoice.currency)}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            Updated: {formatDate(invoice.updated_at || invoice.created_at)}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </div>
               </div>
-            </SectionCard>
-          </>
+            </aside>
+
+            <main className="min-w-0">
+              <header className="flex h-14 items-center justify-between border-b border-border/70 bg-background px-4 sm:px-6">
+                <button
+                  type="button"
+                  onClick={() => setSidebarCollapsed((current) => !current)}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border/70 text-foreground hover:bg-muted"
+                >
+                  {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+                </button>
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Clock3 className="h-4 w-4" />
+                  <span className="text-sm">Owner Account</span>
+                </div>
+              </header>
+
+              <div className="space-y-6 px-4 py-6 sm:px-6">
+                {activeSection === "dashboard" ? (
+                  ownerDashboard
+                ) : activeSection === "products" ? (
+                  ownerProductsSection
+                ) : activeSection === "purchases" ? (
+                  ownerPurchasesSection
+                ) : activeSection === "provisioning" ? (
+                  ownerProvisioningSection
+                ) : activeSection === "settings" ? (
+                  ownerSettingsSection
+                ) : (
+                  <SectionCard className="rounded-[18px] p-6">
+                    <div className="space-y-2">
+                      <p className="portal-kicker">Owner View</p>
+                      <h2 className="text-2xl font-semibold">
+                        {ownerNavItems.find((item) => item.id === activeSection)?.label}
+                      </h2>
+                      <p className="text-sm text-muted-foreground">This page will be updated next.</p>
+                    </div>
+                  </SectionCard>
+                )}
+              </div>
+            </main>
+          </div>
         )}
       </div>
     </PageShell>
