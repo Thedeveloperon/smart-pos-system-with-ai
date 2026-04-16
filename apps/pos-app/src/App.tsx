@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
-import { ExternalLink } from "lucide-react";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -8,20 +7,14 @@ import LoginScreen from "@/components/auth/LoginScreen";
 import { AuthProvider, useAuth } from "@/components/auth/AuthContext";
 import { LicensingProvider, useLicensing } from "@/components/licensing/LicensingContext";
 import { LicenseActivationScreen, LicenseBlockedScreen } from "@/components/licensing/LicenseScreens";
-import { Button } from "@/components/ui/button";
 import SplashScreen from "@/components/ui/SplashScreen";
 import { isSuperAdminBackendRole } from "@/lib/auth";
+import AdminConsole from "./pages/AdminConsole";
 import Index from "./pages/Index.tsx";
 import LicenseAccessSuccess from "./pages/LicenseAccessSuccess.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
 const SPLASH_MIN_DURATION_MS = 1000;
-const MARKETING_WEBSITE_BASE_URL = (import.meta.env.VITE_MARKETING_WEBSITE_URL || "http://localhost:3000").replace(
-  /\/+$/,
-  "",
-);
-const MARKETING_ADMIN_LOGIN_URL = `${MARKETING_WEBSITE_BASE_URL}/admin/login`;
-
 const useMinimumVisible = (isVisible: boolean, minimumDurationMs = SPLASH_MIN_DURATION_MS) => {
   const [shouldRender, setShouldRender] = useState(isVisible);
   const visibleSinceRef = useRef<number | null>(isVisible ? Date.now() : null);
@@ -70,65 +63,10 @@ const useMinimumVisible = (isVisible: boolean, minimumDurationMs = SPLASH_MIN_DU
   return shouldRender;
 };
 
-const AdminPortalHandoffScreen = ({
-  username,
-  onSignOut,
-  autoRedirect = false,
-}: {
-  username?: string;
-  onSignOut?: () => void;
-  autoRedirect?: boolean;
-}) => {
-  useEffect(() => {
-    if (!autoRedirect || typeof window === "undefined") {
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      window.location.replace(MARKETING_ADMIN_LOGIN_URL);
-    }, 150);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [autoRedirect]);
-
-  return (
-    <div className="min-h-screen bg-background p-4 flex items-center justify-center">
-      <div className="w-full max-w-xl rounded-2xl border border-border bg-card p-6 shadow-sm space-y-4">
-        <h1 className="text-2xl font-bold tracking-tight">Admin Portal Moved</h1>
-        <p className="text-sm text-muted-foreground">
-          Super-admin operations now run on the marketing website admin portal.
-          {username ? ` Signed in as ${username}.` : ""}
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            onClick={() => {
-              if (typeof window !== "undefined") {
-                window.location.href = MARKETING_ADMIN_LOGIN_URL;
-              }
-            }}
-          >
-            <ExternalLink className="h-4 w-4" />
-            Open Website Admin
-          </Button>
-          {onSignOut && (
-            <Button variant="outline" onClick={onSignOut}>
-              Sign Out
-            </Button>
-          )}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          URL: <span className="font-mono">{MARKETING_ADMIN_LOGIN_URL}</span>
-        </p>
-      </div>
-    </div>
-  );
-};
-
 const AuthGate = () => {
   const { isAuthenticated, isLoading, user } = useAuth();
   const hasSuperAdminAccess = isSuperAdminBackendRole(user?.backendRole);
+  const isAdminPath = typeof window !== "undefined" && window.location.pathname.startsWith("/admin");
   const showSplash = useMinimumVisible(isLoading);
 
   if (showSplash) {
@@ -136,18 +74,11 @@ const AuthGate = () => {
   }
 
   if (!isAuthenticated) {
-    return <LoginScreen mode="pos" />;
+    return <LoginScreen mode={isAdminPath ? "admin" : "pos"} />;
   }
 
   if (hasSuperAdminAccess) {
-    return (
-      <AdminPortalHandoffScreen
-        username={user?.username}
-        onSignOut={() => {
-          void logout();
-        }}
-      />
-    );
+    return <AdminConsole />;
   }
 
   return (
@@ -237,8 +168,6 @@ const App = () => (
     <Sonner />
     {(typeof window !== "undefined" && window.location.pathname.startsWith("/license/success")) ? (
       <LicenseAccessSuccess />
-    ) : (typeof window !== "undefined" && window.location.pathname.startsWith("/admin")) ? (
-      <AdminPortalHandoffScreen autoRedirect />
     ) : (
       <LicensingProvider>
         <LicenseGate />
