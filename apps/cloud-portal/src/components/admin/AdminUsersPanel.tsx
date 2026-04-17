@@ -49,6 +49,10 @@ type ResetPasswordForm = {
   actorNote: string;
 };
 
+type HardDeleteForm = {
+  actorNote: string;
+};
+
 const initialCreateForm: CreateUserForm = {
   username: "",
   fullName: "",
@@ -59,6 +63,10 @@ const initialCreateForm: CreateUserForm = {
 
 const initialResetForm: ResetPasswordForm = {
   newPassword: "",
+  actorNote: "",
+};
+
+const initialHardDeleteForm: HardDeleteForm = {
   actorNote: "",
 };
 
@@ -87,6 +95,10 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
   const [resettingUser, setResettingUser] = useState<AdminShopUserRow | null>(null);
   const [resetForm, setResetForm] = useState<ResetPasswordForm>(initialResetForm);
   const [resetSubmitting, setResetSubmitting] = useState(false);
+
+  const [hardDeletingUser, setHardDeletingUser] = useState<AdminShopUserRow | null>(null);
+  const [hardDeleteForm, setHardDeleteForm] = useState<HardDeleteForm>(initialHardDeleteForm);
+  const [hardDeleteSubmitting, setHardDeleteSubmitting] = useState(false);
 
   const shopOptions = useMemo(
     () => [...shops].sort((a, b) => a.shop_code.localeCompare(b.shop_code)),
@@ -277,33 +289,45 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
 
   const handleHardDelete = useCallback(
     async (user: AdminShopUserRow) => {
-      const confirmed = window.confirm(
-        `Permanently delete '${user.username}' and shop '${user.shop_name}'? This removes the shop and all users mapped to it.`,
-      );
-      if (!confirmed) {
-        return;
-      }
-
-      const actorNote = window.prompt(`Actor note for hard deleting '${user.username}'`);
-      if (!actorNote || !actorNote.trim()) {
-        return;
-      }
-
-      try {
-        await hardDeleteAdminShopUser(user.user_id, {
-          actor: "support-ui",
-          reason_code: "manual_shop_user_hard_delete",
-          actor_note: actorNote.trim(),
-        });
-        toast.success(`Shop '${user.shop_name}' and user '${user.username}' hard deleted.`);
-        await loadUsers(true);
-      } catch (error) {
-        console.error(error);
-        toast.error(error instanceof Error ? error.message : "Failed to hard delete user.");
-      }
+      setHardDeletingUser(user);
+      setHardDeleteForm(initialHardDeleteForm);
     },
-    [loadUsers],
+    [],
   );
+
+  const handleConfirmHardDelete = useCallback(async () => {
+    if (!hardDeletingUser) {
+      return;
+    }
+
+    if (!hardDeleteForm.actorNote.trim()) {
+      toast.error("Actor note is required.");
+      return;
+    }
+
+    setHardDeleteSubmitting(true);
+    try {
+      await hardDeleteAdminShopUser(hardDeletingUser.user_id, {
+        actor: "support-ui",
+        reason_code: "manual_shop_user_hard_delete",
+        actor_note: hardDeleteForm.actorNote.trim(),
+      });
+      toast.success(`Shop '${hardDeletingUser.shop_name}' and user '${hardDeletingUser.username}' hard deleted.`);
+      setHardDeletingUser(null);
+      setHardDeleteForm(initialHardDeleteForm);
+      await loadUsers(true);
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Failed to hard delete user.");
+    } finally {
+      setHardDeleteSubmitting(false);
+    }
+  }, [hardDeleteForm.actorNote, hardDeletingUser, loadUsers]);
+
+  const closeHardDeleteDialog = useCallback(() => {
+    setHardDeletingUser(null);
+    setHardDeleteForm(initialHardDeleteForm);
+  }, []);
 
   const handleReactivate = useCallback(
     async (user: AdminShopUserRow) => {
@@ -446,11 +470,11 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
                           Reactivate
                         </Button>
                       )}
-                      {user.role_code === "owner" ? (
-                        <Button variant="destructive" size="sm" onClick={() => void handleHardDelete(user)}>
-                          Hard Delete
-                        </Button>
-                      ) : null}
+      {user.role_code === "owner" ? (
+        <Button variant="destructive" size="sm" onClick={() => void handleHardDelete(user)}>
+          Hard Delete
+        </Button>
+      ) : null}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -637,6 +661,47 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
             </Button>
             <Button onClick={() => void handleResetPassword()} disabled={resetSubmitting}>
               {resetSubmitting ? "Resetting..." : "Reset Password"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(hardDeletingUser)}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeHardDeleteDialog();
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-destructive">Hard Delete User</DialogTitle>
+            <DialogDescription>
+              Permanently delete <span className="font-medium">{hardDeletingUser?.username}</span> and remove the
+              shop <span className="font-medium">{hardDeletingUser?.shop_name}</span> plus all mapped users.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-muted-foreground">
+            This cannot be undone. The shop, owner account, and all associated users will be deleted.
+          </div>
+
+          <div className="space-y-1">
+            <Label>Actor Note</Label>
+            <Input
+              value={hardDeleteForm.actorNote}
+              onChange={(event) => setHardDeleteForm((current) => ({ ...current, actorNote: event.target.value }))}
+              placeholder="Why this shop and owner are being deleted"
+            />
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={closeHardDeleteDialog} disabled={hardDeleteSubmitting}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={() => void handleConfirmHardDelete()} disabled={hardDeleteSubmitting}>
+              {hardDeleteSubmitting ? "Deleting..." : "Delete Shop and User"}
             </Button>
           </DialogFooter>
         </DialogContent>
