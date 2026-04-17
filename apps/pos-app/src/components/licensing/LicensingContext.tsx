@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
+  API_BASE_URL,
   ApiError,
   activateLicense as apiActivateLicense,
   fetchLicenseStatus,
@@ -27,6 +28,19 @@ const LicensingContext = createContext<LicensingContextValue | null>(null);
 const isLicensedState = (status: LicenseStatus | null) => status?.state === "active" || status?.state === "grace";
 const isBlockedState = (status: LicenseStatus | null) => status?.state === "suspended" || status?.state === "revoked";
 
+function isLikelyNetworkFailure(error: unknown) {
+  if (!(error instanceof TypeError)) {
+    return false;
+  }
+
+  const message = (error.message || "").toLowerCase();
+  return (
+    message.includes("failed to fetch") ||
+    message.includes("networkerror") ||
+    message.includes("load failed")
+  );
+}
+
 function toErrorMessage(error: unknown) {
   if (error instanceof ApiError) {
     if (error.code === "CLOUD_LICENSE_UNREACHABLE") {
@@ -42,6 +56,10 @@ function toErrorMessage(error: unknown) {
     }
 
     return error.message;
+  }
+
+  if (isLikelyNetworkFailure(error)) {
+    return `Unable to reach SmartPOS backend at ${API_BASE_URL}. Start the backend service and retry.`;
   }
 
   return "Unable to validate terminal license.";

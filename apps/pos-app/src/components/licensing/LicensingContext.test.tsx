@@ -104,6 +104,21 @@ describe("LicensingContext", () => {
     expect(cacheMocks.loadCachedLicenseStatus).toHaveBeenCalledWith("licensing-context-terminal");
   });
 
+  it("shows actionable backend connectivity message when no cached status is available", async () => {
+    apiMocks.fetchLicenseStatus.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    cacheMocks.loadCachedLicenseStatus.mockResolvedValueOnce(null);
+
+    render(
+      <LicensingProvider>
+        <Probe />
+      </LicensingProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("error").textContent).toMatch(/Unable to reach SmartPOS backend/i);
+    });
+  });
+
   it("retries heartbeat when connectivity returns", async () => {
     render(
       <LicensingProvider>
