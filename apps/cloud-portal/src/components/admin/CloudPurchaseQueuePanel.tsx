@@ -179,7 +179,10 @@ const CloudPurchaseQueuePanel = ({ heading = "Purchase Queue" }: CloudPurchaseQu
               <div key={item.purchase_id} className="rounded-xl border border-border/70 bg-surface-muted p-3 space-y-2">
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   <span className="font-semibold">{item.order_number}</span>
-                  <span className="text-muted-foreground">Shop: {item.shop_code}</span>
+                  <span className="text-muted-foreground">
+                    Owner: {item.owner_full_name || item.owner_username || "Unknown"}
+                  </span>
+                  <span className="text-muted-foreground">Shop: {item.shop_name || item.shop_code}</span>
                   <StatusChip tone={normalizedStatus === "rejected" ? "warning" : "info"}>
                     {toSentence(item.status)}
                   </StatusChip>

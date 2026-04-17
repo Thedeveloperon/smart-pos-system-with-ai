@@ -4,6 +4,7 @@ import {
   createAdminShop,
   deactivateAdminShop,
   fetchAdminLicensingShops,
+  hardDeleteAdminShop,
   reactivateAdminShop,
   updateAdminShop,
   type AdminShopsLicensingSnapshotResponse,
@@ -213,6 +214,33 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
     }
   }, [refreshAll]);
 
+  const handleHardDelete = useCallback(async (shop: AdminShopsLicensingSnapshotResponse["items"][number]) => {
+    const confirmed = window.confirm(
+      `Hard delete '${shop.shop_code}'? This removes the shop and all users mapped to it.`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    const actorNote = window.prompt(`Actor note for hard deleting '${shop.shop_code}'`);
+    if (!actorNote || !actorNote.trim()) {
+      return;
+    }
+
+    try {
+      await hardDeleteAdminShop(shop.shop_id, {
+        actor: "support-ui",
+        reason_code: "manual_shop_hard_delete",
+        actor_note: actorNote.trim(),
+      });
+      toast.success(`Shop '${shop.shop_code}' hard deleted.`);
+      await refreshAll(true);
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Failed to hard delete shop.");
+    }
+  }, [refreshAll]);
+
   return (
     <div className="rounded-2xl border border-border bg-card shadow-sm">
       <div className="flex flex-col gap-3 border-b border-border px-4 py-3 md:flex-row md:items-end md:justify-between">
@@ -282,6 +310,9 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
                     <div className="flex justify-end gap-2">
                       <Button size="sm" variant="outline" onClick={() => openEdit(shop)}>
                         Edit
+                      </Button>
+                      <Button size="sm" variant="destructive" onClick={() => void handleHardDelete(shop)}>
+                        Hard Delete
                       </Button>
                       {shop.is_active !== false ? (
                         <Button size="sm" variant="outline" onClick={() => void handleDeactivate(shop)}>

@@ -157,6 +157,9 @@ export type CloudPurchaseRow = {
   purchase_id: string;
   order_number: string;
   shop_code: string;
+  shop_name?: string | null;
+  owner_username?: string | null;
+  owner_full_name?: string | null;
   status: CloudPurchaseStatus;
   items: CloudPurchaseItemRow[];
   total_amount: number;
@@ -470,6 +473,12 @@ export type DeactivateAdminShopRequest = {
   actor_note: string;
 };
 
+export type HardDeleteAdminShopRequest = {
+  actor?: string;
+  reason_code?: string;
+  actor_note: string;
+};
+
 export type ReactivateAdminShopRequest = {
   actor?: string;
   reason_code?: string;
@@ -516,6 +525,7 @@ export type AdminShopUserRow = {
   user_id: string;
   shop_id: string;
   shop_code: string;
+  shop_name: string;
   username: string;
   full_name: string;
   role_code: "owner" | "manager" | "cashier" | string;
@@ -1247,6 +1257,16 @@ export async function deactivateAdminShop(shopId: string, payload: DeactivateAdm
   });
 }
 
+export async function hardDeleteAdminShop(shopId: string, payload: HardDeleteAdminShopRequest) {
+  return request<AdminShopMutationResponse>(`/api/admin/licensing/shops/${encodeURIComponent(shopId)}/hard-delete`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function reactivateAdminShop(shopId: string, payload: ReactivateAdminShopRequest) {
   return request<AdminShopMutationResponse>(`/api/admin/licensing/shops/${encodeURIComponent(shopId)}/reactivate`, {
     method: "POST",
@@ -1308,6 +1328,16 @@ export async function updateAdminShopUser(userId: string, payload: UpdateAdminSh
 
 export async function deactivateAdminShopUser(userId: string, payload: DeactivateAdminShopUserRequest) {
   return request<AdminShopUserMutationResponse>(`/api/admin/licensing/users/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function hardDeleteAdminShopUser(userId: string, payload: DeactivateAdminShopUserRequest) {
+  return request<AdminShopUserMutationResponse>(`/api/admin/licensing/users/${encodeURIComponent(userId)}/hard-delete`, {
     method: "DELETE",
     headers: {
       "Content-Type": "application/json",
