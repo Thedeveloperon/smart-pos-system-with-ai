@@ -157,6 +157,8 @@ export type CloudPurchaseRow = {
   purchase_id: string;
   order_number: string;
   shop_code: string;
+  shop_name?: string | null;
+  owner_full_name?: string | null;
   status: CloudPurchaseStatus;
   items: CloudPurchaseItemRow[];
   total_amount: number;
@@ -476,6 +478,12 @@ export type ReactivateAdminShopRequest = {
   actor_note: string;
 };
 
+export type DeleteAdminShopRequest = {
+  actor?: string;
+  reason_code?: string;
+  actor_note: string;
+};
+
 export type AdminShopMutationResponse = {
   action: string;
   shop: {
@@ -516,6 +524,7 @@ export type AdminShopUserRow = {
   user_id: string;
   shop_id: string;
   shop_code: string;
+  shop_name: string;
   username: string;
   full_name: string;
   role_code: "owner" | "manager" | "cashier" | string;
@@ -557,6 +566,12 @@ export type DeactivateAdminShopUserRequest = {
 };
 
 export type ReactivateAdminShopUserRequest = {
+  actor?: string;
+  reason_code?: string;
+  actor_note: string;
+};
+
+export type DeleteAdminShopUserRequest = {
   actor?: string;
   reason_code?: string;
   actor_note: string;
@@ -1257,14 +1272,26 @@ export async function reactivateAdminShop(shopId: string, payload: ReactivateAdm
   });
 }
 
+export async function deleteAdminShop(shopId: string, payload: DeleteAdminShopRequest) {
+  return request<AdminShopMutationResponse>(`/api/admin/licensing/shops/${encodeURIComponent(shopId)}/hard-delete`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function fetchAdminShopUsers({
   shopCode,
   search,
+  roleCode,
   includeInactive = false,
   take = 50,
 }: {
   shopCode?: string;
   search?: string;
+  roleCode?: "owner" | "manager" | "cashier";
   includeInactive?: boolean;
   take?: number;
 } = {}) {
@@ -1275,6 +1302,10 @@ export async function fetchAdminShopUsers({
 
   if (search?.trim()) {
     params.set("search", search.trim());
+  }
+
+  if (roleCode?.trim()) {
+    params.set("role_code", roleCode.trim());
   }
 
   if (includeInactive) {
@@ -1319,6 +1350,16 @@ export async function deactivateAdminShopUser(userId: string, payload: Deactivat
 export async function reactivateAdminShopUser(userId: string, payload: ReactivateAdminShopUserRequest) {
   return request<AdminShopUserMutationResponse>(`/api/admin/licensing/users/${encodeURIComponent(userId)}/reactivate`, {
     method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteAdminShopUser(userId: string, payload: DeleteAdminShopUserRequest) {
+  return request<AdminShopUserMutationResponse>(`/api/admin/licensing/users/${encodeURIComponent(userId)}/hard-delete`, {
+    method: "DELETE",
     headers: {
       "Content-Type": "application/json",
     },

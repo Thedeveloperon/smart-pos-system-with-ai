@@ -1052,9 +1052,33 @@ public static class LicenseEndpoints
         .WithName("AdminReactivateShop")
         .WithOpenApi();
 
+        admin.MapDelete("/shops/{shop_id:guid}/hard-delete", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+            Guid shop_id,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var request = await httpContext.Request.ReadFromJsonAsync<AdminShopDeleteRequest>(cancellationToken)
+                    ?? new AdminShopDeleteRequest();
+                var response = await licenseService.DeleteAdminShopAsync(shop_id, request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .WithName("AdminDeleteShop")
+        .WithOpenApi();
+
         admin.MapGet("/users", [Authorize(Policy = SmartPosPolicies.SuperAdminOperator)] async (
             string? shop_code,
             string? search,
+            string? role_code,
             bool? include_inactive,
             int? take,
             LicenseService licenseService,
@@ -1065,6 +1089,7 @@ public static class LicenseEndpoints
                 var response = await licenseService.GetAdminShopUsersAsync(
                     shop_code,
                     search,
+                    role_code,
                     include_inactive ?? false,
                     take ?? 50,
                     cancellationToken);
@@ -1165,6 +1190,29 @@ public static class LicenseEndpoints
         })
         .RequireAuthorization(SmartPosPolicies.SuperAdminOperator)
         .WithName("AdminReactivateShopUser")
+        .WithOpenApi();
+
+        admin.MapDelete("/users/{user_id:guid}/hard-delete", [Authorize(Policy = SmartPosPolicies.SuperAdminOperator)] async (
+            Guid user_id,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ValidateIdempotencyKey(httpContext);
+                var request = await httpContext.Request.ReadFromJsonAsync<AdminShopUserDeleteRequest>(cancellationToken)
+                    ?? new AdminShopUserDeleteRequest();
+                var response = await licenseService.DeleteAdminShopUserAsync(user_id, request, cancellationToken);
+                return Results.Ok(response);
+            }
+            catch (LicenseException ex)
+            {
+                return ToErrorResult(ex);
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.SuperAdminOperator)
+        .WithName("AdminDeleteShopUser")
         .WithOpenApi();
 
         admin.MapPost("/users/{user_id:guid}/reset-password", [Authorize(Policy = SmartPosPolicies.SuperAdminOperator)] async (

@@ -1897,7 +1897,11 @@ public sealed class LicenseService(
         });
 
         await dbContext.SaveChangesAsync(cancellationToken);
-        return MapAiCreditInvoiceRow(invoice, aiCreditOrder, ownerContext.Shop.Code);
+        return MapAiCreditInvoiceRow(
+            invoice,
+            aiCreditOrder,
+            ownerContext.Shop.Code,
+            ownerContext.Shop.Name);
     }
 
     public async Task<AiCreditInvoicesResponse> GetOwnerAiCreditInvoicesAsync(
@@ -1935,7 +1939,11 @@ public sealed class LicenseService(
 
         var items = orders
             .Where(x => x.Invoice is not null)
-            .Select(x => MapAiCreditInvoiceRow(x.Invoice!, x, ownerContext.Shop.Code))
+            .Select(x => MapAiCreditInvoiceRow(
+                x.Invoice!,
+                x,
+                ownerContext.Shop.Code,
+                ownerContext.Shop.Name))
             .ToList();
 
         return new AiCreditInvoicesResponse
@@ -1990,7 +1998,8 @@ public sealed class LicenseService(
             .Select(x =>
             {
                 var shopCode = x.Shop?.Code ?? ResolveShopCode(null);
-                return MapAiCreditInvoiceRow(x.Invoice!, x, shopCode);
+                var shopName = NormalizeOptionalValue(x.Shop?.Name);
+                return MapAiCreditInvoiceRow(x.Invoice!, x, shopCode, shopName);
             })
             .ToList();
 
@@ -2096,9 +2105,10 @@ public sealed class LicenseService(
         }
 
         var shopCode = aiCreditOrder.Shop?.Code ?? ResolveShopCode(null);
+        var shopName = NormalizeOptionalValue(aiCreditOrder.Shop?.Name);
         return new AdminAiCreditInvoiceActionResponse
         {
-            Invoice = MapAiCreditInvoiceRow(invoice, aiCreditOrder, shopCode),
+            Invoice = MapAiCreditInvoiceRow(invoice, aiCreditOrder, shopCode, shopName),
             ProcessedAt = now
         };
     }
@@ -2187,9 +2197,10 @@ public sealed class LicenseService(
         }
 
         var shopCode = aiCreditOrder.Shop?.Code ?? ResolveShopCode(null);
+        var shopName = NormalizeOptionalValue(aiCreditOrder.Shop?.Name);
         return new AdminAiCreditInvoiceActionResponse
         {
-            Invoice = MapAiCreditInvoiceRow(invoice, aiCreditOrder, shopCode),
+            Invoice = MapAiCreditInvoiceRow(invoice, aiCreditOrder, shopCode, shopName),
             ProcessedAt = now
         };
     }
@@ -2561,6 +2572,7 @@ public sealed class LicenseService(
             Purchase = MapCloudPosPurchaseRow(
                 invoice,
                 ownerContext.Shop.Code,
+                ownerContext.Shop.Name,
                 ParseCloudPosPurchaseMetadata(invoice.Notes)),
             ProcessedAt = now
         };
@@ -2596,7 +2608,11 @@ public sealed class LicenseService(
         }
 
         var items = aiInvoices.Items.Select(MapOwnerAiInvoiceToCloudPurchase)
-            .Concat(posInvoices.Select(x => MapCloudPosPurchaseRow(x, ownerContext.Shop.Code, ParseCloudPosPurchaseMetadata(x.Notes))))
+            .Concat(posInvoices.Select(x => MapCloudPosPurchaseRow(
+                x,
+                ownerContext.Shop.Code,
+                ownerContext.Shop.Name,
+                ParseCloudPosPurchaseMetadata(x.Notes))))
             .OrderByDescending(x => x.CreatedAt)
             .Take(normalizedTake)
             .ToList();
@@ -2632,7 +2648,11 @@ public sealed class LicenseService(
                 cancellationToken);
         if (aiOrder?.Invoice is not null)
         {
-            return MapOwnerAiInvoiceToCloudPurchase(MapAiCreditInvoiceRow(aiOrder.Invoice, aiOrder, ownerContext.Shop.Code));
+            return MapOwnerAiInvoiceToCloudPurchase(MapAiCreditInvoiceRow(
+                aiOrder.Invoice,
+                aiOrder,
+                ownerContext.Shop.Code,
+                ownerContext.Shop.Name));
         }
 
         var invoice = await dbContext.ManualBillingInvoices
@@ -2647,7 +2667,11 @@ public sealed class LicenseService(
                 LicenseErrorCodes.InvalidAdminRequest,
                 "Purchase was not found.",
                 StatusCodes.Status404NotFound);
-        return MapCloudPosPurchaseRow(invoice, ownerContext.Shop.Code, ParseCloudPosPurchaseMetadata(invoice.Notes));
+        return MapCloudPosPurchaseRow(
+            invoice,
+            ownerContext.Shop.Code,
+            ownerContext.Shop.Name,
+            ParseCloudPosPurchaseMetadata(invoice.Notes));
     }
 
     public async Task<CloudPurchasesResponse> GetAdminCloudPurchasesAsync(
@@ -2687,7 +2711,8 @@ public sealed class LicenseService(
             .Concat(posInvoices.Select(x =>
             {
                 var shopCode = x.Shop?.Code ?? ResolveShopCode(null);
-                return MapCloudPosPurchaseRow(x, shopCode, ParseCloudPosPurchaseMetadata(x.Notes));
+                var shopName = NormalizeOptionalValue(x.Shop?.Name);
+                return MapCloudPosPurchaseRow(x, shopCode, shopName, ParseCloudPosPurchaseMetadata(x.Notes));
             }))
             .Where(x => string.IsNullOrWhiteSpace(normalizedStatus) || x.Status == normalizedStatus)
             .OrderByDescending(x => x.CreatedAt)
@@ -2779,7 +2804,7 @@ public sealed class LicenseService(
         await dbContext.SaveChangesAsync(cancellationToken);
         return new CloudPurchaseActionResponse
         {
-            Purchase = MapCloudPosPurchaseRow(invoice, invoice.Shop.Code, metadata),
+            Purchase = MapCloudPosPurchaseRow(invoice, invoice.Shop.Code, invoice.Shop.Name, metadata),
             ProcessedAt = now
         };
     }
@@ -2868,7 +2893,7 @@ public sealed class LicenseService(
         await dbContext.SaveChangesAsync(cancellationToken);
         return new CloudPurchaseActionResponse
         {
-            Purchase = MapCloudPosPurchaseRow(invoice, invoice.Shop.Code, metadata),
+            Purchase = MapCloudPosPurchaseRow(invoice, invoice.Shop.Code, invoice.Shop.Name, metadata),
             ProcessedAt = now
         };
     }
@@ -2984,7 +3009,7 @@ public sealed class LicenseService(
 
         return new CloudPurchaseActionResponse
         {
-            Purchase = MapCloudPosPurchaseRow(invoice, invoice.Shop.Code, metadata),
+            Purchase = MapCloudPosPurchaseRow(invoice, invoice.Shop.Code, invoice.Shop.Name, metadata),
             ProcessedAt = now
         };
     }
@@ -3076,7 +3101,7 @@ public sealed class LicenseService(
         await dbContext.SaveChangesAsync(cancellationToken);
         return new CloudPurchaseActionResponse
         {
-            Purchase = MapCloudPosPurchaseRow(invoice, invoice.Shop.Code, metadata),
+            Purchase = MapCloudPosPurchaseRow(invoice, invoice.Shop.Code, invoice.Shop.Name, metadata),
             ProcessedAt = now
         };
     }
@@ -3698,6 +3723,129 @@ public sealed class LicenseService(
         };
     }
 
+    public async Task<AdminShopMutationResponse> DeleteAdminShopAsync(
+        Guid shopId,
+        AdminShopDeleteRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var now = DateTimeOffset.UtcNow;
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Reason,
+            defaultActor: "support-admin",
+            defaultReasonCode: "manual_shop_delete");
+        var shop = await ResolveExistingShopByIdAsync(shopId, cancellationToken);
+
+        if (shop.IsActive)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Shop must be deactivated before hard-delete.",
+                StatusCodes.Status409Conflict);
+        }
+
+        var dependencySnapshot = await BuildShopDeactivationDependencySnapshotAsync(shop.Id, cancellationToken);
+        if (dependencySnapshot.HasBlockingDependencies)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                $"Shop cannot be hard-deleted while active dependents exist (active_devices={dependencySnapshot.ActiveDevices}, non_terminal_subscriptions={dependencySnapshot.NonTerminalSubscriptions}, open_or_pending_invoices={dependencySnapshot.OpenOrPendingInvoices}, pending_manual_payments={dependencySnapshot.PendingManualPayments}, pending_ai_orders={dependencySnapshot.PendingAiOrders}, pending_ai_payments={dependencySnapshot.PendingAiPayments}).",
+                StatusCodes.Status409Conflict);
+        }
+
+        var shopUsers = await dbContext.Users
+            .Where(x => x.StoreId == shop.Id)
+            .ToListAsync(cancellationToken);
+        var revokedSessions = 0;
+        foreach (var user in shopUsers)
+        {
+            revokedSessions += await RevokeAuthSessionsForUserAsync(
+                user.Id,
+                now,
+                "admin_shop_deleted",
+                cancellationToken);
+            dbContext.Users.Remove(user);
+        }
+
+        var deletedUserCount = shopUsers.Count;
+        var deletedShopSnapshot = MapAdminShopMutationRow(shop);
+        dbContext.Shops.Remove(shop);
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = shop.Id,
+            Action = "shop_deleted",
+            Actor = overrideContext.Actor,
+            Reason = overrideContext.AuditReason,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                shop_id = shop.Id,
+                shop_code = shop.Code,
+                shop_name = shop.Name,
+                is_active = shop.IsActive,
+                deleted_users = deletedUserCount,
+                revoked_sessions = revokedSessions,
+                active_devices = dependencySnapshot.ActiveDevices,
+                non_terminal_subscriptions = dependencySnapshot.NonTerminalSubscriptions,
+                open_or_pending_invoices = dependencySnapshot.OpenOrPendingInvoices,
+                pending_manual_payments = dependencySnapshot.PendingManualPayments,
+                pending_ai_orders = dependencySnapshot.PendingAiOrders,
+                pending_ai_payments = dependencySnapshot.PendingAiPayments,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            }),
+            CreatedAtUtc = now
+        });
+
+        await AddManualOverrideAuditLogAsync(
+            shop.Id,
+            null,
+            "manual_override_shop_delete",
+            overrideContext.Actor,
+            overrideContext.AuditReason,
+            new
+            {
+                shop_id = shop.Id,
+                shop_code = shop.Code,
+                shop_name = shop.Name,
+                is_active = shop.IsActive,
+                deleted_users = deletedUserCount,
+                revoked_sessions = revokedSessions,
+                active_devices = dependencySnapshot.ActiveDevices,
+                non_terminal_subscriptions = dependencySnapshot.NonTerminalSubscriptions,
+                open_or_pending_invoices = dependencySnapshot.OpenOrPendingInvoices,
+                pending_manual_payments = dependencySnapshot.PendingManualPayments,
+                pending_ai_orders = dependencySnapshot.PendingAiOrders,
+                pending_ai_payments = dependencySnapshot.PendingAiPayments,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            },
+            now,
+            cancellationToken);
+
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "Shop cannot be hard-deleted because related records are protected. Deactivate the shop instead.",
+                StatusCodes.Status409Conflict);
+        }
+
+        return new AdminShopMutationResponse
+        {
+            Action = "delete",
+            Shop = deletedShopSnapshot,
+            ProcessedAt = now
+        };
+    }
+
     public async Task<AdminBranchSeatAllocationListResponse> GetBranchSeatAllocationsAsAdminAsync(
         string shopCode,
         CancellationToken cancellationToken)
@@ -3904,6 +4052,7 @@ public sealed class LicenseService(
     public async Task<AdminShopUsersResponse> GetAdminShopUsersAsync(
         string? shopCode,
         string? search,
+        string? roleCode,
         bool includeInactive,
         int take,
         CancellationToken cancellationToken)
@@ -3911,6 +4060,7 @@ public sealed class LicenseService(
         var now = DateTimeOffset.UtcNow;
         var normalizedTake = Math.Clamp(take, 1, 200);
         var normalizedSearch = NormalizeOptionalValue(search)?.ToLowerInvariant();
+        var normalizedRoleCode = ResolveOptionalManagedShopRoleCode(roleCode);
 
         Shop? targetShop = null;
         if (!string.IsNullOrWhiteSpace(NormalizeOptionalValue(shopCode)))
@@ -3987,6 +4137,12 @@ public sealed class LicenseService(
         foreach (var user in candidates)
         {
             if (!roleCodeByUserId.TryGetValue(user.Id, out var managedRoleCode))
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(normalizedRoleCode) &&
+                !string.Equals(managedRoleCode, normalizedRoleCode, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -4368,6 +4524,91 @@ public sealed class LicenseService(
         {
             Action = "reactivate",
             User = MapAdminShopUserRow(user, shop, roleCode),
+            ProcessedAt = now
+        };
+    }
+
+    public async Task<AdminShopUserMutationResponse> DeleteAdminShopUserAsync(
+        Guid userId,
+        AdminShopUserDeleteRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var now = DateTimeOffset.UtcNow;
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote ?? request.Reason,
+            defaultActor: "support-admin",
+            defaultReasonCode: "manual_shop_user_delete");
+        var (user, shop, roleCode) = await ResolveManagedShopUserContextAsync(userId, cancellationToken);
+
+        if (string.Equals(roleCode, SmartPosRoles.Owner, StringComparison.OrdinalIgnoreCase))
+        {
+            await EnsureShopHasAnotherActiveOwnerAsync(shop.Id, user.Id, cancellationToken);
+        }
+
+        var deletedUserSnapshot = MapAdminShopUserRow(user, shop, roleCode);
+        var revokedSessions = await RevokeAuthSessionsForUserAsync(
+            user.Id,
+            now,
+            "admin_user_deleted",
+            cancellationToken);
+        dbContext.Users.Remove(user);
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = shop.Id,
+            Action = "shop_user_deleted",
+            Actor = overrideContext.Actor,
+            Reason = overrideContext.AuditReason,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                user_id = user.Id,
+                username = user.Username,
+                role_code = roleCode,
+                revoked_sessions = revokedSessions,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            }),
+            CreatedAtUtc = now
+        });
+
+        await AddManualOverrideAuditLogAsync(
+            shop.Id,
+            null,
+            "manual_override_shop_user_delete",
+            overrideContext.Actor,
+            overrideContext.AuditReason,
+            new
+            {
+                user_id = user.Id,
+                username = user.Username,
+                role_code = roleCode,
+                revoked_sessions = revokedSessions,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            },
+            now,
+            cancellationToken);
+
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "User cannot be hard-deleted because related records are protected. Deactivate the user instead.",
+                StatusCodes.Status409Conflict);
+        }
+
+        return new AdminShopUserMutationResponse
+        {
+            Action = "delete",
+            User = deletedUserSnapshot,
             ProcessedAt = now
         };
     }
@@ -12346,7 +12587,8 @@ public sealed class LicenseService(
     private static AiCreditInvoiceRowResponse MapAiCreditInvoiceRow(
         ManualBillingInvoice invoice,
         AiCreditOrder order,
-        string shopCode)
+        string shopCode,
+        string? shopName = null)
     {
         var metadata = ParseOwnerAiCreditInvoiceMetadata(order.MetadataJson);
         var approvedAt = metadata.ApprovedAt ?? order.VerifiedAtUtc;
@@ -12357,6 +12599,10 @@ public sealed class LicenseService(
             InvoiceId = invoice.Id,
             InvoiceNumber = invoice.InvoiceNumber,
             ShopCode = shopCode,
+            ShopName = NormalizeOptionalValue(shopName),
+            OwnerFullName = NormalizeOptionalValue(metadata.RequestedByFullName) ??
+                            NormalizeOptionalValue(metadata.RequestedByUsername) ??
+                            NormalizeOptionalValue(invoice.CreatedBy),
             PackCode = NormalizeOptionalValue(order.PackageCode) ?? NormalizeOptionalValue(metadata.PackCode) ?? string.Empty,
             RequestedCredits = RoundAiCredits(order.RequestedCredits > 0m
                 ? order.RequestedCredits
@@ -12400,6 +12646,8 @@ public sealed class LicenseService(
             PurchaseId = invoice.InvoiceId,
             OrderNumber = invoice.InvoiceNumber,
             ShopCode = invoice.ShopCode,
+            ShopName = invoice.ShopName,
+            OwnerFullName = invoice.OwnerFullName,
             Status = status,
             Items =
             [
@@ -12426,6 +12674,7 @@ public sealed class LicenseService(
     private static CloudPurchaseRowResponse MapCloudPosPurchaseRow(
         ManualBillingInvoice invoice,
         string shopCode,
+        string? shopName,
         CloudPosPurchaseMetadataState metadata)
     {
         var status = NormalizeOptionalValue(metadata.Status)?.ToLowerInvariant();
@@ -12456,6 +12705,10 @@ public sealed class LicenseService(
             PurchaseId = invoice.Id,
             OrderNumber = invoice.InvoiceNumber,
             ShopCode = shopCode,
+            ShopName = NormalizeOptionalValue(shopName),
+            OwnerFullName = NormalizeOptionalValue(metadata.RequestedByFullName) ??
+                            NormalizeOptionalValue(metadata.RequestedByUsername) ??
+                            NormalizeOptionalValue(invoice.CreatedBy),
             Status = status,
             Items =
             [
@@ -12805,6 +13058,25 @@ public sealed class LicenseService(
         return normalized;
     }
 
+    private static string? ResolveOptionalManagedShopRoleCode(string? roleCode)
+    {
+        var normalized = NormalizeOptionalValue(roleCode)?.ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        if (!ManagedShopRoleCodes.Contains(normalized))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "role_code must be one of: owner, manager, cashier.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        return normalized;
+    }
+
     private async Task<AppRole> ResolveManagedShopRoleEntityAsync(
         string roleCode,
         CancellationToken cancellationToken)
@@ -12938,6 +13210,7 @@ public sealed class LicenseService(
             UserId = user.Id,
             ShopId = shop.Id,
             ShopCode = shop.Code,
+            ShopName = shop.Name,
             Username = user.Username,
             FullName = user.FullName,
             RoleCode = roleCode,

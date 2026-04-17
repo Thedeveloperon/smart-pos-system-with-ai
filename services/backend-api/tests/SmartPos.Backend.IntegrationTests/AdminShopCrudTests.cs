@@ -108,6 +108,51 @@ public sealed class AdminShopCrudTests(CustomWebApplicationFactory factory)
 
         Assert.Equal("reactivate", TestJson.GetString(reactivated, "action"));
         Assert.True(reactivated["shop"]?["is_active"]?.GetValue<bool>() ?? false);
+
+        var deactivatedForDelete = await SendMutationAndReadAsync(
+            adminClient,
+            HttpMethod.Delete,
+            $"/api/admin/licensing/shops/{Uri.EscapeDataString(shopId)}",
+            new
+            {
+                actor = "support_admin",
+                reason_code = "manual_shop_deactivate",
+                actor_note = "prepare shop delete"
+            });
+
+        Assert.Equal("deactivate", TestJson.GetString(deactivatedForDelete, "action"));
+        Assert.False(deactivatedForDelete["shop"]?["is_active"]?.GetValue<bool>() ?? true);
+
+        var deleted = await SendMutationAndReadAsync(
+            adminClient,
+            HttpMethod.Delete,
+            $"/api/admin/licensing/shops/{Uri.EscapeDataString(shopId)}/hard-delete",
+            new
+            {
+                actor = "support_admin",
+                reason_code = "manual_shop_delete",
+                actor_note = "delete pilot shop"
+            });
+
+        Assert.Equal("delete", TestJson.GetString(deleted, "action"));
+        Assert.Equal(shopCode, TestJson.GetString(deleted["shop"]!, "shop_code"));
+
+        var listAfterDelete = await TestJson.ReadObjectAsync(
+            await adminClient.GetAsync("/api/admin/licensing/shops?include_inactive=true&take=300"));
+        var existsAfterDelete = listAfterDelete["items"]?
+            .AsArray()
+            .Any(x => string.Equals(x?["shop_code"]?.GetValue<string>(), shopCode, StringComparison.OrdinalIgnoreCase));
+        Assert.False(existsAfterDelete ?? false);
+
+        var ownerLoginAfterDeleteClient = appFactory.CreateClient();
+        var ownerLoginAfterDelete = await ownerLoginAfterDeleteClient.PostAsJsonAsync("/api/auth/login", new
+        {
+            username = ownerUsername,
+            password = "OwnerPass123!",
+            device_code = $"deleted-shop-owner-{Guid.NewGuid():N}",
+            device_name = "Deleted Shop Owner Device"
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, ownerLoginAfterDelete.StatusCode);
     }
 
     [Fact]
@@ -254,6 +299,42 @@ public sealed class AdminShopCrudTests(CustomWebApplicationFactory factory)
                 actor = "support_admin",
                 reason_code = "manual_shop_deactivate",
                 actor_note = "should block"
+            });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ShopHardDelete_ShouldRequireInactiveShop()
+    {
+        await TestAuth.SignInAsSupportAdminAsync(adminClient);
+
+        var created = await SendMutationAndReadAsync(
+            adminClient,
+            HttpMethod.Post,
+            "/api/admin/licensing/shops",
+            new
+            {
+                shop_code = $"harddel-{Guid.NewGuid():N}"[..18],
+                shop_name = "Hard Delete Guard Shop",
+                owner_username = $"harddel-owner-{Guid.NewGuid():N}"[..22],
+                owner_password = "OwnerPass123!",
+                owner_full_name = "Hard Delete Owner",
+                actor = "support_admin",
+                reason_code = "manual_shop_create",
+                actor_note = "seed"
+            });
+
+        var shopId = TestJson.GetString(created["shop"]!, "shop_id");
+        var response = await SendMutationAsync(
+            adminClient,
+            HttpMethod.Delete,
+            $"/api/admin/licensing/shops/{Uri.EscapeDataString(shopId)}/hard-delete",
+            new
+            {
+                actor = "support_admin",
+                reason_code = "manual_shop_delete",
+                actor_note = "attempt deleting active shop"
             });
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);

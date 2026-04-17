@@ -37,6 +37,21 @@ function canApproveOrReject(status: string) {
   return queueStatuses.has(normalized);
 }
 
+function resolveShopLabel(item: CloudPurchaseRow) {
+  const shopCode = item.shop_code?.trim();
+  const shopName = item.shop_name?.trim();
+
+  if (shopName && shopCode && shopName.toLowerCase() !== shopCode.toLowerCase()) {
+    return `${shopName} (${shopCode})`;
+  }
+
+  return shopName || shopCode || "-";
+}
+
+function resolveOwnerName(item: CloudPurchaseRow) {
+  return item.owner_full_name?.trim() || "-";
+}
+
 const CloudPurchaseQueuePanel = ({ heading = "Purchase Queue" }: CloudPurchaseQueuePanelProps) => {
   const [items, setItems] = useState<CloudPurchaseRow[]>([]);
   const [statusFilter, setStatusFilter] = useState(PendingStatusFilterValue);
@@ -175,11 +190,14 @@ const CloudPurchaseQueuePanel = ({ heading = "Purchase Queue" }: CloudPurchaseQu
           {items.map((item) => {
             const normalizedStatus = item.status.trim().toLowerCase();
             const isSubmitting = submittingId === item.purchase_id;
+            const shopLabel = resolveShopLabel(item);
+            const ownerName = resolveOwnerName(item);
             return (
               <div key={item.purchase_id} className="rounded-xl border border-border/70 bg-surface-muted p-3 space-y-2">
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   <span className="font-semibold">{item.order_number}</span>
-                  <span className="text-muted-foreground">Shop: {item.shop_code}</span>
+                  <span className="text-muted-foreground">Shop: {shopLabel}</span>
+                  <span className="text-muted-foreground">Owner: {ownerName}</span>
                   <StatusChip tone={normalizedStatus === "rejected" ? "warning" : "info"}>
                     {toSentence(item.status)}
                   </StatusChip>

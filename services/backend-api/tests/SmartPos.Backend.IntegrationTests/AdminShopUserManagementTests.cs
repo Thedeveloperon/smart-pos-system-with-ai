@@ -156,6 +156,35 @@ public sealed class AdminShopUserManagementTests(CustomWebApplicationFactory fac
             device_name = "Reactivated User Device"
         });
         loginAfterReactivate.EnsureSuccessStatusCode();
+
+        var deleteResponse = await SendMutationAndReadAsync(
+            adminClient,
+            HttpMethod.Delete,
+            $"/api/admin/licensing/users/{Uri.EscapeDataString(userId)}/hard-delete",
+            new
+            {
+                actor = "support_admin",
+                reason_code = "manual_shop_user_delete",
+                actor_note = "retired owner account"
+            });
+        Assert.Equal("delete", TestJson.GetString(deleteResponse, "action"));
+
+        var loginAfterDeleteClient = appFactory.CreateClient();
+        var loginAfterDelete = await loginAfterDeleteClient.PostAsJsonAsync("/api/auth/login", new
+        {
+            username,
+            password = updatedPassword,
+            device_code = $"deleted-{Guid.NewGuid():N}",
+            device_name = "Deleted User Device"
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, loginAfterDelete.StatusCode);
+
+        var listAfterDelete = await TestJson.ReadObjectAsync(
+            await adminClient.GetAsync($"/api/admin/licensing/users?shop_code=default&search={Uri.EscapeDataString(username)}&take=20"));
+        var existsAfterDelete = listAfterDelete["items"]?
+            .AsArray()
+            .Any(x => string.Equals(x?["username"]?.GetValue<string>(), username, StringComparison.OrdinalIgnoreCase));
+        Assert.False(existsAfterDelete);
     }
 
     [Fact]

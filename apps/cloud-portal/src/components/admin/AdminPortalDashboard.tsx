@@ -1,10 +1,8 @@
 "use client";
 
 import { type ElementType, useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   Bell,
-  ChevronDown,
   CircleDollarSign,
   CircleEllipsis,
   Clock3,
@@ -34,7 +32,6 @@ import {
   type CloudProductRow,
   type CloudPurchaseRow,
 } from "@/lib/adminApi";
-import { defaultLocale } from "@/i18n/config";
 import type { AdminSession } from "./auth";
 
 type AdminPortalDashboardProps = {
@@ -130,10 +127,8 @@ function AdminSectionHeader({
 }
 
 export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDashboardProps) {
-  const router = useRouter();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activeSection, setActiveSection] = useState<SectionId>("overview");
-  const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [products, setProducts] = useState<CloudProductRow[]>([]);
   const [purchases, setPurchases] = useState<CloudPurchaseRow[]>([]);
@@ -147,7 +142,7 @@ export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDas
         fetchAdminCloudProducts({ includeInactive: true, take: 100 }),
         fetchAdminCloudPurchases({ take: 100 }),
         fetchAdminLicensingShops({ includeInactive: true, take: 100 }),
-        fetchAdminShopUsers({ includeInactive: true, take: 200 }),
+        fetchAdminShopUsers({ includeInactive: true, roleCode: "owner", take: 200 }),
       ]);
 
       if (productsResult.status === "fulfilled") setProducts(productsResult.value.items || []);
@@ -222,12 +217,20 @@ export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDas
                       : purchase.status === "pending_approval"
                         ? "bg-amber-100 text-amber-800"
                         : "bg-sky-100 text-sky-700";
+                const normalizedShopCode = purchase.shop_code?.trim() || "-";
+                const normalizedShopName = purchase.shop_name?.trim();
+                const shopLabel =
+                  normalizedShopName && normalizedShopName.toLowerCase() !== normalizedShopCode.toLowerCase()
+                    ? `${normalizedShopName} (${normalizedShopCode})`
+                    : normalizedShopName || normalizedShopCode;
+                const ownerLabel = purchase.owner_full_name?.trim() || "-";
 
                 return (
                   <div key={purchase.purchase_id} className="flex items-center justify-between gap-4 px-5 py-4">
                     <div>
                       <p className="font-medium text-slate-950">{purchase.order_number}</p>
-                      <p className="text-sm text-slate-500">{purchase.shop_code}</p>
+                      <p className="text-sm text-slate-500">{shopLabel}</p>
+                      <p className="text-xs text-slate-500">Owner: {ownerLabel}</p>
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="font-medium text-slate-950">{formatCurrency(purchase.total_amount, purchase.currency)}</span>
@@ -280,21 +283,11 @@ export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDas
       case "users":
         return (
           <div className="space-y-6">
-            <AdminSectionHeader title="Users Management" subtitle="Manage cloud-managed users, roles, and access." />
+            <AdminSectionHeader title="Users Management" subtitle="Manage cloud shop-owner accounts and access." />
             <AdminUsersPanel shops={shops} />
           </div>
         );
     }
-  };
-
-  const goToOwnerView = () => {
-    setViewMenuOpen(false);
-    router.push(`/${defaultLocale}/account`);
-  };
-
-  const goToAdminView = () => {
-    setViewMenuOpen(false);
-    router.push("/admin");
   };
 
   return (
@@ -318,9 +311,7 @@ export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDas
             </div>
 
             <div className={["relative py-4", sidebarCollapsed ? "px-2" : "px-4"].join(" ")}>
-              <button
-                type="button"
-                onClick={() => setViewMenuOpen((current) => !current)}
+              <div
                 className={[
                   "flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white py-2 text-sm shadow-sm",
                   sidebarCollapsed ? "px-2" : "px-3",
@@ -330,34 +321,7 @@ export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDas
                   <Shield className="h-4 w-4 text-slate-600" />
                   <span className={sidebarCollapsed ? "hidden" : ""}>Admin View</span>
                 </span>
-                <ChevronDown className={["h-4 w-4 text-slate-500", sidebarCollapsed ? "hidden" : ""].join(" ")} />
-              </button>
-
-              {viewMenuOpen && (
-                <div
-                  className={[
-                    "absolute top-[calc(100%+0.5rem)] z-20 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg",
-                    sidebarCollapsed ? "left-2 right-2" : "left-4 right-4",
-                  ].join(" ")}
-                >
-                  <button
-                    type="button"
-                    onClick={goToOwnerView}
-                    className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm text-slate-700 hover:bg-slate-50"
-                  >
-                    <Users className="h-4 w-4" />
-                    Owner View
-                  </button>
-                  <button
-                    type="button"
-                    onClick={goToAdminView}
-                    className="flex w-full items-center gap-2 border-t border-slate-100 px-4 py-3 text-left text-sm text-slate-700 hover:bg-slate-50"
-                  >
-                    <Shield className="h-4 w-4" />
-                    Admin View
-                  </button>
-                </div>
-              )}
+              </div>
             </div>
 
             <div className="px-2">
