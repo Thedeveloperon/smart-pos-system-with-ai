@@ -728,6 +728,21 @@ public sealed class AdminShopReactivateRequest
     public string? Reason { get; set; }
 }
 
+public sealed class AdminShopDeleteRequest
+{
+    [JsonPropertyName("actor")]
+    public string? Actor { get; set; }
+
+    [JsonPropertyName("reason_code")]
+    public string? ReasonCode { get; set; }
+
+    [JsonPropertyName("actor_note")]
+    public string? ActorNote { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+}
+
 public sealed class AdminShopMutationShopRow
 {
     [JsonPropertyName("shop_id")]
@@ -1348,6 +1363,9 @@ public sealed class AdminShopUserRow
     [JsonPropertyName("shop_code")]
     public string ShopCode { get; set; } = string.Empty;
 
+    [JsonPropertyName("shop_name")]
+    public string ShopName { get; set; } = string.Empty;
+
     [JsonPropertyName("username")]
     public string Username { get; set; } = string.Empty;
 
@@ -1437,6 +1455,21 @@ public sealed class AdminShopUserDeactivateRequest
 }
 
 public sealed class AdminShopUserReactivateRequest
+{
+    [JsonPropertyName("actor")]
+    public string? Actor { get; set; }
+
+    [JsonPropertyName("reason_code")]
+    public string? ReasonCode { get; set; }
+
+    [JsonPropertyName("actor_note")]
+    public string? ActorNote { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+}
+
+public sealed class AdminShopUserDeleteRequest
 {
     [JsonPropertyName("actor")]
     public string? Actor { get; set; }
@@ -2029,6 +2062,12 @@ public sealed class AiCreditInvoiceRowResponse
     [JsonPropertyName("shop_code")]
     public string ShopCode { get; set; } = string.Empty;
 
+    [JsonPropertyName("shop_name")]
+    public string? ShopName { get; set; }
+
+    [JsonPropertyName("owner_full_name")]
+    public string? OwnerFullName { get; set; }
+
     [JsonPropertyName("pack_code")]
     public string PackCode { get; set; } = string.Empty;
 
@@ -2394,6 +2433,12 @@ public sealed class CloudPurchaseRowResponse
 
     [JsonPropertyName("shop_code")]
     public string ShopCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("shop_name")]
+    public string? ShopName { get; set; }
+
+    [JsonPropertyName("owner_full_name")]
+    public string? OwnerFullName { get; set; }
 
     [JsonPropertyName("status")]
     public string Status { get; set; } = "submitted";

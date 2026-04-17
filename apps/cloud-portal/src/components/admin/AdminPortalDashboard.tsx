@@ -143,7 +143,7 @@ export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDas
         fetchAdminCloudProducts({ includeInactive: true, take: 100 }),
         fetchAdminCloudPurchases({ take: 100 }),
         fetchAdminLicensingShops({ includeInactive: true, take: 100 }),
-        fetchAdminShopUsers({ includeInactive: true, take: 200 }),
+        fetchAdminShopUsers({ includeInactive: true, roleCode: "owner", take: 200 }),
       ]);
 
       if (productsResult.status === "fulfilled") setProducts(productsResult.value.items || []);
@@ -218,15 +218,20 @@ export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDas
                       : purchase.status === "pending_approval"
                         ? "bg-amber-100 text-amber-800"
                         : "bg-sky-100 text-sky-700";
+                const normalizedShopCode = purchase.shop_code?.trim() || "-";
+                const normalizedShopName = purchase.shop_name?.trim();
+                const shopLabel =
+                  normalizedShopName && normalizedShopName.toLowerCase() !== normalizedShopCode.toLowerCase()
+                    ? `${normalizedShopName} (${normalizedShopCode})`
+                    : normalizedShopName || normalizedShopCode;
+                const ownerLabel = purchase.owner_full_name?.trim() || purchase.owner_username?.trim() || "-";
 
                 return (
                   <div key={purchase.purchase_id} className="flex items-center justify-between gap-4 px-5 py-4">
                     <div>
                       <p className="font-medium text-slate-950">{purchase.order_number}</p>
-                      <p className="text-sm text-slate-500">
-                        {purchase.owner_full_name || purchase.owner_username || "Unknown owner"} ·{" "}
-                        {purchase.shop_name || purchase.shop_code}
-                      </p>
+                      <p className="text-sm text-slate-500">{shopLabel}</p>
+                      <p className="text-xs text-slate-500">Owner: {ownerLabel}</p>
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="font-medium text-slate-950">{formatCurrency(purchase.total_amount, purchase.currency)}</span>
@@ -270,7 +275,7 @@ export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDas
       case "users":
         return (
           <div className="space-y-6">
-            <AdminSectionHeader title="Users Management" subtitle="Manage cloud-managed users, roles, and access." />
+            <AdminSectionHeader title="Users Management" subtitle="Manage cloud shop-owner accounts and access." />
             <AdminUsersPanel shops={shops} />
           </div>
         );

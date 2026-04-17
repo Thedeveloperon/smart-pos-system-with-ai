@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   createAdminShopUser,
+  deleteAdminShopUser,
   deactivateAdminShopUser,
   fetchAdminShopUsers,
-  hardDeleteAdminShopUser,
   reactivateAdminShopUser,
   resetAdminShopUserPassword,
   updateAdminShopUser,
@@ -29,10 +29,11 @@ type AdminUsersPanelProps = {
   shops: AdminShopsLicensingSnapshotResponse["items"];
 };
 
+const ALL_SHOPS_VALUE = "__all_shops__";
+
 type CreateUserForm = {
   username: string;
   fullName: string;
-  roleCode: "owner" | "manager" | "cashier";
   password: string;
   actorNote: string;
 };
@@ -40,7 +41,6 @@ type CreateUserForm = {
 type EditUserForm = {
   username: string;
   fullName: string;
-  roleCode: "owner" | "manager" | "cashier";
   actorNote: string;
 };
 
@@ -52,7 +52,6 @@ type ResetPasswordForm = {
 const initialCreateForm: CreateUserForm = {
   username: "",
   fullName: "",
-  roleCode: "cashier",
   password: "",
   actorNote: "",
 };
@@ -65,7 +64,7 @@ const initialResetForm: ResetPasswordForm = {
 const roleLabel = (roleCode: string) => roleCode.replaceAll("_", " ");
 
 const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
-  const [selectedShopCode, setSelectedShopCode] = useState("");
+  const [selectedShopCode, setSelectedShopCode] = useState(ALL_SHOPS_VALUE);
   const [search, setSearch] = useState("");
   const [includeInactive, setIncludeInactive] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -79,7 +78,6 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
   const [editForm, setEditForm] = useState<EditUserForm>({
     username: "",
     fullName: "",
-    roleCode: "cashier",
     actorNote: "",
   });
   const [editSubmitting, setEditSubmitting] = useState(false);
@@ -94,28 +92,19 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
   );
 
   useEffect(() => {
-    if (!selectedShopCode && shopOptions.length > 0) {
-      setSelectedShopCode(shopOptions[0].shop_code);
-      return;
-    }
-
-    if (selectedShopCode && shopOptions.every((item) => item.shop_code !== selectedShopCode)) {
-      setSelectedShopCode(shopOptions[0]?.shop_code ?? "");
+    if (selectedShopCode !== ALL_SHOPS_VALUE && shopOptions.every((item) => item.shop_code !== selectedShopCode)) {
+      setSelectedShopCode(ALL_SHOPS_VALUE);
     }
   }, [selectedShopCode, shopOptions]);
 
   const loadUsers = useCallback(
     async (quiet = false) => {
-      if (!selectedShopCode) {
-        setUsers([]);
-        return;
-      }
-
       setLoading(true);
       try {
         const response = await fetchAdminShopUsers({
-          shopCode: selectedShopCode,
+          shopCode: selectedShopCode === ALL_SHOPS_VALUE ? undefined : selectedShopCode,
           search: search.trim() || undefined,
+          roleCode: "owner",
           includeInactive,
           take: 200,
         });
@@ -123,7 +112,7 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
       } catch (error) {
         console.error(error);
         if (!quiet) {
-          toast.error(error instanceof Error ? error.message : "Failed to load shop users.");
+          toast.error(error instanceof Error ? error.message : "Failed to load cloud users.");
         }
       } finally {
         setLoading(false);
@@ -137,8 +126,8 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
   }, [loadUsers]);
 
   const handleCreateUser = useCallback(async () => {
-    if (!selectedShopCode) {
-      toast.error("Select a shop first.");
+    if (selectedShopCode === ALL_SHOPS_VALUE) {
+      toast.error("Select a specific shop to create an owner account.");
       return;
     }
 
@@ -153,7 +142,7 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
         shop_code: selectedShopCode,
         username: createForm.username.trim(),
         full_name: createForm.fullName.trim(),
-        role_code: createForm.roleCode,
+        role_code: "owner",
         password: createForm.password,
         actor: "support-ui",
         reason_code: "manual_shop_user_create",
@@ -172,16 +161,10 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
   }, [createForm, loadUsers, selectedShopCode]);
 
   const openEditDialog = useCallback((user: AdminShopUserRow) => {
-    const normalizedRole = (user.role_code || "cashier").toLowerCase();
-    const safeRole: "owner" | "manager" | "cashier" =
-      normalizedRole === "owner" || normalizedRole === "manager" || normalizedRole === "cashier"
-        ? normalizedRole
-        : "cashier";
     setEditingUser(user);
     setEditForm({
       username: user.username,
       fullName: user.full_name,
-      roleCode: safeRole,
       actorNote: "",
     });
   }, []);
@@ -201,7 +184,7 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
       await updateAdminShopUser(editingUser.user_id, {
         username: editForm.username.trim(),
         full_name: editForm.fullName.trim(),
-        role_code: editForm.roleCode,
+        role_code: "owner",
         actor: "support-ui",
         reason_code: "manual_shop_user_update",
         actor_note: editForm.actorNote.trim(),
@@ -275,36 +258,6 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
     [loadUsers],
   );
 
-  const handleHardDelete = useCallback(
-    async (user: AdminShopUserRow) => {
-      const confirmed = window.confirm(
-        `Permanently delete '${user.username}' and shop '${user.shop_name}'? This removes the shop and all users mapped to it.`,
-      );
-      if (!confirmed) {
-        return;
-      }
-
-      const actorNote = window.prompt(`Actor note for hard deleting '${user.username}'`);
-      if (!actorNote || !actorNote.trim()) {
-        return;
-      }
-
-      try {
-        await hardDeleteAdminShopUser(user.user_id, {
-          actor: "support-ui",
-          reason_code: "manual_shop_user_hard_delete",
-          actor_note: actorNote.trim(),
-        });
-        toast.success(`Shop '${user.shop_name}' and user '${user.username}' hard deleted.`);
-        await loadUsers(true);
-      } catch (error) {
-        console.error(error);
-        toast.error(error instanceof Error ? error.message : "Failed to hard delete user.");
-      }
-    },
-    [loadUsers],
-  );
-
   const handleReactivate = useCallback(
     async (user: AdminShopUserRow) => {
       const actorNote = window.prompt(`Actor note for reactivating '${user.username}'`);
@@ -328,6 +281,36 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
     [loadUsers],
   );
 
+  const handleDelete = useCallback(
+    async (user: AdminShopUserRow) => {
+      const confirmed = window.confirm(
+        `Permanently delete '${user.username}' (${user.shop_name || user.shop_code})?\n\nThis cannot be undone.`,
+      );
+      if (!confirmed) {
+        return;
+      }
+
+      const actorNote = window.prompt(`Actor note for permanently deleting '${user.username}'`);
+      if (!actorNote || !actorNote.trim()) {
+        return;
+      }
+
+      try {
+        await deleteAdminShopUser(user.user_id, {
+          actor: "support-ui",
+          reason_code: "manual_shop_user_delete",
+          actor_note: actorNote.trim(),
+        });
+        toast.success(`User '${user.username}' deleted.`);
+        await loadUsers(true);
+      } catch (error) {
+        console.error(error);
+        toast.error(error instanceof Error ? error.message : "Failed to delete user.");
+      }
+    },
+    [loadUsers],
+  );
+
   return (
     <div className="rounded-2xl border border-border bg-card shadow-sm">
       <div className="flex flex-col gap-3 border-b border-border px-4 py-3 md:flex-row md:items-end md:justify-between">
@@ -340,15 +323,12 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
               value={selectedShopCode}
               onChange={(event) => setSelectedShopCode(event.target.value)}
             >
-              {shopOptions.length === 0 ? (
-                <option value="">No shops</option>
-              ) : (
-                shopOptions.map((shop) => (
-                  <option key={shop.shop_id} value={shop.shop_code}>
-                    {shop.shop_code} - {shop.shop_name}
-                  </option>
-                ))
-              )}
+              <option value={ALL_SHOPS_VALUE}>All shops</option>
+              {shopOptions.map((shop) => (
+                <option key={shop.shop_id} value={shop.shop_code}>
+                  {shop.shop_code} - {shop.shop_name}
+                </option>
+              ))}
             </select>
           </div>
           <div className="space-y-1">
@@ -357,7 +337,7 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
               id="admin-users-search-input"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="username / name / role"
+              placeholder="username / owner name / shop"
             />
           </div>
           <div className="flex items-center gap-2 self-end pb-1">
@@ -379,15 +359,15 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
           <Button
             size="sm"
             onClick={() => {
-              if (!selectedShopCode) {
-                toast.error("Select a shop first.");
+              if (selectedShopCode === ALL_SHOPS_VALUE) {
+                toast.error("Select a specific shop to create an owner account.");
                 return;
               }
 
               setCreateDialogOpen(true);
             }}
           >
-            Create User
+            Create Owner
           </Button>
         </div>
       </div>
@@ -410,7 +390,7 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
             {users.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
-                  {loading ? "Loading users..." : "No users found for this shop/filter."}
+                  {loading ? "Loading users..." : "No owner accounts found for this filter."}
                 </TableCell>
               </TableRow>
             ) : (
@@ -418,7 +398,10 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
                 <TableRow key={user.user_id}>
                   <TableCell className="font-medium">{user.username}</TableCell>
                   <TableCell>{user.full_name}</TableCell>
-                  <TableCell>{user.shop_name}</TableCell>
+                  <TableCell>
+                    <p className="font-medium">{user.shop_name || "-"}</p>
+                    <p className="text-xs text-muted-foreground">{user.shop_code}</p>
+                  </TableCell>
                   <TableCell className="capitalize">{roleLabel(user.role_code)}</TableCell>
                   <TableCell>
                     <Badge variant={user.is_active ? "secondary" : "outline"}>
@@ -446,11 +429,9 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
                           Reactivate
                         </Button>
                       )}
-                      {user.role_code === "owner" ? (
-                        <Button variant="destructive" size="sm" onClick={() => void handleHardDelete(user)}>
-                          Hard Delete
-                        </Button>
-                      ) : null}
+                      <Button variant="destructive" size="sm" onClick={() => void handleDelete(user)}>
+                        Delete
+                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -463,8 +444,8 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Create Shop User</DialogTitle>
-            <DialogDescription>Create an owner, manager, or cashier for the selected shop.</DialogDescription>
+            <DialogTitle>Create Shop Owner</DialogTitle>
+            <DialogDescription>Create a cloud owner account for the selected shop.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1">
@@ -482,23 +463,6 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
                 onChange={(event) => setCreateForm((current) => ({ ...current, fullName: event.target.value }))}
                 placeholder="User full name"
               />
-            </div>
-            <div className="space-y-1">
-              <Label>Role</Label>
-              <select
-                className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
-                value={createForm.roleCode}
-                onChange={(event) =>
-                  setCreateForm((current) => ({
-                    ...current,
-                    roleCode: event.target.value as "owner" | "manager" | "cashier",
-                  }))
-                }
-              >
-                <option value="owner">owner</option>
-                <option value="manager">manager</option>
-                <option value="cashier">cashier</option>
-              </select>
             </div>
             <div className="space-y-1">
               <Label>Password</Label>
@@ -523,7 +487,7 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
               Cancel
             </Button>
             <Button onClick={() => void handleCreateUser()} disabled={createSubmitting}>
-              {createSubmitting ? "Creating..." : "Create User"}
+              {createSubmitting ? "Creating..." : "Create Owner"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -539,9 +503,9 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
       >
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Edit User</DialogTitle>
+            <DialogTitle>Edit Owner</DialogTitle>
             <DialogDescription>
-              Update username, full name, or role for <span className="font-medium">{editingUser?.username}</span>.
+              Update username or full name for <span className="font-medium">{editingUser?.username}</span>.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -558,23 +522,6 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
                 value={editForm.fullName}
                 onChange={(event) => setEditForm((current) => ({ ...current, fullName: event.target.value }))}
               />
-            </div>
-            <div className="space-y-1">
-              <Label>Role</Label>
-              <select
-                className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
-                value={editForm.roleCode}
-                onChange={(event) =>
-                  setEditForm((current) => ({
-                    ...current,
-                    roleCode: event.target.value as "owner" | "manager" | "cashier",
-                  }))
-                }
-              >
-                <option value="owner">owner</option>
-                <option value="manager">manager</option>
-                <option value="cashier">cashier</option>
-              </select>
             </div>
             <div className="space-y-1">
               <Label>Actor Note</Label>

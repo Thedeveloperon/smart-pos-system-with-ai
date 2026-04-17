@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   createAdminShop,
+  deleteAdminShop,
   deactivateAdminShop,
   fetchAdminLicensingShops,
-  hardDeleteAdminShop,
   reactivateAdminShop,
   updateAdminShop,
   type AdminShopsLicensingSnapshotResponse,
@@ -214,30 +214,35 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
     }
   }, [refreshAll]);
 
-  const handleHardDelete = useCallback(async (shop: AdminShopsLicensingSnapshotResponse["items"][number]) => {
+  const handleDelete = useCallback(async (shop: AdminShopsLicensingSnapshotResponse["items"][number]) => {
+    if (shop.is_active !== false) {
+      toast.error("Deactivate the shop before deleting it permanently.");
+      return;
+    }
+
     const confirmed = window.confirm(
-      `Hard delete '${shop.shop_code}'? This removes the shop and all users mapped to it.`,
+      `Permanently delete shop '${shop.shop_code}' (${shop.shop_name})?\n\nThis will remove the shop and linked users. This cannot be undone.`,
     );
     if (!confirmed) {
       return;
     }
 
-    const actorNote = window.prompt(`Actor note for hard deleting '${shop.shop_code}'`);
+    const actorNote = window.prompt(`Actor note for permanently deleting '${shop.shop_code}'`);
     if (!actorNote || !actorNote.trim()) {
       return;
     }
 
     try {
-      await hardDeleteAdminShop(shop.shop_id, {
+      await deleteAdminShop(shop.shop_id, {
         actor: "support-ui",
-        reason_code: "manual_shop_hard_delete",
+        reason_code: "manual_shop_delete",
         actor_note: actorNote.trim(),
       });
-      toast.success(`Shop '${shop.shop_code}' hard deleted.`);
+      toast.success(`Shop '${shop.shop_code}' deleted.`);
       await refreshAll(true);
     } catch (error) {
       console.error(error);
-      toast.error(error instanceof Error ? error.message : "Failed to hard delete shop.");
+      toast.error(error instanceof Error ? error.message : "Failed to delete shop.");
     }
   }, [refreshAll]);
 
@@ -311,9 +316,6 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
                       <Button size="sm" variant="outline" onClick={() => openEdit(shop)}>
                         Edit
                       </Button>
-                      <Button size="sm" variant="destructive" onClick={() => void handleHardDelete(shop)}>
-                        Hard Delete
-                      </Button>
                       {shop.is_active !== false ? (
                         <Button size="sm" variant="outline" onClick={() => void handleDeactivate(shop)}>
                           Deactivate
@@ -323,6 +325,9 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
                           Reactivate
                         </Button>
                       )}
+                      <Button size="sm" variant="destructive" onClick={() => void handleDelete(shop)}>
+                        Delete
+                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>
