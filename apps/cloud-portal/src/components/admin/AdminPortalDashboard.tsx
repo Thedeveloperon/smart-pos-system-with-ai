@@ -33,6 +33,7 @@ import {
   type CloudPurchaseRow,
 } from "@/lib/adminApi";
 import type { AdminSession } from "./auth";
+import { isSuperAdminRole } from "./auth";
 
 type AdminPortalDashboardProps = {
   user: AdminSession;
@@ -223,7 +224,7 @@ export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDas
                   normalizedShopName && normalizedShopName.toLowerCase() !== normalizedShopCode.toLowerCase()
                     ? `${normalizedShopName} (${normalizedShopCode})`
                     : normalizedShopName || normalizedShopCode;
-                const ownerLabel = purchase.owner_full_name?.trim() || "-";
+                const ownerLabel = purchase.owner_full_name?.trim() || purchase.owner_username?.trim() || "-";
 
                 return (
                   <div key={purchase.purchase_id} className="flex items-center justify-between gap-4 px-5 py-4">
@@ -253,16 +254,7 @@ export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDas
       case "catalog":
         return (
           <div className="space-y-6">
-            <AdminSectionHeader
-              title="Product Catalog"
-              subtitle="Manage POS subscriptions and AI credit packs."
-              action={
-                <Button className="bg-[#1f4a8f] text-white hover:bg-[#173d75]" size="sm">
-                  <span className="mr-2">+</span>
-                  Add Product
-                </Button>
-              }
-            />
+            <AdminSectionHeader title="Product Catalog" subtitle="Manage POS subscriptions and AI credit packs." />
             <CloudProductCatalogPanel />
           </div>
         );
@@ -311,17 +303,18 @@ export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDas
             </div>
 
             <div className={["relative py-4", sidebarCollapsed ? "px-2" : "px-4"].join(" ")}>
-              <div
-                className={[
-                  "flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white py-2 text-sm shadow-sm",
-                  sidebarCollapsed ? "px-2" : "px-3",
-                ].join(" ")}
-              >
-                <span className="flex items-center gap-2">
+              {isSuperAdminRole(user.role) ? (
+                <div
+                  className={[
+                    "flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm",
+                    sidebarCollapsed ? "justify-center px-2" : "",
+                  ].join(" ")}
+                  aria-label="Admin View"
+                >
                   <Shield className="h-4 w-4 text-slate-600" />
                   <span className={sidebarCollapsed ? "hidden" : ""}>Admin View</span>
-                </span>
-              </div>
+                </div>
+              ) : null}
             </div>
 
             <div className="px-2">

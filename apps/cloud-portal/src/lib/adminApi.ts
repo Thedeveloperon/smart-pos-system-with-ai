@@ -158,6 +158,7 @@ export type CloudPurchaseRow = {
   order_number: string;
   shop_code: string;
   shop_name?: string | null;
+  owner_username?: string | null;
   owner_full_name?: string | null;
   status: CloudPurchaseStatus;
   items: CloudPurchaseItemRow[];
@@ -467,6 +468,12 @@ export type UpdateAdminShopRequest = {
 };
 
 export type DeactivateAdminShopRequest = {
+  actor?: string;
+  reason_code?: string;
+  actor_note: string;
+};
+
+export type HardDeleteAdminShopRequest = {
   actor?: string;
   reason_code?: string;
   actor_note: string;
@@ -1262,6 +1269,16 @@ export async function deactivateAdminShop(shopId: string, payload: DeactivateAdm
   });
 }
 
+export async function hardDeleteAdminShop(shopId: string, payload: HardDeleteAdminShopRequest) {
+  return request<AdminShopMutationResponse>(`/api/admin/licensing/shops/${encodeURIComponent(shopId)}/hard-delete`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function reactivateAdminShop(shopId: string, payload: ReactivateAdminShopRequest) {
   return request<AdminShopMutationResponse>(`/api/admin/licensing/shops/${encodeURIComponent(shopId)}/reactivate`, {
     method: "POST",
@@ -1339,6 +1356,16 @@ export async function updateAdminShopUser(userId: string, payload: UpdateAdminSh
 
 export async function deactivateAdminShopUser(userId: string, payload: DeactivateAdminShopUserRequest) {
   return request<AdminShopUserMutationResponse>(`/api/admin/licensing/users/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function hardDeleteAdminShopUser(userId: string, payload: DeactivateAdminShopUserRequest) {
+  return request<AdminShopUserMutationResponse>(`/api/admin/licensing/users/${encodeURIComponent(userId)}/hard-delete`, {
     method: "DELETE",
     headers: {
       "Content-Type": "application/json",

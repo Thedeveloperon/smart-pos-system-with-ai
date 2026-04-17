@@ -49,7 +49,7 @@ function resolveShopLabel(item: CloudPurchaseRow) {
 }
 
 function resolveOwnerName(item: CloudPurchaseRow) {
-  return item.owner_full_name?.trim() || "-";
+  return item.owner_full_name?.trim() || item.owner_username?.trim() || "-";
 }
 
 const CloudPurchaseQueuePanel = ({ heading = "Purchase Queue" }: CloudPurchaseQueuePanelProps) => {
