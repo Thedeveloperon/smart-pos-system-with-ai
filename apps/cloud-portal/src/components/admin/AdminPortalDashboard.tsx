@@ -1,10 +1,8 @@
 "use client";
 
 import { type ElementType, useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   Bell,
-  ChevronDown,
   CircleDollarSign,
   CircleEllipsis,
   Clock3,
@@ -34,8 +32,8 @@ import {
   type CloudProductRow,
   type CloudPurchaseRow,
 } from "@/lib/adminApi";
-import { defaultLocale } from "@/i18n/config";
 import type { AdminSession } from "./auth";
+import { isSuperAdminRole } from "./auth";
 
 type AdminPortalDashboardProps = {
   user: AdminSession;
@@ -130,10 +128,8 @@ function AdminSectionHeader({
 }
 
 export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDashboardProps) {
-  const router = useRouter();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activeSection, setActiveSection] = useState<SectionId>("overview");
-  const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [products, setProducts] = useState<CloudProductRow[]>([]);
   const [purchases, setPurchases] = useState<CloudPurchaseRow[]>([]);
@@ -227,7 +223,10 @@ export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDas
                   <div key={purchase.purchase_id} className="flex items-center justify-between gap-4 px-5 py-4">
                     <div>
                       <p className="font-medium text-slate-950">{purchase.order_number}</p>
-                      <p className="text-sm text-slate-500">{purchase.shop_code}</p>
+                      <p className="text-sm text-slate-500">
+                        {purchase.owner_full_name || purchase.owner_username || "Unknown owner"} ·{" "}
+                        {purchase.shop_name || purchase.shop_code}
+                      </p>
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="font-medium text-slate-950">{formatCurrency(purchase.total_amount, purchase.currency)}</span>
@@ -250,16 +249,7 @@ export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDas
       case "catalog":
         return (
           <div className="space-y-6">
-            <AdminSectionHeader
-              title="Product Catalog"
-              subtitle="Manage POS subscriptions and AI credit packs."
-              action={
-                <Button className="bg-[#1f4a8f] text-white hover:bg-[#173d75]" size="sm">
-                  <span className="mr-2">+</span>
-                  Add Product
-                </Button>
-              }
-            />
+            <AdminSectionHeader title="Product Catalog" subtitle="Manage POS subscriptions and AI credit packs." />
             <CloudProductCatalogPanel />
           </div>
         );
@@ -287,16 +277,6 @@ export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDas
     }
   };
 
-  const goToOwnerView = () => {
-    setViewMenuOpen(false);
-    router.push(`/${defaultLocale}/account`);
-  };
-
-  const goToAdminView = () => {
-    setViewMenuOpen(false);
-    router.push("/admin");
-  };
-
   return (
     <div className="min-h-screen bg-[#f7f8fb] text-slate-950">
       <div
@@ -318,46 +298,18 @@ export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDas
             </div>
 
             <div className={["relative py-4", sidebarCollapsed ? "px-2" : "px-4"].join(" ")}>
-              <button
-                type="button"
-                onClick={() => setViewMenuOpen((current) => !current)}
-                className={[
-                  "flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white py-2 text-sm shadow-sm",
-                  sidebarCollapsed ? "px-2" : "px-3",
-                ].join(" ")}
-              >
-                <span className="flex items-center gap-2">
-                  <Shield className="h-4 w-4 text-slate-600" />
-                  <span className={sidebarCollapsed ? "hidden" : ""}>Admin View</span>
-                </span>
-                <ChevronDown className={["h-4 w-4 text-slate-500", sidebarCollapsed ? "hidden" : ""].join(" ")} />
-              </button>
-
-              {viewMenuOpen && (
+              {isSuperAdminRole(user.role) ? (
                 <div
                   className={[
-                    "absolute top-[calc(100%+0.5rem)] z-20 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg",
-                    sidebarCollapsed ? "left-2 right-2" : "left-4 right-4",
+                    "flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm",
+                    sidebarCollapsed ? "justify-center px-2" : "",
                   ].join(" ")}
+                  aria-label="Admin View"
                 >
-                  <button
-                    type="button"
-                    onClick={goToOwnerView}
-                    className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm text-slate-700 hover:bg-slate-50"
-                  >
-                    <Users className="h-4 w-4" />
-                    Owner View
-                  </button>
-                  <button
-                    type="button"
-                    onClick={goToAdminView}
-                    className="flex w-full items-center gap-2 border-t border-slate-100 px-4 py-3 text-left text-sm text-slate-700 hover:bg-slate-50"
-                  >
-                    <Shield className="h-4 w-4" />
-                    Admin View
-                  </button>
+                  <Shield className="h-4 w-4 text-slate-600" />
+                  <span className={sidebarCollapsed ? "hidden" : ""}>Admin View</span>
                 </div>
-              )}
+              ) : null}
             </div>
 
             <div className="px-2">

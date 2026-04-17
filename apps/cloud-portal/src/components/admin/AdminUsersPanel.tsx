@@ -4,6 +4,7 @@ import {
   createAdminShopUser,
   deactivateAdminShopUser,
   fetchAdminShopUsers,
+  hardDeleteAdminShopUser,
   reactivateAdminShopUser,
   resetAdminShopUserPassword,
   updateAdminShopUser,
@@ -274,6 +275,36 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
     [loadUsers],
   );
 
+  const handleHardDelete = useCallback(
+    async (user: AdminShopUserRow) => {
+      const confirmed = window.confirm(
+        `Permanently delete '${user.username}' and shop '${user.shop_name}'? This removes the shop and all users mapped to it.`,
+      );
+      if (!confirmed) {
+        return;
+      }
+
+      const actorNote = window.prompt(`Actor note for hard deleting '${user.username}'`);
+      if (!actorNote || !actorNote.trim()) {
+        return;
+      }
+
+      try {
+        await hardDeleteAdminShopUser(user.user_id, {
+          actor: "support-ui",
+          reason_code: "manual_shop_user_hard_delete",
+          actor_note: actorNote.trim(),
+        });
+        toast.success(`Shop '${user.shop_name}' and user '${user.username}' hard deleted.`);
+        await loadUsers(true);
+      } catch (error) {
+        console.error(error);
+        toast.error(error instanceof Error ? error.message : "Failed to hard delete user.");
+      }
+    },
+    [loadUsers],
+  );
+
   const handleReactivate = useCallback(
     async (user: AdminShopUserRow) => {
       const actorNote = window.prompt(`Actor note for reactivating '${user.username}'`);
@@ -367,6 +398,7 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
             <TableRow>
               <TableHead>Username</TableHead>
               <TableHead>Full Name</TableHead>
+              <TableHead>Shop Name</TableHead>
               <TableHead>Role</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Last Login</TableHead>
@@ -377,7 +409,7 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
           <TableBody>
             {users.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
+                <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
                   {loading ? "Loading users..." : "No users found for this shop/filter."}
                 </TableCell>
               </TableRow>
@@ -386,6 +418,7 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
                 <TableRow key={user.user_id}>
                   <TableCell className="font-medium">{user.username}</TableCell>
                   <TableCell>{user.full_name}</TableCell>
+                  <TableCell>{user.shop_name}</TableCell>
                   <TableCell className="capitalize">{roleLabel(user.role_code)}</TableCell>
                   <TableCell>
                     <Badge variant={user.is_active ? "secondary" : "outline"}>
@@ -413,6 +446,11 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
                           Reactivate
                         </Button>
                       )}
+                      {user.role_code === "owner" ? (
+                        <Button variant="destructive" size="sm" onClick={() => void handleHardDelete(user)}>
+                          Hard Delete
+                        </Button>
+                      ) : null}
                     </div>
                   </TableCell>
                 </TableRow>
