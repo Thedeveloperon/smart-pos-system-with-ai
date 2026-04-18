@@ -51,6 +51,10 @@ const initialCreateForm: CreateShopForm = {
   actorNote: "",
 };
 
+function buildShopActionActorNote(action: "deactivate" | "reactivate" | "delete", shopCode: string) {
+  return `Manual ${action} from admin portal for shop '${shopCode}'.`;
+}
+
 const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
   const [items, setItems] = useState<AdminShopsLicensingSnapshotResponse["items"]>(shops);
   const [search, setSearch] = useState("");
@@ -175,8 +179,10 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
   }, [editForm, editingShop, refreshAll]);
 
   const handleDeactivate = useCallback(async (shop: AdminShopsLicensingSnapshotResponse["items"][number]) => {
-    const actorNote = window.prompt(`Actor note for deactivating '${shop.shop_code}'`);
-    if (!actorNote || !actorNote.trim()) {
+    const confirmed = window.confirm(
+      `Deactivate shop '${shop.shop_code}' (${shop.shop_name})?\n\nYou can delete it permanently after deactivation.`,
+    );
+    if (!confirmed) {
       return;
     }
 
@@ -184,15 +190,18 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
       await deactivateAdminShop(shop.shop_id, {
         actor: "support-ui",
         reason_code: "manual_shop_deactivate",
-        actor_note: actorNote.trim(),
+        actor_note: buildShopActionActorNote("deactivate", shop.shop_code),
       });
       toast.success(`Shop '${shop.shop_code}' deactivated.`);
-      await refreshAll(true);
+      setItems((current) =>
+        current.map((item) => (item.shop_id === shop.shop_id ? { ...item, is_active: false } : item)),
+      );
+      await onShopsChanged?.();
     } catch (error) {
       console.error(error);
       toast.error(error instanceof Error ? error.message : "Failed to deactivate shop.");
     }
-  }, [refreshAll]);
+  }, [onShopsChanged]);
 
   const handleReactivate = useCallback(async (shop: AdminShopsLicensingSnapshotResponse["items"][number]) => {
     const actorNote = window.prompt(`Actor note for reactivating '${shop.shop_code}'`);
@@ -227,24 +236,20 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
       return;
     }
 
-    const actorNote = window.prompt(`Actor note for permanently deleting '${shop.shop_code}'`);
-    if (!actorNote || !actorNote.trim()) {
-      return;
-    }
-
     try {
       await deleteAdminShop(shop.shop_id, {
         actor: "support-ui",
         reason_code: "manual_shop_delete",
-        actor_note: actorNote.trim(),
+        actor_note: buildShopActionActorNote("delete", shop.shop_code),
       });
       toast.success(`Shop '${shop.shop_code}' deleted.`);
-      await refreshAll(true);
+      setItems((current) => current.filter((item) => item.shop_id !== shop.shop_id));
+      await onShopsChanged?.();
     } catch (error) {
       console.error(error);
       toast.error(error instanceof Error ? error.message : "Failed to delete shop.");
     }
-  }, [refreshAll]);
+  }, [onShopsChanged]);
 
   return (
     <div className="rounded-2xl border border-border bg-card shadow-sm">
