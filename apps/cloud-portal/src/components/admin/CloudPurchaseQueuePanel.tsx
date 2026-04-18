@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CalendarDays,
   Check,
+  ChevronDown,
   CreditCard,
   DollarSign,
   Hash,
@@ -59,6 +60,29 @@ type PurchaseMetaCellProps = {
 const PendingStatusFilterValue = "__pending_queue__";
 const queueStatuses = new Set(["pending", "pending_approval", "submitted", "paid", "payment_pending"]);
 
+function normalizeQueueStatus(status?: string | null) {
+  const normalized = (status || "").trim().toLowerCase();
+  if (!normalized) return "";
+  if (normalized === "verified") return "approved";
+  if (normalized === "settled") return "assigned";
+  if (normalized === "canceled") return "cancelled";
+  if (normalized === "pending_review" || normalized === "pending_verification") return "pending";
+  return normalized;
+}
+
+function matchesStatusFilter(status: string, filterValue: string) {
+  const normalizedStatus = normalizeQueueStatus(status);
+  if (filterValue === PendingStatusFilterValue) {
+    return queueStatuses.has(normalizedStatus);
+  }
+
+  if (!filterValue) {
+    return true;
+  }
+
+  return normalizedStatus === normalizeQueueStatus(filterValue);
+}
+
 function toSentence(value?: string | null) {
   return (value || "").replaceAll("_", " ").trim() || "-";
 }
@@ -92,7 +116,7 @@ function formatQuantity(value: number) {
 }
 
 function canApproveOrReject(status: string) {
-  const normalized = status.trim().toLowerCase();
+  const normalized = normalizeQueueStatus(status);
   return queueStatuses.has(normalized);
 }
 
@@ -189,7 +213,7 @@ function resolveStatusVisual(normalizedStatus: string): PurchaseStatusVisual {
     };
   }
 
-  if (normalizedStatus === "rejected" || normalizedStatus === "cancelled") {
+  if (normalizedStatus === "rejected" || normalizedStatus === "cancelled" || normalizedStatus === "revoked") {
     return {
       accentClassName: "border-l-rose-400",
       statusClassName: "border border-rose-200 bg-rose-50 text-rose-700",
@@ -238,30 +262,25 @@ const CloudPurchaseQueuePanel = ({ heading = "Purchase Queue" }: CloudPurchaseQu
   const load = useCallback(async () => {
     setIsLoading(true);
     try {
-      const statusForQuery = statusFilter === PendingStatusFilterValue ? undefined : statusFilter;
       const response = await fetchAdminCloudPurchases({
-        status: statusForQuery,
-        take: 150,
+        take: 300,
       });
       const responseItems = Array.isArray(response.items) ? response.items : [];
-      if (statusFilter === PendingStatusFilterValue) {
-        setItems(responseItems.filter((item) => queueStatuses.has((item.status || "").trim().toLowerCase())));
-      } else {
-        setItems(responseItems);
-      }
+      setItems(responseItems);
     } catch (error) {
       console.error(error);
       toast.error(error instanceof Error ? error.message : "Failed to load purchase queue.");
     } finally {
       setIsLoading(false);
     }
-  }, [statusFilter]);
+  }, []);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const pendingCount = useMemo(() => items.filter((item) => queueStatuses.has(item.status.trim().toLowerCase())).length, [items]);
+  const filteredItems = useMemo(() => items.filter((item) => matchesStatusFilter(item.status, statusFilter)), [items, statusFilter]);
+  const pendingCount = useMemo(() => items.filter((item) => queueStatuses.has(normalizeQueueStatus(item.status))).length, [items]);
 
   const resolveActorNote = useCallback((purchaseId: string) => actorNotes[purchaseId]?.trim() || "", [actorNotes]);
   const resolveReasonCode = useCallback((purchaseId: string) => reasonCodes[purchaseId]?.trim() || "", [reasonCodes]);
@@ -331,19 +350,24 @@ const CloudPurchaseQueuePanel = ({ heading = "Purchase Queue" }: CloudPurchaseQu
         </div>
         <div className="flex min-w-[220px] flex-col items-start gap-2 sm:items-end">
           <StatusChip tone={pendingCount > 0 ? "warning" : "neutral"}>Pending {pendingCount}</StatusChip>
-          <select
-            className="field-shell h-9 w-[180px] text-sm"
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value)}
-          >
-            <option value={PendingStatusFilterValue}>Pending queue</option>
-            <option value="pending">Pending</option>
-            <option value="pending_approval">Pending approval</option>
-            <option value="approved">Approved</option>
-            <option value="assigned">Assigned</option>
-            <option value="rejected">Rejected</option>
-            <option value="">All statuses</option>
-          </select>
+          <div className="relative w-[190px]">
+            <select
+              className="field-shell h-10 w-full appearance-none bg-white py-0 pr-9 text-sm text-[#244a45]"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+            >
+              <option value={PendingStatusFilterValue}>Pending queue</option>
+              <option value="pending">Pending</option>
+              <option value="pending_approval">Pending approval</option>
+              <option value="approved">Approved</option>
+              <option value="assigned">Assigned</option>
+              <option value="rejected">Rejected</option>
+              <option value="cancelled">Cancelled</option>
+              <option value="revoked">Revoked</option>
+              <option value="">All statuses</option>
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#5f8f86]" />
+          </div>
           <Button
             type="button"
             size="sm"
@@ -358,13 +382,14 @@ const CloudPurchaseQueuePanel = ({ heading = "Purchase Queue" }: CloudPurchaseQu
         </div>
       </div>
 
-      {items.length === 0 ? (
+      {filteredItems.length === 0 ? (
         <p className="text-sm text-muted-foreground">No purchases matched this filter.</p>
       ) : (
         <div className="space-y-3">
-          {items.map((item) => {
+          {filteredItems.map((item) => {
             const purchase = item as CloudPurchaseRuntime;
-            const normalizedStatus = item.status.trim().toLowerCase();
+            const normalizedStatus = normalizeQueueStatus(item.status);
+            const statusLabel = toTitleCase(toSentence(normalizedStatus || item.status));
             const statusVisual = resolveStatusVisual(normalizedStatus);
             const isSubmitting = submittingId === item.purchase_id;
             const shopLabel = resolveShopLabel(item);
@@ -404,7 +429,7 @@ const CloudPurchaseQueuePanel = ({ heading = "Purchase Queue" }: CloudPurchaseQu
                       className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold ${statusVisual.statusClassName}`}
                     >
                       <span className={`h-1.5 w-1.5 rounded-full ${statusVisual.statusDotClassName}`} />
-                      {toTitleCase(toSentence(item.status))}
+                      {statusLabel}
                     </span>
                   </div>
                   <span className={`text-4xl font-semibold leading-none tracking-tight sm:text-[2.55rem] ${statusVisual.amountClassName}`}>
