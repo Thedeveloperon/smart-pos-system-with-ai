@@ -1958,13 +1958,34 @@ public sealed class LicenseService(
         int take,
         CancellationToken cancellationToken)
     {
-        var normalizedTake = Math.Clamp(take, 1, 300);
         var pendingStates = new[]
         {
             AiCreditOrderStatus.Submitted,
             AiCreditOrderStatus.PendingVerification,
             AiCreditOrderStatus.Verified
         };
+
+        return await GetAdminAiCreditInvoicesAsync(take, pendingStates, cancellationToken);
+    }
+
+    private async Task<AiCreditInvoicesResponse> GetAdminAiCreditInvoicesAsync(
+        int take,
+        AiCreditOrderStatus[] allowedStates,
+        CancellationToken cancellationToken)
+    {
+        var normalizedTake = Math.Clamp(take, 1, 300);
+        var normalizedStates = (allowedStates ?? [])
+            .Distinct()
+            .ToArray();
+        if (normalizedStates.Length == 0)
+        {
+            return new AiCreditInvoicesResponse
+            {
+                GeneratedAt = DateTimeOffset.UtcNow,
+                Count = 0,
+                Items = []
+            };
+        }
 
         var query = dbContext.AiCreditOrders
             .AsNoTracking()
@@ -1973,7 +1994,7 @@ public sealed class LicenseService(
             .Where(x =>
                 x.Source == CloudOwnerAccountAiCreditOrderSource &&
                 x.InvoiceId.HasValue &&
-                pendingStates.Contains(x.Status));
+                normalizedStates.Contains(x.Status));
 
         List<AiCreditOrder> orders;
         if (dbContext.Database.IsSqlite())
@@ -2680,8 +2701,16 @@ public sealed class LicenseService(
         CancellationToken cancellationToken)
     {
         var normalizedTake = Math.Clamp(take <= 0 ? 80 : take, 1, 300);
-        var normalizedStatus = NormalizeOptionalValue(status)?.ToLowerInvariant();
-        var aiInvoices = await GetAdminPendingAiCreditInvoicesAsync(normalizedTake, cancellationToken);
+        var normalizedStatus = NormalizeCloudPurchaseQueueStatus(status);
+        var queueStates = new[]
+        {
+            AiCreditOrderStatus.Submitted,
+            AiCreditOrderStatus.PendingVerification,
+            AiCreditOrderStatus.Verified,
+            AiCreditOrderStatus.Rejected,
+            AiCreditOrderStatus.Settled
+        };
+        var aiInvoices = await GetAdminAiCreditInvoicesAsync(normalizedTake, queueStates, cancellationToken);
 
         List<ManualBillingInvoice> posInvoices;
         if (dbContext.Database.IsSqlite())
@@ -2714,7 +2743,7 @@ public sealed class LicenseService(
                 var shopName = NormalizeOptionalValue(x.Shop?.Name);
                 return MapCloudPosPurchaseRow(x, shopCode, shopName, ParseCloudPosPurchaseMetadata(x.Notes));
             }))
-            .Where(x => string.IsNullOrWhiteSpace(normalizedStatus) || x.Status == normalizedStatus)
+            .Where(x => string.IsNullOrWhiteSpace(normalizedStatus) || NormalizeCloudPurchaseQueueStatus(x.Status) == normalizedStatus)
             .OrderByDescending(x => x.CreatedAt)
             .Take(normalizedTake)
             .ToList();
@@ -12635,10 +12664,10 @@ public sealed class LicenseService(
 
     private static CloudPurchaseRowResponse MapOwnerAiInvoiceToCloudPurchase(AiCreditInvoiceRowResponse invoice)
     {
-        var status = invoice.Status;
-        if (status == "settled")
+        var status = NormalizeCloudPurchaseQueueStatus(invoice.Status);
+        if (string.IsNullOrWhiteSpace(status))
         {
-            status = "assigned";
+            status = "pending";
         }
 
         return new CloudPurchaseRowResponse
@@ -12677,7 +12706,7 @@ public sealed class LicenseService(
         string? shopName,
         CloudPosPurchaseMetadataState metadata)
     {
-        var status = NormalizeOptionalValue(metadata.Status)?.ToLowerInvariant();
+        var status = NormalizeCloudPurchaseQueueStatus(metadata.Status);
         if (string.IsNullOrWhiteSpace(status))
         {
             status = invoice.Status switch
@@ -12687,6 +12716,7 @@ public sealed class LicenseService(
                 _ => "pending_approval"
             };
         }
+        status = NormalizeCloudPurchaseQueueStatus(status);
 
         var quantity = metadata.Quantity.GetValueOrDefault(1m);
         if (quantity <= 0m)
@@ -12728,6 +12758,25 @@ public sealed class LicenseService(
             RejectedBy = metadata.RejectedBy,
             AssignedBy = metadata.AssignedBy,
             AssignmentId = metadata.AssignmentId
+        };
+    }
+
+    private static string NormalizeCloudPurchaseQueueStatus(string? status)
+    {
+        var normalized = NormalizeOptionalValue(status)?.ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return string.Empty;
+        }
+
+        return normalized switch
+        {
+            "pending_verification" => "pending",
+            "pending_review" => "pending_approval",
+            "verified" => "approved",
+            "settled" => "assigned",
+            "canceled" => "cancelled",
+            _ => normalized
         };
     }
 
