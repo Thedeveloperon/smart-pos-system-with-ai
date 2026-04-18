@@ -3,6 +3,7 @@ export type AdminSession = {
   username: string;
   full_name: string;
   role: string;
+  super_admin_scope?: string;
   device_id: string;
   device_code: string;
   expires_at: string;
@@ -26,6 +27,25 @@ export function isSuperAdminRole(role?: string | null) {
     normalized === "billing_admin" ||
     normalized === "security_admin"
   );
+}
+
+export function normalizeSuperAdminScope(scope?: string | null) {
+  const normalized = (scope || "").trim().toLowerCase();
+  return normalized || null;
+}
+
+export function canAccessBillingApproverWorkspace(session?: Pick<AdminSession, "role" | "super_admin_scope"> | null) {
+  if (!isSuperAdminRole(session?.role)) {
+    return false;
+  }
+
+  const scope = normalizeSuperAdminScope(session?.super_admin_scope);
+  if (!scope) {
+    // Backward-compatible fallback for older backend payloads without scope.
+    return true;
+  }
+
+  return scope === "super_admin" || scope === "billing_admin";
 }
 
 async function parseApiPayload(response: Response): Promise<unknown> {
