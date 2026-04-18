@@ -1007,7 +1007,7 @@ public static class LicenseEndpoints
         .WithName("AdminUpdateShop")
         .WithOpenApi();
 
-        admin.MapDelete("/shops/{shop_id:guid}", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+        admin.MapDelete("/shops/{shop_id:guid}", [Authorize(Policy = SmartPosPolicies.SupportOrBilling)] async (
             Guid shop_id,
             HttpContext httpContext,
             LicenseService licenseService,
@@ -1026,7 +1026,7 @@ public static class LicenseEndpoints
                 return ToErrorResult(ex);
             }
         })
-        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .RequireAuthorization(SmartPosPolicies.SupportOrBilling)
         .WithName("AdminDeactivateShop")
         .WithOpenApi();
 
@@ -1052,7 +1052,7 @@ public static class LicenseEndpoints
         .WithName("AdminReactivateShop")
         .WithOpenApi();
 
-        admin.MapDelete("/shops/{shop_id:guid}/hard-delete", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+        admin.MapDelete("/shops/{shop_id:guid}/hard-delete", [Authorize(Policy = SmartPosPolicies.SupportOrBilling)] async (
             Guid shop_id,
             HttpContext httpContext,
             LicenseService licenseService,
@@ -1071,7 +1071,7 @@ public static class LicenseEndpoints
                 return ToErrorResult(ex);
             }
         })
-        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .RequireAuthorization(SmartPosPolicies.SupportOrBilling)
         .WithName("AdminDeleteShop")
         .WithOpenApi();
 
