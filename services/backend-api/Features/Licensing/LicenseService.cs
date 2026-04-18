@@ -3630,6 +3630,26 @@ public sealed class LicenseService(
         var wasActive = shop.IsActive;
         shop.IsActive = false;
         shop.UpdatedAtUtc = now;
+        var shopUsers = await dbContext.Users
+            .Where(x => x.StoreId == shop.Id)
+            .ToListAsync(cancellationToken);
+        var deactivatedUsers = 0;
+        var revokedSessions = 0;
+        foreach (var user in shopUsers)
+        {
+            if (!user.IsActive)
+            {
+                continue;
+            }
+
+            user.IsActive = false;
+            deactivatedUsers++;
+            revokedSessions += await RevokeAuthSessionsForUserAsync(
+                user.Id,
+                now,
+                "admin_shop_deactivated",
+                cancellationToken);
+        }
 
         dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
         {
@@ -3649,6 +3669,8 @@ public sealed class LicenseService(
                 pending_manual_payments = dependencySnapshot.PendingManualPayments,
                 pending_ai_orders = dependencySnapshot.PendingAiOrders,
                 pending_ai_payments = dependencySnapshot.PendingAiPayments,
+                deactivated_users = deactivatedUsers,
+                revoked_sessions = revokedSessions,
                 reason_code = overrideContext.ReasonCode,
                 actor_note = overrideContext.ActorNote
             }),
@@ -3673,6 +3695,8 @@ public sealed class LicenseService(
                 pending_manual_payments = dependencySnapshot.PendingManualPayments,
                 pending_ai_orders = dependencySnapshot.PendingAiOrders,
                 pending_ai_payments = dependencySnapshot.PendingAiPayments,
+                deactivated_users = deactivatedUsers,
+                revoked_sessions = revokedSessions,
                 reason_code = overrideContext.ReasonCode,
                 actor_note = overrideContext.ActorNote
             },

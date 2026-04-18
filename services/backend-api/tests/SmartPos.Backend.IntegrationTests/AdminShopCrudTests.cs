@@ -52,6 +52,16 @@ public sealed class AdminShopCrudTests(CustomWebApplicationFactory factory)
         Assert.NotNull(owner);
         Assert.Equal("owner", TestJson.GetString(owner!, "role_code"));
 
+        var ownerSessionClient = appFactory.CreateClient();
+        var ownerLogin = await ownerSessionClient.PostAsJsonAsync("/api/auth/login", new
+        {
+            username = ownerUsername,
+            password = "OwnerPass123!",
+            device_code = $"shop-owner-{Guid.NewGuid():N}",
+            device_name = "Shop Owner Session"
+        });
+        ownerLogin.EnsureSuccessStatusCode();
+
         var updated = await SendMutationAndReadAsync(
             adminClient,
             HttpMethod.Put,
@@ -80,6 +90,27 @@ public sealed class AdminShopCrudTests(CustomWebApplicationFactory factory)
 
         Assert.Equal("deactivate", TestJson.GetString(deactivated, "action"));
         Assert.False(deactivated["shop"]?["is_active"]?.GetValue<bool>() ?? true);
+
+        var ownerMeAfterDeactivate = await ownerSessionClient.GetAsync("/api/auth/me");
+        Assert.Equal(HttpStatusCode.Unauthorized, ownerMeAfterDeactivate.StatusCode);
+
+        var ownerLoginAfterDeactivateClient = appFactory.CreateClient();
+        var ownerLoginAfterDeactivateAttempt = await ownerLoginAfterDeactivateClient.PostAsJsonAsync("/api/auth/login", new
+        {
+            username = ownerUsername,
+            password = "OwnerPass123!",
+            device_code = $"inactive-owner-{Guid.NewGuid():N}",
+            device_name = "Inactive Owner Device"
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, ownerLoginAfterDeactivateAttempt.StatusCode);
+
+        var usersAfterDeactivate = await TestJson.ReadObjectAsync(
+            await adminClient.GetAsync($"/api/admin/licensing/users?shop_code={Uri.EscapeDataString(shopCode)}&include_inactive=true&take=20"));
+        var ownerAfterDeactivate = usersAfterDeactivate["items"]?
+            .AsArray()
+            .FirstOrDefault(x => string.Equals(x?["username"]?.GetValue<string>(), ownerUsername, StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(ownerAfterDeactivate);
+        Assert.False(ownerAfterDeactivate?["is_active"]?.GetValue<bool>() ?? true);
 
         var defaultList = await TestJson.ReadObjectAsync(await adminClient.GetAsync("/api/admin/licensing/shops?take=300"));
         var presentInDefault = defaultList["items"]?
@@ -153,6 +184,62 @@ public sealed class AdminShopCrudTests(CustomWebApplicationFactory factory)
             device_name = "Deleted Shop Owner Device"
         });
         Assert.Equal(HttpStatusCode.BadRequest, ownerLoginAfterDelete.StatusCode);
+    }
+
+    [Fact]
+    public async Task BillingAdmin_ShouldDeactivateAndDeleteShop()
+    {
+        var supportClient = appFactory.CreateClient();
+        await TestAuth.SignInAsSupportAdminAsync(supportClient);
+
+        var shopCode = $"billdel-{Guid.NewGuid():N}"[..16];
+        var ownerUsername = $"billowner-{Guid.NewGuid():N}"[..20];
+        var created = await SendMutationAndReadAsync(
+            supportClient,
+            HttpMethod.Post,
+            "/api/admin/licensing/shops",
+            new
+            {
+                shop_code = shopCode,
+                shop_name = "Billing Delete Shop",
+                owner_username = ownerUsername,
+                owner_password = "OwnerPass123!",
+                owner_full_name = "Billing Delete Owner",
+                actor = "support_admin",
+                reason_code = "manual_shop_create",
+                actor_note = "seed shop for billing delete scope"
+            });
+
+        var shopId = TestJson.GetString(created["shop"]!, "shop_id");
+
+        var billingClient = appFactory.CreateClient();
+        await TestAuth.SignInAsBillingAdminAsync(billingClient);
+
+        var deactivated = await SendMutationAndReadAsync(
+            billingClient,
+            HttpMethod.Delete,
+            $"/api/admin/licensing/shops/{Uri.EscapeDataString(shopId)}",
+            new
+            {
+                actor = "billing_admin",
+                reason_code = "manual_shop_deactivate",
+                actor_note = "billing admin deactivation test"
+            });
+        Assert.Equal("deactivate", TestJson.GetString(deactivated, "action"));
+        Assert.False(deactivated["shop"]?["is_active"]?.GetValue<bool>() ?? true);
+
+        var deleted = await SendMutationAndReadAsync(
+            billingClient,
+            HttpMethod.Delete,
+            $"/api/admin/licensing/shops/{Uri.EscapeDataString(shopId)}/hard-delete",
+            new
+            {
+                actor = "billing_admin",
+                reason_code = "manual_shop_delete",
+                actor_note = "billing admin delete test"
+            });
+        Assert.Equal("delete", TestJson.GetString(deleted, "action"));
+        Assert.Equal(shopCode, TestJson.GetString(deleted["shop"]!, "shop_code"));
     }
 
     [Fact]
