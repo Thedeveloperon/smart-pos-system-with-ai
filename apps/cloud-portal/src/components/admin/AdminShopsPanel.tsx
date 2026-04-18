@@ -144,6 +144,8 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
   const [search, setSearch] = useState("");
   const [includeInactive, setIncludeInactive] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [selectedShopIds, setSelectedShopIds] = useState<string[]>([]);
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm, setCreateForm] = useState<CreateShopForm>(initialCreateForm);
@@ -157,6 +159,7 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [confirmationState, setConfirmationState] = useState<ConfirmationDialogConfig | null>(null);
   const confirmationResolveRef = useRef<((value: boolean) => void) | null>(null);
+  const selectAllCheckboxRef = useRef<HTMLInputElement | null>(null);
 
   const openConfirmationDialog = useCallback((config: ConfirmationDialogConfig) => {
     return new Promise<boolean>((resolve) => {
@@ -187,6 +190,27 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
     () => [...items].sort((a, b) => a.shop_code.localeCompare(b.shop_code)),
     [items],
   );
+  const selectedShopIdSet = useMemo(() => new Set(selectedShopIds), [selectedShopIds]);
+  const selectedShops = useMemo(
+    () => sortedItems.filter((shop) => selectedShopIdSet.has(shop.shop_id)),
+    [selectedShopIdSet, sortedItems],
+  );
+  const allVisibleShopsSelected =
+    sortedItems.length > 0 && sortedItems.every((shop) => selectedShopIdSet.has(shop.shop_id));
+  const someVisibleShopsSelected =
+    sortedItems.length > 0 && sortedItems.some((shop) => selectedShopIdSet.has(shop.shop_id));
+
+  useEffect(() => {
+    setSelectedShopIds((current) => current.filter((shopId) => items.some((shop) => shop.shop_id === shopId)));
+  }, [items]);
+
+  useEffect(() => {
+    if (!selectAllCheckboxRef.current) {
+      return;
+    }
+
+    selectAllCheckboxRef.current.indeterminate = someVisibleShopsSelected && !allVisibleShopsSelected;
+  }, [allVisibleShopsSelected, someVisibleShopsSelected]);
 
   const loadShops = useCallback(async (quiet = false) => {
     setLoading(true);
@@ -211,6 +235,205 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
     await loadShops(quiet);
     await onShopsChanged?.();
   }, [loadShops, onShopsChanged]);
+
+  const toggleShopSelection = useCallback((shopId: string, checked: boolean) => {
+    setSelectedShopIds((current) => {
+      if (checked) {
+        if (current.includes(shopId)) {
+          return current;
+        }
+
+        return [...current, shopId];
+      }
+
+      return current.filter((item) => item !== shopId);
+    });
+  }, []);
+
+  const toggleAllVisibleShops = useCallback(
+    (checked: boolean) => {
+      setSelectedShopIds((current) => {
+        if (checked) {
+          const currentSet = new Set(current);
+          for (const shop of sortedItems) {
+            currentSet.add(shop.shop_id);
+          }
+
+          return Array.from(currentSet);
+        }
+
+        const visibleIds = new Set(sortedItems.map((shop) => shop.shop_id));
+        return current.filter((shopId) => !visibleIds.has(shopId));
+      });
+    },
+    [sortedItems],
+  );
+
+  const setSelectionToFailedIds = useCallback((failedIds: Set<string>) => {
+    setSelectedShopIds(Array.from(failedIds));
+  }, []);
+
+  const handleBulkDeactivate = useCallback(async () => {
+    const candidates = selectedShops.filter((shop) => shop.is_active !== false);
+    if (candidates.length === 0) {
+      toast.error("Select at least one active shop to deactivate.");
+      return;
+    }
+
+    const confirmed = await openConfirmationDialog({
+      title: "Deactivate selected shops?",
+      description: `Deactivate ${candidates.length} selected shop(s)?`,
+      confirmLabel: "Deactivate",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    setBulkSubmitting(true);
+    const failedIds = new Set<string>();
+    let successCount = 0;
+    let failureCount = 0;
+
+    try {
+      for (const shop of candidates) {
+        try {
+          await deactivateAdminShop(shop.shop_id, {
+            actor: "support-ui",
+            reason_code: "manual_shop_deactivate",
+            actor_note: buildShopActionActorNote("deactivate", shop.shop_code),
+          });
+          successCount += 1;
+        } catch (error) {
+          console.error(error);
+          failedIds.add(shop.shop_id);
+          failureCount += 1;
+        }
+      }
+
+      if (successCount > 0) {
+        toast.success(`Deactivated ${successCount} shop(s).`);
+      }
+      if (failureCount > 0) {
+        toast.error(`${failureCount} shop(s) failed to deactivate. Check console logs for details.`);
+      }
+      await refreshAll(true);
+      setSelectionToFailedIds(failedIds);
+    } finally {
+      setBulkSubmitting(false);
+    }
+  }, [openConfirmationDialog, refreshAll, selectedShops, setSelectionToFailedIds]);
+
+  const handleBulkReactivate = useCallback(async () => {
+    const candidates = selectedShops.filter((shop) => shop.is_active === false);
+    if (candidates.length === 0) {
+      toast.error("Select at least one inactive shop to reactivate.");
+      return;
+    }
+
+    const actorNote = window.prompt(`Actor note for reactivating ${candidates.length} selected shop(s)`);
+    if (!actorNote || !actorNote.trim()) {
+      return;
+    }
+
+    const confirmed = await openConfirmationDialog({
+      title: "Reactivate selected shops?",
+      description: `Reactivate ${candidates.length} selected shop(s)?`,
+      confirmLabel: "Reactivate",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    setBulkSubmitting(true);
+    const failedIds = new Set<string>();
+    let successCount = 0;
+    let failureCount = 0;
+
+    try {
+      for (const shop of candidates) {
+        try {
+          await reactivateAdminShop(shop.shop_id, {
+            actor: "support-ui",
+            reason_code: "manual_shop_reactivate",
+            actor_note: actorNote.trim(),
+          });
+          successCount += 1;
+        } catch (error) {
+          console.error(error);
+          failedIds.add(shop.shop_id);
+          failureCount += 1;
+        }
+      }
+
+      if (successCount > 0) {
+        toast.success(`Reactivated ${successCount} shop(s).`);
+      }
+      if (failureCount > 0) {
+        toast.error(`${failureCount} shop(s) failed to reactivate. Check console logs for details.`);
+      }
+      await refreshAll(true);
+      setSelectionToFailedIds(failedIds);
+    } finally {
+      setBulkSubmitting(false);
+    }
+  }, [openConfirmationDialog, refreshAll, selectedShops, setSelectionToFailedIds]);
+
+  const handleBulkDelete = useCallback(async () => {
+    const activeSelections = selectedShops.filter((shop) => shop.is_active !== false);
+    if (activeSelections.length > 0) {
+      toast.error("Deactivate selected active shops before deleting them permanently.");
+      return;
+    }
+
+    const candidates = selectedShops.filter((shop) => shop.is_active === false);
+    if (candidates.length === 0) {
+      toast.error("Select at least one inactive shop to delete.");
+      return;
+    }
+
+    const confirmed = await openConfirmationDialog({
+      title: "Delete selected shops permanently?",
+      description: `Delete ${candidates.length} selected shop(s)? Linked users will also be removed. This cannot be undone.`,
+      confirmLabel: "Delete",
+      confirmVariant: "destructive",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    setBulkSubmitting(true);
+    const failedIds = new Set<string>();
+    let successCount = 0;
+    let failureCount = 0;
+
+    try {
+      for (const shop of candidates) {
+        try {
+          await deleteAdminShop(shop.shop_id, {
+            actor: "support-ui",
+            reason_code: "manual_shop_delete",
+            actor_note: buildShopActionActorNote("delete", shop.shop_code),
+          });
+          successCount += 1;
+        } catch (error) {
+          console.error(error);
+          failedIds.add(shop.shop_id);
+          failureCount += 1;
+        }
+      }
+
+      if (successCount > 0) {
+        toast.success(`Deleted ${successCount} shop(s).`);
+      }
+      if (failureCount > 0) {
+        toast.error(`${failureCount} shop(s) failed to delete. Check console logs for details.`);
+      }
+      await refreshAll(true);
+      setSelectionToFailedIds(failedIds);
+    } finally {
+      setBulkSubmitting(false);
+    }
+  }, [openConfirmationDialog, refreshAll, selectedShops, setSelectionToFailedIds]);
 
   const handleCreate = useCallback(async () => {
     if (
@@ -386,11 +609,32 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
           </label>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {selectedShops.length > 0 ? (
+            <>
+              <p className="text-sm text-muted-foreground">{selectedShops.length} selected</p>
+              <Button variant="outline" onClick={() => void handleBulkDeactivate()} disabled={bulkSubmitting}>
+                Deactivate Selected
+              </Button>
+              <Button variant="outline" onClick={() => void handleBulkReactivate()} disabled={bulkSubmitting}>
+                Reactivate Selected
+              </Button>
+              <Button variant="destructive" onClick={() => void handleBulkDelete()} disabled={bulkSubmitting}>
+                Delete Selected
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => setSelectedShopIds([])}
+                disabled={bulkSubmitting}
+              >
+                Clear Selection
+              </Button>
+            </>
+          ) : null}
           <Button variant="outline" onClick={() => void loadShops()} disabled={loading}>
             {loading ? "Loading..." : "Refresh"}
           </Button>
-          <Button onClick={() => setCreateOpen(true)}>Create Shop</Button>
+          <Button onClick={() => setCreateOpen(true)} disabled={bulkSubmitting}>Create Shop</Button>
         </div>
       </div>
 
@@ -398,6 +642,17 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-12 px-2">
+                <input
+                  ref={selectAllCheckboxRef}
+                  type="checkbox"
+                  aria-label="Select all shops"
+                  checked={allVisibleShopsSelected}
+                  onChange={(event) => toggleAllVisibleShops(event.target.checked)}
+                  disabled={sortedItems.length === 0 || bulkSubmitting}
+                  className="h-4 w-4"
+                />
+              </TableHead>
               <TableHead>Shop</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Plan</TableHead>
@@ -409,13 +664,23 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
           <TableBody>
             {sortedItems.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
+                <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
                   No shops found.
                 </TableCell>
               </TableRow>
             ) : (
               sortedItems.map((shop) => (
                 <TableRow key={shop.shop_id}>
+                  <TableCell className="w-12 px-2">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${shop.shop_code}`}
+                      checked={selectedShopIdSet.has(shop.shop_id)}
+                      onChange={(event) => toggleShopSelection(shop.shop_id, event.target.checked)}
+                      disabled={bulkSubmitting}
+                      className="h-4 w-4"
+                    />
+                  </TableCell>
                   <TableCell>
                     <div className="space-y-1">
                       <p className="font-medium">{shop.shop_name}</p>
@@ -430,19 +695,34 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
                   <TableCell className="text-right">{shop.total_devices}</TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
-                      <Button size="sm" variant="outline" onClick={() => openEdit(shop)}>
+                      <Button size="sm" variant="outline" onClick={() => openEdit(shop)} disabled={bulkSubmitting}>
                         Edit
                       </Button>
                       {shop.is_active !== false ? (
-                        <Button size="sm" variant="outline" onClick={() => void handleDeactivate(shop)}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void handleDeactivate(shop)}
+                          disabled={bulkSubmitting}
+                        >
                           Deactivate
                         </Button>
                       ) : (
-                        <Button size="sm" variant="outline" onClick={() => void handleReactivate(shop)}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void handleReactivate(shop)}
+                          disabled={bulkSubmitting}
+                        >
                           Reactivate
                         </Button>
                       )}
-                      <Button size="sm" variant="destructive" onClick={() => void handleDelete(shop)}>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => void handleDelete(shop)}
+                        disabled={bulkSubmitting}
+                      >
                         Delete
                       </Button>
                     </div>

@@ -30,9 +30,8 @@ type AdminUsersPanelProps = {
   shops: AdminShopsLicensingSnapshotResponse["items"];
 };
 
-const ALL_SHOPS_VALUE = "__all_shops__";
-
 type CreateUserForm = {
+  shopCode: string;
   username: string;
   fullName: string;
   password: string;
@@ -51,6 +50,7 @@ type ResetPasswordForm = {
 };
 
 const initialCreateForm: CreateUserForm = {
+  shopCode: "",
   username: "",
   fullName: "",
   password: "",
@@ -65,11 +65,12 @@ const initialResetForm: ResetPasswordForm = {
 const roleLabel = (roleCode: string) => roleCode.replaceAll("_", " ");
 
 const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
-  const [selectedShopCode, setSelectedShopCode] = useState(ALL_SHOPS_VALUE);
   const [search, setSearch] = useState("");
   const [includeInactive, setIncludeInactive] = useState(false);
   const [loading, setLoading] = useState(false);
   const [users, setUsers] = useState<AdminShopUserRow[]>([]);
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [createForm, setCreateForm] = useState<CreateUserForm>(initialCreateForm);
@@ -88,6 +89,7 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
   const [resetSubmitting, setResetSubmitting] = useState(false);
   const [confirmationState, setConfirmationState] = useState<ConfirmationDialogConfig | null>(null);
   const confirmationResolveRef = useRef<((value: boolean) => void) | null>(null);
+  const selectAllCheckboxRef = useRef<HTMLInputElement | null>(null);
 
   const openConfirmationDialog = useCallback((config: ConfirmationDialogConfig) => {
     return new Promise<boolean>((resolve) => {
@@ -114,19 +116,31 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
     () => [...shops].sort((a, b) => a.shop_code.localeCompare(b.shop_code)),
     [shops],
   );
+  const selectedUserIdSet = useMemo(() => new Set(selectedUserIds), [selectedUserIds]);
+  const selectedUsers = useMemo(
+    () => users.filter((user) => selectedUserIdSet.has(user.user_id)),
+    [selectedUserIdSet, users],
+  );
+  const allVisibleUsersSelected = users.length > 0 && users.every((user) => selectedUserIdSet.has(user.user_id));
+  const someVisibleUsersSelected = users.length > 0 && users.some((user) => selectedUserIdSet.has(user.user_id));
 
   useEffect(() => {
-    if (selectedShopCode !== ALL_SHOPS_VALUE && shopOptions.every((item) => item.shop_code !== selectedShopCode)) {
-      setSelectedShopCode(ALL_SHOPS_VALUE);
+    setSelectedUserIds((current) => current.filter((userId) => users.some((user) => user.user_id === userId)));
+  }, [users]);
+
+  useEffect(() => {
+    if (!selectAllCheckboxRef.current) {
+      return;
     }
-  }, [selectedShopCode, shopOptions]);
+
+    selectAllCheckboxRef.current.indeterminate = someVisibleUsersSelected && !allVisibleUsersSelected;
+  }, [allVisibleUsersSelected, someVisibleUsersSelected]);
 
   const loadUsers = useCallback(
     async (quiet = false) => {
       setLoading(true);
       try {
         const response = await fetchAdminShopUsers({
-          shopCode: selectedShopCode === ALL_SHOPS_VALUE ? undefined : selectedShopCode,
           search: search.trim() || undefined,
           roleCode: "owner",
           includeInactive,
@@ -142,20 +156,223 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
         setLoading(false);
       }
     },
-    [includeInactive, search, selectedShopCode],
+    [includeInactive, search],
   );
 
   useEffect(() => {
     void loadUsers(true);
   }, [loadUsers]);
 
-  const handleCreateUser = useCallback(async () => {
-    if (selectedShopCode === ALL_SHOPS_VALUE) {
-      toast.error("Select a specific shop to create an owner account.");
+  const toggleUserSelection = useCallback((userId: string, checked: boolean) => {
+    setSelectedUserIds((current) => {
+      if (checked) {
+        if (current.includes(userId)) {
+          return current;
+        }
+
+        return [...current, userId];
+      }
+
+      return current.filter((item) => item !== userId);
+    });
+  }, []);
+
+  const toggleAllVisibleUsers = useCallback(
+    (checked: boolean) => {
+      setSelectedUserIds((current) => {
+        if (checked) {
+          const currentSet = new Set(current);
+          for (const user of users) {
+            currentSet.add(user.user_id);
+          }
+
+          return Array.from(currentSet);
+        }
+
+        const visibleIds = new Set(users.map((user) => user.user_id));
+        return current.filter((userId) => !visibleIds.has(userId));
+      });
+    },
+    [users],
+  );
+
+  const setSelectionToFailedUserIds = useCallback((failedIds: Set<string>) => {
+    setSelectedUserIds(Array.from(failedIds));
+  }, []);
+
+  const handleBulkDeactivate = useCallback(async () => {
+    const candidates = selectedUsers.filter((user) => user.is_active);
+    if (candidates.length === 0) {
+      toast.error("Select at least one active user to deactivate.");
       return;
     }
 
-    if (!createForm.username.trim() || !createForm.fullName.trim() || !createForm.password.trim() || !createForm.actorNote.trim()) {
+    const actorNote = window.prompt(`Actor note for deactivating ${candidates.length} selected user(s)`);
+    if (!actorNote || !actorNote.trim()) {
+      return;
+    }
+
+    const confirmed = await openConfirmationDialog({
+      title: "Deactivate selected users?",
+      description: `Deactivate ${candidates.length} selected user account(s)?`,
+      confirmLabel: "Deactivate",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    setBulkSubmitting(true);
+    const failedIds = new Set<string>();
+    let successCount = 0;
+    let failureCount = 0;
+
+    try {
+      for (const user of candidates) {
+        try {
+          await deactivateAdminShopUser(user.user_id, {
+            actor: "support-ui",
+            reason_code: "manual_shop_user_deactivate",
+            actor_note: actorNote.trim(),
+          });
+          successCount += 1;
+        } catch (error) {
+          console.error(error);
+          failedIds.add(user.user_id);
+          failureCount += 1;
+        }
+      }
+
+      if (successCount > 0) {
+        toast.success(`Deactivated ${successCount} user(s).`);
+      }
+      if (failureCount > 0) {
+        toast.error(`${failureCount} user(s) failed to deactivate. Check console logs for details.`);
+      }
+      await loadUsers(true);
+      setSelectionToFailedUserIds(failedIds);
+    } finally {
+      setBulkSubmitting(false);
+    }
+  }, [loadUsers, openConfirmationDialog, selectedUsers, setSelectionToFailedUserIds]);
+
+  const handleBulkReactivate = useCallback(async () => {
+    const candidates = selectedUsers.filter((user) => !user.is_active);
+    if (candidates.length === 0) {
+      toast.error("Select at least one inactive user to reactivate.");
+      return;
+    }
+
+    const actorNote = window.prompt(`Actor note for reactivating ${candidates.length} selected user(s)`);
+    if (!actorNote || !actorNote.trim()) {
+      return;
+    }
+
+    const confirmed = await openConfirmationDialog({
+      title: "Reactivate selected users?",
+      description: `Reactivate ${candidates.length} selected user account(s)?`,
+      confirmLabel: "Reactivate",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    setBulkSubmitting(true);
+    const failedIds = new Set<string>();
+    let successCount = 0;
+    let failureCount = 0;
+
+    try {
+      for (const user of candidates) {
+        try {
+          await reactivateAdminShopUser(user.user_id, {
+            actor: "support-ui",
+            reason_code: "manual_shop_user_reactivate",
+            actor_note: actorNote.trim(),
+          });
+          successCount += 1;
+        } catch (error) {
+          console.error(error);
+          failedIds.add(user.user_id);
+          failureCount += 1;
+        }
+      }
+
+      if (successCount > 0) {
+        toast.success(`Reactivated ${successCount} user(s).`);
+      }
+      if (failureCount > 0) {
+        toast.error(`${failureCount} user(s) failed to reactivate. Check console logs for details.`);
+      }
+      await loadUsers(true);
+      setSelectionToFailedUserIds(failedIds);
+    } finally {
+      setBulkSubmitting(false);
+    }
+  }, [loadUsers, openConfirmationDialog, selectedUsers, setSelectionToFailedUserIds]);
+
+  const handleBulkDelete = useCallback(async () => {
+    if (selectedUsers.length === 0) {
+      toast.error("Select at least one user to delete.");
+      return;
+    }
+
+    const confirmed = await openConfirmationDialog({
+      title: "Delete selected users permanently?",
+      description: `Delete ${selectedUsers.length} selected user account(s)? This cannot be undone.`,
+      confirmLabel: "Delete",
+      confirmVariant: "destructive",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    const actorNote = window.prompt(`Actor note for permanently deleting ${selectedUsers.length} selected user(s)`);
+    if (!actorNote || !actorNote.trim()) {
+      return;
+    }
+
+    setBulkSubmitting(true);
+    const failedIds = new Set<string>();
+    let successCount = 0;
+    let failureCount = 0;
+
+    try {
+      for (const user of selectedUsers) {
+        try {
+          await deleteAdminShopUser(user.user_id, {
+            actor: "support-ui",
+            reason_code: "manual_shop_user_delete",
+            actor_note: actorNote.trim(),
+          });
+          successCount += 1;
+        } catch (error) {
+          console.error(error);
+          failedIds.add(user.user_id);
+          failureCount += 1;
+        }
+      }
+
+      if (successCount > 0) {
+        toast.success(`Deleted ${successCount} user(s).`);
+      }
+      if (failureCount > 0) {
+        toast.error(`${failureCount} user(s) failed to delete. Check console logs for details.`);
+      }
+      await loadUsers(true);
+      setSelectionToFailedUserIds(failedIds);
+    } finally {
+      setBulkSubmitting(false);
+    }
+  }, [loadUsers, openConfirmationDialog, selectedUsers, setSelectionToFailedUserIds]);
+
+  const handleCreateUser = useCallback(async () => {
+    if (
+      !createForm.shopCode.trim() ||
+      !createForm.username.trim() ||
+      !createForm.fullName.trim() ||
+      !createForm.password.trim() ||
+      !createForm.actorNote.trim()
+    ) {
       toast.error("All create-user fields are required.");
       return;
     }
@@ -163,7 +380,7 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
     setCreateSubmitting(true);
     try {
       await createAdminShopUser({
-        shop_code: selectedShopCode,
+        shop_code: createForm.shopCode.trim(),
         username: createForm.username.trim(),
         full_name: createForm.fullName.trim(),
         role_code: "owner",
@@ -182,7 +399,7 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
     } finally {
       setCreateSubmitting(false);
     }
-  }, [createForm, loadUsers, selectedShopCode]);
+  }, [createForm, loadUsers]);
 
   const openEditDialog = useCallback((user: AdminShopUserRow) => {
     setEditingUser(user);
@@ -341,23 +558,7 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
   return (
     <div className="rounded-2xl border border-border bg-card shadow-sm">
       <div className="flex flex-col gap-3 border-b border-border px-4 py-3 md:flex-row md:items-end md:justify-between">
-        <div className="grid w-full gap-3 md:grid-cols-3">
-          <div className="space-y-1">
-            <Label htmlFor="admin-users-shop-select">Shop</Label>
-            <select
-              id="admin-users-shop-select"
-              className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
-              value={selectedShopCode}
-              onChange={(event) => setSelectedShopCode(event.target.value)}
-            >
-              <option value={ALL_SHOPS_VALUE}>All shops</option>
-              {shopOptions.map((shop) => (
-                <option key={shop.shop_id} value={shop.shop_code}>
-                  {shop.shop_code} - {shop.shop_name}
-                </option>
-              ))}
-            </select>
-          </div>
+        <div className="grid w-full gap-3 md:grid-cols-2">
           <div className="space-y-1">
             <Label htmlFor="admin-users-search-input">Search</Label>
             <Input
@@ -367,7 +568,7 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
               placeholder="username / owner name / shop"
             />
           </div>
-          <div className="flex items-center gap-2 self-end pb-1">
+          <div className="flex items-center gap-2 self-end pb-1 md:justify-end">
             <input
               id="admin-users-include-inactive"
               type="checkbox"
@@ -379,18 +580,40 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {selectedUsers.length > 0 ? (
+            <>
+              <p className="text-sm text-muted-foreground">{selectedUsers.length} selected</p>
+              <Button variant="outline" size="sm" onClick={() => void handleBulkDeactivate()} disabled={bulkSubmitting}>
+                Deactivate Selected
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => void handleBulkReactivate()} disabled={bulkSubmitting}>
+                Reactivate Selected
+              </Button>
+              <Button variant="destructive" size="sm" onClick={() => void handleBulkDelete()} disabled={bulkSubmitting}>
+                Delete Selected
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setSelectedUserIds([])} disabled={bulkSubmitting}>
+                Clear Selection
+              </Button>
+            </>
+          ) : null}
           <Button variant="outline" size="sm" onClick={() => void loadUsers()} disabled={loading}>
             {loading ? "Loading..." : "Refresh"}
           </Button>
           <Button
             size="sm"
+            disabled={bulkSubmitting}
             onClick={() => {
-              if (selectedShopCode === ALL_SHOPS_VALUE) {
-                toast.error("Select a specific shop to create an owner account.");
+              if (shopOptions.length === 0) {
+                toast.error("No shops available. Create a shop first.");
                 return;
               }
 
+              setCreateForm((current) => ({
+                ...current,
+                shopCode: current.shopCode || shopOptions[0].shop_code,
+              }));
               setCreateDialogOpen(true);
             }}
           >
@@ -403,6 +626,17 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-12 px-2">
+                <input
+                  ref={selectAllCheckboxRef}
+                  type="checkbox"
+                  aria-label="Select all users"
+                  checked={allVisibleUsersSelected}
+                  onChange={(event) => toggleAllVisibleUsers(event.target.checked)}
+                  disabled={users.length === 0 || bulkSubmitting}
+                  className="h-4 w-4"
+                />
+              </TableHead>
               <TableHead>Username</TableHead>
               <TableHead>Full Name</TableHead>
               <TableHead>Shop Name</TableHead>
@@ -416,13 +650,23 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
           <TableBody>
             {users.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
+                <TableCell colSpan={9} className="py-10 text-center text-muted-foreground">
                   {loading ? "Loading users..." : "No owner accounts found for this filter."}
                 </TableCell>
               </TableRow>
             ) : (
               users.map((user) => (
                 <TableRow key={user.user_id}>
+                  <TableCell className="w-12 px-2">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${user.username}`}
+                      checked={selectedUserIdSet.has(user.user_id)}
+                      onChange={(event) => toggleUserSelection(user.user_id, event.target.checked)}
+                      disabled={bulkSubmitting}
+                      className="h-4 w-4"
+                    />
+                  </TableCell>
                   <TableCell className="font-medium">{user.username}</TableCell>
                   <TableCell>{user.full_name}</TableCell>
                   <TableCell>
@@ -441,22 +685,47 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
                   <TableCell className="text-muted-foreground">{new Date(user.created_at).toLocaleString()}</TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
-                      <Button variant="outline" size="sm" onClick={() => openEditDialog(user)}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openEditDialog(user)}
+                        disabled={bulkSubmitting}
+                      >
                         Edit
                       </Button>
-                      <Button variant="outline" size="sm" onClick={() => openResetDialog(user)}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openResetDialog(user)}
+                        disabled={bulkSubmitting}
+                      >
                         Reset Password
                       </Button>
                       {user.is_active ? (
-                        <Button variant="outline" size="sm" onClick={() => void handleDeactivate(user)}>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void handleDeactivate(user)}
+                          disabled={bulkSubmitting}
+                        >
                           Deactivate
                         </Button>
                       ) : (
-                        <Button variant="outline" size="sm" onClick={() => void handleReactivate(user)}>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void handleReactivate(user)}
+                          disabled={bulkSubmitting}
+                        >
                           Reactivate
                         </Button>
                       )}
-                      <Button variant="destructive" size="sm" onClick={() => void handleDelete(user)}>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => void handleDelete(user)}
+                        disabled={bulkSubmitting}
+                      >
                         Delete
                       </Button>
                     </div>
@@ -472,9 +741,27 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Create Shop Owner</DialogTitle>
-            <DialogDescription>Create a cloud owner account for the selected shop.</DialogDescription>
+            <DialogDescription>Create a cloud owner account for a shop.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
+            <div className="space-y-1">
+              <Label htmlFor="create-user-shop-code">Shop</Label>
+              <select
+                id="create-user-shop-code"
+                className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+                value={createForm.shopCode}
+                onChange={(event) => setCreateForm((current) => ({ ...current, shopCode: event.target.value }))}
+              >
+                <option value="" disabled>
+                  Select shop
+                </option>
+                {shopOptions.map((shop) => (
+                  <option key={shop.shop_id} value={shop.shop_code}>
+                    {shop.shop_code} - {shop.shop_name}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="space-y-1">
               <Label>Username</Label>
               <Input
