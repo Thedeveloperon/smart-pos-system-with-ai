@@ -49,6 +49,9 @@ public sealed class AuthSessionResponse
     [JsonPropertyName("role")]
     public string Role { get; set; } = string.Empty;
 
+    [JsonPropertyName("super_admin_scope")]
+    public string? SuperAdminScope { get; set; }
+
     [JsonPropertyName("session_id")]
     public Guid SessionId { get; set; }
 
@@ -84,6 +87,9 @@ public sealed class AccountSessionResponse
 
     [JsonPropertyName("role")]
     public string Role { get; set; } = string.Empty;
+
+    [JsonPropertyName("super_admin_scope")]
+    public string? SuperAdminScope { get; set; }
 
     [JsonPropertyName("session_id")]
     public Guid SessionId { get; set; }
@@ -201,4 +207,7 @@ public sealed class AccountTenantContextResponse
 
     [JsonPropertyName("role")]
     public string Role { get; set; } = string.Empty;
+
+    [JsonPropertyName("super_admin_scope")]
+    public string? SuperAdminScope { get; set; }
 }

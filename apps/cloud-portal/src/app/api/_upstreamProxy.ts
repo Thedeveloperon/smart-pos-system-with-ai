@@ -110,6 +110,22 @@ export async function forwardUpstreamRequest(options: ForwardUpstreamOptions) {
         );
       }
 
+      if (backendResponse.status === 401) {
+        return toErrorResponse(
+          401,
+          "UPSTREAM_UNAUTHORIZED",
+          `${options.serviceName} rejected authentication. Please sign in again.`,
+        );
+      }
+
+      if (backendResponse.status === 403) {
+        return toErrorResponse(
+          403,
+          "UPSTREAM_FORBIDDEN",
+          `${options.serviceName} denied access. Your account may not have the required permissions.`,
+        );
+      }
+
       return toErrorResponse(
         backendResponse.status,
         "UPSTREAM_EMPTY_RESPONSE",

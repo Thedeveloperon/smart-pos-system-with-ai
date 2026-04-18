@@ -33,7 +33,7 @@ import {
   type CloudPurchaseRow,
 } from "@/lib/adminApi";
 import type { AdminSession } from "./auth";
-import { isSuperAdminRole } from "./auth";
+import { canAccessBillingApproverWorkspace, isSuperAdminRole } from "./auth";
 
 type AdminPortalDashboardProps = {
   user: AdminSession;
@@ -135,29 +135,44 @@ export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDas
   const [purchases, setPurchases] = useState<CloudPurchaseRow[]>([]);
   const [shops, setShops] = useState<AdminShopsLicensingSnapshotResponse["items"]>([]);
   const [users, setUsers] = useState<AdminShopUserRow[]>([]);
+  const canAccessBillingApprover = useMemo(() => canAccessBillingApproverWorkspace(user), [user]);
+  const visibleNavItems = useMemo(
+    () => (canAccessBillingApprover ? navItems : navItems.filter((item) => item.id !== "purchases")),
+    [canAccessBillingApprover],
+  );
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
     try {
       const [productsResult, purchasesResult, shopsResult, usersResult] = await Promise.allSettled([
         fetchAdminCloudProducts({ includeInactive: true, take: 100 }),
-        fetchAdminCloudPurchases({ take: 100 }),
+        canAccessBillingApprover ? fetchAdminCloudPurchases({ take: 100 }) : Promise.resolve(null),
         fetchAdminLicensingShops({ includeInactive: true, take: 100 }),
         fetchAdminShopUsers({ includeInactive: true, roleCode: "owner", take: 200 }),
       ]);
 
       if (productsResult.status === "fulfilled") setProducts(productsResult.value.items || []);
-      if (purchasesResult.status === "fulfilled") setPurchases(purchasesResult.value.items || []);
+      if (canAccessBillingApprover && purchasesResult.status === "fulfilled" && purchasesResult.value) {
+        setPurchases(purchasesResult.value.items || []);
+      } else if (!canAccessBillingApprover) {
+        setPurchases([]);
+      }
       if (shopsResult.status === "fulfilled") setShops(shopsResult.value.items || []);
       if (usersResult.status === "fulfilled") setUsers(usersResult.value.items || []);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [canAccessBillingApprover]);
 
   useEffect(() => {
     void loadDashboard();
   }, [loadDashboard]);
+
+  useEffect(() => {
+    if (!canAccessBillingApprover && activeSection === "purchases") {
+      setActiveSection("overview");
+    }
+  }, [activeSection, canAccessBillingApprover]);
 
   const activeProducts = products.filter((product) => product.active);
   const activeShops = shops.filter((shop) => shop.is_active);
@@ -259,6 +274,19 @@ export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDas
           </div>
         );
       case "purchases":
+        if (!canAccessBillingApprover) {
+          return (
+            <div className="space-y-6">
+              <AdminSectionHeader
+                title="Purchase Queue"
+                subtitle="Review and process purchase orders."
+              />
+              <section className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-sm">
+                Billing approval permissions are required for this section.
+              </section>
+            </div>
+          );
+        }
         return (
           <div className="space-y-6">
             <AdminSectionHeader title="Purchase Queue" subtitle="Review and process purchase orders." />
@@ -322,7 +350,7 @@ export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDas
                 {sidebarCollapsed ? "" : "Administration"}
               </p>
               <nav className="space-y-1">
-                {navItems.map((item) => {
+                {visibleNavItems.map((item) => {
                   const Icon = item.icon;
                   const active = activeSection === item.id;
                   return (

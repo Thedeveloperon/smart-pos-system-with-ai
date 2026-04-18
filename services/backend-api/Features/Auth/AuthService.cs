@@ -186,6 +186,7 @@ public sealed class AuthService(
             Username = user.Username,
             FullName = user.FullName,
             Role = role,
+            SuperAdminScope = NormalizeOptionalValue(superAdminScope)?.ToLowerInvariant(),
             SessionId = device.Id,
             TerminalId = device.DeviceCode,
             DeviceId = device.Id,
@@ -249,6 +250,7 @@ public sealed class AuthService(
             Username = user.Username,
             FullName = user.FullName,
             Role = resolvedRole,
+            SuperAdminScope = NormalizeOptionalValue(superAdminScope)?.ToLowerInvariant(),
             SessionId = delegatedSession.SessionId,
             ShopId = shop?.Id,
             ShopCode = shop?.Code,
@@ -267,6 +269,7 @@ public sealed class AuthService(
             principal.FindFirstValue(JwtRegisteredClaimNames.Sub));
         var sessionId = ParseGuid(principal.FindFirstValue("session_id"));
         var role = principal.FindFirstValue(ClaimTypes.Role);
+        var superAdminScope = NormalizeOptionalValue(principal.FindFirstValue("super_admin_scope"))?.ToLowerInvariant();
         var expiresAtUnix = principal.FindFirstValue(JwtRegisteredClaimNames.Exp);
         var mfaVerifiedClaim = principal.FindFirstValue("mfa_verified");
         var mfaVerified = bool.TryParse(mfaVerifiedClaim, out var parsedMfaVerified) && parsedMfaVerified;
@@ -308,6 +311,7 @@ public sealed class AuthService(
             Username = user.Username,
             FullName = user.FullName,
             Role = role,
+            SuperAdminScope = superAdminScope,
             SessionId = device.Id,
             TerminalId = device.DeviceCode,
             DeviceId = device.Id,
@@ -327,6 +331,7 @@ public sealed class AuthService(
             principal.FindFirstValue(JwtRegisteredClaimNames.Sub));
         var sessionId = ParseGuid(principal.FindFirstValue("session_id"));
         var role = principal.FindFirstValue(ClaimTypes.Role);
+        var superAdminScope = NormalizeOptionalValue(principal.FindFirstValue("super_admin_scope"))?.ToLowerInvariant();
         var expiresAtUnix = principal.FindFirstValue(JwtRegisteredClaimNames.Exp);
         var mfaVerifiedClaim = principal.FindFirstValue("mfa_verified");
         var mfaVerified = bool.TryParse(mfaVerifiedClaim, out var parsedMfaVerified) && parsedMfaVerified;
@@ -374,6 +379,7 @@ public sealed class AuthService(
             Username = user.Username,
             FullName = user.FullName,
             Role = role,
+            SuperAdminScope = superAdminScope,
             SessionId = sessionEntity.Id,
             ShopId = shop?.Id,
             ShopCode = shop?.Code,
@@ -417,14 +423,15 @@ public sealed class AuthService(
             throw new InvalidOperationException("Cloud account shop mapping is invalid.");
         }
 
-        var (role, _) = ResolveRoleAndScope(user);
+        var (role, superAdminScope) = ResolveRoleAndScope(user);
         return new AccountTenantContextResponse
         {
             ShopId = shop.Id,
             ShopCode = shop.Code,
             Username = user.Username,
             FullName = user.FullName,
-            Role = role
+            Role = role,
+            SuperAdminScope = NormalizeOptionalValue(superAdminScope)?.ToLowerInvariant()
         };
     }
 
@@ -1132,4 +1139,3 @@ public sealed class AuthService(
         string AlertReason,
         string MetadataJson);
 }
-
