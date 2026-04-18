@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
+  ApiError,
   createAdminShop,
   deleteAdminShop,
   deactivateAdminShop,
@@ -11,6 +12,7 @@ import {
 } from "@/lib/adminApi";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmationDialog, type ConfirmationDialogConfig } from "@/components/ui/confirmation-dialog";
 import {
   Dialog,
   DialogContent,
@@ -55,6 +57,88 @@ function buildShopActionActorNote(action: "deactivate" | "reactivate" | "delete"
   return `Manual ${action} from admin portal for shop '${shopCode}'.`;
 }
 
+const shopDependencyKeys = [
+  "active_devices",
+  "non_terminal_subscriptions",
+  "open_or_pending_invoices",
+  "pending_manual_payments",
+  "pending_ai_orders",
+  "pending_ai_payments",
+] as const;
+
+type ShopDependencyKey = (typeof shopDependencyKeys)[number];
+
+const shopDependencyLabels: Record<ShopDependencyKey, string> = {
+  active_devices: "active devices",
+  non_terminal_subscriptions: "active subscriptions",
+  open_or_pending_invoices: "open/pending invoices",
+  pending_manual_payments: "pending manual payments",
+  pending_ai_orders: "pending AI orders",
+  pending_ai_payments: "pending AI payments",
+};
+
+function resolveDependencyBlockedMessage(
+  action: "deactivate" | "delete",
+  shopCode: string,
+  rawMessage: string,
+): string | null {
+  const expectedPrefix =
+    action === "deactivate"
+      ? "shop cannot be deactivated while active dependents exist"
+      : "shop cannot be hard-deleted while active dependents exist";
+
+  if (!rawMessage.toLowerCase().includes(expectedPrefix)) {
+    return null;
+  }
+
+  const counts: Partial<Record<ShopDependencyKey, number>> = {};
+  for (const match of rawMessage.matchAll(/([a-z_]+)=(-?\d+)/g)) {
+    const key = match[1] as ShopDependencyKey;
+    if (!shopDependencyKeys.includes(key)) {
+      continue;
+    }
+
+    const value = Number.parseInt(match[2], 10);
+    if (Number.isFinite(value)) {
+      counts[key] = value;
+    }
+  }
+
+  const blockers = shopDependencyKeys
+    .map((key) => ({ key, count: counts[key] ?? 0 }))
+    .filter(({ count }) => count > 0)
+    .map(({ key, count }) => `${shopDependencyLabels[key]} (${count})`);
+
+  if (blockers.length === 0) {
+    return null;
+  }
+
+  const operation = action === "deactivate" ? "deactivate" : "hard-delete";
+  return `Cannot ${operation} '${shopCode}'. Blockers: ${blockers.join(", ")}. Clear these first, then retry.`;
+}
+
+function resolveShopMutationErrorMessage(
+  action: "deactivate" | "delete",
+  shopCode: string,
+  error: unknown,
+  fallback: string,
+) {
+  if (!(error instanceof Error)) {
+    return fallback;
+  }
+
+  if (!(error instanceof ApiError) || error.code !== "INVALID_ADMIN_REQUEST") {
+    return error.message;
+  }
+
+  if (action === "delete" && error.message.includes("Shop must be deactivated before hard-delete")) {
+    return `Deactivate '${shopCode}' before deleting it permanently.`;
+  }
+
+  const dependencyBlockedMessage = resolveDependencyBlockedMessage(action, shopCode, error.message);
+  return dependencyBlockedMessage ?? error.message;
+}
+
 const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
   const [items, setItems] = useState<AdminShopsLicensingSnapshotResponse["items"]>(shops);
   const [search, setSearch] = useState("");
@@ -71,6 +155,29 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
     actorNote: "",
   });
   const [editSubmitting, setEditSubmitting] = useState(false);
+  const [confirmationState, setConfirmationState] = useState<ConfirmationDialogConfig | null>(null);
+  const confirmationResolveRef = useRef<((value: boolean) => void) | null>(null);
+
+  const openConfirmationDialog = useCallback((config: ConfirmationDialogConfig) => {
+    return new Promise<boolean>((resolve) => {
+      confirmationResolveRef.current = resolve;
+      setConfirmationState(config);
+    });
+  }, []);
+
+  const closeConfirmationDialog = useCallback((confirmed: boolean) => {
+    confirmationResolveRef.current?.(confirmed);
+    confirmationResolveRef.current = null;
+    setConfirmationState(null);
+  }, []);
+
+  const cancelConfirmationDialog = useCallback(() => {
+    closeConfirmationDialog(false);
+  }, [closeConfirmationDialog]);
+
+  const acceptConfirmationDialog = useCallback(() => {
+    closeConfirmationDialog(true);
+  }, [closeConfirmationDialog]);
 
   useEffect(() => {
     setItems(shops);
@@ -179,9 +286,11 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
   }, [editForm, editingShop, refreshAll]);
 
   const handleDeactivate = useCallback(async (shop: AdminShopsLicensingSnapshotResponse["items"][number]) => {
-    const confirmed = window.confirm(
-      `Deactivate shop '${shop.shop_code}' (${shop.shop_name})?\n\nYou can delete it permanently after deactivation.`,
-    );
+    const confirmed = await openConfirmationDialog({
+      title: "Deactivate shop?",
+      description: `Deactivate shop '${shop.shop_code}' (${shop.shop_name})? You can delete it permanently after deactivation.`,
+      confirmLabel: "Deactivate",
+    });
     if (!confirmed) {
       return;
     }
@@ -199,9 +308,9 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
       await onShopsChanged?.();
     } catch (error) {
       console.error(error);
-      toast.error(error instanceof Error ? error.message : "Failed to deactivate shop.");
+      toast.error(resolveShopMutationErrorMessage("deactivate", shop.shop_code, error, "Failed to deactivate shop."));
     }
-  }, [onShopsChanged]);
+  }, [onShopsChanged, openConfirmationDialog]);
 
   const handleReactivate = useCallback(async (shop: AdminShopsLicensingSnapshotResponse["items"][number]) => {
     const actorNote = window.prompt(`Actor note for reactivating '${shop.shop_code}'`);
@@ -229,9 +338,12 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
       return;
     }
 
-    const confirmed = window.confirm(
-      `Permanently delete shop '${shop.shop_code}' (${shop.shop_name})?\n\nThis will remove the shop and linked users. This cannot be undone.`,
-    );
+    const confirmed = await openConfirmationDialog({
+      title: "Delete shop permanently?",
+      description: `Delete shop '${shop.shop_code}' (${shop.shop_name})? This will remove the shop and linked users. This cannot be undone.`,
+      confirmLabel: "Delete",
+      confirmVariant: "destructive",
+    });
     if (!confirmed) {
       return;
     }
@@ -247,9 +359,9 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
       await onShopsChanged?.();
     } catch (error) {
       console.error(error);
-      toast.error(error instanceof Error ? error.message : "Failed to delete shop.");
+      toast.error(resolveShopMutationErrorMessage("delete", shop.shop_code, error, "Failed to delete shop."));
     }
-  }, [onShopsChanged]);
+  }, [onShopsChanged, openConfirmationDialog]);
 
   return (
     <div className="rounded-2xl border border-border bg-card shadow-sm">
@@ -449,6 +561,22 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmationDialog
+        open={Boolean(confirmationState)}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) {
+            cancelConfirmationDialog();
+          }
+        }}
+        onCancel={cancelConfirmationDialog}
+        onConfirm={acceptConfirmationDialog}
+        title={confirmationState?.title || "Confirm Action"}
+        description={confirmationState?.description}
+        cancelLabel={confirmationState?.cancelLabel}
+        confirmLabel={confirmationState?.confirmLabel}
+        confirmVariant={confirmationState?.confirmVariant}
+      />
     </div>
   );
 };
