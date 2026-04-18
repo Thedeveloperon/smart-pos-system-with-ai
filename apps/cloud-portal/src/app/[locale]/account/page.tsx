@@ -15,6 +15,7 @@ import {
   ShoppingBag,
   ShoppingCart,
   Settings2,
+  Wallet,
 } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
@@ -174,6 +175,19 @@ function formatCredits(value?: number | null) {
   });
 }
 
+function formatSignedCredits(value?: number | null) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "-";
+  }
+
+  if (value === 0) {
+    return "0";
+  }
+
+  const prefix = value > 0 ? "+" : "-";
+  return `${prefix}${formatCredits(Math.abs(value))}`;
+}
+
 function formatAmount(value?: number | null, currency = "USD") {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return `- ${currency}`;
@@ -217,14 +231,31 @@ function canManageCommerce(role?: string | null) {
   return normalized === "owner";
 }
 
-type OwnerSectionId = "dashboard" | "products" | "purchases" | "provisioning" | "settings";
+type OwnerSectionId = "dashboard" | "products" | "purchases" | "wallet" | "provisioning" | "settings";
 type ProductCatalogFilter = "all" | "pos" | "ai";
 type PurchaseFilter = "all" | "active" | "completed";
+type WalletTransactionKind = "purchase" | "spend" | "refund" | "adjustment";
+type WalletTransactionSource = "order" | "payment" | "ledger";
+
+type WalletTransaction = {
+  id: string;
+  kind: WalletTransactionKind;
+  source: WalletTransactionSource;
+  status: string;
+  credits: number;
+  amount?: number | null;
+  currency?: string | null;
+  balanceAfter?: number | null;
+  reference?: string | null;
+  description?: string | null;
+  occurredAt: string;
+};
 
 const ownerNavItems: Array<{ id: OwnerSectionId; label: string; icon: typeof LayoutGrid }> = [
   { id: "dashboard", label: "Dashboard", icon: LayoutGrid },
   { id: "products", label: "Products", icon: Package },
   { id: "purchases", label: "My Purchases", icon: ShoppingCart },
+  { id: "wallet", label: "AI Credit Wallet", icon: Wallet },
   { id: "provisioning", label: "POS Provisioning", icon: Monitor },
   { id: "settings", label: "Account Settings", icon: Settings2 },
 ];
@@ -483,6 +514,141 @@ export default function AccountPage() {
 
     return purchaseRows;
   }, [purchaseFilter, purchaseRows]);
+
+  const walletPurchasedCredits = useMemo(
+    () =>
+      aiLedger.reduce((total, entry) => {
+        if (entry.delta_credits > 0) {
+          return total + entry.delta_credits;
+        }
+        return total;
+      }, 0),
+    [aiLedger],
+  );
+
+  const walletSpentCredits = useMemo(
+    () =>
+      aiLedger.reduce((total, entry) => {
+        if (entry.delta_credits < 0) {
+          return total + Math.abs(entry.delta_credits);
+        }
+        return total;
+      }, 0),
+    [aiLedger],
+  );
+
+  const walletTransactions = useMemo<WalletTransaction[]>(() => {
+    const purchaseTransactions: WalletTransaction[] = purchases
+      .filter((purchase) => purchase.items.some((item) => item.product_type === "ai_credit"))
+      .map((purchase) => {
+        const aiItems = purchase.items.filter((item) => item.product_type === "ai_credit");
+        const requestedCredits = aiItems.reduce((total, item) => {
+          const perItemCredits = typeof item.credits === "number" ? item.credits : 0;
+          const quantity = Number.isFinite(item.quantity) ? Math.max(1, item.quantity) : 1;
+          return total + perItemCredits * quantity;
+        }, 0);
+
+        return {
+          id: `order-${purchase.purchase_id}`,
+          kind: "purchase",
+          source: "order",
+          status: purchase.status,
+          credits: requestedCredits,
+          amount: purchase.total_amount,
+          currency: purchase.currency,
+          reference: purchase.order_number,
+          description: aiItems.map((item) => item.product_name).join(", "),
+          occurredAt: purchase.created_at,
+        };
+      });
+
+    const paymentTransactions: WalletTransaction[] = aiPayments
+      .filter((payment) => payment.payment_status !== "succeeded")
+      .map((payment) => ({
+        id: `payment-${payment.payment_id}`,
+        kind: "purchase",
+        source: "payment",
+        status: payment.payment_status,
+        credits: payment.credits,
+        amount: payment.amount,
+        currency: payment.currency,
+        reference: payment.external_reference,
+        description: `${toSentence(payment.payment_method)} via ${payment.provider || "provider"}`,
+        occurredAt: payment.created_at,
+      }));
+
+    const ledgerTransactions: WalletTransaction[] = aiLedger.map((entry, index) => {
+      const entryType = (entry.entry_type || "").trim().toLowerCase();
+      const kind: WalletTransactionKind =
+        entryType === "charge"
+          ? "spend"
+          : entryType === "refund"
+            ? "refund"
+            : entryType === "purchase"
+              ? "purchase"
+              : entry.delta_credits < 0
+                ? "spend"
+                : "adjustment";
+
+      return {
+        id: `ledger-${entry.created_at_utc}-${entry.reference || index}`,
+        kind,
+        source: "ledger",
+        status: "recorded",
+        credits: entry.delta_credits,
+        balanceAfter: entry.balance_after_credits,
+        reference: entry.reference || null,
+        description: entry.description || null,
+        occurredAt: entry.created_at_utc,
+      };
+    });
+
+    const parseTimestamp = (value: string) => {
+      const parsed = new Date(value).getTime();
+      return Number.isNaN(parsed) ? 0 : parsed;
+    };
+
+    return [...ledgerTransactions, ...purchaseTransactions, ...paymentTransactions]
+      .sort((left, right) => parseTimestamp(right.occurredAt) - parseTimestamp(left.occurredAt))
+      .slice(0, 30);
+  }, [aiLedger, aiPayments, purchases]);
+
+  const getWalletTransactionTypeLabel = (kind: WalletTransactionKind, source: WalletTransactionSource) => {
+    if (kind === "purchase" && source !== "ledger") {
+      return "Credit Purchase Request";
+    }
+
+    if (kind === "purchase") {
+      return "Credit Purchase";
+    }
+
+    if (kind === "spend") {
+      return "AI Credit Spend";
+    }
+
+    if (kind === "refund") {
+      return "Credit Refund";
+    }
+
+    return "Wallet Adjustment";
+  };
+
+  const getWalletTransactionStatusTone = (status: string): "neutral" | "success" | "warning" | "info" => {
+    const normalized = status.trim().toLowerCase();
+    if (["approved", "assigned", "paid", "settled", "succeeded", "completed", "recorded"].includes(normalized)) {
+      return "success";
+    }
+
+    if (["pending", "pending_approval", "pending_verification", "payment_pending", "submitted", "draft", "processing"].includes(normalized)) {
+      return "warning";
+    }
+
+    if (["rejected", "failed", "cancelled", "canceled", "refunded"].includes(normalized)) {
+      return "neutral";
+    }
+
+    return "info";
+  };
 
   const ownerDashboard = (
     <div className="space-y-6">
@@ -743,6 +909,133 @@ export default function AccountPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{formatDate(purchase.created_at)}</td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </SectionCard>
+    </div>
+  );
+
+  const ownerWalletSection = (
+    <div className="space-y-6">
+      <div className="space-y-2">
+        <h1 className="text-4xl font-semibold tracking-tight">AI Credit Wallet</h1>
+        <p className="text-sm text-muted-foreground">
+          View your remaining balance and recent AI credit transactions.
+        </p>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-3">
+        <SectionCard className="rounded-[16px] p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <p className="text-sm text-muted-foreground">Remaining Balance</p>
+            <Wallet className="h-4 w-4 text-muted-foreground" />
+          </div>
+          <p className="mt-2 text-3xl font-semibold tracking-tight">
+            {wallet ? formatCredits(wallet.available_credits) : "0"}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Last updated: {wallet?.updated_at ? formatDate(wallet.updated_at) : "Not available"}
+          </p>
+        </SectionCard>
+
+        <SectionCard className="rounded-[16px] p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <p className="text-sm text-muted-foreground">Purchased Credits</p>
+            <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+          </div>
+          <p className="mt-2 text-3xl font-semibold tracking-tight text-emerald-700">
+            {formatCredits(walletPurchasedCredits)}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">From credited top-ups and refunds.</p>
+        </SectionCard>
+
+        <SectionCard className="rounded-[16px] p-5 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <p className="text-sm text-muted-foreground">Spent Credits</p>
+            <Clock3 className="h-4 w-4 text-muted-foreground" />
+          </div>
+          <p className="mt-2 text-3xl font-semibold tracking-tight text-rose-700">
+            {formatCredits(walletSpentCredits)}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">Credits used by AI features.</p>
+        </SectionCard>
+      </div>
+
+      <SectionCard className="overflow-hidden rounded-[16px] p-0 shadow-sm">
+        <div className="flex items-center justify-between gap-4 border-b border-border/70 px-4 py-3">
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold">Recent Transactions</h2>
+            <p className="text-xs text-muted-foreground">AI credit purchases and spending activity.</p>
+          </div>
+          <Button type="button" variant="outline" size="sm" onClick={() => void handleRefresh()} disabled={isLoadingCommerce}>
+            <RefreshCw className={["h-4 w-4", isLoadingCommerce ? "animate-spin" : ""].join(" ")} />
+            Refresh
+          </Button>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[980px] border-collapse text-sm">
+            <thead className="border-b border-border/70 bg-surface-muted/50 text-left text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3 font-medium">Date</th>
+                <th className="px-4 py-3 font-medium">Type</th>
+                <th className="px-4 py-3 font-medium">Reference</th>
+                <th className="px-4 py-3 font-medium">Credits</th>
+                <th className="px-4 py-3 font-medium">Amount</th>
+                <th className="px-4 py-3 font-medium">Balance After</th>
+                <th className="px-4 py-3 font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {walletTransactions.length === 0 ? (
+                <tr>
+                  <td className="px-4 py-8 text-muted-foreground" colSpan={7}>
+                    No AI credit transactions yet.
+                  </td>
+                </tr>
+              ) : (
+                walletTransactions.map((transaction) => {
+                  const signedCredits = formatSignedCredits(transaction.credits);
+                  const creditsClass =
+                    transaction.credits > 0
+                      ? "text-emerald-700"
+                      : transaction.credits < 0
+                        ? "text-rose-700"
+                        : "text-muted-foreground";
+
+                  return (
+                    <tr key={transaction.id} className="border-b border-border/70 last:border-b-0">
+                      <td className="px-4 py-3 text-muted-foreground">{formatDate(transaction.occurredAt)}</td>
+                      <td className="px-4 py-3">
+                        <div className="space-y-0.5">
+                          <p className="font-medium">
+                            {getWalletTransactionTypeLabel(transaction.kind, transaction.source)}
+                          </p>
+                          {transaction.description ? (
+                            <p className="text-xs text-muted-foreground">{transaction.description}</p>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">{transaction.reference || "-"}</td>
+                      <td className={["px-4 py-3 font-medium", creditsClass].join(" ")}>{signedCredits}</td>
+                      <td className="px-4 py-3">
+                        {typeof transaction.amount === "number" && Number.isFinite(transaction.amount)
+                          ? formatAmount(transaction.amount, transaction.currency || "USD")
+                          : "-"}
+                      </td>
+                      <td className="px-4 py-3">
+                        {typeof transaction.balanceAfter === "number" ? formatCredits(transaction.balanceAfter) : "-"}
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusChip tone={getWalletTransactionStatusTone(transaction.status)}>
+                          {toSentence(transaction.status)}
+                        </StatusChip>
+                      </td>
                     </tr>
                   );
                 })
@@ -1389,6 +1682,8 @@ export default function AccountPage() {
                   ownerProductsSection
                 ) : activeSection === "purchases" ? (
                   ownerPurchasesSection
+                ) : activeSection === "wallet" ? (
+                  ownerWalletSection
                 ) : activeSection === "provisioning" ? (
                   ownerProvisioningSection
                 ) : activeSection === "settings" ? (

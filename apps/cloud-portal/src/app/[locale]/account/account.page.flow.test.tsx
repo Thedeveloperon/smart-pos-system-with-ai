@@ -280,6 +280,133 @@ describe("Account page credentials-only commerce flow", () => {
     expect("device_code" in loginBody).toBe(false);
   });
 
+  it("shows AI credit wallet with balance and recent purchase and spending transactions", async () => {
+    vi.mocked(global.fetch).mockImplementation(async (input) => {
+      const requestUrl = normalizeFetchUrl(resolveRequestUrl(input));
+
+      if (requestUrl === "/api/account/me") {
+        return jsonResponse({
+          user_id: "11111111-1111-1111-1111-111111111111",
+          username: "owner",
+          full_name: "Store Owner",
+          role: "owner",
+          session_id: "sess-wallet-01",
+          shop_id: "33333333-3333-3333-3333-333333333333",
+          shop_code: "default",
+          expires_at: "2026-04-20T00:00:00Z",
+          mfa_verified: true,
+          auth_session_version: 1,
+        });
+      }
+
+      if (requestUrl === "/api/account/products?take=120") {
+        return jsonResponse({ generated_at: "2026-04-13T00:00:00Z", count: 0, items: [] });
+      }
+
+      if (requestUrl === "/api/account/purchases?take=80") {
+        return jsonResponse({
+          generated_at: "2026-04-13T00:00:00Z",
+          count: 1,
+          items: [
+            {
+              purchase_id: "pur-wallet-01",
+              order_number: "PO-WALLET-001",
+              shop_code: "default",
+              status: "assigned",
+              items: [
+                {
+                  product_code: "ai_pack_500",
+                  product_name: "AI Credit Pack 500",
+                  product_type: "ai_credit",
+                  quantity: 1,
+                  amount: 79.99,
+                  currency: "USD",
+                  credits: 500,
+                },
+              ],
+              total_amount: 79.99,
+              currency: "USD",
+              note: null,
+              created_at: "2026-04-13T00:00:00Z",
+            },
+          ],
+        });
+      }
+
+      if (requestUrl === "/api/account/ai/invoices?take=80") {
+        return jsonResponse({ generated_at: "2026-04-13T00:00:00Z", count: 0, items: [] });
+      }
+
+      if (requestUrl === "/api/account/ai/wallet") {
+        return jsonResponse({
+          available_credits: 4771.9,
+          updated_at: "2026-04-13T00:00:00Z",
+        });
+      }
+
+      if (requestUrl === "/api/account/ai/ledger?take=30") {
+        return jsonResponse({
+          items: [
+            {
+              entry_type: "purchase",
+              delta_credits: 500,
+              balance_after_credits: 4804.4,
+              reference: "ai-payment-manual-01",
+              created_at_utc: "2026-04-13T00:01:00Z",
+            },
+            {
+              entry_type: "charge",
+              delta_credits: -32.5,
+              balance_after_credits: 4771.9,
+              reference: "ai-insight-usage-01",
+              created_at_utc: "2026-04-13T00:02:00Z",
+            },
+          ],
+        });
+      }
+
+      if (requestUrl === "/api/account/ai/payments?take=30") {
+        return jsonResponse({ items: [] });
+      }
+
+      if (requestUrl === "/api/account/license-portal") {
+        return jsonResponse({
+          shop_code: "default",
+          latest_activation_entitlement: null,
+          devices: [],
+        });
+      }
+
+      throw new Error(`Unexpected fetch URL: ${requestUrl}`);
+    });
+
+    await act(async () => {
+      root.render(
+        <I18nProvider locale="en" messages={{}}>
+          <AccountPage />
+        </I18nProvider>,
+      );
+      await flushUi();
+    });
+
+    await waitForCondition(() => container.textContent?.includes("Owner Account") ?? false);
+
+    const walletNavButton = getButtonByText(container, "AI Credit Wallet");
+    expect(walletNavButton).toBeTruthy();
+
+    await act(async () => {
+      walletNavButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flushUi();
+    });
+
+    await waitForCondition(() => container.textContent?.includes("Recent Transactions") ?? false);
+    expect(container.textContent).toContain("Remaining Balance");
+    expect(container.textContent).toContain("AI Credit Spend");
+    expect(container.textContent).toContain("Credit Purchase");
+    expect(container.textContent).toContain("PO-WALLET-001");
+    expect(container.textContent).toContain("4,771.9");
+  });
+
   it("creates purchase request as owner without device dependency", async () => {
     let hasCreatedPurchase = false;
 
