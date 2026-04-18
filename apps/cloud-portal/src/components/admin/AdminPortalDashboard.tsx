@@ -268,7 +268,7 @@ export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDas
         return renderOverview();
       case "catalog":
         return (
-          <div className="space-y-6">
+          <div className="mx-auto w-full max-w-5xl space-y-5">
             <AdminSectionHeader title="Product Catalog" subtitle="Manage POS subscriptions and AI credit packs." />
             <CloudProductCatalogPanel />
           </div>
@@ -276,7 +276,7 @@ export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDas
       case "purchases":
         if (!canAccessBillingApprover) {
           return (
-            <div className="space-y-6">
+            <div className="mx-auto w-full max-w-5xl space-y-5">
               <AdminSectionHeader
                 title="Purchase Queue"
                 subtitle="Review and process purchase orders."
@@ -288,7 +288,7 @@ export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDas
           );
         }
         return (
-          <div className="space-y-6">
+          <div className="mx-auto w-full max-w-5xl space-y-5">
             <AdminSectionHeader title="Purchase Queue" subtitle="Review and process purchase orders." />
             <CloudPurchaseQueuePanel heading="Purchase Queue" />
           </div>
