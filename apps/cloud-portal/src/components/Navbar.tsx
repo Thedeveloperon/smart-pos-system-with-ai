@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Menu, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -6,10 +6,20 @@ import Image from "next/image";
 import Link from "next/link";
 import { locales } from "@/i18n/config";
 import { useI18n } from "@/i18n/I18nProvider";
+import { buildLocaleHref } from "@/i18n/localePath";
 
 const Navbar = () => {
   const [open, setOpen] = useState(false);
   const { locale, t } = useI18n();
+  const [currentPathname, setCurrentPathname] = useState(`/${locale}`);
+  const [currentSearch, setCurrentSearch] = useState("");
+
+  useEffect(() => {
+    setCurrentPathname(window.location.pathname || `/${locale}`);
+    setCurrentSearch(window.location.search ?? "");
+  }, [locale]);
+
+  const currentSearchParams = useMemo(() => new URLSearchParams(currentSearch), [currentSearch]);
 
   const navLinks = [
     { href: "#features", label: t("nav.links.features") },
@@ -46,7 +56,7 @@ const Navbar = () => {
             {locales.map((code) => (
               <Link
                 key={code}
-                href={`/${code}`}
+                href={buildLocaleHref(currentPathname, code, currentSearchParams)}
                 aria-label={`${t("nav.languageLabel")}: ${t(`nav.languages.${code}`)}`}
                 className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
                   locale === code ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
@@ -92,7 +102,7 @@ const Navbar = () => {
                 {locales.map((code) => (
                   <Link
                     key={code}
-                    href={`/${code}`}
+                    href={buildLocaleHref(currentPathname, code, currentSearchParams)}
                     onClick={() => setOpen(false)}
                     className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
                       locale === code ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
