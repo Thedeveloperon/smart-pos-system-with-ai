@@ -342,7 +342,7 @@ const CloudPurchaseQueuePanel = ({ heading = "Purchase Queue" }: CloudPurchaseQu
   );
 
   return (
-    <SectionCard className="space-y-3">
+    <SectionCard className="mx-auto w-full max-w-5xl space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="portal-kicker">Commerce Operations</p>
@@ -420,9 +420,9 @@ const CloudPurchaseQueuePanel = ({ heading = "Purchase Queue" }: CloudPurchaseQu
                 key={item.purchase_id}
                 className={`overflow-hidden rounded-2xl border border-[#d4e6e0] border-l-4 bg-[#f7fcfa] shadow-[0_1px_2px_rgba(15,23,42,0.05)] ${statusVisual.accentClassName}`}
               >
-                <div className="flex flex-wrap items-start justify-between gap-3 px-6 py-5">
+                <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-4">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[1.45rem] font-semibold tracking-tight text-[#1f5f59]">
+                    <span className="text-xl font-semibold tracking-tight text-[#1f5f59]">
                       {formatOrderNumber(item.order_number)}
                     </span>
                     <span
@@ -432,19 +432,19 @@ const CloudPurchaseQueuePanel = ({ heading = "Purchase Queue" }: CloudPurchaseQu
                       {statusLabel}
                     </span>
                   </div>
-                  <span className={`text-4xl font-semibold leading-none tracking-tight sm:text-[2.55rem] ${statusVisual.amountClassName}`}>
+                  <span className={`text-3xl font-semibold leading-none tracking-tight sm:text-[2.35rem] ${statusVisual.amountClassName}`}>
                     {formatMoney(item.total_amount, item.currency)}
                   </span>
                 </div>
 
-                <div className="border-t border-[#d4e6e0] px-6 py-5">
+                <div className="border-t border-[#d4e6e0] px-5 py-4">
                   <div className="grid gap-4 md:grid-cols-2">
                     <PurchaseMetaCell icon={Store} label="Shop" value={shopLabel} secondary={shopSecondary} />
                     <PurchaseMetaCell icon={UserRound} label="Owner" value={ownerName} secondary={ownerSecondary} />
                   </div>
                 </div>
 
-                <div className="border-t border-[#d4e6e0] px-6 py-5">
+                <div className="border-t border-[#d4e6e0] px-5 py-4">
                   <div className="grid gap-4 md:grid-cols-2">
                     <PurchaseMetaCell icon={Tag} label="Product Type" value={productType} />
                     <PurchaseMetaCell icon={Package} label="Product Name" value={productName} secondary={primaryItem?.product_code} />
@@ -453,7 +453,7 @@ const CloudPurchaseQueuePanel = ({ heading = "Purchase Queue" }: CloudPurchaseQu
                   </div>
                 </div>
 
-                <div className="border-t border-[#d4e6e0] px-6 py-5">
+                <div className="border-t border-[#d4e6e0] px-5 py-4">
                   <div className="grid gap-4 md:grid-cols-2">
                     <PurchaseMetaCell icon={CreditCard} label="Billing Mode" value={billingMode} valueAsPill />
                     <PurchaseMetaCell icon={CalendarDays} label="Validity Period" value={validityPeriod} />
@@ -461,7 +461,7 @@ const CloudPurchaseQueuePanel = ({ heading = "Purchase Queue" }: CloudPurchaseQu
                 </div>
 
                 {canMutate && (
-                  <div className="border-t border-[#d4e6e0] px-6 py-5">
+                  <div className="border-t border-[#d4e6e0] px-5 py-4">
                     <div className="grid gap-3 lg:grid-cols-2">
                       <label className="space-y-2">
                         <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#5f8f8a]">
@@ -476,7 +476,7 @@ const CloudPurchaseQueuePanel = ({ heading = "Purchase Queue" }: CloudPurchaseQu
                             }))
                           }
                           placeholder="Required. Add context for this decision..."
-                          className="field-shell min-h-[102px] resize-y rounded-xl border-[#cfe4dd] bg-[#f2fbf7] text-sm text-[#244a45] placeholder:text-[#7aa79e] focus:border-[#7cc9b2] focus:ring-[#7cc9b2]/20"
+                          className="field-shell min-h-[90px] resize-y rounded-xl border-[#cfe4dd] bg-[#f2fbf7] text-sm text-[#244a45] placeholder:text-[#7aa79e] focus:border-[#7cc9b2] focus:ring-[#7cc9b2]/20"
                         />
                       </label>
 
@@ -505,7 +505,7 @@ const CloudPurchaseQueuePanel = ({ heading = "Purchase Queue" }: CloudPurchaseQu
                             type="button"
                             size="sm"
                             variant="outline"
-                            className="h-11 rounded-xl border-rose-200 bg-white px-5 text-rose-500 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600"
+                            className="h-10 rounded-xl border-rose-200 bg-white px-4 text-rose-500 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600"
                             disabled={isSubmitting}
                             onClick={() => {
                               void runAction(item.purchase_id, "reject", rejectAdminCloudPurchase);
@@ -517,7 +517,7 @@ const CloudPurchaseQueuePanel = ({ heading = "Purchase Queue" }: CloudPurchaseQu
                           <Button
                             type="button"
                             size="sm"
-                            className="h-11 rounded-xl bg-emerald-500 px-6 text-white hover:bg-emerald-600"
+                            className="h-10 rounded-xl bg-emerald-500 px-5 text-white hover:bg-emerald-600"
                             disabled={isSubmitting}
                             onClick={() => {
                               void runAction(item.purchase_id, "approve", approveAdminCloudPurchase);
@@ -532,7 +532,7 @@ const CloudPurchaseQueuePanel = ({ heading = "Purchase Queue" }: CloudPurchaseQu
                         <Button
                           type="button"
                           size="sm"
-                          className="h-11 rounded-xl bg-emerald-500 px-6 text-white hover:bg-emerald-600"
+                          className="h-10 rounded-xl bg-emerald-500 px-5 text-white hover:bg-emerald-600"
                           disabled={isSubmitting}
                           onClick={() => {
                             void runAction(item.purchase_id, "assign", assignAdminCloudPurchase);
@@ -547,7 +547,7 @@ const CloudPurchaseQueuePanel = ({ heading = "Purchase Queue" }: CloudPurchaseQu
                           type="button"
                           size="sm"
                           variant="outline"
-                          className="h-11 rounded-xl border-amber-200 bg-white px-5 text-amber-700 hover:border-amber-300 hover:bg-amber-50"
+                          className="h-10 rounded-xl border-amber-200 bg-white px-4 text-amber-700 hover:border-amber-300 hover:bg-amber-50"
                           disabled={isSubmitting}
                           onClick={() => {
                             void handleRevoke(item.assignment_id!, item.purchase_id);
@@ -562,7 +562,7 @@ const CloudPurchaseQueuePanel = ({ heading = "Purchase Queue" }: CloudPurchaseQu
                 )}
 
                 {!canMutate && (
-                  <div className="border-t border-[#d4e6e0] px-6 py-3 text-xs text-[#6f9b93]">
+                  <div className="border-t border-[#d4e6e0] px-5 py-3 text-xs text-[#6f9b93]">
                     Updated {new Date(item.updated_at || item.created_at).toLocaleString()}
                   </div>
                 )}

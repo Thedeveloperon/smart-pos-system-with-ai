@@ -164,12 +164,12 @@ const CloudProductCatalogPanel = () => {
   );
 
   return (
-    <SectionCard className="space-y-5 border-0 bg-transparent px-0 py-0 shadow-none md:px-0 md:py-0">
-      <section className="space-y-4 rounded-2xl border border-[#d9e1ea] bg-white p-5 shadow-sm md:p-6">
+    <SectionCard className="mx-auto w-full max-w-5xl space-y-4 border-0 bg-transparent px-0 py-0 shadow-none md:px-0 md:py-0">
+      <section className="space-y-4 rounded-2xl border border-[#d9e1ea] bg-white p-4 shadow-sm md:p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="portal-kicker text-[#61728d]">Catalog Management</p>
-            <h2 className="text-2xl font-semibold tracking-tight text-slate-950 md:text-[1.9rem]">Product Catalog</h2>
+            <h2 className="text-xl font-semibold tracking-tight text-slate-950 md:text-2xl">Product Catalog</h2>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <StatusChip tone="success" className="border border-emerald-200 bg-emerald-50 px-3 py-1 font-semibold text-emerald-700">
@@ -206,7 +206,7 @@ const CloudProductCatalogPanel = () => {
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search by name, SKU, or type..."
-              className="h-11 rounded-lg border-[#d0d9e8] bg-white pl-10 text-sm text-slate-900 placeholder:text-slate-500"
+              className="h-10 rounded-lg border-[#d0d9e8] bg-white pl-10 text-sm text-slate-900 placeholder:text-slate-500"
             />
           </div>
 
@@ -235,18 +235,18 @@ const CloudProductCatalogPanel = () => {
                 item.active ? "border-l-[5px] border-l-emerald-500" : "border-l-[5px] border-l-slate-300"
               }`}
             >
-              <div className="flex flex-col gap-4 px-5 py-5 md:flex-row md:items-start md:justify-between md:gap-6 md:px-6">
+              <div className="flex flex-col gap-4 px-4 py-4 md:flex-row md:items-start md:justify-between md:gap-5 md:px-5">
                 <div className="flex min-w-0 items-start gap-3">
                   <div
-                    className={`mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
+                    className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
                       item.active ? "bg-emerald-50 text-emerald-600" : "bg-slate-100 text-slate-500"
                     }`}
                   >
-                    <Sparkles className="h-5 w-5" />
+                    <Sparkles className="h-4 w-4" />
                   </div>
                   <div className="min-w-0 space-y-2">
                     <div className="flex flex-wrap items-center gap-2.5">
-                      <p className="text-xl font-semibold tracking-tight text-slate-950 md:text-[1.9rem]">{item.product_name}</p>
+                      <p className="text-lg font-semibold tracking-tight text-slate-950 md:text-xl">{item.product_name}</p>
                       <StatusChip
                         tone={item.active ? "success" : "warning"}
                         className={
@@ -273,7 +273,7 @@ const CloudProductCatalogPanel = () => {
                     </div>
 
                     {item.description && (
-                      <p className="max-w-3xl text-sm text-slate-600 md:text-[1.05rem]">
+                      <p className="max-w-3xl text-sm text-slate-600">
                         {item.description}
                       </p>
                     )}
@@ -281,14 +281,14 @@ const CloudProductCatalogPanel = () => {
                 </div>
 
                 <div className="shrink-0 text-left md:min-w-[140px] md:text-right">
-                  <p className="text-3xl font-semibold leading-none tracking-tight text-slate-950 md:text-[2.65rem]">
+                  <p className="text-2xl font-semibold leading-none tracking-tight text-slate-950 md:text-4xl">
                     {formatPrice(item.price, item.currency)}
                   </p>
                   <p className="mt-2 text-sm text-slate-500">{resolveBillingModeCaption(item.billing_mode)}</p>
                 </div>
               </div>
 
-              <div className="border-t border-[#d6dfea] px-5 py-4 md:px-6">
+              <div className="border-t border-[#d6dfea] px-4 py-4 md:px-5">
                 <div className="flex flex-wrap justify-end gap-2.5">
                   <Button
                     type="button"
