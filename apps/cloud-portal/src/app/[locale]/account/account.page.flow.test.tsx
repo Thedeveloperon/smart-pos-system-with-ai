@@ -44,6 +44,12 @@ function setInputValue(input: HTMLInputElement, value: string) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+function getButtonByText(container: HTMLElement, label: string) {
+  return Array.from(container.querySelectorAll("button")).find(
+    (button) => button.textContent?.trim() === label,
+  ) as HTMLButtonElement | undefined;
+}
+
 async function flushUi() {
   await Promise.resolve();
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -218,6 +224,14 @@ describe("Account page credentials-only commerce flow", () => {
         });
       }
 
+      if (requestUrl === "/api/account/license-portal") {
+        return jsonResponse({
+          shop_code: "default",
+          latest_activation_entitlement: null,
+          devices: [],
+        });
+      }
+
       throw new Error(`Unexpected fetch URL: ${requestUrl}`);
     });
 
@@ -230,12 +244,7 @@ describe("Account page credentials-only commerce flow", () => {
       await flushUi();
     });
 
-    await waitForCondition(() => {
-      const signInButton = Array.from(container.querySelectorAll("button")).find(
-        (button) => button.textContent?.trim() === "Sign In",
-      ) as HTMLButtonElement | undefined;
-      return Boolean(signInButton) && !signInButton!.disabled;
-    });
+    await waitForCondition(() => Boolean(getButtonByText(container, "Sign In")));
 
     const usernameInput = container.querySelector('input[autocomplete="username"]') as HTMLInputElement | null;
     const passwordInput = container.querySelector('input[type="password"]') as HTMLInputElement | null;
@@ -255,9 +264,9 @@ describe("Account page credentials-only commerce flow", () => {
       await flushUi();
     });
 
-    await waitForCondition(() => container.textContent?.includes("Signed in as") ?? false);
-    expect(container.textContent).toContain("Buy POS Plans or AI Credit Packages");
-    expect(container.textContent).toContain("Purchases & AI Credit Invoices");
+    await waitForCondition(() => container.textContent?.includes("Owner Account") ?? false);
+    expect(container.textContent).toContain("Dashboard");
+    expect(container.textContent).toContain("My Purchases");
     expect(container.textContent).not.toContain("Device is not provisioned");
     expect(container.textContent).not.toContain("Activation Key Access");
 
@@ -272,6 +281,8 @@ describe("Account page credentials-only commerce flow", () => {
   });
 
   it("creates purchase request as owner without device dependency", async () => {
+    let hasCreatedPurchase = false;
+
     vi.mocked(global.fetch).mockImplementation(async (input, init) => {
       const requestUrl = normalizeFetchUrl(resolveRequestUrl(input));
 
@@ -312,7 +323,35 @@ describe("Account page credentials-only commerce flow", () => {
       }
 
       if (requestUrl === "/api/account/purchases?take=80") {
-        return jsonResponse({ generated_at: "2026-04-13T00:00:00Z", count: 0, items: [] });
+        return jsonResponse({
+          generated_at: "2026-04-13T00:00:00Z",
+          count: hasCreatedPurchase ? 1 : 0,
+          items: hasCreatedPurchase
+            ? [
+                {
+                  purchase_id: "pur-02",
+                  order_number: "PO-002",
+                  shop_code: "default",
+                  status: "pending",
+                  items: [
+                    {
+                      product_code: "ai_pack_100",
+                      product_name: "AI Credit Pack 100",
+                      product_type: "ai_credit",
+                      quantity: 1,
+                      amount: 5,
+                      currency: "USD",
+                      credits: 100,
+                    },
+                  ],
+                  total_amount: 5,
+                  currency: "USD",
+                  note: null,
+                  created_at: "2026-04-13T00:00:00Z",
+                },
+              ]
+            : [],
+        });
       }
 
       if (requestUrl === "/api/account/ai/invoices?take=80") {
@@ -334,26 +373,38 @@ describe("Account page credentials-only commerce flow", () => {
       if (requestUrl === "/api/account/purchases") {
         const requestInit = init as RequestInit;
         expect(requestInit.method).toBe("POST");
+        hasCreatedPurchase = true;
         return jsonResponse({
-          purchase_id: "pur-02",
-          order_number: "PO-002",
+          purchase: {
+            purchase_id: "pur-02",
+            order_number: "PO-002",
+            shop_code: "default",
+            status: "pending",
+            items: [
+              {
+                product_code: "ai_pack_100",
+                product_name: "AI Credit Pack 100",
+                product_type: "ai_credit",
+                quantity: 1,
+                amount: 5,
+                currency: "USD",
+                credits: 100,
+              },
+            ],
+            total_amount: 5,
+            currency: "USD",
+            note: null,
+            created_at: "2026-04-13T00:00:00Z",
+          },
+          processed_at: "2026-04-13T00:00:00Z",
+        });
+      }
+
+      if (requestUrl === "/api/account/license-portal") {
+        return jsonResponse({
           shop_code: "default",
-          status: "submitted",
-          items: [
-            {
-              product_code: "ai_pack_100",
-              product_name: "AI Credit Pack 100",
-              product_type: "ai_credit",
-              quantity: 2,
-              amount: 10,
-              currency: "USD",
-              credits: 200,
-            },
-          ],
-          total_amount: 10,
-          currency: "USD",
-          note: "April invoice",
-          created_at: "2026-04-13T00:00:00Z",
+          latest_activation_entitlement: null,
+          devices: [],
         });
       }
 
@@ -369,26 +420,22 @@ describe("Account page credentials-only commerce flow", () => {
       await flushUi();
     });
 
-    await waitForCondition(() => container.textContent?.includes("Buy POS Plans or AI Credit Packages") ?? false);
-
-    const quantityInput = container.querySelector('input[type="number"]') as HTMLInputElement | null;
-    const noteInput = container.querySelector('input[placeholder="Invoice note for billing team"]') as HTMLInputElement | null;
-    expect(quantityInput).toBeTruthy();
-    expect(noteInput).toBeTruthy();
+    await waitForCondition(() => container.textContent?.includes("Owner Account") ?? false);
+    const productsNavButton = getButtonByText(container, "Products");
+    expect(productsNavButton).toBeTruthy();
 
     await act(async () => {
-      setInputValue(quantityInput!, "2");
-      setInputValue(noteInput!, "April invoice");
+      productsNavButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await flushUi();
     });
 
-    const submitButton = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.textContent?.trim() === "Create Purchase Request",
-    ) as HTMLButtonElement | undefined;
-    expect(submitButton).toBeTruthy();
+    await waitForCondition(() => container.textContent?.includes("Product Catalog") ?? false);
+
+    const orderNowButton = getButtonByText(container, "Order Now");
+    expect(orderNowButton).toBeTruthy();
 
     await act(async () => {
-      submitButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      orderNowButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await flushUi();
     });
 
@@ -407,15 +454,15 @@ describe("Account page credentials-only commerce flow", () => {
       items: [
         {
           product_code: "ai_pack_100",
-          quantity: 2,
+          quantity: 1,
         },
       ],
-      note: "April invoice",
     });
 
     await waitForCondition(() =>
-      container.textContent?.includes("Purchase request submitted. Billing admin approval is required.") ?? false,
+      container.textContent?.includes("purchase created with pending status") ?? false,
     );
+    expect(container.textContent).toContain("PO-002");
   });
 
   it("shows owner-only commerce restriction for cashier role", async () => {
@@ -457,6 +504,14 @@ describe("Account page credentials-only commerce flow", () => {
         return jsonResponse({ items: [] });
       }
 
+      if (requestUrl === "/api/account/license-portal") {
+        return jsonResponse({
+          shop_code: "default",
+          latest_activation_entitlement: null,
+          devices: [],
+        });
+      }
+
       throw new Error(`Unexpected fetch URL: ${requestUrl}`);
     });
 
@@ -469,13 +524,34 @@ describe("Account page credentials-only commerce flow", () => {
       await flushUi();
     });
 
-    await waitForCondition(() => container.textContent?.includes("Signed in as") ?? false);
-    expect(container.textContent).toContain("Only shop owners can create package and AI credit purchases.");
-    expect(container.textContent).not.toContain("Create Purchase Request");
+    await waitForCondition(() => container.textContent?.includes("Owner Account") ?? false);
+
+    const productsNavButton = getButtonByText(container, "Products");
+    expect(productsNavButton).toBeTruthy();
+
+    await act(async () => {
+      productsNavButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flushUi();
+    });
+
+    const orderNowButton = getButtonByText(container, "Order Now");
+    expect(orderNowButton).toBeTruthy();
+
+    await act(async () => {
+      orderNowButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flushUi();
+    });
+
+    await waitForCondition(() => container.textContent?.includes("Only shop owners can create package and AI credit purchases.") ?? false);
 
     const invoiceCalls = vi
       .mocked(global.fetch)
       .mock.calls.filter(([url]) => normalizeFetchUrl(String(url)).startsWith("/api/account/ai/invoices?"));
     expect(invoiceCalls.length).toBe(0);
+
+    const purchaseCreateCalls = vi
+      .mocked(global.fetch)
+      .mock.calls.filter(([url]) => normalizeFetchUrl(String(url)) === "/api/account/purchases");
+    expect(purchaseCreateCalls.length).toBe(0);
   });
 });

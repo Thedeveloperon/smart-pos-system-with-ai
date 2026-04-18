@@ -1050,7 +1050,7 @@ export async function fetchAccountCloudPurchases(take = 80) {
 }
 
 export async function createAccountCloudPurchase(payload: CreateAccountCloudPurchaseRequest) {
-  return request<CloudPurchaseRow>("/api/account/purchases", {
+  return request<CloudPurchaseActionResponse>("/api/account/purchases", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
