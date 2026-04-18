@@ -2,7 +2,6 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ChevronDown,
   CircleUserRound,
   Clock3,
   KeyRound,
@@ -433,10 +432,8 @@ export default function AccountPage() {
   const [commerceMessage, setCommerceMessage] = useState<string | null>(null);
   const [isLoadingCommerce, setIsLoadingCommerce] = useState(false);
 
-  const [selectedProductCode, setSelectedProductCode] = useState("");
-  const [purchaseQuantity, setPurchaseQuantity] = useState("1");
-  const [purchaseNote, setPurchaseNote] = useState("");
   const [isSubmittingPurchase, setIsSubmittingPurchase] = useState(false);
+  const [orderingProductCode, setOrderingProductCode] = useState<string | null>(null);
   const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
 
   const canPurchase = canManageCommerce(authSession?.role);
@@ -485,11 +482,6 @@ export default function AccountPage() {
 
     return purchaseRows;
   }, [purchaseFilter, purchaseRows]);
-
-  const selectedProduct = useMemo(
-    () => catalogProducts.find((product) => product.product_code === selectedProductCode) || null,
-    [catalogProducts, selectedProductCode],
-  );
 
   const ownerDashboard = (
     <div className="space-y-6">
@@ -662,14 +654,13 @@ export default function AccountPage() {
                   type="button"
                   variant="hero"
                   className="w-full justify-center"
+                  disabled={isSubmittingPurchase}
                   onClick={() => {
-                    setSelectedProductCode(product.product_code);
-                    setActiveSection("purchases");
-                    setCommerceMessage(`${product.product_name} added to cart.`);
+                    void handleOrderNow(product);
                   }}
                 >
                   <ShoppingCart className="mr-2 h-4 w-4" />
-                  Add to Cart
+                  {isSubmittingPurchase && orderingProductCode === product.product_code ? "Ordering..." : "Order Now"}
                 </Button>
               </div>
             </SectionCard>
@@ -1039,11 +1030,7 @@ export default function AccountPage() {
     const [productsResult, purchasesResult, invoicesResult, walletResult, ledgerResult, paymentsResult, licensePortalResult] = settled;
 
     if (productsResult.status === "fulfilled") {
-      const productItems = productsResult.value.items || [];
-      setProducts(productItems);
-      if (productItems.length > 0 && !selectedProductCode) {
-        setSelectedProductCode(productItems[0].product_code);
-      }
+      setProducts(productsResult.value.items || []);
     } else {
       setCommerceError(productsResult.reason instanceof Error ? productsResult.reason.message : "Unable to load products.");
     }
@@ -1073,7 +1060,7 @@ export default function AccountPage() {
     }
 
     setIsLoadingCommerce(false);
-  }, [authSession, canPurchase, selectedProductCode]);
+  }, [authSession, canPurchase]);
 
   useEffect(() => {
     void loadAccountSession();
@@ -1182,18 +1169,18 @@ export default function AccountPage() {
     setCommerceMessage("Commerce data refreshed.");
   };
 
-  const handleCreatePurchase = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!canPurchase || !selectedProductCode || isSubmittingPurchase) {
+  const handleOrderNow = async (product: CloudProductRow) => {
+    if (!canPurchase) {
+      setCommerceError(OwnerOnlyMessage);
       return;
     }
 
-    const parsedQuantity = Number(purchaseQuantity);
-    const normalizedQuantity = Number.isFinite(parsedQuantity)
-      ? Math.max(1, Math.min(1000, Math.trunc(parsedQuantity)))
-      : 1;
+    if (isSubmittingPurchase) {
+      return;
+    }
 
     setIsSubmittingPurchase(true);
+    setOrderingProductCode(product.product_code);
     setCommerceError(null);
     setCommerceMessage(null);
 
@@ -1201,26 +1188,28 @@ export default function AccountPage() {
       await createAccountCloudPurchase({
         items: [
           {
-            product_code: selectedProductCode,
-            quantity: normalizedQuantity,
+            product_code: product.product_code,
+            quantity: 1,
           },
         ],
-        note: purchaseNote.trim() || undefined,
       });
 
-      setCommerceMessage("Purchase request submitted. Billing admin approval is required.");
-      setPurchaseNote("");
+      setActiveSection("purchases");
+      setCommerceMessage(
+        `${product.product_name} purchase created with pending status. It will be assigned after super admin approval.`,
+      );
       await loadCommerceData();
 
       trackMarketingEvent("marketing_account_cloud_purchase_created", {
         locale,
-        product_code: selectedProductCode,
-        quantity: normalizedQuantity,
+        product_code: product.product_code,
+        quantity: 1,
       });
     } catch (error) {
       setCommerceError(error instanceof Error ? error.message : "Unable to create purchase.");
     } finally {
       setIsSubmittingPurchase(false);
+      setOrderingProductCode(null);
     }
   };
 
@@ -1300,23 +1289,17 @@ export default function AccountPage() {
                     )}
                   </div>
 
-                <div className="px-4 py-4">
-                  <button
-                    type="button"
-                    onClick={() => setSidebarCollapsed((current) => !current)}
-                    className={[
-                      "flex w-full items-center justify-between rounded-xl border border-border/70 bg-background px-3 py-2 text-sm shadow-sm transition",
-                      sidebarCollapsed ? "justify-center" : "",
-                    ].join(" ")}
-                  >
-                    <span className={["flex items-center gap-2", sidebarCollapsed ? "sr-only" : ""].join(" ")}>
+                  <div className="px-4 py-4">
+                    <div
+                      className={[
+                        "flex w-full items-center rounded-xl border border-border/70 bg-background px-3 py-2 text-sm shadow-sm",
+                        sidebarCollapsed ? "justify-center" : "gap-2",
+                      ].join(" ")}
+                    >
                       <CircleUserRound className="h-4 w-4 text-muted-foreground" />
-                      Owner View
-                    </span>
-                    <ChevronDown className={["h-4 w-4 text-muted-foreground", sidebarCollapsed ? "sr-only" : ""].join(" ")} />
-                    {sidebarCollapsed && <CircleUserRound className="h-4 w-4 text-muted-foreground" />}
-                  </button>
-                </div>
+                      {!sidebarCollapsed && <span>Owner View</span>}
+                    </div>
+                  </div>
 
                 <div className="px-2">
                   {!sidebarCollapsed && (
@@ -1383,6 +1366,16 @@ export default function AccountPage() {
               </header>
 
               <div className="space-y-6 px-4 py-6 sm:px-6">
+                {commerceError && (
+                  <div className="rounded-2xl border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                    {commerceError}
+                  </div>
+                )}
+                {commerceMessage && (
+                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                    {commerceMessage}
+                  </div>
+                )}
                 {activeSection === "dashboard" ? (
                   ownerDashboard
                 ) : activeSection === "products" ? (
