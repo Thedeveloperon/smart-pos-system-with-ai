@@ -445,6 +445,7 @@ export default function AccountPage() {
     .map((part) => part[0])
     .join("")
     .toUpperCase();
+  const showMarketingChrome = !authSession;
 
   const catalogProducts = useMemo(
     () => (products.length > 0 ? products : ownerCatalogFallbackProducts),
@@ -1214,9 +1215,15 @@ export default function AccountPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-background">
-      <Navbar />
-      <PageShell className="flex-1 !min-h-0 pt-24 pb-4 md:pt-28 md:pb-6">
+    <div className={showMarketingChrome ? "flex min-h-screen flex-col bg-background" : "min-h-screen bg-background"}>
+      {showMarketingChrome && <Navbar />}
+      <PageShell
+        className={
+          showMarketingChrome
+            ? "flex-1 !min-h-0 pt-24 pb-4 md:pt-28 md:pb-6"
+            : "!min-h-screen pt-4 pb-4 md:pt-6 md:pb-6"
+        }
+      >
         <div className="space-y-6">
           {!authSession && (
             <div className="mx-auto w-full max-w-md rounded-[24px] border border-border/70 bg-background/80 p-6 shadow-sm">
@@ -1403,7 +1410,7 @@ export default function AccountPage() {
           )}
         </div>
       </PageShell>
-      <Footer />
+      {showMarketingChrome && <Footer />}
     </div>
   );
 }
