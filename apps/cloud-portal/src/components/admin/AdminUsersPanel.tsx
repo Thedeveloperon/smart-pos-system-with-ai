@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   createAdminShopUser,
@@ -13,6 +13,7 @@ import {
 } from "@/lib/adminApi";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmationDialog, type ConfirmationDialogConfig } from "@/components/ui/confirmation-dialog";
 import {
   Dialog,
   DialogContent,
@@ -85,6 +86,29 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
   const [resettingUser, setResettingUser] = useState<AdminShopUserRow | null>(null);
   const [resetForm, setResetForm] = useState<ResetPasswordForm>(initialResetForm);
   const [resetSubmitting, setResetSubmitting] = useState(false);
+  const [confirmationState, setConfirmationState] = useState<ConfirmationDialogConfig | null>(null);
+  const confirmationResolveRef = useRef<((value: boolean) => void) | null>(null);
+
+  const openConfirmationDialog = useCallback((config: ConfirmationDialogConfig) => {
+    return new Promise<boolean>((resolve) => {
+      confirmationResolveRef.current = resolve;
+      setConfirmationState(config);
+    });
+  }, []);
+
+  const closeConfirmationDialog = useCallback((confirmed: boolean) => {
+    confirmationResolveRef.current?.(confirmed);
+    confirmationResolveRef.current = null;
+    setConfirmationState(null);
+  }, []);
+
+  const cancelConfirmationDialog = useCallback(() => {
+    closeConfirmationDialog(false);
+  }, [closeConfirmationDialog]);
+
+  const acceptConfirmationDialog = useCallback(() => {
+    closeConfirmationDialog(true);
+  }, [closeConfirmationDialog]);
 
   const shopOptions = useMemo(
     () => [...shops].sort((a, b) => a.shop_code.localeCompare(b.shop_code)),
@@ -283,9 +307,12 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
 
   const handleDelete = useCallback(
     async (user: AdminShopUserRow) => {
-      const confirmed = window.confirm(
-        `Permanently delete '${user.username}' (${user.shop_name || user.shop_code})?\n\nThis cannot be undone.`,
-      );
+      const confirmed = await openConfirmationDialog({
+        title: "Delete user permanently?",
+        description: `Delete '${user.username}' (${user.shop_name || user.shop_code})? This cannot be undone.`,
+        confirmLabel: "Delete",
+        confirmVariant: "destructive",
+      });
       if (!confirmed) {
         return;
       }
@@ -308,7 +335,7 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
         toast.error(error instanceof Error ? error.message : "Failed to delete user.");
       }
     },
-    [loadUsers],
+    [loadUsers, openConfirmationDialog],
   );
 
   return (
@@ -588,6 +615,22 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmationDialog
+        open={Boolean(confirmationState)}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) {
+            cancelConfirmationDialog();
+          }
+        }}
+        onCancel={cancelConfirmationDialog}
+        onConfirm={acceptConfirmationDialog}
+        title={confirmationState?.title || "Confirm Action"}
+        description={confirmationState?.description}
+        cancelLabel={confirmationState?.cancelLabel}
+        confirmLabel={confirmationState?.confirmLabel}
+        confirmVariant={confirmationState?.confirmVariant}
+      />
     </div>
   );
 };

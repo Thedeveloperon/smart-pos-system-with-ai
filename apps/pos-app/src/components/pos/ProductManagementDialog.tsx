@@ -23,15 +23,7 @@ import {
 } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { ConfirmationDialog, type ConfirmationDialogConfig } from "@/components/ui/confirmation-dialog";
 import {
   Dialog,
   DialogContent,
@@ -164,6 +156,29 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabe
   const [barcodeValidationMessage, setBarcodeValidationMessage] = useState("");
   const [barcodeValidationTone, setBarcodeValidationTone] = useState<"neutral" | "success" | "error">("neutral");
   const [form, setForm] = useState<ProductFormState>(emptyFormState());
+  const [confirmationState, setConfirmationState] = useState<ConfirmationDialogConfig | null>(null);
+  const confirmationResolveRef = useRef<((value: boolean) => void) | null>(null);
+
+  const openConfirmationDialog = useCallback((config: ConfirmationDialogConfig) => {
+    return new Promise<boolean>((resolve) => {
+      confirmationResolveRef.current = resolve;
+      setConfirmationState(config);
+    });
+  }, []);
+
+  const closeConfirmationDialog = useCallback((confirmed: boolean) => {
+    confirmationResolveRef.current?.(confirmed);
+    confirmationResolveRef.current = null;
+    setConfirmationState(null);
+  }, []);
+
+  const cancelConfirmationDialog = useCallback(() => {
+    closeConfirmationDialog(false);
+  }, [closeConfirmationDialog]);
+
+  const acceptConfirmationDialog = useCallback(() => {
+    closeConfirmationDialog(true);
+  }, [closeConfirmationDialog]);
 
   useEffect(() => {
     if (!open) {
@@ -327,9 +342,12 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabe
       return;
     }
 
-    const confirmed = window.confirm(
-      `Permanently delete "${product.name}"? This cannot be undone.`
-    );
+    const confirmed = await openConfirmationDialog({
+      title: "Delete product permanently?",
+      description: `Delete "${product.name}" permanently? This cannot be undone.`,
+      confirmLabel: "Delete",
+      confirmVariant: "destructive",
+    });
     if (!confirmed) {
       return;
     }
@@ -359,7 +377,11 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabe
     }
 
     if (forceReplace && form.barcode.trim()) {
-      const confirmed = window.confirm("Regenerate barcode and replace the current value?");
+      const confirmed = await openConfirmationDialog({
+        title: "Replace barcode?",
+        description: "Regenerate barcode and replace the current value?",
+        confirmLabel: "Replace",
+      });
       if (!confirmed) {
         return;
       }
@@ -459,7 +481,8 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabe
     : null;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[96vh] w-[96vw] max-w-[1180px] flex-col overflow-hidden rounded-2xl border border-slate-300 bg-[#f7f8fa] p-0 shadow-2xl">
         <div className="border-b border-slate-300 bg-transparent px-5 py-4">
           <DialogHeader className="space-y-1 text-left sm:text-left">
@@ -874,7 +897,23 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabe
           </DialogFooter>
         </form>
       </DialogContent>
-    </Dialog>
+      </Dialog>
+      <ConfirmationDialog
+        open={Boolean(confirmationState)}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) {
+            cancelConfirmationDialog();
+          }
+        }}
+        onCancel={cancelConfirmationDialog}
+        onConfirm={acceptConfirmationDialog}
+        title={confirmationState?.title || "Confirm Action"}
+        description={confirmationState?.description}
+        cancelLabel={confirmationState?.cancelLabel}
+        confirmLabel={confirmationState?.confirmLabel}
+        confirmVariant={confirmationState?.confirmVariant}
+      />
+    </>
   );
 }
 
@@ -900,7 +939,30 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
   const [labelDialogProducts, setLabelDialogProducts] = useState<CatalogProduct[]>([]);
   const [bulkGeneratingBarcodes, setBulkGeneratingBarcodes] = useState(false);
   const [lastBulkBarcodeResult, setLastBulkBarcodeResult] = useState<BulkGenerateMissingProductBarcodesResponse | null>(null);
+  const [confirmationState, setConfirmationState] = useState<ConfirmationDialogConfig | null>(null);
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
+  const confirmationResolveRef = useRef<((value: boolean) => void) | null>(null);
+
+  const openConfirmationDialog = useCallback((config: ConfirmationDialogConfig) => {
+    return new Promise<boolean>((resolve) => {
+      confirmationResolveRef.current = resolve;
+      setConfirmationState(config);
+    });
+  }, []);
+
+  const closeConfirmationDialog = useCallback((confirmed: boolean) => {
+    confirmationResolveRef.current?.(confirmed);
+    confirmationResolveRef.current = null;
+    setConfirmationState(null);
+  }, []);
+
+  const cancelConfirmationDialog = useCallback(() => {
+    closeConfirmationDialog(false);
+  }, [closeConfirmationDialog]);
+
+  const acceptConfirmationDialog = useCallback(() => {
+    closeConfirmationDialog(true);
+  }, [closeConfirmationDialog]);
 
   const refreshProducts = useCallback(
     async (excludedIds: Set<string> = new Set()) => {
@@ -1061,9 +1123,11 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
         return;
       }
 
-      const shouldApply = window.confirm(
-        `Found ${dryRun.would_generate} product(s) without barcodes. Generate now?`
-      );
+      const shouldApply = await openConfirmationDialog({
+        title: "Generate missing barcodes?",
+        description: `Found ${dryRun.would_generate} product(s) without barcodes. Generate now?`,
+        confirmLabel: "Generate",
+      });
       if (!shouldApply) {
         setLastBulkBarcodeResult(dryRun);
         return;
@@ -1478,64 +1542,93 @@ export default function ProductManagementDialog({ open, onOpenChange, onChanged 
         />
       ) : null}
 
-      <AlertDialog
+      <ConfirmationDialog
         open={Boolean(deleteTarget)}
         onOpenChange={(openState) => {
           if (!openState && !deletingProductId) {
             setDeleteTarget(null);
           }
         }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete product?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {deleteTarget
-                ? `Delete "${deleteTarget.name}"? It will be hidden from active sales and can be reactivated later from Edit.`
-                : "This will hide the product from active sales and can be reactivated later from Edit."}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={Boolean(deletingProductId)}>Cancel</AlertDialogCancel>
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={handleConfirmDelete}
-              disabled={Boolean(deletingProductId)}
-            >
-              {deletingProductId ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-              Delete
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        onCancel={() => {
+          if (!deletingProductId) {
+            setDeleteTarget(null);
+          }
+        }}
+        onConfirm={() => {
+          void handleConfirmDelete();
+        }}
+        title="Delete product?"
+        description={deleteTarget
+          ? `Delete "${deleteTarget.name}"? It will be hidden from active sales and can be reactivated later from Edit.`
+          : "This will hide the product from active sales and can be reactivated later from Edit."}
+        confirmLabel="Delete"
+        confirmVariant="destructive"
+        confirmDisabled={Boolean(deletingProductId)}
+        cancelDisabled={Boolean(deletingProductId)}
+        confirmContent={deletingProductId ? (
+          <>
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Delete
+          </>
+        ) : (
+          <>
+            <Trash2 className="h-4 w-4" />
+            Delete
+          </>
+        )}
+      />
 
-      <AlertDialog
+      <ConfirmationDialog
         open={bulkDeleteOpen}
         onOpenChange={(openState) => {
           if (!openState && !bulkDeleting) {
             setBulkDeleteOpen(false);
           }
         }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete selected products?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {selectedProducts.length > 0
-                ? `Delete ${selectedProducts.length} selected product${selectedProducts.length === 1 ? "" : "s"} from the catalog? They will be hidden from active sales and can be reactivated later from Edit.`
-                : "This will hide the selected products from active sales and can be reactivated later from Edit."}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={bulkDeleting}>Cancel</AlertDialogCancel>
-            <Button type="button" variant="destructive" onClick={handleConfirmBulkDelete} disabled={bulkDeleting}>
-              {bulkDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-              Confirm Delete
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        onCancel={() => {
+          if (!bulkDeleting) {
+            setBulkDeleteOpen(false);
+          }
+        }}
+        onConfirm={() => {
+          void handleConfirmBulkDelete();
+        }}
+        title="Delete selected products?"
+        description={selectedProducts.length > 0
+          ? `Delete ${selectedProducts.length} selected product${selectedProducts.length === 1 ? "" : "s"} from the catalog? They will be hidden from active sales and can be reactivated later from Edit.`
+          : "This will hide the selected products from active sales and can be reactivated later from Edit."}
+        confirmLabel="Confirm Delete"
+        confirmVariant="destructive"
+        confirmDisabled={bulkDeleting}
+        cancelDisabled={bulkDeleting}
+        confirmContent={bulkDeleting ? (
+          <>
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Confirm Delete
+          </>
+        ) : (
+          <>
+            <Trash2 className="h-4 w-4" />
+            Confirm Delete
+          </>
+        )}
+      />
+
+      <ConfirmationDialog
+        open={Boolean(confirmationState)}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) {
+            cancelConfirmationDialog();
+          }
+        }}
+        onCancel={cancelConfirmationDialog}
+        onConfirm={acceptConfirmationDialog}
+        title={confirmationState?.title || "Confirm Action"}
+        description={confirmationState?.description}
+        cancelLabel={confirmationState?.cancelLabel}
+        confirmLabel={confirmationState?.confirmLabel}
+        confirmVariant={confirmationState?.confirmVariant}
+      />
     </>
   );
 }

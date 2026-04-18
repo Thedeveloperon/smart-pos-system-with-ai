@@ -59,15 +59,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+  ConfirmationDialog,
+  type ConfirmationDialogConfig,
+} from "@/components/ui/confirmation-dialog";
 import {
   Dialog,
   DialogContent,
@@ -139,14 +133,7 @@ type PromptDialogState = PromptDialogConfig & {
   error: string | null;
 };
 
-type ConfirmDialogConfig = {
-  title: string;
-  description?: string;
-  confirmLabel?: string;
-  cancelLabel?: string;
-};
-
-type ConfirmDialogState = ConfirmDialogConfig;
+type ConfirmDialogState = ConfirmationDialogConfig;
 
 type ShareDialogState = {
   title: string;
@@ -481,7 +468,7 @@ const ManagerReportsDrawer = ({
     setPromptState(null);
   }, [promptState]);
 
-  const openConfirmDialog = useCallback((config: ConfirmDialogConfig) => {
+  const openConfirmDialog = useCallback((config: ConfirmationDialogConfig) => {
     return new Promise<boolean>((resolve) => {
       confirmResolveRef.current = resolve;
       setConfirmState(config);
@@ -3926,31 +3913,20 @@ const ManagerReportsDrawer = ({
       </DialogContent>
     </Dialog>
 
-    <AlertDialog
+    <ConfirmationDialog
       open={Boolean(confirmState)}
       onOpenChange={(nextOpen) => {
         if (!nextOpen) {
           cancelConfirmDialog();
         }
       }}
-    >
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{confirmState?.title || "Confirm Action"}</AlertDialogTitle>
-          {confirmState?.description && (
-            <AlertDialogDescription>{confirmState.description}</AlertDialogDescription>
-          )}
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel onClick={cancelConfirmDialog}>
-            {confirmState?.cancelLabel || "Cancel"}
-          </AlertDialogCancel>
-          <AlertDialogAction onClick={acceptConfirmDialog}>
-            {confirmState?.confirmLabel || "Confirm"}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+      onCancel={cancelConfirmDialog}
+      onConfirm={acceptConfirmDialog}
+      title={confirmState?.title || "Confirm Action"}
+      description={confirmState?.description}
+      cancelLabel={confirmState?.cancelLabel}
+      confirmLabel={confirmState?.confirmLabel}
+    />
 
     <Dialog
       open={Boolean(shareState)}
