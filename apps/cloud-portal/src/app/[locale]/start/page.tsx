@@ -1,8 +1,9 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { ArrowLeft, CheckCircle2 } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
+import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
 import { PageShell, SectionCard, StatusChip } from "@/components/portal/layout-primitives";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n/I18nProvider";
@@ -337,22 +338,17 @@ export default function StartPage() {
   };
 
   return (
-    <PageShell>
-      <div className="mx-auto w-full max-w-5xl space-y-6">
-        <Link
-          href={`/${locale}#pricing`}
-          className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ArrowLeft size={16} />
-          Back to Pricing
-        </Link>
+    <div className="flex min-h-screen flex-col bg-background">
+      <Navbar />
+      <PageShell className="flex-1 !min-h-0 pt-24 pb-4 md:pt-28 md:pb-6">
+        <div className="mx-auto w-full max-w-5xl space-y-6">
 
-        <SectionCard className="portal-hero space-y-2">
-          <p className="portal-kicker">Owner Onboarding</p>
-          <h1 className="text-2xl font-bold text-foreground md:text-3xl">Start SmartPOS</h1>
-          <p className="text-sm text-muted-foreground">
-            Create your shop owner account, then continue with trial or complete payment for paid plans.
-          </p>
+          <SectionCard className="portal-hero space-y-2">
+            <p className="portal-kicker">Owner Onboarding</p>
+            <h1 className="text-2xl font-bold text-foreground md:text-3xl">Start SmartPOS</h1>
+            <p className="text-sm text-muted-foreground">
+              Create your shop owner account, then continue with trial or complete payment for paid plans.
+            </p>
 
           {planCode !== "starter" && (
             <div className="mt-4 rounded-xl border border-info/35 bg-info/10 p-3 text-sm text-info">
@@ -551,22 +547,22 @@ export default function StartPage() {
           </form>
         </SectionCard>
 
-        {requestResult && (
-          <SectionCard>
-            <h2 className="text-xl font-semibold">Request Created</h2>
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="rounded-xl border border-border/70 bg-surface-muted p-3">
-                <p className="portal-kicker">Shop</p>
-                <p className="mt-1 text-sm font-semibold">{requestResult.shop_name}</p>
-                <p className="text-xs text-muted-foreground">{requestResult.shop_code}</p>
+          {requestResult && (
+            <SectionCard>
+              <h2 className="text-xl font-semibold">Request Created</h2>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="rounded-xl border border-border/70 bg-surface-muted p-3">
+                  <p className="portal-kicker">Shop</p>
+                  <p className="mt-1 text-sm font-semibold">{requestResult.shop_name}</p>
+                  <p className="text-xs text-muted-foreground">{requestResult.shop_code}</p>
+                </div>
+                <div className="rounded-xl border border-border/70 bg-surface-muted p-3">
+                  <p className="portal-kicker">Plan Mapping</p>
+                  <p className="mt-1 text-sm font-semibold">
+                    {requestResult.marketing_plan_code} {"->"} {requestResult.internal_plan_code}
+                  </p>
+                </div>
               </div>
-              <div className="rounded-xl border border-border/70 bg-surface-muted p-3">
-                <p className="portal-kicker">Plan Mapping</p>
-                <p className="mt-1 text-sm font-semibold">
-                  {requestResult.marketing_plan_code} {"->"} {requestResult.internal_plan_code}
-                </p>
-              </div>
-            </div>
 
               <div className="rounded-xl border border-border/70 bg-surface-muted p-4 space-y-1">
                 <p className="portal-kicker">Owner Account</p>
@@ -643,25 +639,27 @@ export default function StartPage() {
               </>
             )}
 
-          </SectionCard>
-        )}
+            </SectionCard>
+          )}
 
-        {submitResult && (
-          <section className="rounded-xl border border-success/35 bg-success/10 p-6 text-success">
-            <div className="flex items-start gap-3">
-              <CheckCircle2 className="mt-0.5" size={20} />
-              <div>
-                <p className="font-semibold">Payment Submitted</p>
-                <p className="text-sm mt-1">{submitResult.message}</p>
-                <p className="text-sm mt-2">Invoice: {submitResult.invoice_number}</p>
-                <p className="text-sm">Payment ID: {submitResult.payment_id}</p>
-                <p className="text-sm">Status: {submitResult.payment_status}</p>
+          {submitResult && (
+            <section className="rounded-xl border border-success/35 bg-success/10 p-6 text-success">
+              <div className="flex items-start gap-3">
+                <CheckCircle2 className="mt-0.5" size={20} />
+                <div>
+                  <p className="font-semibold">Payment Submitted</p>
+                  <p className="text-sm mt-1">{submitResult.message}</p>
+                  <p className="text-sm mt-2">Invoice: {submitResult.invoice_number}</p>
+                  <p className="text-sm">Payment ID: {submitResult.payment_id}</p>
+                  <p className="text-sm">Status: {submitResult.payment_status}</p>
+                </div>
               </div>
-            </div>
-          </section>
-        )}
+            </section>
+          )}
 
-      </div>
-    </PageShell>
+        </div>
+      </PageShell>
+      <Footer />
+    </div>
   );
 }

@@ -1,9 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import {
-  ArrowLeft,
   ChevronDown,
   CircleUserRound,
   Clock3,
@@ -15,11 +13,12 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   RefreshCw,
-  ShieldCheck,
   ShoppingBag,
   ShoppingCart,
   Settings2,
 } from "lucide-react";
+import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
 import { Button } from "@/components/ui/button";
 import { PageShell, SectionCard, StatusChip } from "@/components/portal/layout-primitives";
 import { useI18n } from "@/i18n/I18nProvider";
@@ -413,7 +412,6 @@ export default function AccountPage() {
   const [authSession, setAuthSession] = useState<AccountSessionResponse | null>(null);
   const [authUsername, setAuthUsername] = useState("");
   const [authPassword, setAuthPassword] = useState("");
-  const [authMfaCode, setAuthMfaCode] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [isHydratingSession, setIsHydratingSession] = useState(true);
@@ -1108,7 +1106,6 @@ export default function AccountPage() {
         body: JSON.stringify({
           username: authUsername,
           password: authPassword,
-          mfa_code: authMfaCode || undefined,
         }),
       });
 
@@ -1120,7 +1117,6 @@ export default function AccountPage() {
       const session = requireObjectPayload<AccountSessionResponse>(payload, "Login response is invalid.");
       setAuthSession(session);
       setAuthPassword("");
-      setAuthMfaCode("");
       setAuthMessage("Signed in successfully.");
 
       trackMarketingEvent("marketing_account_signin_success", {
@@ -1229,156 +1225,80 @@ export default function AccountPage() {
   };
 
   return (
-    <PageShell>
-      <div className="space-y-6">
-        <div>
-          <Link href={`/${locale}`} className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
-            <ArrowLeft size={16} />
-            Back to Home
-          </Link>
-        </div>
-
-        {!authSession && (
-            <div className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
-              <div className="flex flex-col justify-between rounded-[24px] border border-border/70 bg-surface-muted/60 p-6">
-                <div className="space-y-4">
-                  <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm">
-                    <ShoppingBag className="h-7 w-7" />
-                  </div>
-
-                  <div className="space-y-2">
-                    <p className="portal-kicker">Cloud Commerce Account</p>
-                    <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">My Account</h1>
-                    <p className="max-w-xl text-sm text-muted-foreground sm:text-base">
-                      Sign in with your cloud owner account to purchase POS plans and AI credits.
-                    </p>
-                  </div>
-
-                  <div className="rounded-2xl border border-border/70 bg-background/70 p-4 text-sm text-muted-foreground">
-                    <p className="font-medium text-foreground">What you can do here</p>
-                    <ul className="mt-2 space-y-1.5">
-                      <li>• Buy POS plans and AI credit packs</li>
-                      <li>• Review wallet balance and recent activity</li>
-                      <li>• Track purchase history and payment status</li>
-                    </ul>
-                  </div>
+    <div className="flex min-h-screen flex-col bg-background">
+      <Navbar />
+      <PageShell className="flex-1 !min-h-0 pt-24 pb-4 md:pt-28 md:pb-6">
+        <div className="space-y-6">
+          {!authSession && (
+            <div className="mx-auto w-full max-w-md rounded-[24px] border border-border/70 bg-background/80 p-6 shadow-sm">
+              <div className="space-y-6">
+                <div className="space-y-2">
+                  <p className="portal-kicker">Cloud Commerce Account</p>
+                  <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">My Account</h1>
                 </div>
 
-                <div className="mt-6 grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-2xl border border-border/70 bg-background/60 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Secure</p>
-                    <p className="mt-2 text-sm font-medium">Session-based sign-in</p>
-                  </div>
-                  <div className="rounded-2xl border border-border/70 bg-background/60 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Linked</p>
-                    <p className="mt-2 text-sm font-medium">Cloud owner account</p>
-                  </div>
-                  <div className="rounded-2xl border border-border/70 bg-background/60 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Fast</p>
-                    <p className="mt-2 text-sm font-medium">Wallet and billing access</p>
-                  </div>
-                </div>
-              </div>
+                {isHydratingSession ? (
+                  <p className="text-sm text-muted-foreground">Checking your session...</p>
+                ) : (
+                  <form className="space-y-4" onSubmit={handleLogin}>
+                    <label className="space-y-1 block">
+                      <span className="portal-kicker">Username</span>
+                      <input
+                        className="field-shell"
+                        value={authUsername}
+                        onChange={(event) => setAuthUsername(event.target.value)}
+                        autoComplete="username"
+                        required
+                      />
+                    </label>
 
-              <div className="rounded-[24px] border border-border/70 bg-background/80 p-6 shadow-sm">
-                <div className="space-y-6">
-                  <div className="flex items-start gap-3">
-                    <div className="rounded-2xl bg-primary/10 p-3 text-primary">
-                      <ShieldCheck className="h-6 w-6" />
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground">Sign In</p>
-                      <p className="text-sm text-muted-foreground">
-                        Use your cloud owner account to access POS plans and AI credits.
-                      </p>
-                    </div>
-                  </div>
+                    <label className="space-y-1 block">
+                      <span className="portal-kicker">Password</span>
+                      <input
+                        className="field-shell"
+                        type="password"
+                        value={authPassword}
+                        onChange={(event) => setAuthPassword(event.target.value)}
+                        autoComplete="current-password"
+                        required
+                      />
+                    </label>
 
-                  {isHydratingSession ? (
-                    <p className="text-sm text-muted-foreground">Checking your session...</p>
-                  ) : (
-                    <form className="space-y-4" onSubmit={handleLogin}>
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        <label className="space-y-1 block">
-                          <span className="portal-kicker">Username</span>
-                          <input
-                            className="field-shell"
-                            value={authUsername}
-                            onChange={(event) => setAuthUsername(event.target.value)}
-                            autoComplete="username"
-                            required
-                          />
-                        </label>
-
-                        <label className="space-y-1 block">
-                          <span className="portal-kicker">Password</span>
-                          <input
-                            className="field-shell"
-                            type="password"
-                            value={authPassword}
-                            onChange={(event) => setAuthPassword(event.target.value)}
-                            autoComplete="current-password"
-                            required
-                          />
-                        </label>
+                    {authError && (
+                      <div className="rounded-2xl border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                        {authError}
                       </div>
+                    )}
 
-                      <label className="space-y-1 block">
-                        <span className="portal-kicker">MFA Code (Optional)</span>
-                        <input
-                          className="field-shell"
-                          value={authMfaCode}
-                          onChange={(event) => setAuthMfaCode(event.target.value)}
-                          placeholder="123456"
-                        />
-                      </label>
-
-                      {authError && (
-                        <div className="rounded-2xl border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                          {authError}
-                        </div>
-                      )}
-
-                      <Button type="submit" variant="hero" className="w-full" disabled={isLoggingIn}>
-                        {isLoggingIn ? "Signing In..." : "Sign In"}
-                      </Button>
-                    </form>
-                  )}
-
-                  <div className="rounded-2xl border border-border/70 bg-surface-muted/60 p-4 text-xs text-muted-foreground">
-                    <div className="flex items-start gap-2">
-                      <KeyRound className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                      <p>
-                        MFA is optional for the cloud account screen. If you are using super-admin credentials,
-                        enter the 6-digit code that your setup expects.
-                      </p>
-                    </div>
-                  </div>
-                </div>
+                    <Button type="submit" variant="hero" className="w-full" disabled={isLoggingIn}>
+                      {isLoggingIn ? "Signing In..." : "Sign In"}
+                    </Button>
+                  </form>
+                )}
               </div>
             </div>
           )}
 
-        {authSession && (
-          <div
-            className={[
-              "grid min-h-[calc(100vh-14rem)] overflow-hidden rounded-[24px] border border-border/70 bg-background",
-              sidebarCollapsed ? "grid-cols-[80px_minmax(0,1fr)]" : "grid-cols-[240px_minmax(0,1fr)]",
-            ].join(" ")}
-          >
-            <aside className="border-r border-border/70 bg-surface-muted/40">
-              <div className="flex h-full flex-col">
-                <div className={["flex items-center gap-3 border-b border-border/70 px-4 py-4", sidebarCollapsed ? "justify-center" : ""].join(" ")}>
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                    <ShoppingBag className="h-5 w-5" />
-                  </div>
-                  {!sidebarCollapsed && (
-                    <div>
-                      <p className="text-sm font-semibold">Cloud Portal</p>
-                      <p className="text-xs text-muted-foreground">v1.0</p>
+          {authSession && (
+            <div
+              className={[
+                "grid min-h-[calc(100vh-14rem)] overflow-hidden rounded-[24px] border border-border/70 bg-background",
+                sidebarCollapsed ? "grid-cols-[80px_minmax(0,1fr)]" : "grid-cols-[240px_minmax(0,1fr)]",
+              ].join(" ")}
+            >
+              <aside className="border-r border-border/70 bg-surface-muted/40">
+                <div className="flex h-full flex-col">
+                  <div className={["flex items-center gap-3 border-b border-border/70 px-4 py-4", sidebarCollapsed ? "justify-center" : ""].join(" ")}>
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                      <ShoppingBag className="h-5 w-5" />
                     </div>
-                  )}
-                </div>
+                    {!sidebarCollapsed && (
+                      <div>
+                        <p className="text-sm font-semibold">Cloud Portal</p>
+                        <p className="text-xs text-muted-foreground">v1.0</p>
+                      </div>
+                    )}
+                  </div>
 
                 <div className="px-4 py-4">
                   <button
@@ -1487,8 +1407,10 @@ export default function AccountPage() {
               </div>
             </main>
           </div>
-        )}
-      </div>
-    </PageShell>
+          )}
+        </div>
+      </PageShell>
+      <Footer />
+    </div>
   );
 }

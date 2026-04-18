@@ -9,7 +9,8 @@ type FooterColumn = {
 
 const Footer = () => {
   const { locale, t, get } = useI18n();
-  const columns = get<FooterColumn[]>("footer.columns");
+  const columnsValue = get<FooterColumn[]>("footer.columns");
+  const columns = Array.isArray(columnsValue) ? columnsValue : [];
 
   return (
     <footer className="bg-background border-t border-border py-12">
