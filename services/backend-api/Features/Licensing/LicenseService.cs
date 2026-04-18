@@ -3618,8 +3618,11 @@ public sealed class LicenseService(
             defaultReasonCode: "manual_shop_deactivate");
         var shop = await ResolveExistingShopByIdAsync(shopId, cancellationToken);
         var dependencySnapshot = await BuildShopDeactivationDependencySnapshotAsync(shop.Id, cancellationToken);
+        var adminScope = ResolveCurrentAdminScope();
+        var canBypassDependencyGuard = CanBypassAdminShopDependencyGuard(adminScope);
+        var dependencyOverrideApplied = canBypassDependencyGuard && dependencySnapshot.HasBlockingDependencies;
 
-        if (dependencySnapshot.HasBlockingDependencies)
+        if (dependencySnapshot.HasBlockingDependencies && !canBypassDependencyGuard)
         {
             throw new LicenseException(
                 LicenseErrorCodes.InvalidAdminRequest,
@@ -3669,6 +3672,8 @@ public sealed class LicenseService(
                 pending_manual_payments = dependencySnapshot.PendingManualPayments,
                 pending_ai_orders = dependencySnapshot.PendingAiOrders,
                 pending_ai_payments = dependencySnapshot.PendingAiPayments,
+                dependency_override_applied = dependencyOverrideApplied,
+                dependency_override_scope = dependencyOverrideApplied ? adminScope : null,
                 deactivated_users = deactivatedUsers,
                 revoked_sessions = revokedSessions,
                 reason_code = overrideContext.ReasonCode,
@@ -3695,6 +3700,8 @@ public sealed class LicenseService(
                 pending_manual_payments = dependencySnapshot.PendingManualPayments,
                 pending_ai_orders = dependencySnapshot.PendingAiOrders,
                 pending_ai_payments = dependencySnapshot.PendingAiPayments,
+                dependency_override_applied = dependencyOverrideApplied,
+                dependency_override_scope = dependencyOverrideApplied ? adminScope : null,
                 deactivated_users = deactivatedUsers,
                 revoked_sessions = revokedSessions,
                 reason_code = overrideContext.ReasonCode,
@@ -3801,7 +3808,10 @@ public sealed class LicenseService(
         }
 
         var dependencySnapshot = await BuildShopDeactivationDependencySnapshotAsync(shop.Id, cancellationToken);
-        if (dependencySnapshot.HasBlockingDependencies)
+        var adminScope = ResolveCurrentAdminScope();
+        var canBypassDependencyGuard = CanBypassAdminShopDependencyGuard(adminScope);
+        var dependencyOverrideApplied = canBypassDependencyGuard && dependencySnapshot.HasBlockingDependencies;
+        if (dependencySnapshot.HasBlockingDependencies && !canBypassDependencyGuard)
         {
             throw new LicenseException(
                 LicenseErrorCodes.InvalidAdminRequest,
@@ -3847,6 +3857,8 @@ public sealed class LicenseService(
                 pending_manual_payments = dependencySnapshot.PendingManualPayments,
                 pending_ai_orders = dependencySnapshot.PendingAiOrders,
                 pending_ai_payments = dependencySnapshot.PendingAiPayments,
+                dependency_override_applied = dependencyOverrideApplied,
+                dependency_override_scope = dependencyOverrideApplied ? adminScope : null,
                 reason_code = overrideContext.ReasonCode,
                 actor_note = overrideContext.ActorNote
             }),
@@ -3873,6 +3885,8 @@ public sealed class LicenseService(
                 pending_manual_payments = dependencySnapshot.PendingManualPayments,
                 pending_ai_orders = dependencySnapshot.PendingAiOrders,
                 pending_ai_payments = dependencySnapshot.PendingAiPayments,
+                dependency_override_applied = dependencyOverrideApplied,
+                dependency_override_scope = dependencyOverrideApplied ? adminScope : null,
                 reason_code = overrideContext.ReasonCode,
                 actor_note = overrideContext.ActorNote
             },
@@ -12459,6 +12473,12 @@ public sealed class LicenseService(
         }
 
         return scope.ToLowerInvariant();
+    }
+
+    private static bool CanBypassAdminShopDependencyGuard(string adminScope)
+    {
+        return string.Equals(adminScope, SmartPosRoles.SuperAdmin, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(adminScope, SmartPosRoles.BillingAdmin, StringComparison.OrdinalIgnoreCase);
     }
 
     private Guid ResolveCurrentAuthenticatedUserId()

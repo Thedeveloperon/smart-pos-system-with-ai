@@ -392,6 +392,86 @@ public sealed class AdminShopCrudTests(CustomWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task BillingAdmin_ShouldBypassDependencyGuard_ForOpenInvoiceDeactivateAndDelete()
+    {
+        var supportClient = appFactory.CreateClient();
+        await TestAuth.SignInAsSupportAdminAsync(supportClient);
+
+        var shopCode = $"billdep-{Guid.NewGuid():N}"[..16];
+        var ownerUsername = $"billdep-owner-{Guid.NewGuid():N}"[..20];
+        var created = await SendMutationAndReadAsync(
+            supportClient,
+            HttpMethod.Post,
+            "/api/admin/licensing/shops",
+            new
+            {
+                shop_code = shopCode,
+                shop_name = "Billing Dependency Override Shop",
+                owner_username = ownerUsername,
+                owner_password = "OwnerPass123!",
+                owner_full_name = "Billing Dependency Owner",
+                actor = "support_admin",
+                reason_code = "manual_shop_create",
+                actor_note = "seed shop for dependency override"
+            });
+
+        var shopId = Guid.Parse(TestJson.GetString(created["shop"]!, "shop_id"));
+
+        await using (var scope = appFactory.Services.CreateAsyncScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+            var shop = await dbContext.Shops.FirstAsync(x => x.Id == shopId);
+            dbContext.ManualBillingInvoices.Add(new ManualBillingInvoice
+            {
+                ShopId = shopId,
+                InvoiceNumber = $"INV-{Guid.NewGuid():N}"[..16],
+                AmountDue = 2500m,
+                AmountPaid = 0m,
+                Currency = "LKR",
+                Status = ManualBillingInvoiceStatus.Open,
+                DueAtUtc = DateTimeOffset.UtcNow.AddDays(7),
+                CreatedBy = "integration-tests",
+                Shop = shop
+            });
+            await dbContext.SaveChangesAsync();
+        }
+
+        var billingClient = appFactory.CreateClient();
+        await TestAuth.SignInAsBillingAdminAsync(billingClient);
+
+        var deactivated = await SendMutationAndReadAsync(
+            billingClient,
+            HttpMethod.Delete,
+            $"/api/admin/licensing/shops/{Uri.EscapeDataString(shopId.ToString())}",
+            new
+            {
+                actor = "billing_admin",
+                reason_code = "manual_shop_deactivate",
+                actor_note = "billing admin dependency override deactivation"
+            });
+        Assert.Equal("deactivate", TestJson.GetString(deactivated, "action"));
+        Assert.False(deactivated["shop"]?["is_active"]?.GetValue<bool>() ?? true);
+
+        var deleted = await SendMutationAndReadAsync(
+            billingClient,
+            HttpMethod.Delete,
+            $"/api/admin/licensing/shops/{Uri.EscapeDataString(shopId.ToString())}/hard-delete",
+            new
+            {
+                actor = "billing_admin",
+                reason_code = "manual_shop_delete",
+                actor_note = "billing admin dependency override delete"
+            });
+        Assert.Equal("delete", TestJson.GetString(deleted, "action"));
+        Assert.Equal(shopCode, TestJson.GetString(deleted["shop"]!, "shop_code"));
+
+        await using var verifyScope = appFactory.Services.CreateAsyncScope();
+        var verifyDbContext = verifyScope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+        Assert.False(await verifyDbContext.Shops.AnyAsync(x => x.Id == shopId));
+        Assert.False(await verifyDbContext.ManualBillingInvoices.AnyAsync(x => x.ShopId == shopId));
+    }
+
+    [Fact]
     public async Task ShopHardDelete_ShouldRequireInactiveShop()
     {
         await TestAuth.SignInAsSupportAdminAsync(adminClient);
