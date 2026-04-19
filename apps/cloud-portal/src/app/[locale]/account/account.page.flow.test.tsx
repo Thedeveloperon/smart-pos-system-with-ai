@@ -566,6 +566,21 @@ describe("Account page credentials-only commerce flow", () => {
       await flushUi();
     });
 
+    await waitForCondition(() => Boolean(getButtonByText(document.body, "Place Order")));
+
+    const purchaseCreateCallsBeforeConfirm = vi
+      .mocked(global.fetch)
+      .mock.calls.filter(([url]) => normalizeFetchUrl(String(url)) === "/api/account/purchases");
+    expect(purchaseCreateCallsBeforeConfirm.length).toBe(0);
+
+    const placeOrderButton = getButtonByText(document.body, "Place Order");
+    expect(placeOrderButton).toBeTruthy();
+
+    await act(async () => {
+      placeOrderButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flushUi();
+    });
+
     await waitForCondition(() =>
       vi
         .mocked(global.fetch)
