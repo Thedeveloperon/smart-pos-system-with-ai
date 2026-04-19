@@ -695,6 +695,7 @@ if (app.Environment.IsDevelopment())
 using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+    var authSecurityOptions = scope.ServiceProvider.GetRequiredService<IOptions<AuthSecurityOptions>>().Value;
     dbContext.Database.EnsureCreated();
     await DbSchemaUpdater.EnsureProductImageSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureProductBarcodeSchemaAsync(dbContext);
@@ -709,7 +710,9 @@ using (var scope = app.Services.CreateScope())
     await DbSchemaUpdater.EnsureAiInsightsSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureCloudApiReliabilitySchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureCloudAccountLinkSchemaAsync(dbContext);
-    await DbSeeder.SeedAsync(dbContext);
+    await DbSeeder.SeedAsync(
+        dbContext,
+        resetSeedUserPasswordsOnStartup: authSecurityOptions.ResetSeedUserPasswordsOnStartup);
 }
 
 if (staticFilesAvailable)
