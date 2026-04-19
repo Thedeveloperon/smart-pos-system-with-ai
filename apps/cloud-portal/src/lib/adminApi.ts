@@ -430,6 +430,7 @@ export type AdminShopsLicensingSnapshotResponse = {
     shop_id: string;
     shop_code: string;
     shop_name: string;
+    is_default_shop?: boolean;
     is_active: boolean;
     subscription_status: string;
     plan: string;

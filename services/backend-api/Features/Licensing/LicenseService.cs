@@ -3386,6 +3386,7 @@ public sealed class LicenseService(
                 ShopId = shop.Id,
                 ShopCode = shop.Code,
                 ShopName = shop.Name,
+                IsDefaultShop = IsConfiguredDefaultShop(shop),
                 IsActive = shop.IsActive,
                 SubscriptionStatus = (subscription?.Status ?? SubscriptionStatus.Trialing).ToString().ToLowerInvariant(),
                 Plan = subscription?.Plan ?? ResolvePlanCode(options.DefaultPlan),
@@ -3632,6 +3633,11 @@ public sealed class LicenseService(
             defaultActor: "support-admin",
             defaultReasonCode: "manual_shop_deactivate");
         var shop = await ResolveExistingShopByIdAsync(shopId, cancellationToken);
+        if (IsConfiguredDefaultShop(shop))
+        {
+            ThrowDefaultShopProtectionException("deactivated");
+        }
+
         var dependencySnapshot = await BuildShopDeactivationDependencySnapshotAsync(shop.Id, cancellationToken);
         var adminScope = ResolveCurrentAdminScope();
         var canBypassDependencyGuard = CanBypassAdminShopDependencyGuard(adminScope);
@@ -3831,6 +3837,10 @@ public sealed class LicenseService(
             defaultActor: "support-admin",
             defaultReasonCode: "manual_shop_delete");
         var shop = await ResolveExistingShopByIdAsync(shopId, cancellationToken);
+        if (IsConfiguredDefaultShop(shop))
+        {
+            ThrowDefaultShopProtectionException("hard-deleted");
+        }
 
         if (shop.IsActive)
         {
@@ -15198,6 +15208,20 @@ public sealed class LicenseService(
 
         var defaultCode = NormalizeOptionalValue(options.DefaultShopCode);
         return string.IsNullOrWhiteSpace(defaultCode) ? "default" : defaultCode;
+    }
+
+    private bool IsConfiguredDefaultShop(Shop shop)
+    {
+        var defaultShopCode = ResolveShopCode(options.DefaultShopCode);
+        return string.Equals(shop.Code, defaultShopCode, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void ThrowDefaultShopProtectionException(string action)
+    {
+        throw new LicenseException(
+            LicenseErrorCodes.DefaultShopProtected,
+            $"The default shop cannot be {action}.",
+            StatusCodes.Status409Conflict);
     }
 
     private string ResolveBranchCode(string? branchCode, string? fallbackBranchCode = null)
