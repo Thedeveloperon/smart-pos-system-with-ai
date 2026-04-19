@@ -44,8 +44,8 @@ const CashSessionBanner = ({ onEndShift, onManageDrawer }: CashSessionBannerProp
     .padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
 
   return (
-    <div className="bg-accent/60 border-b border-accent px-4 py-2 flex items-center justify-between text-sm">
-      <div className="flex items-center gap-3">
+    <div className="flex flex-wrap items-center gap-2 border-b border-accent bg-accent/60 px-3 py-2 text-sm sm:px-4">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
         <div className="flex items-center gap-1.5 text-success font-semibold text-sm">
           <Shield className="h-4 w-4" />
           <span className="text-sm">Session Active</span>
@@ -65,7 +65,7 @@ const CashSessionBanner = ({ onEndShift, onManageDrawer }: CashSessionBannerProp
           </span>
         </span>
       </div>
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ml-auto flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:flex-nowrap">
         <Button
           variant="outline"
           size="sm"

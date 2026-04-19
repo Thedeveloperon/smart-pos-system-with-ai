@@ -138,18 +138,6 @@ public sealed class ReceiptService(CheckoutService checkoutService)
     display: block;
     margin: 0 auto 8px;
   }
-  .logo-fallback {
-    width: 72px;
-    height: 72px;
-    border-radius: 999px;
-    margin: 0 auto 8px;
-    display: grid;
-    place-items: center;
-    background: linear-gradient(135deg, #111827, #374151);
-    color: #fff;
-    font-size: 26px;
-    font-weight: 700;
-  }
   .shop-name {
     font-size: 20px;
     font-weight: 700;
@@ -226,20 +214,6 @@ public sealed class ReceiptService(CheckoutService checkoutService)
     font-size: 13px;
     text-transform: uppercase;
   }
-  .actions {
-    margin-top: 14px;
-    display: flex;
-    justify-content: center;
-  }
-  .refund-button {
-    border: 1px solid #111827;
-    background: #111827;
-    color: #fff;
-    font-size: 12px;
-    border-radius: 999px;
-    padding: 10px 14px;
-    cursor: pointer;
-  }
   .footer {
     margin-top: 14px;
     text-align: center;
@@ -269,10 +243,6 @@ public sealed class ReceiptService(CheckoutService checkoutService)
         if (!string.IsNullOrWhiteSpace(logoUrl))
         {
             sb.AppendLine($"<img class=\"logo\" src=\"{Html(logoUrl)}\" alt=\"{Html(shopName)} logo\" />");
-        }
-        else
-        {
-            sb.AppendLine($"<div class=\"logo-fallback\">{Html(GetShopInitial(shopName))}</div>");
         }
 
         sb.AppendLine($"<div class=\"shop-name\">{Html(shopName)}</div>");
@@ -333,11 +303,6 @@ public sealed class ReceiptService(CheckoutService checkoutService)
             sb.AppendLine($"<div class=\"payment-row\"><span>{Html(payment.Method.ToUpperInvariant())}</span><span>{payment.NetAmount:0.00}</span></div>");
         }
         sb.AppendLine($"<div class=\"payment-row\"><span>BALANCE</span><span class=\"balance-negative\">{sale.GrandTotal - sale.PaidTotal:0.00}</span></div>");
-        sb.AppendLine("</div>");
-
-        sb.AppendLine("<div class=\"actions\">");
-        sb.AppendLine(
-            $"<button type=\"button\" class=\"refund-button\" onclick=\"window.opener && window.opener.postMessage({{ type: 'smartpos-open-refund', saleId: '{Html(sale.SaleId.ToString())}' }}, '*'); this.textContent='Opened in POS';\">Refund in POS</button>");
         sb.AppendLine("</div>");
 
         sb.AppendLine("<div class=\"rule\"></div>");
@@ -428,17 +393,6 @@ public sealed class ReceiptService(CheckoutService checkoutService)
         return string.IsNullOrWhiteSpace(shopProfile?.ShopName)
             ? "SmartPOS Lanka"
             : shopProfile.ShopName.Trim();
-    }
-
-    private static string GetShopInitial(string shopName)
-    {
-        var parts = shopName
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Take(2)
-            .Select(part => part[0])
-            .ToArray();
-
-        return parts.Length == 0 ? "SP" : new string(parts).ToUpperInvariant();
     }
 
     private static string Html(string? value)

@@ -102,214 +102,218 @@ const HeaderBar = ({
   const allowCashier = (visible?: boolean) => !isCashier || visible !== false;
 
   return (
-    <header className="mx-2 mt-2 flex h-14 shrink-0 items-center justify-between gap-3 border border-border/60 bg-pos-header/95 px-4 text-pos-header-foreground backdrop-blur-sm">
-      <div className="flex items-center gap-2">
+    <header className="mx-2 mt-2 flex h-14 shrink-0 items-center justify-between gap-3 overflow-hidden border border-border/60 bg-pos-header/95 px-4 text-pos-header-foreground backdrop-blur-sm">
+      <div className="flex shrink-0 items-center gap-2">
         <img src="/logo.png" alt="SmartPOS Lanka logo" className="h-10 w-auto object-contain" />
       </div>
 
-      <div className="hidden xl:flex items-center gap-2">
-        {allowCashier(cashierToolbarVisibility?.heldBills) && (
-          <Button
-          variant="ghost"
-          size="sm"
-          onClick={onHeldBills}
-          className="text-pos-header-foreground hover:bg-pos-header-foreground/10 relative"
-        >
-          <PauseCircle className="h-4 w-4" />
-          <span className="hidden md:inline ml-1">Held</span>
-          {heldBillsCount > 0 && (
-            <Badge className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-[10px] bg-warning text-warning-foreground">
-              {heldBillsCount}
-            </Badge>
-          )}
-          </Button>
-        )}
-
-        {allowCashier(cashierToolbarVisibility?.newItem) && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onNewItem}
-            className="text-pos-header-foreground hover:bg-pos-header-foreground/10"
-          >
-            <PlusCircle className="h-4 w-4" />
-            <span className="hidden md:inline ml-1">New Item</span>
-          </Button>
-        )}
-
-        {onManageProducts && allowCashier(cashierToolbarVisibility?.manage) && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onManageProducts}
-            className="text-pos-header-foreground hover:bg-pos-header-foreground/10"
-          >
-            <PencilLine className="h-4 w-4" />
-            <span className="hidden md:inline ml-1">POS Manager</span>
-          </Button>
-        )}
-
-        {onReports && allowCashier(cashierToolbarVisibility?.reports) && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onReports}
-            className="text-pos-header-foreground hover:bg-pos-header-foreground/10"
-          >
-            <BarChart3 className="h-4 w-4" />
-            <span className="hidden md:inline ml-1">Reports</span>
-          </Button>
-        )}
-
-        {onAiInsights && allowCashier(cashierToolbarVisibility?.aiInsights) && (
-          <div className="flex flex-col items-center gap-0.5">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onAiInsights}
-              className="text-pos-header-foreground hover:bg-pos-header-foreground/10 relative"
-            >
-              <Sparkles className="h-4 w-4" />
-              <span className="hidden md:inline ml-1">AI Insights</span>
-              {aiCredits !== null && (
-                <Badge
-                  className={`absolute -top-1 -right-1 h-5 min-w-5 px-1.5 flex items-center justify-center text-[10px] text-white ${
-                    isAiCreditLow ? "bg-amber-500" : "bg-emerald-500"
-                  }`}
-                >
-                  {isAiCreditLow ? "!" : aiCredits > 999 ? "999+" : aiCredits.toFixed(0)}
-                </Badge>
-              )}
-            </Button>
-            {isAiCreditLow && cloudPortalUrl && (
-              <a
-                href={`${cloudPortalUrl}/en/account`}
-                target="_blank"
-                rel="noreferrer"
-                className="text-[10px] text-amber-400 hover:text-amber-300 leading-none"
-                onClick={(event) => event.stopPropagation()}
+      <div className="hidden min-w-0 flex-1 items-center justify-end gap-2 xl:flex">
+        <div className="flex min-w-0 flex-1 justify-end">
+          <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap py-1 pr-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {allowCashier(cashierToolbarVisibility?.heldBills) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onHeldBills}
+                className="relative text-pos-header-foreground hover:bg-pos-header-foreground/10"
               >
-                Top Up
-              </a>
+                <PauseCircle className="h-4 w-4" />
+                <span className="ml-1 hidden md:inline">Held</span>
+                {heldBillsCount > 0 && (
+                  <Badge className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center bg-warning p-0 text-[10px] text-warning-foreground">
+                    {heldBillsCount}
+                  </Badge>
+                )}
+              </Button>
+            )}
+
+            {allowCashier(cashierToolbarVisibility?.newItem) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onNewItem}
+                className="text-pos-header-foreground hover:bg-pos-header-foreground/10"
+              >
+                <PlusCircle className="h-4 w-4" />
+                <span className="ml-1 hidden md:inline">New Item</span>
+              </Button>
+            )}
+
+            {onManageProducts && allowCashier(cashierToolbarVisibility?.manage) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onManageProducts}
+                className="text-pos-header-foreground hover:bg-pos-header-foreground/10"
+              >
+                <PencilLine className="h-4 w-4" />
+                <span className="ml-1 hidden md:inline">POS Manager</span>
+              </Button>
+            )}
+
+            {onReports && allowCashier(cashierToolbarVisibility?.reports) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onReports}
+                className="text-pos-header-foreground hover:bg-pos-header-foreground/10"
+              >
+                <BarChart3 className="h-4 w-4" />
+                <span className="ml-1 hidden md:inline">Reports</span>
+              </Button>
+            )}
+
+            {onAiInsights && allowCashier(cashierToolbarVisibility?.aiInsights) && (
+              <div className="flex flex-col items-center gap-0.5">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={onAiInsights}
+                  className="relative text-pos-header-foreground hover:bg-pos-header-foreground/10"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  <span className="ml-1 hidden md:inline">AI Insights</span>
+                  {aiCredits !== null && (
+                    <Badge
+                      className={`absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center px-1.5 text-[10px] text-white ${
+                        isAiCreditLow ? "bg-amber-500" : "bg-emerald-500"
+                      }`}
+                    >
+                      {isAiCreditLow ? "!" : aiCredits > 999 ? "999+" : aiCredits.toFixed(0)}
+                    </Badge>
+                  )}
+                </Button>
+                {isAiCreditLow && cloudPortalUrl && (
+                  <a
+                    href={`${cloudPortalUrl}/en/account`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="leading-none text-[10px] text-amber-400 hover:text-amber-300"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    Top Up
+                  </a>
+                )}
+              </div>
+            )}
+
+            {onReminders && allowCashier(cashierToolbarVisibility?.reminders) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onReminders}
+                className="relative text-pos-header-foreground hover:bg-pos-header-foreground/10"
+              >
+                <Bell className="h-4 w-4" />
+                <span className="ml-1 hidden md:inline">Reminders</span>
+                {openReminderCount > 0 && (
+                  <Badge className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center bg-amber-500 px-1.5 text-[10px] text-white">
+                    {openReminderCount > 99 ? "99+" : openReminderCount}
+                  </Badge>
+                )}
+              </Button>
+            )}
+
+            {allowCashier(cashierToolbarVisibility?.todaySales) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onTodaySales}
+                className="relative text-pos-header-foreground hover:bg-pos-header-foreground/10"
+              >
+                <Clock className="h-4 w-4" />
+                <span className="ml-1 hidden md:inline">Today</span>
+                {todayIssueCount > 0 && (
+                  <Badge className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full border border-destructive/30 bg-destructive px-1.5 text-[10px] text-destructive-foreground shadow-sm">
+                    {todayIssueCount > 99 ? "99+" : todayIssueCount}
+                  </Badge>
+                )}
+              </Button>
+            )}
+
+            {onAuditLog && allowCashier(cashierToolbarVisibility?.auditTrail) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onAuditLog}
+                className="text-pos-header-foreground hover:bg-pos-header-foreground/10"
+              >
+                <FileText className="h-4 w-4" />
+                <span className="ml-1 hidden md:inline">Audit</span>
+              </Button>
+            )}
+
+            {hasActiveSession && onEndShift && allowCashier(cashierToolbarVisibility?.endShift) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onEndShift}
+                className="text-pos-header-foreground hover:bg-destructive/20 hover:text-destructive"
+              >
+                <Lock className="h-4 w-4" />
+                <span className="ml-1 hidden md:inline">End Shift</span>
+              </Button>
+            )}
+
+            {allowCashier(cashierToolbarVisibility?.importBill) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onImportSupplierBill}
+                className="text-pos-header-foreground hover:bg-pos-header-foreground/10"
+              >
+                <Upload className="h-4 w-4" />
+                <span className="ml-1 hidden md:inline">Import Bill</span>
+              </Button>
+            )}
+
+            {onShopSettings && allowCashier(cashierToolbarVisibility?.shopSettings) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onShopSettings}
+                className="text-pos-header-foreground hover:bg-pos-header-foreground/10"
+              >
+                <Settings2 className="h-4 w-4" />
+                <span className="ml-1 hidden md:inline">Shop</span>
+              </Button>
+            )}
+
+            {onMyAccountLicenses && allowCashier(cashierToolbarVisibility?.myLicenses) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onMyAccountLicenses}
+                className="text-pos-header-foreground hover:bg-pos-header-foreground/10"
+              >
+                <KeyRound className="h-4 w-4" />
+                <span className="ml-1 hidden md:inline">My Licenses</span>
+              </Button>
+            )}
+
+            {onSyncOffline && allowCashier(cashierToolbarVisibility?.sync) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onSyncOffline}
+                disabled={isOfflineSyncing}
+                className="relative text-pos-header-foreground hover:bg-pos-header-foreground/10"
+              >
+                {isOfflineSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudUpload className="h-4 w-4" />}
+                <span className="ml-1 hidden md:inline">Sync</span>
+                {offlinePendingCount > 0 && (
+                  <Badge className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center bg-warning px-1.5 text-[10px] text-warning-foreground">
+                    {offlinePendingCount > 99 ? "99+" : offlinePendingCount}
+                  </Badge>
+                )}
+              </Button>
             )}
           </div>
-        )}
+        </div>
 
-        {onReminders && allowCashier(cashierToolbarVisibility?.reminders) && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onReminders}
-            className="text-pos-header-foreground hover:bg-pos-header-foreground/10 relative"
-          >
-            <Bell className="h-4 w-4" />
-            <span className="hidden md:inline ml-1">Reminders</span>
-            {openReminderCount > 0 && (
-              <Badge className="absolute -top-1 -right-1 h-5 min-w-5 px-1.5 flex items-center justify-center text-[10px] bg-amber-500 text-white">
-                {openReminderCount > 99 ? "99+" : openReminderCount}
-              </Badge>
-            )}
-          </Button>
-        )}
+        <div className="h-6 w-px shrink-0 bg-pos-header-foreground/20" />
 
-        {allowCashier(cashierToolbarVisibility?.todaySales) && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onTodaySales}
-            className="text-pos-header-foreground hover:bg-pos-header-foreground/10 relative"
-          >
-            <Clock className="h-4 w-4" />
-            <span className="hidden md:inline ml-1">Today</span>
-            {todayIssueCount > 0 && (
-              <Badge className="absolute -top-1 -right-1 h-5 min-w-5 px-1.5 flex items-center justify-center rounded-full border border-destructive/30 bg-destructive text-[10px] text-destructive-foreground shadow-sm">
-                {todayIssueCount > 99 ? "99+" : todayIssueCount}
-              </Badge>
-            )}
-          </Button>
-        )}
-
-        {onAuditLog && allowCashier(cashierToolbarVisibility?.auditTrail) && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onAuditLog}
-            className="text-pos-header-foreground hover:bg-pos-header-foreground/10"
-          >
-            <FileText className="h-4 w-4" />
-            <span className="hidden md:inline ml-1">Audit</span>
-          </Button>
-        )}
-
-        {hasActiveSession && onEndShift && allowCashier(cashierToolbarVisibility?.endShift) && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onEndShift}
-            className="text-pos-header-foreground hover:bg-destructive/20 hover:text-destructive"
-          >
-            <Lock className="h-4 w-4" />
-            <span className="hidden md:inline ml-1">End Shift</span>
-          </Button>
-        )}
-
-        {allowCashier(cashierToolbarVisibility?.importBill) && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onImportSupplierBill}
-            className="text-pos-header-foreground hover:bg-pos-header-foreground/10"
-          >
-            <Upload className="h-4 w-4" />
-            <span className="hidden md:inline ml-1">Import Bill</span>
-          </Button>
-        )}
-
-        {onShopSettings && allowCashier(cashierToolbarVisibility?.shopSettings) && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onShopSettings}
-            className="text-pos-header-foreground hover:bg-pos-header-foreground/10"
-          >
-            <Settings2 className="h-4 w-4" />
-            <span className="hidden md:inline ml-1">Shop</span>
-          </Button>
-        )}
-
-        {onMyAccountLicenses && allowCashier(cashierToolbarVisibility?.myLicenses) && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onMyAccountLicenses}
-            className="text-pos-header-foreground hover:bg-pos-header-foreground/10"
-          >
-            <KeyRound className="h-4 w-4" />
-            <span className="hidden md:inline ml-1">My Licenses</span>
-          </Button>
-        )}
-
-        {onSyncOffline && allowCashier(cashierToolbarVisibility?.sync) && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onSyncOffline}
-            disabled={isOfflineSyncing}
-            className="text-pos-header-foreground hover:bg-pos-header-foreground/10 relative"
-          >
-            {isOfflineSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudUpload className="h-4 w-4" />}
-            <span className="hidden md:inline ml-1">Sync</span>
-            {offlinePendingCount > 0 && (
-              <Badge className="absolute -top-1 -right-1 h-5 min-w-5 px-1.5 flex items-center justify-center text-[10px] bg-warning text-warning-foreground">
-                {offlinePendingCount > 99 ? "99+" : offlinePendingCount}
-              </Badge>
-            )}
-          </Button>
-        )}
-
-        <div className="h-6 w-px bg-pos-header-foreground/20 mx-1 hidden sm:block" />
-
-        <div className="flex items-center gap-2 text-sm text-pos-header-foreground/80">
+        <div className="flex shrink-0 items-center gap-2 text-sm text-pos-header-foreground/80">
           <User className="h-4 w-4" />
           <span className="hidden lg:inline">{cashierName}</span>
         </div>
@@ -318,7 +322,7 @@ const HeaderBar = ({
           variant="ghost"
           size="icon-sm"
           onClick={onSignOut}
-          className="text-pos-header-foreground hover:bg-destructive/20 hover:text-destructive"
+          className="shrink-0 text-pos-header-foreground hover:bg-destructive/20 hover:text-destructive"
         >
           <LogOut className="h-4 w-4" />
         </Button>
