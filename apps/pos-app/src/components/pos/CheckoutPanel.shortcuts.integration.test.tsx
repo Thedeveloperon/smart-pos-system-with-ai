@@ -28,6 +28,22 @@ const sampleItems: CartItem[] = [
 ];
 
 describe("CheckoutPanel shortcut integration", () => {
+  it("keeps customer mobile hidden by default and reveals it on demand", () => {
+    render(
+      <CheckoutPanel
+        items={sampleItems}
+        onCompleteSale={vi.fn()}
+        onHoldBill={vi.fn()}
+        onCancelSale={vi.fn()}
+        showShortcutHints
+      />,
+    );
+
+    expect(screen.queryByPlaceholderText("Customer mobile (optional)")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add Customer Details" }));
+    expect(screen.getByPlaceholderText("Customer mobile (optional)")).toBeInTheDocument();
+  });
+
   it("blocks complete sale when cart is empty", () => {
     const panelRef = createRef<CheckoutPanelHandle>();
     const onCompleteSale = vi.fn();

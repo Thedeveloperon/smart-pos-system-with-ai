@@ -44,7 +44,9 @@ describe("BarcodeLabelPrintDialog runtime print output", () => {
     const html = buildPrintDocumentHtml([sampleProduct], 2, true, "thermal", "electron");
 
     expect(html).toContain("size: 58mm 40mm");
-    expect(html).toContain("Electron runtime detected");
+    expect(html).toContain("margin: 0");
+    expect(html).toContain("break-after: page");
+    expect(html).not.toContain("footer-note");
     expect(html).toContain("setTimeout(function () { window.print(); }, 80);");
     expect(html).toContain("4006381333931");
   });
@@ -54,7 +56,16 @@ describe("BarcodeLabelPrintDialog runtime print output", () => {
 
     expect(html).toContain("size: A4");
     expect(html).toContain("grid-template-columns: repeat(3, minmax(0, 1fr));");
-    expect(html).toContain("Use browser print options to select the connected label printer.");
+    expect(html).not.toContain("Use browser print options to select the connected label printer.");
     expect(html).toContain("window.onload = function () { window.print(); };");
+  });
+
+  it("builds compact thermal print document for 40mm x 30mm labels", () => {
+    const html = buildPrintDocumentHtml([sampleProduct], 1, true, "thermal-40x30", "chromium");
+
+    expect(html).toContain("size: 40mm 30mm");
+    expect(html).toContain("padding: 1.3mm 1.6mm 1.2mm");
+    expect(html).toContain("height: 9.6mm");
+    expect(html).toContain("font-size: 8px");
   });
 });
