@@ -584,6 +584,53 @@ public sealed class AdminShopCrudTests(CustomWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task DefaultShop_ShouldBeProtectedFromDeactivateAndDelete()
+    {
+        await TestAuth.SignInAsSupportAdminAsync(adminClient);
+
+        var shops = await TestJson.ReadObjectAsync(
+            await adminClient.GetAsync("/api/admin/licensing/shops?include_inactive=true&take=300"));
+        var defaultShop = shops["items"]?
+            .AsArray()
+            .FirstOrDefault(x => string.Equals(x?["shop_code"]?.GetValue<string>(), "default", StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(defaultShop);
+
+        var defaultShopId = TestJson.GetString(defaultShop!, "shop_id");
+
+        var deactivateResponse = await SendMutationAsync(
+            adminClient,
+            HttpMethod.Delete,
+            $"/api/admin/licensing/shops/{Uri.EscapeDataString(defaultShopId)}",
+            new
+            {
+                actor = "support_admin",
+                reason_code = "manual_shop_deactivate",
+                actor_note = "attempt default shop deactivation"
+            });
+        Assert.Equal(HttpStatusCode.Conflict, deactivateResponse.StatusCode);
+
+        var deactivateError = await deactivateResponse.Content.ReadFromJsonAsync<JsonObject>();
+        Assert.NotNull(deactivateError);
+        Assert.Equal("DEFAULT_SHOP_PROTECTED", TestJson.GetString(deactivateError!["error"]!, "code"));
+
+        var deleteResponse = await SendMutationAsync(
+            adminClient,
+            HttpMethod.Delete,
+            $"/api/admin/licensing/shops/{Uri.EscapeDataString(defaultShopId)}/hard-delete",
+            new
+            {
+                actor = "support_admin",
+                reason_code = "manual_shop_delete",
+                actor_note = "attempt default shop deletion"
+            });
+        Assert.Equal(HttpStatusCode.Conflict, deleteResponse.StatusCode);
+
+        var deleteError = await deleteResponse.Content.ReadFromJsonAsync<JsonObject>();
+        Assert.NotNull(deleteError);
+        Assert.Equal("DEFAULT_SHOP_PROTECTED", TestJson.GetString(deleteError!["error"]!, "code"));
+    }
+
+    [Fact]
     public async Task BillingAndLocalRoles_ShouldBeForbidden_FromShopCrud()
     {
         var billingClient = appFactory.CreateClient();
