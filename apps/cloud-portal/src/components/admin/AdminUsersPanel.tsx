@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   createAdminShopUser,
-  deleteAdminShopUser,
   deactivateAdminShopUser,
   fetchAdminShopUsers,
   reactivateAdminShopUser,
@@ -310,61 +309,6 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
     }
   }, [loadUsers, openConfirmationDialog, selectedUsers, setSelectionToFailedUserIds]);
 
-  const handleBulkDelete = useCallback(async () => {
-    if (selectedUsers.length === 0) {
-      toast.error("Select at least one user to delete.");
-      return;
-    }
-
-    const confirmed = await openConfirmationDialog({
-      title: "Delete selected users permanently?",
-      description: `Delete ${selectedUsers.length} selected user account(s)? This cannot be undone.`,
-      confirmLabel: "Delete",
-      confirmVariant: "destructive",
-    });
-    if (!confirmed) {
-      return;
-    }
-
-    const actorNote = window.prompt(`Actor note for permanently deleting ${selectedUsers.length} selected user(s)`);
-    if (!actorNote || !actorNote.trim()) {
-      return;
-    }
-
-    setBulkSubmitting(true);
-    const failedIds = new Set<string>();
-    let successCount = 0;
-    let failureCount = 0;
-
-    try {
-      for (const user of selectedUsers) {
-        try {
-          await deleteAdminShopUser(user.user_id, {
-            actor: "support-ui",
-            reason_code: "manual_shop_user_delete",
-            actor_note: actorNote.trim(),
-          });
-          successCount += 1;
-        } catch (error) {
-          console.error(error);
-          failedIds.add(user.user_id);
-          failureCount += 1;
-        }
-      }
-
-      if (successCount > 0) {
-        toast.success(`Deleted ${successCount} user(s).`);
-      }
-      if (failureCount > 0) {
-        toast.error(`${failureCount} user(s) failed to delete. Check console logs for details.`);
-      }
-      await loadUsers(true);
-      setSelectionToFailedUserIds(failedIds);
-    } finally {
-      setBulkSubmitting(false);
-    }
-  }, [loadUsers, openConfirmationDialog, selectedUsers, setSelectionToFailedUserIds]);
-
   const handleCreateUser = useCallback(async () => {
     if (
       !createForm.shopCode.trim() ||
@@ -522,39 +466,6 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
     [loadUsers],
   );
 
-  const handleDelete = useCallback(
-    async (user: AdminShopUserRow) => {
-      const confirmed = await openConfirmationDialog({
-        title: "Delete user permanently?",
-        description: `Delete '${user.username}' (${user.shop_name || user.shop_code})? This cannot be undone.`,
-        confirmLabel: "Delete",
-        confirmVariant: "destructive",
-      });
-      if (!confirmed) {
-        return;
-      }
-
-      const actorNote = window.prompt(`Actor note for permanently deleting '${user.username}'`);
-      if (!actorNote || !actorNote.trim()) {
-        return;
-      }
-
-      try {
-        await deleteAdminShopUser(user.user_id, {
-          actor: "support-ui",
-          reason_code: "manual_shop_user_delete",
-          actor_note: actorNote.trim(),
-        });
-        toast.success(`User '${user.username}' deleted.`);
-        await loadUsers(true);
-      } catch (error) {
-        console.error(error);
-        toast.error(error instanceof Error ? error.message : "Failed to delete user.");
-      }
-    },
-    [loadUsers, openConfirmationDialog],
-  );
-
   return (
     <div className="rounded-2xl border border-border bg-card shadow-sm">
       <div className="flex flex-col gap-3 border-b border-border px-4 py-3 md:flex-row md:items-end md:justify-between">
@@ -589,9 +500,6 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
               </Button>
               <Button variant="outline" size="sm" onClick={() => void handleBulkReactivate()} disabled={bulkSubmitting}>
                 Reactivate Selected
-              </Button>
-              <Button variant="destructive" size="sm" onClick={() => void handleBulkDelete()} disabled={bulkSubmitting}>
-                Delete Selected
               </Button>
               <Button variant="ghost" size="sm" onClick={() => setSelectedUserIds([])} disabled={bulkSubmitting}>
                 Clear Selection
@@ -720,14 +628,6 @@ const AdminUsersPanel = ({ shops }: AdminUsersPanelProps) => {
                           Reactivate
                         </Button>
                       )}
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => void handleDelete(user)}
-                        disabled={bulkSubmitting}
-                      >
-                        Delete
-                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>

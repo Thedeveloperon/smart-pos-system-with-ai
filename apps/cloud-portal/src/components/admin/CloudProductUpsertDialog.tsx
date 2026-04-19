@@ -20,6 +20,7 @@ type CatalogDraft = {
   product_type: string;
   description: string;
   price: string;
+  discount_percentage: string;
   currency: string;
   billing_mode: string;
   validity: string;
@@ -32,6 +33,7 @@ const defaultDraft: CatalogDraft = {
   product_type: "ai_credit",
   description: "",
   price: "",
+  discount_percentage: "0",
   currency: "USD",
   billing_mode: "one_time",
   validity: "",
@@ -42,6 +44,11 @@ function toRequestPayload(draft: CatalogDraft): CloudProductUpsertRequest {
   const price = Number(draft.price);
   if (!Number.isFinite(price) || price < 0) {
     throw new Error("Price must be a valid number.");
+  }
+
+  const discountPercentage = Number(draft.discount_percentage);
+  if (!Number.isFinite(discountPercentage) || discountPercentage < 0 || discountPercentage > 100) {
+    throw new Error("Discount percentage must be a number between 0 and 100.");
   }
 
   const quantity = Number(draft.default_quantity_or_credits);
@@ -80,6 +87,7 @@ function toRequestPayload(draft: CatalogDraft): CloudProductUpsertRequest {
     product_type: productType,
     description: draft.description.trim() || undefined,
     price,
+    discount_percentage: discountPercentage,
     currency,
     billing_mode: billingMode,
     validity: draft.validity.trim() || undefined,
@@ -118,6 +126,7 @@ const CloudProductUpsertDialog = ({
             product_type: product.product_type,
             description: product.description || "",
             price: String(product.price),
+            discount_percentage: String(product.discount_percentage ?? 0),
             currency: product.currency,
             billing_mode: product.billing_mode,
             validity: product.validity || "",
@@ -201,6 +210,20 @@ const CloudProductUpsertDialog = ({
               value={draft.price}
               onChange={(event) => setDraft((current) => ({ ...current, price: event.target.value }))}
               placeholder="0.00"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Discount percentage</label>
+            <Input
+              type="number"
+              min="0"
+              max="100"
+              step="0.01"
+              value={draft.discount_percentage}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, discount_percentage: event.target.value }))
+              }
+              placeholder="0"
             />
           </div>
           <div className="space-y-2">

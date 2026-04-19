@@ -2293,6 +2293,9 @@ public sealed class CloudProductUpsertRequest
     [JsonPropertyName("price")]
     public decimal Price { get; set; }
 
+    [JsonPropertyName("discount_percentage")]
+    public decimal? DiscountPercentage { get; set; }
+
     [JsonPropertyName("currency")]
     public string? Currency { get; set; }
 
@@ -2331,6 +2334,9 @@ public sealed class CloudProductRowResponse
 
     [JsonPropertyName("price")]
     public decimal Price { get; set; }
+
+    [JsonPropertyName("discount_percentage")]
+    public decimal DiscountPercentage { get; set; }
 
     [JsonPropertyName("currency")]
     public string Currency { get; set; } = "USD";

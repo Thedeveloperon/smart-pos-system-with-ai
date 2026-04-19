@@ -44,6 +44,16 @@ type EditShopForm = {
   actorNote: string;
 };
 
+type ReactivatePromptState = {
+  title: string;
+  description: string;
+  placeholder?: string;
+  confirmLabel: string;
+  cancelLabel: string;
+  value: string;
+  error: string | null;
+};
+
 const initialCreateForm: CreateShopForm = {
   shopCode: "",
   shopName: "",
@@ -157,8 +167,10 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
     actorNote: "",
   });
   const [editSubmitting, setEditSubmitting] = useState(false);
+  const [reactivatePrompt, setReactivatePrompt] = useState<ReactivatePromptState | null>(null);
   const [confirmationState, setConfirmationState] = useState<ConfirmationDialogConfig | null>(null);
   const confirmationResolveRef = useRef<((value: boolean) => void) | null>(null);
+  const reactivatePromptResolveRef = useRef<((value: string | null) => void) | null>(null);
   const selectAllCheckboxRef = useRef<HTMLInputElement | null>(null);
 
   const openConfirmationDialog = useCallback((config: ConfirmationDialogConfig) => {
@@ -181,6 +193,48 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
   const acceptConfirmationDialog = useCallback(() => {
     closeConfirmationDialog(true);
   }, [closeConfirmationDialog]);
+
+  const openReactivatePrompt = useCallback((config: Omit<ReactivatePromptState, "value" | "error">) => {
+    return new Promise<string | null>((resolve) => {
+      reactivatePromptResolveRef.current = resolve;
+      setReactivatePrompt({
+        ...config,
+        value: "",
+        error: null,
+      });
+    });
+  }, []);
+
+  const closeReactivatePrompt = useCallback((value: string | null) => {
+    reactivatePromptResolveRef.current?.(value);
+    reactivatePromptResolveRef.current = null;
+    setReactivatePrompt(null);
+  }, []);
+
+  const cancelReactivatePrompt = useCallback(() => {
+    closeReactivatePrompt(null);
+  }, [closeReactivatePrompt]);
+
+  const acceptReactivatePrompt = useCallback(() => {
+    if (!reactivatePrompt) {
+      return;
+    }
+
+    const actorNote = reactivatePrompt.value.trim();
+    if (!actorNote) {
+      setReactivatePrompt((current) =>
+        current
+          ? {
+              ...current,
+              error: "Actor note is required.",
+            }
+          : current,
+      );
+      return;
+    }
+
+    closeReactivatePrompt(actorNote);
+  }, [closeReactivatePrompt, reactivatePrompt]);
 
   useEffect(() => {
     setItems(shops);
@@ -330,17 +384,14 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
       return;
     }
 
-    const actorNote = window.prompt(`Actor note for reactivating ${candidates.length} selected shop(s)`);
-    if (!actorNote || !actorNote.trim()) {
-      return;
-    }
-
-    const confirmed = await openConfirmationDialog({
-      title: "Reactivate selected shops?",
-      description: `Reactivate ${candidates.length} selected shop(s)?`,
-      confirmLabel: "Reactivate",
+    const actorNote = await openReactivatePrompt({
+      title: "Reactivate selected shops",
+      description: `Enter an actor note for reactivating ${candidates.length} selected shop(s).`,
+      placeholder: "Reactivate pilot shops",
+      confirmLabel: "OK",
+      cancelLabel: "Cancel",
     });
-    if (!confirmed) {
+    if (!actorNote) {
       return;
     }
 
@@ -355,7 +406,7 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
           await reactivateAdminShop(shop.shop_id, {
             actor: "support-ui",
             reason_code: "manual_shop_reactivate",
-            actor_note: actorNote.trim(),
+            actor_note: actorNote,
           });
           successCount += 1;
         } catch (error) {
@@ -376,7 +427,7 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
     } finally {
       setBulkSubmitting(false);
     }
-  }, [openConfirmationDialog, refreshAll, selectedShops, setSelectionToFailedIds]);
+  }, [openReactivatePrompt, refreshAll, selectedShops, setSelectionToFailedIds]);
 
   const handleBulkDelete = useCallback(async () => {
     const activeSelections = selectedShops.filter((shop) => shop.is_active !== false);
@@ -536,8 +587,14 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
   }, [onShopsChanged, openConfirmationDialog]);
 
   const handleReactivate = useCallback(async (shop: AdminShopsLicensingSnapshotResponse["items"][number]) => {
-    const actorNote = window.prompt(`Actor note for reactivating '${shop.shop_code}'`);
-    if (!actorNote || !actorNote.trim()) {
+    const actorNote = await openReactivatePrompt({
+      title: `Reactivate '${shop.shop_code}'`,
+      description: "Enter an actor note for this reactivation.",
+      placeholder: "Reactivating shop access",
+      confirmLabel: "OK",
+      cancelLabel: "Cancel",
+    });
+    if (!actorNote) {
       return;
     }
 
@@ -545,7 +602,7 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
       await reactivateAdminShop(shop.shop_id, {
         actor: "support-ui",
         reason_code: "manual_shop_reactivate",
-        actor_note: actorNote.trim(),
+        actor_note: actorNote,
       });
       toast.success(`Shop '${shop.shop_code}' reactivated.`);
       await refreshAll(true);
@@ -553,7 +610,7 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
       console.error(error);
       toast.error(error instanceof Error ? error.message : "Failed to reactivate shop.");
     }
-  }, [refreshAll]);
+  }, [openReactivatePrompt, refreshAll]);
 
   const handleDelete = useCallback(async (shop: AdminShopsLicensingSnapshotResponse["items"][number]) => {
     if (shop.is_active !== false) {
@@ -837,6 +894,61 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
             <Button variant="outline" onClick={() => setEditingShop(null)} disabled={editSubmitting}>Cancel</Button>
             <Button onClick={() => void handleEdit()} disabled={editSubmitting}>
               {editSubmitting ? "Saving..." : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(reactivatePrompt)}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) {
+            cancelReactivatePrompt();
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{reactivatePrompt?.title || "Reactivate shop"}</DialogTitle>
+            {reactivatePrompt?.description ? (
+              <DialogDescription>{reactivatePrompt.description}</DialogDescription>
+            ) : null}
+          </DialogHeader>
+
+          <div className="space-y-2">
+            <Label htmlFor="reactivate-shop-actor-note">Actor note</Label>
+            <Input
+              id="reactivate-shop-actor-note"
+              value={reactivatePrompt?.value || ""}
+              placeholder={reactivatePrompt?.placeholder}
+              autoFocus
+              onChange={(event) => {
+                setReactivatePrompt((current) =>
+                  current
+                    ? {
+                        ...current,
+                        value: event.target.value,
+                        error: null,
+                      }
+                    : current,
+                );
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  acceptReactivatePrompt();
+                }
+              }}
+            />
+            {reactivatePrompt?.error ? <p className="text-sm text-destructive">{reactivatePrompt.error}</p> : null}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={cancelReactivatePrompt}>
+              {reactivatePrompt?.cancelLabel || "Cancel"}
+            </Button>
+            <Button onClick={acceptReactivatePrompt}>
+              {reactivatePrompt?.confirmLabel || "OK"}
             </Button>
           </DialogFooter>
         </DialogContent>

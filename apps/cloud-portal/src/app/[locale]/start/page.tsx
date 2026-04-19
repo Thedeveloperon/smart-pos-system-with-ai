@@ -126,7 +126,6 @@ export default function StartPage() {
   const [planCode, setPlanCode] = useState<PlanCode>("starter");
   const [shopName, setShopName] = useState("");
   const [shopAddress, setShopAddress] = useState("");
-  const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [contactPhone, setContactPhone] = useState("");
   const [notes, setNotes] = useState("");
@@ -135,6 +134,7 @@ export default function StartPage() {
   const [ownerFullName, setOwnerFullName] = useState("");
   const [ownerAddress, setOwnerAddress] = useState("");
   const [ownerEmail, setOwnerEmail] = useState("");
+  const [mirrorOwnerContactDetails, setMirrorOwnerContactDetails] = useState(false);
   const [ownerPhone, setOwnerPhone] = useState("");
   const [ownerPassword, setOwnerPassword] = useState("");
   const [ownerConfirmPassword, setOwnerConfirmPassword] = useState("");
@@ -171,6 +171,10 @@ export default function StartPage() {
   }, [locale]);
 
   const buildMarketingRequestPayload = () => {
+    if (!shopName.trim()) {
+      throw new Error("Shop name is required.");
+    }
+
     if (!shopAddress.trim()) {
       throw new Error("Shop address is required.");
     }
@@ -192,21 +196,25 @@ export default function StartPage() {
       throw new Error("Confirm password must match owner password.");
     }
 
-    if (!ownerAddress.trim()) {
+    if (!ownerFullName.trim()) {
+      throw new Error("Owner full name is required.");
+    }
+
+    if (!mirrorOwnerContactDetails && !ownerAddress.trim()) {
       throw new Error("Owner address is required.");
     }
 
-    if (!ownerEmail.trim()) {
+    if (!mirrorOwnerContactDetails && !ownerEmail.trim()) {
       throw new Error("Owner email is required.");
     }
 
     return {
-      shop_name: shopName,
+      shop_name: shopName.trim(),
       shop_address: shopAddress.trim(),
-      shop_contact_name: contactName,
+      shop_contact_name: ownerFullName.trim(),
       shop_contact_email: contactEmail.trim(),
       shop_contact_phone: contactPhone || undefined,
-      contact_name: contactName,
+      contact_name: ownerFullName.trim(),
       contact_email: contactEmail.trim(),
       contact_phone: contactPhone || undefined,
       plan_code: planCode,
@@ -215,9 +223,9 @@ export default function StartPage() {
       source: "cloud_registration_v1",
       notes: notes || undefined,
       owner_username: normalizedOwnerUsername,
-      owner_full_name: ownerFullName.trim() || contactName,
-      owner_address: ownerAddress.trim(),
-      owner_email: ownerEmail.trim(),
+      owner_full_name: ownerFullName.trim(),
+      owner_address: mirrorOwnerContactDetails ? shopAddress.trim() : ownerAddress.trim(),
+      owner_email: mirrorOwnerContactDetails ? contactEmail.trim() : ownerEmail.trim(),
       owner_phone: ownerPhone.trim() || undefined,
       owner_password: normalizedOwnerPassword,
       confirm_password: ownerConfirmPassword.trim(),
@@ -306,7 +314,7 @@ export default function StartPage() {
           amount: parsedAmount,
           currency: requestResult.currency,
           bank_reference: normalizedReference,
-          contact_name: contactName || undefined,
+          contact_name: ownerFullName.trim() || undefined,
           contact_email: contactEmail || undefined,
           contact_phone: contactPhone || undefined,
           notes: paymentNotes || undefined,
@@ -396,7 +404,9 @@ export default function StartPage() {
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <label className="space-y-1 md:col-span-2">
-                  <span className="portal-kicker">Shop Name</span>
+                  <span className="portal-kicker inline-flex items-center gap-1">
+                    Shop Name <span className="text-destructive">*</span>
+                  </span>
                   <input
                     className="field-shell"
                     value={shopName}
@@ -406,7 +416,9 @@ export default function StartPage() {
                   />
                 </label>
                 <label className="space-y-1 md:col-span-2">
-                  <span className="portal-kicker">Shop Address</span>
+                  <span className="portal-kicker inline-flex items-center gap-1">
+                    Shop Address <span className="text-destructive">*</span>
+                  </span>
                   <input
                     className="field-shell"
                     value={shopAddress}
@@ -416,17 +428,9 @@ export default function StartPage() {
                   />
                 </label>
                 <label className="space-y-1">
-                  <span className="portal-kicker">Shop Contact Name</span>
-                  <input
-                    className="field-shell"
-                    value={contactName}
-                    onChange={(event) => setContactName(event.target.value)}
-                    placeholder="Owner name"
-                    required
-                  />
-                </label>
-                <label className="space-y-1">
-                  <span className="portal-kicker">Shop Contact Email</span>
+                  <span className="portal-kicker inline-flex items-center gap-1">
+                    Shop Contact Email <span className="text-destructive">*</span>
+                  </span>
                   <input
                     type="email"
                     className="field-shell"
@@ -446,7 +450,9 @@ export default function StartPage() {
                   />
                 </label>
                 <label className="space-y-1">
-                  <span className="portal-kicker">Owner Full Name</span>
+                  <span className="portal-kicker inline-flex items-center gap-1">
+                    Owner Full Name <span className="text-destructive">*</span>
+                  </span>
                   <input
                     className="field-shell"
                     value={ownerFullName}
@@ -456,14 +462,17 @@ export default function StartPage() {
                   />
                 </label>
                 <label className="space-y-1">
-                  <span className="portal-kicker">Owner Email</span>
+                  <span className="portal-kicker inline-flex items-center gap-1">
+                    Owner Email {!mirrorOwnerContactDetails && <span className="text-destructive">*</span>}
+                  </span>
                   <input
                     type="email"
                     className="field-shell"
-                    value={ownerEmail}
+                    value={mirrorOwnerContactDetails ? contactEmail : ownerEmail}
                     onChange={(event) => setOwnerEmail(event.target.value)}
                     placeholder="owner.personal@shop.lk"
-                    required
+                    required={!mirrorOwnerContactDetails}
+                    disabled={mirrorOwnerContactDetails}
                   />
                 </label>
                 <label className="space-y-1">
@@ -476,14 +485,28 @@ export default function StartPage() {
                   />
                 </label>
                 <label className="space-y-1">
-                  <span className="portal-kicker">Owner Address</span>
+                  <span className="portal-kicker inline-flex items-center gap-1">
+                    Owner Address {!mirrorOwnerContactDetails && <span className="text-destructive">*</span>}
+                  </span>
                   <input
                     className="field-shell"
-                    value={ownerAddress}
+                    value={mirrorOwnerContactDetails ? shopAddress : ownerAddress}
                     onChange={(event) => setOwnerAddress(event.target.value)}
                     placeholder="Owner residence address"
-                    required
+                    required={!mirrorOwnerContactDetails}
+                    disabled={mirrorOwnerContactDetails}
                   />
+                </label>
+                <label className="space-y-1 md:col-span-2">
+                  <span className="portal-kicker">
+                    <input
+                      type="checkbox"
+                      className="mr-2 align-middle"
+                      checked={mirrorOwnerContactDetails}
+                      onChange={(event) => setMirrorOwnerContactDetails(event.target.checked)}
+                    />
+                    Use shop address and shop contact email for the owner
+                  </span>
                 </label>
                 <label className="space-y-1 md:col-span-2">
                   <span className="portal-kicker">Notes (optional)</span>
@@ -503,7 +526,9 @@ export default function StartPage() {
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <label className="space-y-1">
-                  <span className="portal-kicker">Owner Username</span>
+                  <span className="portal-kicker inline-flex items-center gap-1">
+                    Owner Username <span className="text-destructive">*</span>
+                  </span>
                   <input
                     className="field-shell"
                     value={ownerUsername}
@@ -513,7 +538,9 @@ export default function StartPage() {
                   />
                 </label>
                 <label className="space-y-1">
-                  <span className="portal-kicker">Owner Password</span>
+                  <span className="portal-kicker inline-flex items-center gap-1">
+                    Owner Password <span className="text-destructive">*</span>
+                  </span>
                   <input
                     type="password"
                     className="field-shell"
@@ -524,7 +551,9 @@ export default function StartPage() {
                   />
                 </label>
                 <label className="space-y-1">
-                  <span className="portal-kicker">Confirm Password</span>
+                  <span className="portal-kicker inline-flex items-center gap-1">
+                    Confirm Password <span className="text-destructive">*</span>
+                  </span>
                   <input
                     type="password"
                     className="field-shell"

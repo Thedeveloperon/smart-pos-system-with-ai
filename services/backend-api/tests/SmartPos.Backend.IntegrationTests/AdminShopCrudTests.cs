@@ -140,6 +140,16 @@ public sealed class AdminShopCrudTests(CustomWebApplicationFactory factory)
         Assert.Equal("reactivate", TestJson.GetString(reactivated, "action"));
         Assert.True(reactivated["shop"]?["is_active"]?.GetValue<bool>() ?? false);
 
+        var ownerLoginAfterReactivateClient = appFactory.CreateClient();
+        var ownerLoginAfterReactivate = await ownerLoginAfterReactivateClient.PostAsJsonAsync("/api/auth/login", new
+        {
+            username = ownerUsername,
+            password = "OwnerPass123!",
+            device_code = $"reactivated-shop-owner-{Guid.NewGuid():N}",
+            device_name = "Reactivated Shop Owner Device"
+        });
+        ownerLoginAfterReactivate.EnsureSuccessStatusCode();
+
         var deactivatedForDelete = await SendMutationAndReadAsync(
             adminClient,
             HttpMethod.Delete,
@@ -184,6 +194,72 @@ public sealed class AdminShopCrudTests(CustomWebApplicationFactory factory)
             device_name = "Deleted Shop Owner Device"
         });
         Assert.Equal(HttpStatusCode.BadRequest, ownerLoginAfterDelete.StatusCode);
+    }
+
+    [Fact]
+    public async Task BillingAdmin_ShouldReactivateShop_AndRestoreOwnerCloudAccess()
+    {
+        var supportClient = appFactory.CreateClient();
+        await TestAuth.SignInAsSupportAdminAsync(supportClient);
+
+        var shopCode = $"react-{Guid.NewGuid():N}"[..18];
+        var ownerUsername = $"reactowner-{Guid.NewGuid():N}"[..20];
+
+        var created = await SendMutationAndReadAsync(
+            supportClient,
+            HttpMethod.Post,
+            "/api/admin/licensing/shops",
+            new
+            {
+                shop_code = shopCode,
+                shop_name = "Reactivate Billing Shop",
+                owner_username = ownerUsername,
+                owner_password = "OwnerPass123!",
+                owner_full_name = "Reactivate Billing Owner",
+                actor = "support_admin",
+                reason_code = "manual_shop_create",
+                actor_note = "seed billing reactivate shop"
+            });
+
+        var shopId = TestJson.GetString(created["shop"]!, "shop_id");
+
+        await SendMutationAndReadAsync(
+            supportClient,
+            HttpMethod.Delete,
+            $"/api/admin/licensing/shops/{Uri.EscapeDataString(shopId)}",
+            new
+            {
+                actor = "support_admin",
+                reason_code = "manual_shop_deactivate",
+                actor_note = "deactivate before billing reactivate"
+            });
+
+        var billingClient = appFactory.CreateClient();
+        await TestAuth.SignInAsBillingAdminAsync(billingClient);
+
+        var reactivated = await SendMutationAndReadAsync(
+            billingClient,
+            HttpMethod.Post,
+            $"/api/admin/licensing/shops/{Uri.EscapeDataString(shopId)}/reactivate",
+            new
+            {
+                actor = "billing_admin",
+                reason_code = "manual_shop_reactivate",
+                actor_note = "billing admin reactivate"
+            });
+
+        Assert.Equal("reactivate", TestJson.GetString(reactivated, "action"));
+        Assert.True(reactivated["shop"]?["is_active"]?.GetValue<bool>() ?? false);
+
+        var ownerLoginClient = appFactory.CreateClient();
+        var ownerLogin = await ownerLoginClient.PostAsJsonAsync("/api/auth/login", new
+        {
+            username = ownerUsername,
+            password = "OwnerPass123!",
+            device_code = $"billing-reactivated-owner-{Guid.NewGuid():N}",
+            device_name = "Billing Reactivated Owner Device"
+        });
+        ownerLogin.EnsureSuccessStatusCode();
     }
 
     [Fact]

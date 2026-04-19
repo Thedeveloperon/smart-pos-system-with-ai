@@ -103,6 +103,7 @@ export type CloudProductRow = {
   product_type: CloudProductType;
   description?: string | null;
   price: number;
+  discount_percentage: number;
   currency: string;
   billing_mode: string;
   validity?: string | null;
@@ -124,6 +125,7 @@ export type CloudProductUpsertRequest = {
   product_type: CloudProductType;
   description?: string;
   price: number;
+  discount_percentage?: number | null;
   currency: string;
   billing_mode: string;
   validity?: string;
