@@ -20,6 +20,7 @@ import {
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { Button } from "@/components/ui/button";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { PageShell, SectionCard, StatusChip } from "@/components/portal/layout-primitives";
 import { useI18n } from "@/i18n/I18nProvider";
 import { trackMarketingEvent } from "@/lib/marketingAnalytics";
@@ -465,6 +466,7 @@ export default function AccountPage() {
 
   const [isSubmittingPurchase, setIsSubmittingPurchase] = useState(false);
   const [orderingProductCode, setOrderingProductCode] = useState<string | null>(null);
+  const [pendingOrderProduct, setPendingOrderProduct] = useState<CloudProductRow | null>(null);
   const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
 
   const canPurchase = canManageCommerce(authSession?.role);
@@ -823,7 +825,7 @@ export default function AccountPage() {
                   className="w-full justify-center"
                   disabled={isSubmittingPurchase}
                   onClick={() => {
-                    void handleOrderNow(product);
+                    handleOrderNow(product);
                   }}
                 >
                   <ShoppingCart className="mr-2 h-4 w-4" />
@@ -1448,6 +1450,7 @@ export default function AccountPage() {
       setAiLedger([]);
       setAiPayments([]);
       setLicensePortal(null);
+      setPendingOrderProduct(null);
       setIsLoggingOut(false);
       setAuthMessage("Signed out.");
     }
@@ -1463,7 +1466,15 @@ export default function AccountPage() {
     setCommerceMessage("Commerce data refreshed.");
   };
 
-  const handleOrderNow = async (product: CloudProductRow) => {
+  const closeOrderDialog = useCallback(() => {
+    if (isSubmittingPurchase) {
+      return;
+    }
+
+    setPendingOrderProduct(null);
+  }, [isSubmittingPurchase]);
+
+  const handleOrderNow = (product: CloudProductRow) => {
     if (!canPurchase) {
       setCommerceError(OwnerOnlyMessage);
       return;
@@ -1473,6 +1484,26 @@ export default function AccountPage() {
       return;
     }
 
+    setCommerceError(null);
+    setPendingOrderProduct(product);
+  };
+
+  const handleConfirmOrder = async () => {
+    if (!pendingOrderProduct) {
+      return;
+    }
+
+    if (!canPurchase) {
+      setCommerceError(OwnerOnlyMessage);
+      setPendingOrderProduct(null);
+      return;
+    }
+
+    if (isSubmittingPurchase) {
+      return;
+    }
+
+    const product = pendingOrderProduct;
     setIsSubmittingPurchase(true);
     setOrderingProductCode(product.product_code);
     setCommerceError(null);
@@ -1504,6 +1535,7 @@ export default function AccountPage() {
     } finally {
       setIsSubmittingPurchase(false);
       setOrderingProductCode(null);
+      setPendingOrderProduct(null);
     }
   };
 
@@ -1703,6 +1735,29 @@ export default function AccountPage() {
             </main>
           </div>
           )}
+          <ConfirmationDialog
+            open={Boolean(pendingOrderProduct)}
+            onOpenChange={(open) => {
+              if (!open) {
+                closeOrderDialog();
+              }
+            }}
+            onCancel={closeOrderDialog}
+            onConfirm={() => {
+              void handleConfirmOrder();
+            }}
+            title={pendingOrderProduct ? `Confirm order for ${pendingOrderProduct.product_name}` : "Confirm Order"}
+            description={
+              pendingOrderProduct
+                ? `Place this order for ${formatAmount(pendingOrderProduct.price, pendingOrderProduct.currency)}?`
+                : "Place this order?"
+            }
+            cancelLabel="Cancel"
+            confirmLabel={isSubmittingPurchase ? "Ordering..." : "Place Order"}
+            confirmVariant="hero"
+            confirmDisabled={isSubmittingPurchase}
+            cancelDisabled={isSubmittingPurchase}
+          />
         </div>
       </PageShell>
       {showMarketingChrome && <Footer />}
