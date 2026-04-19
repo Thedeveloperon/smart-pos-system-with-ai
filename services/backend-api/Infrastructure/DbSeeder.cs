@@ -6,7 +6,10 @@ namespace SmartPos.Backend.Infrastructure;
 
 public static class DbSeeder
 {
-    public static async Task SeedAsync(SmartPosDbContext dbContext, CancellationToken cancellationToken = default)
+    public static async Task SeedAsync(
+        SmartPosDbContext dbContext,
+        bool resetSeedUserPasswordsOnStartup = false,
+        CancellationToken cancellationToken = default)
     {
         if (!dbContext.Products.Any())
         {
@@ -204,6 +207,7 @@ public static class DbSeeder
             roleCode: SmartPosRoles.Owner,
             mfaSecret: null,
             storeId: seedShop.Id,
+            resetPasswordOnStartup: resetSeedUserPasswordsOnStartup,
             cancellationToken);
         await EnsureSeedUserAsync(
             dbContext,
@@ -214,6 +218,7 @@ public static class DbSeeder
             roleCode: SmartPosRoles.Manager,
             mfaSecret: null,
             storeId: seedShop.Id,
+            resetPasswordOnStartup: resetSeedUserPasswordsOnStartup,
             cancellationToken);
         await EnsureSeedUserAsync(
             dbContext,
@@ -224,6 +229,7 @@ public static class DbSeeder
             roleCode: SmartPosRoles.Cashier,
             mfaSecret: null,
             storeId: seedShop.Id,
+            resetPasswordOnStartup: resetSeedUserPasswordsOnStartup,
             cancellationToken);
         await EnsureSeedUserAsync(
             dbContext,
@@ -234,6 +240,7 @@ public static class DbSeeder
             roleCode: SmartPosRoles.Support,
             mfaSecret: "support-admin-mfa-secret-2026",
             storeId: seedShop.Id,
+            resetPasswordOnStartup: resetSeedUserPasswordsOnStartup,
             cancellationToken);
         await EnsureSeedUserAsync(
             dbContext,
@@ -244,6 +251,7 @@ public static class DbSeeder
             roleCode: SmartPosRoles.BillingAdmin,
             mfaSecret: "billing-admin-mfa-secret-2026",
             storeId: seedShop.Id,
+            resetPasswordOnStartup: resetSeedUserPasswordsOnStartup,
             cancellationToken);
         await EnsureSeedUserAsync(
             dbContext,
@@ -254,6 +262,7 @@ public static class DbSeeder
             roleCode: SmartPosRoles.SecurityAdmin,
             mfaSecret: "security-admin-mfa-secret-2026",
             storeId: seedShop.Id,
+            resetPasswordOnStartup: resetSeedUserPasswordsOnStartup,
             cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -268,6 +277,7 @@ public static class DbSeeder
         string roleCode,
         string? mfaSecret,
         Guid? storeId,
+        bool resetPasswordOnStartup,
         CancellationToken cancellationToken)
     {
         var normalizedUsername = username.Trim().ToLowerInvariant();
@@ -296,6 +306,15 @@ public static class DbSeeder
             if (storeId.HasValue && storeId.Value != Guid.Empty)
             {
                 user.StoreId = storeId.Value;
+            }
+
+            if (resetPasswordOnStartup)
+            {
+                user.PasswordHash = PasswordHashing.HashPassword(user, password);
+                user.IsActive = true;
+                user.FailedLoginAttempts = 0;
+                user.LastFailedLoginAtUtc = null;
+                user.LockoutEndAtUtc = null;
             }
 
             user.IsMfaEnabled = !string.IsNullOrWhiteSpace(mfaSecret);
