@@ -125,91 +125,89 @@ const CloudAccountSettingsCard = ({ open }: CloudAccountSettingsCardProps) => {
         </div>
       ) : (
         <div className="mt-4 space-y-4">
-          {!status?.cloud_relay_configured ? (
+          {!status?.cloud_relay_configured && (
             <div className="rounded-xl border border-amber-300/40 bg-amber-50/60 px-3 py-2 text-xs text-amber-900">
               Cloud relay is not configured. Set `AiInsights__CloudRelayBaseUrl` (or licensing cloud relay base URL) in
               backend environment settings.
             </div>
-          ) : (
-            <>
-              <div className="rounded-xl border border-border bg-background px-3 py-3">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm font-medium">Status</p>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                      isLinked ? "bg-emerald-100 text-emerald-900" : "bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    {isLinked ? "Linked" : "Not linked"}
-                  </span>
-                </div>
-                {isLinked ? (
-                  <div className="mt-3 space-y-1 text-xs text-muted-foreground">
-                    <p>
-                      Username: <span className="text-foreground">{status?.cloud_username || "-"}</span>
-                    </p>
-                    <p>
-                      Full name: <span className="text-foreground">{status?.cloud_full_name || "-"}</span>
-                    </p>
-                    <p>
-                      Role: <span className="text-foreground">{status?.cloud_role || "-"}</span>
-                    </p>
-                    <p>
-                      Shop code: <span className="text-foreground">{status?.cloud_shop_code || "-"}</span>
-                    </p>
-                    <p>
-                      Linked at: <span className="text-foreground">{formatDateTime(status?.linked_at)}</span>
-                    </p>
-                    <p>
-                      Token expires:{" "}
-                      <span className={tokenExpired ? "font-medium text-red-600" : "text-foreground"}>
-                        {formatDateTime(status?.token_expires_at)}
-                        {tokenExpired ? " (expired - re-link required)" : ""}
-                      </span>
-                    </p>
-                  </div>
-                ) : (
-                  <p className="mt-3 text-xs text-muted-foreground">No cloud account linked for this POS installation.</p>
-                )}
-              </div>
-
-              <form className="space-y-3" onSubmit={handleLink}>
-                <div className="grid gap-2">
-                  <Label htmlFor="cloud-account-username">Cloud username</Label>
-                  <Input
-                    id="cloud-account-username"
-                    value={username}
-                    onChange={(event) => setUsername(event.target.value)}
-                    placeholder="Cloud portal username"
-                    autoComplete="username"
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="cloud-account-password">Cloud password</Label>
-                  <Input
-                    id="cloud-account-password"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    type="password"
-                    placeholder="Cloud portal password"
-                    autoComplete="current-password"
-                  />
-                </div>
-                {error && <p className="text-xs text-red-600">{error}</p>}
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button type="submit" disabled={linking || unlinking}>
-                    {linking ? "Linking..." : linkButtonLabel}
-                  </Button>
-                  {isLinked && (
-                    <Button type="button" variant="outline" onClick={handleUnlink} disabled={unlinking || linking}>
-                      {unlinking ? "Unlinking..." : "Unlink"}
-                    </Button>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground">Your cloud password is never stored in the POS database.</p>
-              </form>
-            </>
           )}
+
+          <div className="rounded-xl border border-border bg-background px-3 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-medium">Status</p>
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                  isLinked ? "bg-emerald-100 text-emerald-900" : "bg-muted text-muted-foreground"
+                }`}
+              >
+                {isLinked ? "Linked" : "Not linked"}
+              </span>
+            </div>
+            {isLinked ? (
+              <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+                <p>
+                  Username: <span className="text-foreground">{status?.cloud_username || "-"}</span>
+                </p>
+                <p>
+                  Full name: <span className="text-foreground">{status?.cloud_full_name || "-"}</span>
+                </p>
+                <p>
+                  Role: <span className="text-foreground">{status?.cloud_role || "-"}</span>
+                </p>
+                <p>
+                  Shop code: <span className="text-foreground">{status?.cloud_shop_code || "-"}</span>
+                </p>
+                <p>
+                  Linked at: <span className="text-foreground">{formatDateTime(status?.linked_at)}</span>
+                </p>
+                <p>
+                  Token expires:{" "}
+                  <span className={tokenExpired ? "font-medium text-red-600" : "text-foreground"}>
+                    {formatDateTime(status?.token_expires_at)}
+                    {tokenExpired ? " (expired - re-link required)" : ""}
+                  </span>
+                </p>
+              </div>
+            ) : (
+              <p className="mt-3 text-xs text-muted-foreground">No cloud account linked for this POS installation.</p>
+            )}
+          </div>
+
+          <form className="space-y-3" onSubmit={handleLink}>
+            <div className="grid gap-2">
+              <Label htmlFor="cloud-account-username">Cloud username</Label>
+              <Input
+                id="cloud-account-username"
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                placeholder="Cloud portal username"
+                autoComplete="username"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="cloud-account-password">Cloud password</Label>
+              <Input
+                id="cloud-account-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                type="password"
+                placeholder="Cloud portal password"
+                autoComplete="current-password"
+              />
+            </div>
+            {error && <p className="text-xs text-red-600">{error}</p>}
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="submit" disabled={linking || unlinking}>
+                {linking ? "Linking..." : linkButtonLabel}
+              </Button>
+              {isLinked && (
+                <Button type="button" variant="outline" onClick={handleUnlink} disabled={unlinking || linking}>
+                  {unlinking ? "Unlinking..." : "Unlink"}
+                </Button>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">Your cloud password is never stored in the POS database.</p>
+          </form>
         </div>
       )}
     </div>
