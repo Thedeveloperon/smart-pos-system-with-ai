@@ -276,7 +276,7 @@ public static class LicenseEndpoints
             try
             {
                 ValidateIdempotencyKey(httpContext);
-                var response = await licenseService.CreateOwnerAiCreditInvoiceAsync(request, cancellationToken);
+                var response = await licenseService.CreateOwnerAiCreditInvoiceAsync(request, 0m, cancellationToken);
                 return Results.Ok(response);
             }
             catch (LicenseException ex)
@@ -1030,7 +1030,7 @@ public static class LicenseEndpoints
         .WithName("AdminDeactivateShop")
         .WithOpenApi();
 
-        admin.MapPost("/shops/{shop_id:guid}/reactivate", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+        admin.MapPost("/shops/{shop_id:guid}/reactivate", [Authorize(Policy = SmartPosPolicies.SupportOrBilling)] async (
             Guid shop_id,
             AdminShopReactivateRequest request,
             HttpContext httpContext,
@@ -1048,7 +1048,7 @@ public static class LicenseEndpoints
                 return ToErrorResult(ex);
             }
         })
-        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .RequireAuthorization(SmartPosPolicies.SupportOrBilling)
         .WithName("AdminReactivateShop")
         .WithOpenApi();
 

@@ -197,6 +197,18 @@ function formatAmount(value?: number | null, currency = "USD") {
   return `${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
 }
 
+function calculateDiscountedAmount(price: number, discountPercentage: number) {
+  const normalizedDiscount = Math.min(100, Math.max(0, discountPercentage));
+  return Math.max(0, price * (1 - normalizedDiscount / 100));
+}
+
+function resolveDiscountLabel(discountPercentage: number) {
+  return `${discountPercentage.toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })}% off`;
+}
+
 function formatRelativeTime(value?: string | null) {
   if (!value) {
     return "Unknown";
@@ -270,6 +282,7 @@ const ownerCatalogFallbackProducts: CloudProductRow[] = [
     product_type: "pos_subscription",
     description: "Standard POS terminal subscription with full feature access, monthly billing.",
     price: 49.99,
+    discount_percentage: 0,
     currency: "USD",
     billing_mode: "monthly",
     validity: "30 days",
@@ -284,6 +297,7 @@ const ownerCatalogFallbackProducts: CloudProductRow[] = [
     product_type: "pos_subscription",
     description: "Standard POS terminal subscription with full feature access, annual billing with 2 months free.",
     price: 499.99,
+    discount_percentage: 0,
     currency: "USD",
     billing_mode: "yearly",
     validity: "365 days",
@@ -298,6 +312,7 @@ const ownerCatalogFallbackProducts: CloudProductRow[] = [
     product_type: "pos_subscription",
     description: "Professional POS with advanced analytics, inventory management, and multi-terminal support.",
     price: 99.99,
+    discount_percentage: 0,
     currency: "USD",
     billing_mode: "monthly",
     validity: "30 days",
@@ -312,6 +327,7 @@ const ownerCatalogFallbackProducts: CloudProductRow[] = [
     product_type: "ai_credit",
     description: "100 AI processing credits for smart recommendations, receipt scanning, and inventory insights.",
     price: 19.99,
+    discount_percentage: 0,
     currency: "USD",
     billing_mode: "one_time",
     validity: null,
@@ -326,6 +342,7 @@ const ownerCatalogFallbackProducts: CloudProductRow[] = [
     product_type: "ai_credit",
     description: "500 AI processing credits. Best value for growing businesses.",
     price: 79.99,
+    discount_percentage: 0,
     currency: "USD",
     billing_mode: "one_time",
     validity: null,
@@ -340,6 +357,7 @@ const ownerCatalogFallbackProducts: CloudProductRow[] = [
     product_type: "ai_credit",
     description: "2000 AI processing credits. Enterprise volume pack.",
     price: 249.99,
+    discount_percentage: 0,
     currency: "USD",
     billing_mode: "one_time",
     validity: null,
@@ -784,6 +802,7 @@ export default function AccountPage() {
           const typeBadgeClass = isPos
             ? "border-slate-200 bg-slate-100 text-slate-700"
             : "border-teal-200 bg-teal-100 text-teal-700";
+          const discountedPrice = calculateDiscountedAmount(product.price, product.discount_percentage);
           const creditsLabel =
             product.product_type === "ai_credit"
               ? `${formatCredits(product.default_quantity_or_credits)} credits included`
@@ -809,13 +828,23 @@ export default function AccountPage() {
               </div>
 
               <div className="mt-6 space-y-1">
+                {product.discount_percentage > 0 && (
+                  <p className="text-sm text-muted-foreground line-through">
+                    {formatAmount(product.price, product.currency)}
+                  </p>
+                )}
                 <p className="text-3xl font-semibold tracking-tight">
-                  {formatAmount(product.price, product.currency)}
+                  {formatAmount(discountedPrice, product.currency)}
                   <span className="text-base font-normal text-muted-foreground">{priceSuffix}</span>
                 </p>
                 <p className="text-sm text-muted-foreground">
                   {product.validity ? `Validity: ${product.validity}` : creditsLabel}
                 </p>
+                {product.discount_percentage > 0 && (
+                  <p className="text-sm font-medium text-emerald-600">
+                    {resolveDiscountLabel(product.discount_percentage)}
+                  </p>
+                )}
               </div>
 
               <div className="mt-auto pt-6">
@@ -1746,14 +1775,20 @@ export default function AccountPage() {
             onConfirm={() => {
               void handleConfirmOrder();
             }}
-            title={pendingOrderProduct ? `Confirm order for ${pendingOrderProduct.product_name}` : "Confirm Order"}
+            title="Order Confirmation"
             description={
               pendingOrderProduct
-                ? `Place this order for ${formatAmount(pendingOrderProduct.price, pendingOrderProduct.currency)}?`
-                : "Place this order?"
+                ? `Review your order for ${pendingOrderProduct.product_name} (${formatAmount(
+                    calculateDiscountedAmount(
+                      pendingOrderProduct.price,
+                      pendingOrderProduct.discount_percentage,
+                    ),
+                    pendingOrderProduct.currency,
+                  )}). This creates a pending purchase that requires approval before assignment.`
+                : "Review this order before continuing."
             }
             cancelLabel="Cancel"
-            confirmLabel={isSubmittingPurchase ? "Ordering..." : "Place Order"}
+            confirmLabel={isSubmittingPurchase ? "Ordering..." : "Confirm Order"}
             confirmVariant="hero"
             confirmDisabled={isSubmittingPurchase}
             cancelDisabled={isSubmittingPurchase}

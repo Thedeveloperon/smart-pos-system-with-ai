@@ -204,6 +204,7 @@ public sealed class LicenseService(
         public string ProductType { get; set; } = "pos_subscription";
         public string? Description { get; set; }
         public decimal Price { get; set; }
+        public decimal DiscountPercentage { get; set; }
         public string Currency { get; set; } = "USD";
         public string BillingMode { get; set; } = "one_time";
         public string? Validity { get; set; }
@@ -218,6 +219,8 @@ public sealed class LicenseService(
     {
         public string? PackCode { get; set; }
         public decimal? RequestedCredits { get; set; }
+        public decimal? DiscountPercentage { get; set; }
+        public decimal? OriginalAmountDue { get; set; }
         public string? RequestedByUserId { get; set; }
         public string? RequestedByUsername { get; set; }
         public string? RequestedByFullName { get; set; }
@@ -241,6 +244,8 @@ public sealed class LicenseService(
         public decimal? Quantity { get; set; }
         public decimal? UnitPrice { get; set; }
         public decimal? TotalAmount { get; set; }
+        public decimal? DiscountPercentage { get; set; }
+        public decimal? OriginalUnitPrice { get; set; }
         public string? RequestedByUserId { get; set; }
         public string? RequestedByUsername { get; set; }
         public string? RequestedByFullName { get; set; }
@@ -1819,6 +1824,7 @@ public sealed class LicenseService(
 
     public async Task<AiCreditInvoiceRowResponse> CreateOwnerAiCreditInvoiceAsync(
         OwnerAiCreditInvoiceCreateRequest request,
+        decimal discountPercentage,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -1828,11 +1834,14 @@ public sealed class LicenseService(
         var pack = ResolveConfiguredAiCreditPack(request.PackCode);
         var normalizedNote = NormalizeOptionalValue(request.Note);
         var invoiceNumber = await ResolveManualBillingInvoiceNumberAsync(null, cancellationToken);
+        var amountDue = CalculateDiscountedAmount(pack.Price, discountPercentage);
 
         var metadata = new OwnerAiCreditInvoiceMetadataState
         {
             PackCode = pack.PackCode,
             RequestedCredits = pack.Credits,
+            DiscountPercentage = decimal.Round(discountPercentage, 2, MidpointRounding.AwayFromZero),
+            OriginalAmountDue = decimal.Round(pack.Price, 2, MidpointRounding.AwayFromZero),
             RequestedByUserId = ownerContext.User.Id.ToString("D"),
             RequestedByUsername = ownerContext.User.Username,
             RequestedByFullName = ownerContext.User.FullName,
@@ -1844,7 +1853,7 @@ public sealed class LicenseService(
             ShopId = ownerContext.Shop.Id,
             Shop = ownerContext.Shop,
             InvoiceNumber = invoiceNumber,
-            AmountDue = decimal.Round(pack.Price, 2, MidpointRounding.AwayFromZero),
+            AmountDue = amountDue,
             AmountPaid = 0m,
             Currency = ResolveCurrency(pack.Currency),
             Status = ManualBillingInvoiceStatus.Open,
@@ -2519,6 +2528,7 @@ public sealed class LicenseService(
                     PackCode = packCode,
                     Note = request.Note
                 },
+                product.DiscountPercentage,
                 cancellationToken);
 
             return new CloudPurchaseActionResponse
@@ -2539,12 +2549,14 @@ public sealed class LicenseService(
         var quantity = firstItem.Quantity <= 0m ? 1m : decimal.Round(firstItem.Quantity, 2, MidpointRounding.AwayFromZero);
         var ownerContext = await ResolveCurrentOwnerManagedShopContextAsync(cancellationToken);
         var now = DateTimeOffset.UtcNow;
+        var discountedUnitPrice = CalculateDiscountedAmount(product.Price, product.DiscountPercentage);
+        var totalAmount = decimal.Round(discountedUnitPrice * quantity, 2, MidpointRounding.AwayFromZero);
         var invoice = new ManualBillingInvoice
         {
             ShopId = ownerContext.Shop.Id,
             Shop = ownerContext.Shop,
             InvoiceNumber = await ResolveManualBillingInvoiceNumberAsync(null, cancellationToken),
-            AmountDue = decimal.Round(product.Price * quantity, 2, MidpointRounding.AwayFromZero),
+            AmountDue = totalAmount,
             AmountPaid = 0m,
             Currency = ResolveCurrency(product.Currency),
             Status = ManualBillingInvoiceStatus.Open,
@@ -2556,8 +2568,10 @@ public sealed class LicenseService(
                 InternalPlanCode = ParseInternalPlanCodeFromCloudProductCode(product.ProductCode),
                 BillingMode = product.BillingMode,
                 Quantity = quantity,
-                UnitPrice = decimal.Round(product.Price, 2, MidpointRounding.AwayFromZero),
-                TotalAmount = decimal.Round(product.Price * quantity, 2, MidpointRounding.AwayFromZero),
+                UnitPrice = discountedUnitPrice,
+                TotalAmount = totalAmount,
+                DiscountPercentage = decimal.Round(product.DiscountPercentage, 2, MidpointRounding.AwayFromZero),
+                OriginalUnitPrice = decimal.Round(product.Price, 2, MidpointRounding.AwayFromZero),
                 RequestedByUserId = ownerContext.User.Id.ToString("D"),
                 RequestedByUsername = ownerContext.User.Username,
                 RequestedByFullName = ownerContext.User.FullName,
@@ -2582,7 +2596,8 @@ public sealed class LicenseService(
                 invoice_number = invoice.InvoiceNumber,
                 product_code = product.ProductCode,
                 quantity,
-                amount_due = invoice.AmountDue
+                amount_due = invoice.AmountDue,
+                discount_percentage = product.DiscountPercentage
             }),
             CreatedAtUtc = now
         });
@@ -3737,6 +3752,22 @@ public sealed class LicenseService(
         var wasActive = shop.IsActive;
         shop.IsActive = true;
         shop.UpdatedAtUtc = now;
+        var shopUsers = await dbContext.Users
+            .Include(x => x.UserRoles)
+            .ThenInclude(x => x.Role)
+            .Where(x => x.StoreId == shop.Id)
+            .ToListAsync(cancellationToken);
+        var reactivatedUsers = 0;
+        foreach (var user in shopUsers)
+        {
+            if (user.IsActive)
+            {
+                continue;
+            }
+
+            user.IsActive = true;
+            reactivatedUsers++;
+        }
 
         dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
         {
@@ -3750,6 +3781,7 @@ public sealed class LicenseService(
                 shop_code = shop.Code,
                 was_active = wasActive,
                 is_active = shop.IsActive,
+                reactivated_users = reactivatedUsers,
                 reason_code = overrideContext.ReasonCode,
                 actor_note = overrideContext.ActorNote
             }),
@@ -3768,6 +3800,7 @@ public sealed class LicenseService(
                 shop_code = shop.Code,
                 was_active = wasActive,
                 is_active = shop.IsActive,
+                reactivated_users = reactivatedUsers,
                 reason_code = overrideContext.ReasonCode,
                 actor_note = overrideContext.ActorNote
             },
@@ -11398,6 +11431,8 @@ public sealed class LicenseService(
         {
             PackCode = NormalizeOptionalValue(metadata.PackCode),
             RequestedCredits = metadata.RequestedCredits,
+            DiscountPercentage = metadata.DiscountPercentage,
+            OriginalAmountDue = metadata.OriginalAmountDue,
             RequestedByUserId = NormalizeOptionalValue(metadata.RequestedByUserId),
             RequestedByUsername = NormalizeOptionalValue(metadata.RequestedByUsername),
             RequestedByFullName = NormalizeOptionalValue(metadata.RequestedByFullName),
@@ -11478,6 +11513,8 @@ public sealed class LicenseService(
             Quantity = metadata.Quantity,
             UnitPrice = metadata.UnitPrice,
             TotalAmount = metadata.TotalAmount,
+            DiscountPercentage = metadata.DiscountPercentage,
+            OriginalUnitPrice = metadata.OriginalUnitPrice,
             RequestedByUserId = NormalizeOptionalValue(metadata.RequestedByUserId),
             RequestedByUsername = NormalizeOptionalValue(metadata.RequestedByUsername),
             RequestedByFullName = NormalizeOptionalValue(metadata.RequestedByFullName),
@@ -11510,6 +11547,13 @@ public sealed class LicenseService(
         }
 
         return normalized;
+    }
+
+    private static decimal CalculateDiscountedAmount(decimal amount, decimal discountPercentage)
+    {
+        var normalizedDiscount = Math.Clamp(discountPercentage, 0m, 100m);
+        var discountedAmount = amount * (1m - normalizedDiscount / 100m);
+        return decimal.Round(Math.Max(0m, discountedAmount), 2, MidpointRounding.AwayFromZero);
     }
 
     private string ParseAiPackCodeFromCloudProductCode(string productCode)
@@ -11555,6 +11599,7 @@ public sealed class LicenseService(
                     ProductType = "pos_subscription",
                     Description = $"{quote.InternalPlanCode} subscription plan",
                     Price = decimal.Round(quote.AmountDue, 2, MidpointRounding.AwayFromZero),
+                    DiscountPercentage = 0m,
                     Currency = ResolveCurrency(quote.Currency),
                     BillingMode = "subscription",
                     Validity = "30d",
@@ -11586,6 +11631,7 @@ public sealed class LicenseService(
                     ProductType = "ai_credit",
                     Description = $"{pack.Credits:0.##} credits pack",
                     Price = decimal.Round(pack.Price, 2, MidpointRounding.AwayFromZero),
+                    DiscountPercentage = 0m,
                     Currency = ResolveCurrency(pack.Currency),
                     BillingMode = "one_time",
                     Validity = null,
@@ -11649,6 +11695,15 @@ public sealed class LicenseService(
                 StatusCodes.Status400BadRequest);
         }
 
+        var discountPercentage = request.DiscountPercentage ?? fallback?.DiscountPercentage ?? 0m;
+        if (discountPercentage < 0m || discountPercentage > 100m)
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "discount_percentage must be between 0 and 100.",
+                StatusCodes.Status400BadRequest);
+        }
+
         return new CloudProductCatalogEntryState
         {
             ProductCode = productCode,
@@ -11656,6 +11711,7 @@ public sealed class LicenseService(
             ProductType = productType,
             Description = NormalizeOptionalValue(request.Description ?? fallback?.Description),
             Price = decimal.Round(price, 2, MidpointRounding.AwayFromZero),
+            DiscountPercentage = decimal.Round(discountPercentage, 2, MidpointRounding.AwayFromZero),
             Currency = ResolveCurrency(request.Currency ?? fallback?.Currency),
             BillingMode = billingMode,
             Validity = NormalizeOptionalValue(request.Validity ?? fallback?.Validity),
@@ -11673,6 +11729,7 @@ public sealed class LicenseService(
             ProductType = entry.ProductType,
             Description = entry.Description,
             Price = decimal.Round(entry.Price, 2, MidpointRounding.AwayFromZero),
+            DiscountPercentage = decimal.Round(entry.DiscountPercentage, 2, MidpointRounding.AwayFromZero),
             Currency = ResolveCurrency(entry.Currency),
             BillingMode = entry.BillingMode,
             Validity = entry.Validity,

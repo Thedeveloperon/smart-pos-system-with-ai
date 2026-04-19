@@ -746,6 +746,67 @@ public sealed class LicensingFlowTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task CloudProductDiscount_ShouldPersistAndApplyToOwnerPurchaseTotal()
+    {
+        await TestAuth.SignInAsBillingAdminAsync(client);
+
+        const string productCode = "pos_subscription:starter";
+        var catalogResponse = await client.GetAsync("/api/admin/cloud/products?search=starter&take=20");
+        catalogResponse.EnsureSuccessStatusCode();
+        var catalog = await TestJson.ReadObjectAsync(catalogResponse);
+        var catalogItems = catalog["items"]?.AsArray() ?? throw new InvalidOperationException("Catalog items were missing.");
+        var starterProduct = catalogItems
+            .Select(item => item?.AsObject())
+            .FirstOrDefault(item => string.Equals(TestJson.GetString(item!, "product_code"), productCode, StringComparison.OrdinalIgnoreCase));
+        Assert.NotNull(starterProduct);
+
+        var originalDiscount = starterProduct!["discount_percentage"]?.GetValue<decimal>() ?? 0m;
+
+        try
+        {
+            var updateRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/admin/cloud/products/{Uri.EscapeDataString(productCode)}")
+            {
+                Content = JsonContent.Create(new
+                {
+                    discount_percentage = 12.5m
+                })
+            };
+            updateRequest.Headers.Add("Idempotency-Key", $"cloud-product-update-{Guid.NewGuid():N}");
+
+            var updateResponse = await client.SendAsync(updateRequest);
+            updateResponse.EnsureSuccessStatusCode();
+
+            var updated = await TestJson.ReadObjectAsync(updateResponse);
+            Assert.Equal(12.5m, updated["discount_percentage"]?.GetValue<decimal>());
+
+            var refreshedCatalogResponse = await client.GetAsync("/api/admin/cloud/products?search=starter&take=20");
+            refreshedCatalogResponse.EnsureSuccessStatusCode();
+            var refreshedCatalog = await TestJson.ReadObjectAsync(refreshedCatalogResponse);
+            var refreshedProduct = refreshedCatalog["items"]?
+                .AsArray()
+                .Select(item => item?.AsObject())
+                .FirstOrDefault(item => string.Equals(TestJson.GetString(item!, "product_code"), productCode, StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(refreshedProduct);
+            Assert.Equal(12.5m, refreshedProduct!["discount_percentage"]?.GetValue<decimal>());
+        }
+        finally
+        {
+            await TestAuth.SignInAsBillingAdminAsync(client);
+            var restoreRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/admin/cloud/products/{Uri.EscapeDataString(productCode)}")
+            {
+                Content = JsonContent.Create(new
+                {
+                    discount_percentage = originalDiscount
+                })
+            };
+            restoreRequest.Headers.Add("Idempotency-Key", $"cloud-product-restore-{Guid.NewGuid():N}");
+
+            var restoreResponse = await client.SendAsync(restoreRequest);
+            restoreResponse.EnsureSuccessStatusCode();
+        }
+    }
+
     private static async Task<JsonObject> ReadJsonAsync(HttpResponseMessage response)
     {
         var payload = await response.Content.ReadFromJsonAsync<JsonObject>();

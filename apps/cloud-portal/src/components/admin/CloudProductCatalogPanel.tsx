@@ -52,6 +52,11 @@ function formatPrice(value: number, currency: string) {
   }
 }
 
+function calculateDiscountedPrice(price: number, discountPercentage: number) {
+  const normalizedDiscount = Math.min(100, Math.max(0, discountPercentage));
+  return Math.max(0, price * (1 - normalizedDiscount / 100));
+}
+
 function resolveProductTypeLabel(productType: string) {
   const key = toKey(productType);
   if (key === "ai_credit") return "AI Credit";
@@ -77,6 +82,13 @@ function resolveDefaultQuantityLabel(item: CloudProductRow) {
   const quantity = Number(item.default_quantity_or_credits) || 0;
   const unit = isAiCredit ? "credits" : "units";
   return `Default: ${quantity.toLocaleString()} ${unit}`;
+}
+
+function resolveDiscountLabel(discountPercentage: number) {
+  return `${discountPercentage.toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })}% discount`;
 }
 
 const CloudProductCatalogPanel = () => {
@@ -260,17 +272,22 @@ const CloudProductCatalogPanel = () => {
                     </div>
                     <p className="text-sm text-slate-500">{item.product_code}</p>
 
-                    <div className="flex flex-wrap gap-2">
-                      <span className="inline-flex items-center rounded-full border border-[#dbe4ef] bg-[#f4f8fc] px-3 py-1 text-xs font-medium text-slate-700">
-                        {resolveProductTypeLabel(item.product_type)}
+                  <div className="flex flex-wrap gap-2">
+                    <span className="inline-flex items-center rounded-full border border-[#dbe4ef] bg-[#f4f8fc] px-3 py-1 text-xs font-medium text-slate-700">
+                      {resolveProductTypeLabel(item.product_type)}
+                    </span>
+                    <span className="inline-flex items-center rounded-full border border-[#dbe4ef] bg-white px-3 py-1 text-xs font-medium text-slate-700">
+                      {resolveBillingModeLabel(item.billing_mode)}
+                    </span>
+                    <span className="inline-flex items-center rounded-full border border-[#dbe4ef] bg-white px-3 py-1 text-xs font-medium text-slate-700">
+                      {resolveDefaultQuantityLabel(item)}
+                    </span>
+                    {item.discount_percentage > 0 && (
+                      <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
+                        {resolveDiscountLabel(item.discount_percentage)}
                       </span>
-                      <span className="inline-flex items-center rounded-full border border-[#dbe4ef] bg-white px-3 py-1 text-xs font-medium text-slate-700">
-                        {resolveBillingModeLabel(item.billing_mode)}
-                      </span>
-                      <span className="inline-flex items-center rounded-full border border-[#dbe4ef] bg-white px-3 py-1 text-xs font-medium text-slate-700">
-                        {resolveDefaultQuantityLabel(item)}
-                      </span>
-                    </div>
+                    )}
+                  </div>
 
                     {item.description && (
                       <p className="max-w-3xl text-sm text-slate-600">
@@ -281,8 +298,13 @@ const CloudProductCatalogPanel = () => {
                 </div>
 
                 <div className="shrink-0 text-left md:min-w-[140px] md:text-right">
+                  {item.discount_percentage > 0 && (
+                    <p className="text-sm text-slate-500 line-through">
+                      {formatPrice(item.price, item.currency)}
+                    </p>
+                  )}
                   <p className="text-2xl font-semibold leading-none tracking-tight text-slate-950 md:text-4xl">
-                    {formatPrice(item.price, item.currency)}
+                    {formatPrice(calculateDiscountedPrice(item.price, item.discount_percentage), item.currency)}
                   </p>
                   <p className="mt-2 text-sm text-slate-500">{resolveBillingModeCaption(item.billing_mode)}</p>
                 </div>
