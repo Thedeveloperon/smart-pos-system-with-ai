@@ -14,7 +14,7 @@
       "dotnetRunMessages": true,
       "launchBrowser": true,
       "launchUrl": "swagger",
-      "applicationUrl": "http://localhost:5102",
+      "applicationUrl": "http://localhost:5080",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development",
         "AiInsights__CloudRelayBaseUrl": "https://smartpos-backend-v7yd.onrender.com",
@@ -26,7 +26,7 @@
       "dotnetRunMessages": true,
       "launchBrowser": true,
       "launchUrl": "swagger",
-      "applicationUrl": "https://localhost:7118;http://localhost:5102",
+      "applicationUrl": "https://localhost:7118;http://localhost:5080",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development",
         "AiInsights__CloudRelayBaseUrl": "https://smartpos-backend-v7yd.onrender.com",

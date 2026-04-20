@@ -2,6 +2,7 @@ param(
     [string]$Runtime = "win-x64",
     [string]$Configuration = "Release",
     [string]$OutputDir = "release/lanka-pos-win-x64",
+    [string]$FrontendApiBaseUrl = "http://127.0.0.1:5080",
     [switch]$SkipNpmCi,
     [switch]$FrameworkDependent,
     [switch]$NoZip
@@ -58,7 +59,23 @@ if (-not $SkipNpmCi) {
     Invoke-External -Label "Installing frontend dependencies" -Command "npm" -Arguments @("ci") -WorkingDirectory $frontendDir
 }
 
-Invoke-External -Label "Building frontend" -Command "npm" -Arguments @("run", "build") -WorkingDirectory $frontendDir
+$previousFrontendApiBaseUrl = $env:VITE_API_BASE_URL
+try {
+    if (-not [string]::IsNullOrWhiteSpace($FrontendApiBaseUrl)) {
+        $env:VITE_API_BASE_URL = $FrontendApiBaseUrl
+        Write-Host "Using frontend API base URL: $($env:VITE_API_BASE_URL)" -ForegroundColor DarkCyan
+    }
+
+    Invoke-External -Label "Building frontend" -Command "npm" -Arguments @("run", "build") -WorkingDirectory $frontendDir
+}
+finally {
+    if ($null -eq $previousFrontendApiBaseUrl) {
+        Remove-Item Env:VITE_API_BASE_URL -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:VITE_API_BASE_URL = $previousFrontendApiBaseUrl
+    }
+}
 
 $publishArgs = @(
     "publish",

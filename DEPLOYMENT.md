@@ -125,7 +125,7 @@ Use the local script to generate the locked policy batch (`count=10`) and write 
 ```
 
 Optional environment overrides:
-- `SMARTPOS_BACKEND_URL` (default `http://127.0.0.1:5102`)
+- `SMARTPOS_BACKEND_URL` (default `http://127.0.0.1:5080`)
 - `SMARTPOS_ADMIN_USERNAME`
 - `SMARTPOS_ADMIN_PASSWORD`
 - `SMARTPOS_ADMIN_MFA_CODE`
