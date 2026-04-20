@@ -101,9 +101,9 @@ const LoginScreen = ({ mode = "pos" }: LoginScreenProps) => {
                 <div className="rounded-2xl border border-border/80 bg-muted/20 p-4 text-sm text-muted-foreground">
                   <p className="font-medium text-foreground">Seeded users</p>
                   <p className="mt-1">
-                    <code className="font-medium text-foreground">owner123</code>,{" "}
-                    <code className="font-medium text-foreground">manager123</code>, and{" "}
-                    <code className="font-medium text-foreground">cashier123</code>.
+                    <code className="font-medium text-foreground">owner / owner123</code>,{" "}
+                    <code className="font-medium text-foreground">manager / manager123</code>, and{" "}
+                    <code className="font-medium text-foreground">cashier / cashier123</code>.
                   </p>
                 </div>
               )}

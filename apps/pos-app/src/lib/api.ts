@@ -10,13 +10,13 @@ function getDefaultApiBaseUrl() {
   if (typeof window !== "undefined") {
     const host = window.location.hostname;
     if (import.meta.env.DEV && (host === "127.0.0.1" || host === "localhost")) {
-      return `http://${host}:5102`;
+      return `http://${host}:5080`;
     }
 
     return window.location.origin;
   }
 
-  return "http://localhost:5102";
+  return "http://127.0.0.1:5080";
 }
 
 const DEFAULT_API_BASE_URL = getDefaultApiBaseUrl();
