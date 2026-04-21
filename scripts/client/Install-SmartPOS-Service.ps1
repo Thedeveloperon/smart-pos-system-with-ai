@@ -191,6 +191,20 @@ function Test-LooksLikeBase64Key {
     return $compact -match "^[A-Za-z0-9+/=]+$"
 }
 
+function Test-EnvFlagEnabled {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $false
+    }
+
+    $normalized = $Value.Trim()
+    return [string]::Equals($normalized, "true", [StringComparison]::OrdinalIgnoreCase) -or
+        [string]::Equals($normalized, "1", [StringComparison]::OrdinalIgnoreCase) -or
+        [string]::Equals($normalized, "yes", [StringComparison]::OrdinalIgnoreCase) -or
+        [string]::Equals($normalized, "on", [StringComparison]::OrdinalIgnoreCase)
+}
+
 function Ensure-SigningKeyPath {
     param(
         [string]$ConfiguredValue,
@@ -317,12 +331,31 @@ if ([string]::Equals($ServiceName, "LankaPOSBackend", [StringComparison]::Ordina
 
 $openAiApiKey = if ($envValues.Contains("OPENAI_API_KEY")) { [string]$envValues["OPENAI_API_KEY"] } else { "" }
 if ([string]::IsNullOrWhiteSpace($openAiApiKey)) {
+    $insightsCloudRelayBaseUrl = if ($envValues.Contains("AiInsights__CloudRelayBaseUrl")) { [string]$envValues["AiInsights__CloudRelayBaseUrl"] } else { "" }
+    if ((-not $envValues.Contains("AiInsights__CloudRelayEnabled") -or [string]::IsNullOrWhiteSpace([string]$envValues["AiInsights__CloudRelayEnabled"])) -and
+        -not [string]::IsNullOrWhiteSpace($insightsCloudRelayBaseUrl)) {
+        $envValues["AiInsights__CloudRelayEnabled"] = "true"
+        Write-Host "[Info] AiInsights__CloudRelayBaseUrl detected. Enabling AiInsights__CloudRelayEnabled=true for keyless AI relay mode."
+    }
+
     if (-not $envValues.Contains("AiSuggestions__Enabled") -or [string]::IsNullOrWhiteSpace([string]$envValues["AiSuggestions__Enabled"])) {
         $envValues["AiSuggestions__Enabled"] = "false"
     }
+    elseif (Test-EnvFlagEnabled -Value ([string]$envValues["AiSuggestions__Enabled"])) {
+        $envValues["AiSuggestions__Enabled"] = "false"
+        Write-Warning "OPENAI_API_KEY is not set. AiSuggestions__Enabled was set to false."
+    }
 
-    if (-not $envValues.Contains("AiInsights__Enabled") -or [string]::IsNullOrWhiteSpace([string]$envValues["AiInsights__Enabled"])) {
-        $envValues["AiInsights__Enabled"] = "false"
+    $insightsCloudRelayEnabledValue = if ($envValues.Contains("AiInsights__CloudRelayEnabled")) { [string]$envValues["AiInsights__CloudRelayEnabled"] } else { "" }
+    $insightsCloudRelayEnabled = Test-EnvFlagEnabled -Value $insightsCloudRelayEnabledValue
+    if (-not $insightsCloudRelayEnabled) {
+        if (-not $envValues.Contains("AiInsights__Enabled") -or [string]::IsNullOrWhiteSpace([string]$envValues["AiInsights__Enabled"])) {
+            $envValues["AiInsights__Enabled"] = "false"
+        }
+        elseif (Test-EnvFlagEnabled -Value ([string]$envValues["AiInsights__Enabled"])) {
+            $envValues["AiInsights__Enabled"] = "false"
+            Write-Warning "OPENAI_API_KEY is not set and AiInsights cloud relay is disabled. AiInsights__Enabled was set to false."
+        }
     }
 }
 
