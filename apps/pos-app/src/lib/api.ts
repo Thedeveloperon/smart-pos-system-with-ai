@@ -897,6 +897,8 @@ type TransactionsReportResponse = {
     net_collected: number;
     custom_payout_used: boolean;
     cash_short_amount: number;
+    transaction_type?: string;
+    cash_movement_amount?: number | null;
     payment_breakdown: {
       method: string;
       paid_amount: number;

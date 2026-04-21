@@ -66,3 +66,25 @@ export function getDenominationShortages(
     })
     .filter((value): value is DenominationShortage => value !== null);
 }
+
+export type OptionalPayoutSuggestion = {
+  requestAmount: number;
+  payoutAmount: number;
+};
+
+export function getOptionalPayoutSuggestion(changeAmount: number): OptionalPayoutSuggestion | null {
+  const normalizedChange = Math.max(0, Math.round(changeAmount));
+  if (normalizedChange === 0) {
+    return null;
+  }
+
+  const payoutAmount = Math.ceil(normalizedChange / 50) * 50;
+  if (payoutAmount <= normalizedChange) {
+    return null;
+  }
+
+  return {
+    requestAmount: payoutAmount - normalizedChange,
+    payoutAmount,
+  };
+}

@@ -172,6 +172,88 @@ public sealed class CashSessionFlowTests(CustomWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task DrawerUpdate_ShouldAppearAsNonSaleTransaction()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+        await CloseActiveSessionIfPresentAsync();
+
+        var productSearch = await TestJson.ReadObjectAsync(
+            await client.GetAsync("/api/products/search"));
+        var firstProduct = FirstObjectFromArray(productSearch, "items");
+        var productId = Guid.Parse(TestJson.GetString(firstProduct, "id"));
+        var unitPrice = TestJson.GetDecimal(firstProduct, "unitPrice");
+
+        await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/cash-sessions/open", new
+            {
+                counts = new[]
+                {
+                    new { denomination = 1000m, quantity = 1m }
+                },
+                total = 1000m,
+                cashier_name = "Drawer Cashier"
+            }));
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var baselineReport = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/reports/transactions?from={today:yyyy-MM-dd}&to={today:yyyy-MM-dd}&take=50"));
+        var baselineGrossTotal = TestJson.GetDecimal(baselineReport, "gross_total");
+        var baselineNetCollectedTotal = TestJson.GetDecimal(baselineReport, "net_collected_total");
+
+        await TestJson.ReadObjectAsync(
+            await client.PutAsJsonAsync("/api/cash-sessions/current/drawer", new
+            {
+                counts = new[]
+                {
+                    new { denomination = 500m, quantity = 1m },
+                    new { denomination = 100m, quantity = 6m }
+                },
+                total = 1100m
+            }));
+
+        var saleResponse = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/checkout/complete", new
+            {
+                sale_id = (Guid?)null,
+                items = new[]
+                {
+                    new
+                    {
+                        product_id = productId,
+                        quantity = 1m
+                    }
+                },
+                discount_percent = 0m,
+                role = "cashier",
+                payments = new[]
+                {
+                    new
+                    {
+                        method = "cash",
+                        amount = unitPrice,
+                        reference_number = (string?)null
+                    }
+                },
+                cash_received_counts = Array.Empty<object>(),
+                cash_change_counts = Array.Empty<object>()
+            }));
+
+        Assert.Equal("completed", TestJson.GetString(saleResponse, "status"));
+
+        var report = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/reports/transactions?from={today:yyyy-MM-dd}&to={today:yyyy-MM-dd}&take=50"));
+
+        Assert.Equal(baselineGrossTotal + unitPrice, TestJson.GetDecimal(report, "gross_total"));
+        Assert.Equal(baselineNetCollectedTotal + unitPrice, TestJson.GetDecimal(report, "net_collected_total"));
+
+        var items = report["items"]!.AsArray().OfType<JsonObject>().ToList();
+        Assert.Contains(items, item =>
+            TestJson.GetString(item, "transaction_type") == "cash_drawer_adjustment" &&
+            TestJson.GetDecimal(item, "cash_movement_amount") == 100m &&
+            TestJson.GetString(item, "status") == "cash_added");
+    }
+
+    [Fact]
     public async Task CashSale_WithDenominationCounts_ShouldUpdateDrawerTotal()
     {
         await TestAuth.SignInAsManagerAsync(client);

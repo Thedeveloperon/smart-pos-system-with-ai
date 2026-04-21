@@ -6,7 +6,15 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AlertTriangle, CalendarDays, FileDown, Package, ReceiptText, RotateCcw, Sparkles } from "lucide-react";
 import { fetchTransactionsReport } from "@/lib/api";
-import { filterShiftTransactions, getDisplayCashShortAmount, openShiftReportPrintWindow, signedMoney } from "@/lib/shiftReport";
+import {
+  filterShiftTransactions,
+  getDisplayCashShortAmount,
+  getTransactionAmount,
+  isCashDrawerAdjustment,
+  isSalesTransaction,
+  openShiftReportPrintWindow,
+  signedMoney,
+} from "@/lib/shiftReport";
 import type { CashSession } from "./cash-session/types";
 
 type TodaySalesDrawerProps = {
@@ -76,7 +84,7 @@ const TodaySalesDrawer = ({
 
   const paymentTotals = useMemo(() => {
     const totals = new Map<string, number>();
-    for (const item of transactions) {
+    for (const item of transactions.filter(isSalesTransaction)) {
       for (const payment of item.payment_breakdown) {
         totals.set(payment.method, (totals.get(payment.method) || 0) + payment.net_amount);
       }
@@ -93,6 +101,7 @@ const TodaySalesDrawer = ({
     if (shiftTransactions.length === 0) {
       return;
     }
+    const shiftSalesTransactions = shiftTransactions.filter(isSalesTransaction);
 
     const balanceStatus =
       actualClosingCash === null
@@ -114,11 +123,11 @@ const TodaySalesDrawer = ({
         closingCash: actualClosingCash,
         expectedCash: expectedClosingCash,
         cashInDrawer: session.drawer.total ?? 0,
-        totalSales: shiftTransactions.length,
-        grossSales: shiftTransactions.reduce((sum, sale) => sum + sale.grand_total, 0),
+        totalSales: shiftSalesTransactions.length,
+        grossSales: shiftSalesTransactions.reduce((sum, sale) => sum + sale.grand_total, 0),
         cashSales: cashSalesTotal,
-        cashShortSalesCount: shiftTransactions.filter((sale) => sale.custom_payout_used).length,
-        cashShortTotal: shiftTransactions.reduce((sum, sale) => {
+        cashShortSalesCount: shiftSalesTransactions.filter((sale) => sale.custom_payout_used).length,
+        cashShortTotal: shiftSalesTransactions.reduce((sum, sale) => {
           if (!sale.custom_payout_used) {
             return sum;
           }
@@ -129,7 +138,7 @@ const TodaySalesDrawer = ({
         }, 0),
         balanceStatus,
         balanceIsHealthy: difference === 0,
-        paymentTotals: Array.from(shiftTransactions.reduce((totals, sale) => {
+        paymentTotals: Array.from(shiftSalesTransactions.reduce((totals, sale) => {
           for (const payment of sale.payment_breakdown) {
             const total = totals.get(payment.method) ?? 0;
             totals.set(payment.method, total + payment.net_amount);
@@ -155,7 +164,7 @@ const TodaySalesDrawer = ({
                 </Badge>
               </SheetTitle>
               <SheetDescription>
-                Individual sales for today. Export the shift report as PDF after the shift ends.
+                Sales and drawer adjustments for today. Export the shift report as PDF after the shift ends.
               </SheetDescription>
               <p className="text-xs text-muted-foreground">
                 Cashier: <span className="font-medium text-foreground">{session?.cashierName || "Unknown"}</span>
@@ -178,7 +187,7 @@ const TodaySalesDrawer = ({
         <ScrollArea className="mt-4 h-[calc(100vh-120px)] -mx-6 px-6">
           <div className="space-y-4 pb-6">
             <div className="rounded-xl border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
-              This view stays focused on the sales list. The printable shift report is generated as a PDF export.
+              This view includes sales and drawer adjustments. The printable shift report is generated as a PDF export.
             </div>
 
             <div className="rounded-xl border border-border bg-card">
@@ -206,7 +215,7 @@ const TodaySalesDrawer = ({
               <div className="flex items-center justify-between px-4 py-3 border-b border-border">
                 <div className="flex items-center gap-2 text-sm font-semibold">
                   <ReceiptText className="h-4 w-4 text-primary" />
-                  Individual Sales
+                  Transactions
                 </div>
                 <Badge variant="secondary">{transactions.length}</Badge>
               </div>
@@ -216,28 +225,48 @@ const TodaySalesDrawer = ({
               ) : transactions.length === 0 ? (
                 <div className="p-6 text-center text-muted-foreground">
                   <AlertTriangle className="mx-auto mb-2 h-10 w-10 opacity-30" />
-                  No sales recorded today.
+                  No transactions recorded today.
                 </div>
               ) : (
                 <div className="divide-y divide-border">
                   {transactions.map((sale) => {
-                    const canRefund = sale.status === "completed" || sale.status === "refundedpartially";
+                    const isDrawerAdjustment = isCashDrawerAdjustment(sale);
+                    const canRefund = !isDrawerAdjustment && (sale.status === "completed" || sale.status === "refundedpartially");
+                    const rowAmount = isDrawerAdjustment ? signedMoney(getTransactionAmount(sale)) : money(sale.grand_total);
+                    const rowAmountLabel = isDrawerAdjustment ? "Movement" : "Paid";
+                    const statusLabel = sale.status.replaceAll("_", " ");
 
                     return (
                       <div
                         key={sale.sale_id}
-                        data-testid={sale.custom_payout_used ? `cash-short-sale-${sale.sale_id}` : undefined}
+                        data-testid={
+                          isDrawerAdjustment
+                            ? `cash-drawer-adjustment-${sale.sale_id}`
+                            : sale.custom_payout_used
+                              ? `cash-short-sale-${sale.sale_id}`
+                              : undefined
+                        }
                         className={`flex items-start justify-between gap-3 px-4 py-3 transition-colors ${
-                          sale.custom_payout_used ? "border-l-2 border-destructive bg-red-50/80" : ""
+                          isDrawerAdjustment
+                            ? "border-l-2 border-amber-500 bg-amber-50/70"
+                            : sale.custom_payout_used
+                              ? "border-l-2 border-destructive bg-red-50/80"
+                              : ""
                         }`}
                       >
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
-                            <p className="truncate font-semibold">{sale.sale_number}</p>
+                            <p className="truncate font-semibold">
+                              {isDrawerAdjustment ? "Drawer adjustment" : sale.sale_number}
+                            </p>
                             <Badge variant="outline" className="text-[10px] capitalize">
-                              {sale.status}
+                              {statusLabel}
                             </Badge>
-                            {sale.custom_payout_used ? (
+                            {isDrawerAdjustment ? (
+                              <Badge variant="secondary" className="text-[10px]">
+                                Adjustment
+                              </Badge>
+                            ) : sale.custom_payout_used ? (
                               <>
                                 <Tooltip>
                                   <TooltipTrigger asChild>
@@ -261,6 +290,11 @@ const TodaySalesDrawer = ({
                           <p className="text-xs text-muted-foreground">
                             Cashier: <span className="font-medium text-foreground">{session?.cashierName || "Unknown"}</span>
                           </p>
+                          {isDrawerAdjustment ? (
+                            <p className="mt-1 text-xs font-medium text-amber-700">
+                              Cash drawer {sale.status === "cash_added" ? "added" : "removed"} outside a sale
+                            </p>
+                          ) : null}
                           <div className="mt-2 flex flex-wrap gap-2">
                             {sale.payment_breakdown.map((payment) => (
                               <PaymentBadge key={`${sale.sale_id}-${payment.method}`} method={payment.method} />
@@ -269,8 +303,12 @@ const TodaySalesDrawer = ({
                         </div>
                         <div className="flex shrink-0 flex-col items-end gap-2 text-right">
                           <div>
-                            <p className="font-bold text-primary">{money(sale.grand_total)}</p>
-                            <p className="text-xs text-muted-foreground">Paid {money(sale.paid_total)}</p>
+                            <p className={`font-bold ${isDrawerAdjustment ? "text-amber-600" : "text-primary"}`}>
+                              {rowAmount}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {rowAmountLabel} {isDrawerAdjustment ? rowAmount : money(sale.paid_total)}
+                            </p>
                           </div>
                           {canRefund && onRefundSale && (
                             <Button
