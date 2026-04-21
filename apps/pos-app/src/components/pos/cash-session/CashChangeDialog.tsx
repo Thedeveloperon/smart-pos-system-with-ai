@@ -13,6 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import {
   buildChangeBreakdown,
   getDenominationShortages,
+  getOptionalPayoutSuggestion,
   splitChangeBreakdown,
 } from "./changeBreakdown";
 import DenominationCounter from "./DenominationCounter";
@@ -76,6 +77,10 @@ const CashChangeDialog = ({
   const selectedShortages = useMemo(
     () => getDenominationShortages(selectedCounts, availableCounts),
     [availableCountsKey, selectedCounts],
+  );
+  const optionalPayoutSuggestion = useMemo(
+    () => getOptionalPayoutSuggestion(normalizedChange),
+    [normalizedChange],
   );
   const hasDenominationShortage = selectedShortages.length > 0;
   const shortageDenominations = useMemo(
@@ -161,6 +166,12 @@ const CashChangeDialog = ({
                 <p className="mt-1 text-xs text-destructive">
                   The drawer does not currently have enough denominations for the full amount.
                   Adjust the notes and coins below to match the balance to return.
+                </p>
+              ) : null}
+              {optionalPayoutSuggestion ? (
+                <p className="mt-2 text-xs font-medium text-slate-600">
+                  Optional suggestion: ask the customer for Rs. {optionalPayoutSuggestion.requestAmount.toLocaleString()} more and
+                  return Rs. {optionalPayoutSuggestion.payoutAmount.toLocaleString()}.
                 </p>
               ) : null}
             </div>
