@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Banknote, Coins, CheckCircle2 } from "lucide-react";
+import { Banknote, Coins, CheckCircle2 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import {
   buildChangeBreakdown,
@@ -26,9 +26,6 @@ interface CashChangeDialogProps {
   onClose: () => void;
   onConfirm: (counts: DenominationCount[], customPayoutUsed: boolean, cashShortAmount: number) => void;
 }
-
-const CASH_DRAWER_DENOMINATION_ERROR =
-  "Cash drawer does not have enough denominations for this transaction.";
 
 const CashChangeDialog = ({
   open,
@@ -149,12 +146,7 @@ const CashChangeDialog = ({
               >
                 Rs. {normalizedChange.toLocaleString()}
               </p>
-              {hasDenominationShortage ? (
-                <div className="mt-1 flex items-start gap-2 text-xs text-red-700">
-                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  <p>{CASH_DRAWER_DENOMINATION_ERROR}</p>
-                </div>
-              ) : isFullyCovered ? (
+              {isFullyCovered ? (
                 <p className="mt-1 text-xs text-emerald-600">
                   This breakdown uses the available drawer notes and coins.
                 </p>
@@ -191,25 +183,23 @@ const CashChangeDialog = ({
                     <p className={`font-medium ${hasDenominationShortage ? "text-red-700" : "text-slate-700"}`}>
                       Selected total: Rs. {selectedTotal.toLocaleString()}
                     </p>
-                    <p
-                      className={`mt-1 text-xs ${
-                        hasDenominationShortage
-                          ? "text-red-700"
-                          : isCustomMode
+                    {!hasDenominationShortage && (
+                      <p
+                        className={`mt-1 text-xs ${
+                          isCustomMode
                             ? (manualTotal === normalizedChange ? "text-emerald-600" : "text-amber-600")
                             : (manualTotal === normalizedChange ? "text-emerald-600" : "text-destructive")
-                      }`}
-                    >
-                      {hasDenominationShortage
-                        ? CASH_DRAWER_DENOMINATION_ERROR
-                        : isCustomMode
+                        }`}
+                      >
+                        {isCustomMode
                           ? (manualTotal === normalizedChange
                             ? "The selected notes and coins match the balance to return."
                             : "Custom payout override is enabled. You can proceed with this payout set.")
                           : (manualTotal === normalizedChange
                             ? "The selected notes and coins match the balance to return."
                             : "Adjust the counts until the selected total matches the balance to return.")}
-                    </p>
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
