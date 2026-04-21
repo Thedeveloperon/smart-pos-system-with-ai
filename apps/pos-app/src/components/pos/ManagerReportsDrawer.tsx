@@ -70,7 +70,15 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { filterShiftTransactions, getDisplayCashShortAmount, openShiftReportPrintWindow, signedMoney } from "@/lib/shiftReport";
+import {
+  filterShiftTransactions,
+  getDisplayCashShortAmount,
+  getTransactionAmount,
+  isCashDrawerAdjustment,
+  isSalesTransaction,
+  openShiftReportPrintWindow,
+  signedMoney,
+} from "@/lib/shiftReport";
 
 type ManagerReportsDrawerProps = {
   open: boolean;
@@ -1509,8 +1517,13 @@ const ManagerReportsDrawer = ({
     ).length;
   }, [report.manualPayments?.items]);
 
+  const salesTransactions = useMemo(
+    () => report.transactions.filter(isSalesTransaction),
+    [report.transactions],
+  );
+
   const handleExportSalesCsv = () => {
-    if (report.transactions.length === 0) {
+    if (salesTransactions.length === 0) {
       toast.info("No sales data to export.");
       return;
     }
@@ -1523,7 +1536,7 @@ const ManagerReportsDrawer = ({
       ["Net Sales", report.summary?.net_sales_total ?? 0],
       [],
       ["Sale No", "Cashier", "Timestamp", "Status", "Items", "Grand Total", "Paid Total", "Net Collected"],
-      ...report.transactions.map((sale) => [
+      ...salesTransactions.map((sale) => [
         sale.sale_number,
         sale.cashier_full_name || sale.cashier_username || "Unknown",
         sale.timestamp,
@@ -1580,12 +1593,12 @@ const ManagerReportsDrawer = ({
   };
 
   const handleExportSalesPdf = () => {
-    if (report.transactions.length === 0) {
+    if (salesTransactions.length === 0) {
       toast.info("No sales data to export.");
       return;
     }
 
-    const rows = report.transactions
+    const rows = salesTransactions
       .map(
         (sale) => `
           <tr>
@@ -1642,18 +1655,19 @@ const ManagerReportsDrawer = ({
   const handleExportShiftPdf = (session: CashSessionHistoryItem) => {
     const shiftTransactions = filterShiftTransactions(report.transactions, session.openedAt, session.closedAt ?? null);
     if (shiftTransactions.length === 0) {
-      toast.info("No sales found for this shift.");
+      toast.info("No transactions found for this shift.");
       return;
     }
+    const shiftSalesTransactions = shiftTransactions.filter(isSalesTransaction);
 
     const hasClosingCash = session.closingTotal != null;
     const expectedCash = session.expectedCash ?? session.openingTotal + session.cashSalesTotal;
     const balanceDifference =
       session.difference ?? (hasClosingCash ? (session.closingTotal as number) - expectedCash : null);
-    const cashShortSalesCount = shiftTransactions.filter((sale) => getDisplayCashShortAmount(sale) !== 0).length;
-    const cashShortTotal = shiftTransactions.reduce((total, sale) => total + getDisplayCashShortAmount(sale), 0);
+    const cashShortSalesCount = shiftSalesTransactions.filter((sale) => getDisplayCashShortAmount(sale) !== 0).length;
+    const cashShortTotal = shiftSalesTransactions.reduce((total, sale) => total + getDisplayCashShortAmount(sale), 0);
     const paymentTotals = Array.from(
-      shiftTransactions.reduce((map, sale) => {
+      shiftSalesTransactions.reduce((map, sale) => {
         for (const payment of sale.payment_breakdown) {
           map.set(payment.method, (map.get(payment.method) || 0) + payment.net_amount);
         }
@@ -1675,8 +1689,8 @@ const ManagerReportsDrawer = ({
       closingCash: session.closingTotal ?? null,
       expectedCash,
       cashInDrawer: session.closingTotal ?? session.openingTotal,
-      totalSales: shiftTransactions.length,
-      grossSales: shiftTransactions.reduce((total, sale) => total + sale.grand_total, 0),
+      totalSales: shiftSalesTransactions.length,
+      grossSales: shiftSalesTransactions.reduce((total, sale) => total + sale.grand_total, 0),
       cashSales: session.cashSalesTotal,
       cashShortSalesCount,
       cashShortTotal,
@@ -1687,20 +1701,7 @@ const ManagerReportsDrawer = ({
           : "Balanced",
       balanceIsHealthy: hasClosingCash && (balanceDifference == null || Math.abs(balanceDifference) <= 0.01),
       paymentTotals,
-      transactions: shiftTransactions.map((sale) => ({
-        sale_id: sale.sale_id,
-        sale_number: sale.sale_number,
-        status: sale.status,
-        timestamp: sale.timestamp,
-        cashier_username: sale.cashier_username,
-        cashier_full_name: sale.cashier_full_name,
-        items_count: sale.items_count,
-        grand_total: sale.grand_total,
-        paid_total: sale.paid_total,
-        custom_payout_used: sale.custom_payout_used,
-        cash_short_amount: getDisplayCashShortAmount(sale),
-        payment_breakdown: sale.payment_breakdown,
-      })),
+      transactions: shiftTransactions,
     });
   };
 
@@ -2076,20 +2077,32 @@ const ManagerReportsDrawer = ({
                       ) : report.transactions.length === 0 ? (
                         <TableRow>
                           <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
-                            No sales in this period.
+                            No transactions in this period.
                           </TableCell>
                         </TableRow>
                       ) : (
                         report.transactions.map((sale) => (
-                          <TableRow key={sale.sale_id}>
+                          <TableRow
+                            key={sale.sale_id}
+                            className={isCashDrawerAdjustment(sale) ? "bg-amber-50/70" : undefined}
+                          >
                             <TableCell>
                               <div className="space-y-1">
-                                <p className="font-medium">{sale.sale_number}</p>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="font-medium">
+                                    {isCashDrawerAdjustment(sale) ? "Drawer adjustment" : sale.sale_number}
+                                  </p>
+                                  {isCashDrawerAdjustment(sale) ? (
+                                    <Badge variant="secondary" className="text-[10px]">
+                                      Adjustment
+                                    </Badge>
+                                  ) : null}
+                                </div>
                                 <div className="flex flex-wrap gap-1">
                                   <Badge variant="outline" className="text-[10px] capitalize">
-                                    {sale.status}
+                                    {sale.status.replaceAll("_", " ")}
                                   </Badge>
-                                  {sale.payment_breakdown.map((payment) => (
+                                  {isCashDrawerAdjustment(sale) ? null : sale.payment_breakdown.map((payment) => (
                                     <BadgeTone key={`${sale.sale_id}-${payment.method}`} method={payment.method} />
                                   ))}
                                 </div>
@@ -2108,14 +2121,20 @@ const ManagerReportsDrawer = ({
                             <TableCell className="text-muted-foreground">
                               {new Date(sale.timestamp).toLocaleString()}
                             </TableCell>
-                            <TableCell className="text-right font-semibold text-primary">
-                              {money(sale.grand_total)}
+                            <TableCell className={`text-right font-semibold ${isCashDrawerAdjustment(sale) ? "text-amber-700" : "text-primary"}`}>
+                              {isCashDrawerAdjustment(sale)
+                                ? signedMoney(getTransactionAmount(sale))
+                                : money(sale.grand_total)}
                               <p className="text-xs font-normal text-muted-foreground">
-                                Paid {money(sale.paid_total)}
+                                {isCashDrawerAdjustment(sale)
+                                  ? "Drawer adjustment"
+                                  : `Paid ${money(sale.paid_total)}`}
                               </p>
                             </TableCell>
                             <TableCell className="text-right">
-                              {(sale.status === "completed" || sale.status === "refundedpartially") && onRefundSale ? (
+                              {!isCashDrawerAdjustment(sale) &&
+                              (sale.status === "completed" || sale.status === "refundedpartially") &&
+                              onRefundSale ? (
                                 <Button
                                   variant="outline"
                                   size="sm"

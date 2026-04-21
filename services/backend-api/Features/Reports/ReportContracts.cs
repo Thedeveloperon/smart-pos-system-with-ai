@@ -121,6 +121,12 @@ public sealed class TransactionReportRow
     [JsonPropertyName("cash_short_amount")]
     public decimal CashShortAmount { get; set; }
 
+    [JsonPropertyName("transaction_type")]
+    public string TransactionType { get; set; } = "sale";
+
+    [JsonPropertyName("cash_movement_amount")]
+    public decimal? CashMovementAmount { get; set; }
+
     [JsonPropertyName("payment_breakdown")]
     public List<ReportPaymentBreakdownRow> PaymentBreakdown { get; set; } = [];
 }

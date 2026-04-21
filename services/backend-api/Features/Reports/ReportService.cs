@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
@@ -87,10 +88,22 @@ public sealed class ReportService(
             .Include(x => x.Payments)
             .ToListAsync(cancellationToken);
 
+        var drawerAdjustments = await dbContext.AuditLogs
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        drawerAdjustments = drawerAdjustments
+            .Where(x => x.Action == "cash_drawer_updated" && IsInRange(x.CreatedAtUtc, range))
+            .ToList();
+
         var cashierIds = sales
             .Select(x => x.CreatedByUserId)
             .Where(x => x.HasValue)
             .Select(x => x!.Value)
+            .Concat(drawerAdjustments
+                .Select(x => x.UserId)
+                .Where(x => x.HasValue)
+                .Select(x => x!.Value))
             .Distinct()
             .ToArray();
 
@@ -102,7 +115,7 @@ public sealed class ReportService(
                 .Select(x => new CashierLookupRow(x.Id, x.Username, x.FullName))
                 .ToDictionaryAsync(x => x.UserId, cancellationToken);
 
-        var allItems = sales
+        var saleItems = sales
             .Where(x => IsFinancialSaleStatus(x.Status) && IsInRange(GetSaleTimestamp(x), range))
             .Select(x =>
             {
@@ -128,9 +141,16 @@ public sealed class ReportService(
                     PaymentBreakdown = BuildPaymentBreakdown(x.Payments
                         .Select(y => new PaymentSnapshot(y.Method, y.Amount, y.IsReversal)))
                 };
-            })
+            });
+
+        var adjustmentItems = drawerAdjustments.Select(auditLog => BuildDrawerAdjustmentRow(auditLog, cashiersById));
+
+        var allItems = saleItems
+            .Concat(adjustmentItems)
             .OrderByDescending(x => x.Timestamp)
             .ToList();
+
+        var financialSales = allItems.Where(x => x.TransactionType == "sale").ToList();
 
         return new TransactionsReportResponse
         {
@@ -138,9 +158,9 @@ public sealed class ReportService(
             ToDate = range.ToDate,
             Take = normalizedTake,
             TransactionCount = allItems.Count,
-            GrossTotal = RoundMoney(allItems.Sum(x => x.GrandTotal)),
-            ReversedTotal = RoundMoney(allItems.Sum(x => x.ReversedTotal)),
-            NetCollectedTotal = RoundMoney(allItems.Sum(x => x.NetCollected)),
+            GrossTotal = RoundMoney(financialSales.Sum(x => x.GrandTotal)),
+            ReversedTotal = RoundMoney(financialSales.Sum(x => x.ReversedTotal)),
+            NetCollectedTotal = RoundMoney(financialSales.Sum(x => x.NetCollected)),
             Items = allItems.Take(normalizedTake).ToList()
         };
     }
@@ -1243,6 +1263,37 @@ public sealed class ReportService(
             .ToList();
     }
 
+    private static TransactionReportRow BuildDrawerAdjustmentRow(
+        AuditLog auditLog,
+        IReadOnlyDictionary<Guid, CashierLookupRow> cashiersById)
+    {
+        cashiersById.TryGetValue(auditLog.UserId ?? Guid.Empty, out var cashier);
+        var beforeTotal = GetDecimalProperty(auditLog.BeforeJson, "drawer_total") ?? 0m;
+        var afterTotal = GetDecimalProperty(auditLog.AfterJson, "drawer_total") ?? beforeTotal;
+        var movement = RoundMoney(afterTotal - beforeTotal);
+
+        return new TransactionReportRow
+        {
+            SaleId = auditLog.Id,
+            SaleNumber = $"DRAWER-{auditLog.CreatedAtUtc:yyyyMMddHHmmss}-{auditLog.Id.ToString()[..8].ToUpperInvariant()}",
+            Status = movement >= 0m ? "cash_added" : "cash_removed",
+            Timestamp = auditLog.CreatedAtUtc,
+            CreatedByUserId = auditLog.UserId,
+            CashierUsername = cashier?.Username,
+            CashierFullName = cashier?.FullName,
+            ItemsCount = 0,
+            GrandTotal = 0m,
+            PaidTotal = 0m,
+            ReversedTotal = 0m,
+            NetCollected = 0m,
+            CustomPayoutUsed = false,
+            CashShortAmount = 0m,
+            TransactionType = "cash_drawer_adjustment",
+            CashMovementAmount = movement,
+            PaymentBreakdown = []
+        };
+    }
+
     private static bool IsFinancialSaleStatus(SaleStatus status)
     {
         return status is SaleStatus.Completed or SaleStatus.RefundedPartially or SaleStatus.RefundedFully;
@@ -1275,6 +1326,44 @@ public sealed class ReportService(
             TimeSpan.Zero);
 
         return new DateRange(normalizedFrom, normalizedTo, startUtc, endUtcExclusive);
+    }
+
+    private static decimal? GetDecimalProperty(string? json, string propertyName)
+    {
+        var element = TryParseJson(json);
+        if (element is not { ValueKind: JsonValueKind.Object } objectElement)
+        {
+            return null;
+        }
+
+        if (!objectElement.TryGetProperty(propertyName, out var property))
+        {
+            return null;
+        }
+
+        return property.ValueKind switch
+        {
+            JsonValueKind.Number when property.TryGetDecimal(out var value) => value,
+            JsonValueKind.String when decimal.TryParse(property.GetString(), NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed) => parsed,
+            _ => null
+        };
+    }
+
+    private static JsonElement? TryParseJson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<JsonElement>(json);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static decimal RoundMoney(decimal value)

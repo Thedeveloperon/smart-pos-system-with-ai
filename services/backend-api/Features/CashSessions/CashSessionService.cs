@@ -121,6 +121,7 @@ public sealed class CashSessionService(
             throw new InvalidOperationException("This cash session belongs to a different device.");
         }
 
+        var previousDrawerTotal = session.DrawerTotal ?? session.OpeningTotal;
         var now = DateTimeOffset.UtcNow;
         session.DrawerCountsJson = JsonSerializer.Serialize(request.Counts);
         session.DrawerTotal = request.Total;
@@ -131,11 +132,18 @@ public sealed class CashSessionService(
             action: "cash_drawer_updated",
             entityName: "cash_session",
             entityId: session.Id.ToString(),
+            before: new
+            {
+                details = $"Drawer before update: Rs. {previousDrawerTotal:N0}",
+                drawer_total = previousDrawerTotal,
+                cashier_name = actor.CashierName
+            },
             after: new
             {
                 details = $"Drawer updated: Rs. {request.Total:N0}",
                 amount = request.Total,
                 drawer_total = request.Total,
+                drawer_delta = request.Total - previousDrawerTotal,
                 cashier_name = actor.CashierName
             });
 

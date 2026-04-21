@@ -15,6 +15,8 @@ export type ShiftReportTransactionRow = {
   paid_total: number;
   custom_payout_used: boolean;
   cash_short_amount?: number;
+  transaction_type?: string;
+  cash_movement_amount?: number | null;
   payment_breakdown: {
     method: string;
     net_amount: number;
@@ -73,6 +75,20 @@ export const getDisplayCashShortAmount = (sale: {
   return sale.cash_short_amount ?? 0;
 };
 
+export const isCashDrawerAdjustment = (transaction: {
+  transaction_type?: string;
+}) => transaction.transaction_type === "cash_drawer_adjustment";
+
+export const isSalesTransaction = (transaction: {
+  transaction_type?: string;
+}) => !isCashDrawerAdjustment(transaction);
+
+export const getTransactionAmount = (transaction: {
+  transaction_type?: string;
+  grand_total: number;
+  cash_movement_amount?: number | null;
+}) => (isCashDrawerAdjustment(transaction) ? (transaction.cash_movement_amount ?? 0) : transaction.grand_total);
+
 export const filterShiftTransactions = <T extends { timestamp: string }>(
   transactions: T[],
   openedAt?: string | Date | null,
@@ -114,18 +130,29 @@ const buildReportHtml = (data: ShiftReportData) => {
   const transactionsRows = data.transactions
     .map((sale, index) => {
       const cashier = sale.cashier_full_name || sale.cashier_username || "Unknown";
-      const shortAmount = sale.custom_payout_used ? signedMoney(getDisplayCashShortAmount(sale)) : "-";
+      const isDrawerAdjustment = isCashDrawerAdjustment(sale);
+      const statusLabel = sale.status.replaceAll("_", " ");
+      const shortAmount = isDrawerAdjustment
+        ? "-"
+        : sale.custom_payout_used
+          ? signedMoney(getDisplayCashShortAmount(sale))
+          : "-";
+      const rowLabel = isDrawerAdjustment ? "Drawer adjustment" : sale.sale_number;
+      const amountLabel = isDrawerAdjustment
+        ? signedMoney(sale.cash_movement_amount ?? 0)
+        : money(sale.grand_total);
+      const paidLabel = isDrawerAdjustment ? "-" : money(sale.paid_total);
 
       return `
-        <tr class="${sale.custom_payout_used ? "cash-short" : ""}">
+        <tr class="${sale.custom_payout_used ? "cash-short" : ""} ${isDrawerAdjustment ? "cash-adjustment" : ""}">
           <td class="center">${escapeHtml(index + 1)}</td>
-          <td>${escapeHtml(sale.sale_number)}</td>
+          <td>${escapeHtml(rowLabel)}</td>
           <td>${escapeHtml(cashier)}</td>
           <td>${escapeHtml(new Date(sale.timestamp).toLocaleString())}</td>
-          <td>${escapeHtml(sale.status)}</td>
+          <td>${escapeHtml(statusLabel)}</td>
           <td class="right">${escapeHtml(sale.items_count)}</td>
-          <td class="right">${escapeHtml(money(sale.grand_total))}</td>
-          <td class="right">${escapeHtml(money(sale.paid_total))}</td>
+          <td class="right">${escapeHtml(amountLabel)}</td>
+          <td class="right">${escapeHtml(paidLabel)}</td>
           <td class="right">${escapeHtml(shortAmount)}</td>
         </tr>
       `;
@@ -240,6 +267,7 @@ const buildReportDocument = (title: string, bodyHtml: string) => `
         .balance .line { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; }
         .balance .status { margin-top: 6px; font-weight: 700; }
         .cash-short { color: #dc2626; font-weight: 700; }
+        .cash-adjustment { background: #f8fafc; color: #0f172a; }
         .center { text-align: center; }
         .right { text-align: right; }
         .footer { margin-top: 18px; font-size: 11px; color: #6b7280; }
