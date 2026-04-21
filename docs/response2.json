@@ -1,0 +1,43 @@
+{
+    "draft_id": "11c3799c-c9d1-4c64-a043-043a53b4a0d9",
+    "correlation_id": "0HNKQPU5KPA5M:00000013",
+    "status": "manual_review_required",
+    "scan_status": "skipped",
+    "file_name": "WhatsApp Image 2026-04-06 at 10.30.51 PM.jpeg",
+    "content_type": "image/jpeg",
+    "file_size": 119141,
+    "supplier_name": null,
+    "invoice_number": null,
+    "invoice_date": null,
+    "currency": "LKR",
+    "subtotal": null,
+    "tax_total": null,
+    "grand_total": null,
+    "ocr_confidence": 0,
+    "extraction_provider": "fallback-manual",
+    "extraction_model": null,
+    "review_required": true,
+    "can_auto_commit": false,
+    "blocked_reasons": [
+        "manual_review_required",
+        "no_line_items_extracted",
+        "ocr_provider_unavailable"
+    ],
+    "totals": {
+        "line_total_sum": 0,
+        "extracted_subtotal": null,
+        "extracted_tax_total": null,
+        "extracted_grand_total": null,
+        "expected_grand_total": 0,
+        "difference": 0,
+        "tolerance": 2.0,
+        "within_tolerance": true,
+        "requires_approval_reason": false
+    },
+    "line_items": [],
+    "warnings": [
+        "Cloud OCR relay request failed with HTTP 404.",
+        "No line items were confidently extracted. Manual mapping is required."
+    ],
+    "created_at": "2026-04-15T09:29:40.0078399+00:00"
+}
