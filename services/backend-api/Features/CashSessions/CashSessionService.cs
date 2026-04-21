@@ -552,7 +552,7 @@ public sealed class CashSessionService(
 
             if (updatedQuantity < 0m)
             {
-                throw new InvalidOperationException("Cash drawer does not have enough denominations for this transaction.");
+                updatedQuantity = 0m;
             }
 
             countsByDenomination[delta.Denomination] = updatedQuantity;
