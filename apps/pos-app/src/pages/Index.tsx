@@ -576,7 +576,7 @@ const IndexInner = () => {
           receiptWindow.close();
         }
         console.error(error);
-        toast.error("Failed to complete sale.");
+        toast.error(error instanceof Error ? error.message : "Failed to complete sale.");
       }
     },
     [activeHeldSaleId, backendRole, cartItems, loadHeldBills, loadProducts, refreshSession]
