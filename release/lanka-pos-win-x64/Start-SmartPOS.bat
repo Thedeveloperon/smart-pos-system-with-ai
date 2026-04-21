@@ -131,13 +131,41 @@ if not exist "%APP_EXE%" (
 )
 
 if "%OPENAI_API_KEY%"=="" (
-  if "%AiSuggestions__Enabled%"=="" set "AiSuggestions__Enabled=false"
-  if "%AiInsights__Enabled%"=="" set "AiInsights__Enabled=false"
+  if "!AiInsights__CloudRelayEnabled!"=="" if not "!AiInsights__CloudRelayBaseUrl!"=="" (
+    set "AiInsights__CloudRelayEnabled=true"
+    echo [Info] AiInsights__CloudRelayBaseUrl is set. Enabling AiInsights__CloudRelayEnabled=true for keyless AI relay mode.
+  )
 
-  if /I "%AiSuggestions__Enabled%"=="false" if /I "%AiInsights__Enabled%"=="false" (
+  if "!AiSuggestions__Enabled!"=="" (
+    set "AiSuggestions__Enabled=false"
+  ) else (
+    if /I "!AiSuggestions__Enabled!"=="true" (
+      set "AiSuggestions__Enabled=false"
+      echo [Warn] OPENAI_API_KEY is not set. AiSuggestions__Enabled was forced to false.
+    )
+  )
+
+  if /I "!AiInsights__CloudRelayEnabled!"=="true" (
+    if "!AiInsights__Enabled!"=="" set "AiInsights__Enabled=true"
+  ) else (
+    if "!AiInsights__Enabled!"=="" (
+      set "AiInsights__Enabled=false"
+    ) else (
+      if /I "!AiInsights__Enabled!"=="true" (
+        set "AiInsights__Enabled=false"
+        echo [Warn] OPENAI_API_KEY is not set and AiInsights cloud relay is disabled. AiInsights__Enabled was forced to false.
+      )
+    )
+  )
+
+  if /I "!AiSuggestions__Enabled!"=="false" if /I "!AiInsights__Enabled!"=="false" (
     echo [Info] OPENAI_API_KEY is not set. AI suggestions and AI insights are disabled.
   ) else (
-    echo [Info] OPENAI_API_KEY is not set. Configure OPENAI_API_KEY when enabling OpenAI AI features.
+    if /I "!AiInsights__CloudRelayEnabled!"=="true" (
+      echo [Info] OPENAI_API_KEY is not set. AI insights will run via cloud relay.
+    ) else (
+      echo [Info] OPENAI_API_KEY is not set. Configure OPENAI_API_KEY when enabling OpenAI AI features.
+    )
   )
 )
 
