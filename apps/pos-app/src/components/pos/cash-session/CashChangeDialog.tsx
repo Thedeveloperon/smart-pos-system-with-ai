@@ -27,6 +27,9 @@ interface CashChangeDialogProps {
   onConfirm: (counts: DenominationCount[], customPayoutUsed: boolean, cashShortAmount: number) => void;
 }
 
+const CASH_DRAWER_SHORTAGE_MESSAGE =
+  "Cash drawer does not have enough denominations for this transaction.";
+
 const CashChangeDialog = ({
   open,
   changeAmount,
@@ -146,7 +149,11 @@ const CashChangeDialog = ({
               >
                 Rs. {normalizedChange.toLocaleString()}
               </p>
-              {isFullyCovered ? (
+              {hasDenominationShortage ? (
+                <p className="mt-1 text-xs font-medium text-red-700">
+                  {CASH_DRAWER_SHORTAGE_MESSAGE}
+                </p>
+              ) : isFullyCovered ? (
                 <p className="mt-1 text-xs text-emerald-600">
                   This breakdown uses the available drawer notes and coins.
                 </p>
@@ -183,7 +190,11 @@ const CashChangeDialog = ({
                     <p className={`font-medium ${hasDenominationShortage ? "text-red-700" : "text-slate-700"}`}>
                       Selected total: Rs. {selectedTotal.toLocaleString()}
                     </p>
-                    {!hasDenominationShortage && (
+                    {hasDenominationShortage ? (
+                      <p className="mt-1 text-xs font-medium text-red-700">
+                        {CASH_DRAWER_SHORTAGE_MESSAGE}
+                      </p>
+                    ) : (
                       <p
                         className={`mt-1 text-xs ${
                           isCustomMode
