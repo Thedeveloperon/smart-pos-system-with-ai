@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using SmartPos.Backend.Features.Ai;
 using SmartPos.Backend.Features.CloudAccount;
 using SmartPos.Backend.Features.Licensing;
+using SmartPos.Backend.Security;
 
 namespace SmartPos.Backend.Features.Purchases;
 
@@ -17,6 +18,7 @@ public sealed class CloudRelayOcrProvider(
 {
     private const string CloudRelayClientName = "cloud-ai-relay";
     private const string CloudAuthCookieName = "smartpos_auth";
+    private const string LicenseTokenHeaderName = "X-License-Token";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true
@@ -43,16 +45,35 @@ public sealed class CloudRelayOcrProvider(
         request.Headers.TryAddWithoutValidation("Cookie", $"{CloudAuthCookieName}={cloudAuthToken}");
 
         var sourceRequest = httpContextAccessor.HttpContext?.Request;
-        var forwardedLicenseToken = sourceRequest?.Headers["X-License-Token"].FirstOrDefault();
+        var forwardedLicenseToken = sourceRequest?.Headers[LicenseTokenHeaderName].FirstOrDefault();
         if (!string.IsNullOrWhiteSpace(forwardedLicenseToken))
         {
-            request.Headers.TryAddWithoutValidation("X-License-Token", forwardedLicenseToken);
+            request.Headers.TryAddWithoutValidation(LicenseTokenHeaderName, forwardedLicenseToken);
         }
 
-        var forwardedPosVersion = sourceRequest?.Headers["X-POS-Version"].FirstOrDefault();
+        var forwardedPosVersion = sourceRequest?.Headers[CloudWriteRequestContract.PosVersionHeaderName].FirstOrDefault();
         if (!string.IsNullOrWhiteSpace(forwardedPosVersion))
         {
-            request.Headers.TryAddWithoutValidation("X-POS-Version", forwardedPosVersion);
+            request.Headers.TryAddWithoutValidation(CloudWriteRequestContract.PosVersionHeaderName, forwardedPosVersion);
+        }
+
+        var forwardedDeviceId = sourceRequest?.Headers[CloudWriteRequestContract.DeviceIdHeaderName].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(forwardedDeviceId))
+        {
+            forwardedDeviceId = sourceRequest?.Headers[CloudWriteRequestContract.DeviceCodeHeaderName].FirstOrDefault();
+        }
+
+        if (string.IsNullOrWhiteSpace(forwardedDeviceId))
+        {
+            forwardedDeviceId = sourceRequest?.Headers[CloudWriteRequestContract.TerminalIdHeaderName].FirstOrDefault();
+        }
+
+        if (!string.IsNullOrWhiteSpace(forwardedDeviceId))
+        {
+            var normalizedDeviceId = forwardedDeviceId.Trim();
+            request.Headers.TryAddWithoutValidation(CloudWriteRequestContract.DeviceIdHeaderName, normalizedDeviceId);
+            request.Headers.TryAddWithoutValidation(CloudWriteRequestContract.DeviceCodeHeaderName, normalizedDeviceId);
+            request.Headers.TryAddWithoutValidation(CloudWriteRequestContract.TerminalIdHeaderName, normalizedDeviceId);
         }
 
         using var form = new MultipartFormDataContent();
