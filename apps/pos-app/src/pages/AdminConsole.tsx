@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowDownLeft, ArrowLeft, ArrowUpRight, Activity, Clock3, LogOut, RefreshCw, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/components/auth/AuthContext";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -98,6 +99,7 @@ const AdminConsole = () => {
   const [insights, setInsights] = useState<AiInsightsHistoryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
 
   const loadDashboard = useCallback(async () => {
     setIsLoading(true);
@@ -193,9 +195,7 @@ const AdminConsole = () => {
                   </Button>
                   <Button
                     variant="outline"
-                    onClick={() => {
-                      void logout();
-                    }}
+                    onClick={() => setShowSignOutConfirm(true)}
                   >
                     <LogOut className="h-4 w-4" />
                     Sign Out
@@ -435,9 +435,7 @@ const AdminConsole = () => {
               </Button>
               <Button
                 variant="outline"
-                onClick={() => {
-                  void logout();
-                }}
+                onClick={() => setShowSignOutConfirm(true)}
                 className="justify-start"
               >
                 <LogOut className="h-4 w-4" />
@@ -447,6 +445,24 @@ const AdminConsole = () => {
           </Card>
         </div>
       </div>
+      <ConfirmationDialog
+        open={showSignOutConfirm}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) {
+            setShowSignOutConfirm(false);
+          }
+        }}
+        title="Sign out?"
+        description="Are you sure you want to sign out of the admin console?"
+        cancelLabel="Cancel"
+        confirmLabel="Sign Out"
+        confirmVariant="destructive"
+        onCancel={() => setShowSignOutConfirm(false)}
+        onConfirm={() => {
+          setShowSignOutConfirm(false);
+          void logout();
+        }}
+      />
     </div>
   );
 };

@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -100,6 +102,7 @@ const HeaderBar = ({
 }: HeaderBarProps) => {
   const isCashier = !isAdmin;
   const allowCashier = (visible?: boolean) => !isCashier || visible !== false;
+  const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
 
   return (
     <header className="mx-2 mt-2 flex h-14 shrink-0 items-center justify-between gap-3 border border-border/60 bg-pos-header/95 px-4 text-pos-header-foreground backdrop-blur-sm">
@@ -457,13 +460,35 @@ const HeaderBar = ({
 
             <DropdownMenuSeparator />
 
-            <DropdownMenuItem onSelect={() => onSignOut()} className="min-h-11 px-3 py-2 text-base">
+            <DropdownMenuItem onSelect={(event) => {
+              event.preventDefault();
+              setShowSignOutConfirm(true);
+            }} className="min-h-11 px-3 py-2 text-base">
               <LogOut className="mr-3 h-5 w-5" />
               Sign Out
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      <ConfirmationDialog
+        open={showSignOutConfirm}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) {
+            setShowSignOutConfirm(false);
+          }
+        }}
+        title="Sign out?"
+        description="Are you sure you want to sign out of this session?"
+        cancelLabel="Cancel"
+        confirmLabel="Sign Out"
+        confirmVariant="destructive"
+        onCancel={() => setShowSignOutConfirm(false)}
+        onConfirm={() => {
+          setShowSignOutConfirm(false);
+          onSignOut();
+        }}
+      />
     </header>
   );
 };

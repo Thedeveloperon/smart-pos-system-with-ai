@@ -21,6 +21,7 @@ import {
 } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -78,6 +79,7 @@ const BillingAdminWorkspace = ({ username, onSignOut }: BillingAdminWorkspacePro
   const [auditLogs, setAuditLogs] = useState<Awaited<ReturnType<typeof fetchAdminLicenseAuditLogs>> | null>(null);
   const [auditSearch, setAuditSearch] = useState("");
   const [activeTab, setActiveTab] = useState("invoices");
+  const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
 
   const loadInvoices = useCallback(async () => {
     const [invoiceData, paymentData] = await Promise.all([
@@ -500,7 +502,7 @@ const BillingAdminWorkspace = ({ username, onSignOut }: BillingAdminWorkspacePro
               <Button variant="outline" onClick={() => void refreshAll()} disabled={loading}>
                 {loading ? "Refreshing..." : "Refresh All"}
               </Button>
-              <Button variant="outline" onClick={onSignOut}>
+              <Button variant="outline" onClick={() => setShowSignOutConfirm(true)}>
                 Sign Out
               </Button>
             </div>
@@ -812,6 +814,25 @@ const BillingAdminWorkspace = ({ username, onSignOut }: BillingAdminWorkspacePro
           </TabsContent>
         </Tabs>
       </div>
+
+      <ConfirmationDialog
+        open={showSignOutConfirm}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) {
+            setShowSignOutConfirm(false);
+          }
+        }}
+        title="Sign out?"
+        description="Are you sure you want to sign out of the billing workspace?"
+        cancelLabel="Cancel"
+        confirmLabel="Sign Out"
+        confirmVariant="destructive"
+        onCancel={() => setShowSignOutConfirm(false)}
+        onConfirm={() => {
+          setShowSignOutConfirm(false);
+          onSignOut();
+        }}
+      />
     </div>
   );
 };
