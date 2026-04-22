@@ -108,14 +108,6 @@ Barcode label print supports both desktop Chromium and Electron shell runtimes w
   - `billing_admin / billing123`
   - `security_admin / security123`
 
-If a persistent environment has drifted credentials and login fails for all seeded users, run one restart with:
-
-```bash
-export AuthSecurity__ResetSeedUserPasswordsOnStartup=true
-```
-
-This reapplies default seed passwords, reactivates seed users, and clears lockout counters on startup.
-
 ## 7. Generate MFA codes (super admin)
 
 Codes rotate every 30 seconds.

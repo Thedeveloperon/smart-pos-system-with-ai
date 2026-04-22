@@ -59,7 +59,6 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
     const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
     const [cashReceived, setCashReceived] = useState("");
     const [customerMobile, setCustomerMobile] = useState("");
-    const [showCustomerDetails, setShowCustomerDetails] = useState(false);
     const [cashReceivedCounts, setCashReceivedCounts] = useState<DenominationCount[]>([]);
     const [cashChangeCounts, setCashChangeCounts] = useState<DenominationCount[]>([]);
     const [showCashCountDialog, setShowCashCountDialog] = useState(false);
@@ -98,7 +97,6 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
       );
       setCashReceived("");
       setCustomerMobile("");
-      setShowCustomerDetails(false);
       setCashReceivedCounts([]);
       setCashChangeCounts([]);
     }, [cashChangeCounts, cashNum, cashReceivedCounts, customerMobile, onCompleteSale, paymentMethod]);
@@ -145,38 +143,26 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
 
     return (
       <div className="flex h-full min-h-0 flex-col bg-card">
-        {/* Optional Customer Details */}
-        <div className="shrink-0 border-b border-border px-3 py-1.5">
-          <Button
-            type="button"
-            variant="ghost"
-            className="h-8 w-full justify-start gap-2 rounded-xl px-2 text-xs font-semibold text-muted-foreground hover:text-foreground"
-            onClick={() => {
-              setShowCustomerDetails((current) => !current);
-            }}
-          >
-            <Phone className="h-3.5 w-3.5 shrink-0" />
-            {showCustomerDetails ? "Hide Customer Details" : "Add Customer Details"}
-          </Button>
-          {showCustomerDetails && (
-            <div className="relative mt-1">
-              <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-              <Input
-                value={customerMobile}
-                onChange={(e) => setCustomerMobile(e.target.value)}
-                placeholder="Customer mobile (optional)"
-                className="h-9 rounded-xl pl-9 text-sm"
-              />
-            </div>
-          )}
+        <div className="scrollbar-thin flex-1 min-h-0 overflow-y-auto">
+        {/* Customer Mobile */}
+        <div className="border-b border-border px-3 py-2">
+          <div className="relative">
+            <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <Input
+              value={customerMobile}
+              onChange={(e) => setCustomerMobile(e.target.value)}
+              placeholder="Customer mobile (optional)"
+              className="h-9 rounded-xl pl-9 text-sm"
+            />
+          </div>
         </div>
 
         {/* Payment Method */}
-        <div className="shrink-0 border-b border-border px-3 py-1.5">
-          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <div className="border-b border-border px-3 py-2">
+          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             Payment Method
           </p>
-          <div className="grid grid-cols-3 gap-1.5">
+          <div className="grid grid-cols-3 gap-2">
             {(
               [
                 {
@@ -193,7 +179,7 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
               <Button
                 key={key}
                 variant={paymentMethod === key ? "default" : "pos-quick"}
-                className={`h-10 flex-row gap-1 rounded-xl px-2 text-[11px] font-semibold sm:text-xs ${
+                className={`h-11 flex-row gap-1.5 rounded-xl px-2 text-[11px] font-semibold sm:text-xs ${
                   paymentMethod === key ? "" : ""
                 }`}
                 onClick={() => {
@@ -220,44 +206,42 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
             ))}
           </div>
         </div>
+        </div>
 
-        {paymentMethod === "cash" ? (
-          <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
-            <div className="space-y-1.5 px-3 py-1.5">
-              <div>
-                <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Cash Received
-                </p>
-                <Input
-                  ref={cashReceivedInputRef}
-                  type="number"
-                  value={cashReceived}
-                  onChange={(e) => setCashReceived(e.target.value)}
-                  placeholder="0.00"
-                  className="h-9 rounded-xl text-center text-base font-bold"
-                />
-              </div>
-
-              {cashNum > 0 && (
-                <div
-                  className={`rounded-xl px-3 py-1.5 text-center ${
-                    change >= 0
-                      ? "bg-accent text-accent-foreground"
-                      : "bg-destructive/10 text-destructive"
-                  }`}
-                >
-                  <p className="mb-0.5 text-[10px] font-medium uppercase tracking-wider">
-                    {change >= 0 ? "Change" : "Due"}
-                  </p>
-                  <p className="text-base font-extrabold sm:text-lg">
-                    Rs. {Math.abs(change >= 0 ? change : due).toLocaleString()}
-                  </p>
-                </div>
-              )}
+        {/* Cash Input - pinned above actions so it's always visible without scrolling */}
+        {paymentMethod === "cash" && (
+          <div className="shrink-0 space-y-1.5 border-t border-border px-3 py-2">
+            <div>
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Cash Received
+              </p>
+              <Input
+                ref={cashReceivedInputRef}
+                type="number"
+                value={cashReceived}
+                onChange={(e) => setCashReceived(e.target.value)}
+                placeholder="0.00"
+                className="h-9 rounded-xl text-center text-base font-bold"
+              />
             </div>
+
+            {cashNum > 0 && (
+              <div
+                className={`rounded-xl px-3 py-2 text-center ${
+                  change >= 0
+                    ? "bg-accent text-accent-foreground"
+                    : "bg-destructive/10 text-destructive"
+                }`}
+              >
+                <p className="mb-0.5 text-[10px] font-medium uppercase tracking-wider">
+                  {change >= 0 ? "Change" : "Due"}
+                </p>
+                <p className="text-lg font-extrabold sm:text-xl">
+                  Rs. {Math.abs(change >= 0 ? change : due).toLocaleString()}
+                </p>
+              </div>
+            )}
           </div>
-        ) : (
-          <div className="min-h-0 flex-1" />
         )}
 
         {/* Actions */}

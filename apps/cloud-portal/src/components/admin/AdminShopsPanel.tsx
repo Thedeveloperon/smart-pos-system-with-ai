@@ -30,8 +30,6 @@ type AdminShopsPanelProps = {
   onShopsChanged?: () => Promise<void> | void;
 };
 
-type AdminShopRow = AdminShopsLicensingSnapshotResponse["items"][number];
-
 type CreateShopForm = {
   shopCode: string;
   shopName: string;
@@ -67,10 +65,6 @@ const initialCreateForm: CreateShopForm = {
 
 function buildShopActionActorNote(action: "deactivate" | "reactivate" | "delete", shopCode: string) {
   return `Manual ${action} from admin portal for shop '${shopCode}'.`;
-}
-
-function isDefaultSmartPosShop(shop: AdminShopRow) {
-  return shop.is_default_shop === true || shop.shop_code.trim().toLowerCase() === "default";
 }
 
 const shopDependencyKeys = [
@@ -141,12 +135,6 @@ function resolveShopMutationErrorMessage(
 ) {
   if (!(error instanceof Error)) {
     return fallback;
-  }
-
-  if (error instanceof ApiError && error.code === "DEFAULT_SHOP_PROTECTED") {
-    return action === "deactivate"
-      ? "The default shop cannot be deactivated."
-      : "The default shop cannot be deleted.";
   }
 
   if (!(error instanceof ApiError) || error.code !== "INVALID_ADMIN_REQUEST") {
@@ -256,24 +244,18 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
     () => [...items].sort((a, b) => a.shop_code.localeCompare(b.shop_code)),
     [items],
   );
-  const selectableSortedItems = useMemo(
-    () => sortedItems.filter((shop) => !isDefaultSmartPosShop(shop)),
-    [sortedItems],
-  );
   const selectedShopIdSet = useMemo(() => new Set(selectedShopIds), [selectedShopIds]);
   const selectedShops = useMemo(
-    () => sortedItems.filter((shop) => selectedShopIdSet.has(shop.shop_id) && !isDefaultSmartPosShop(shop)),
+    () => sortedItems.filter((shop) => selectedShopIdSet.has(shop.shop_id)),
     [selectedShopIdSet, sortedItems],
   );
   const allVisibleShopsSelected =
-    selectableSortedItems.length > 0 && selectableSortedItems.every((shop) => selectedShopIdSet.has(shop.shop_id));
+    sortedItems.length > 0 && sortedItems.every((shop) => selectedShopIdSet.has(shop.shop_id));
   const someVisibleShopsSelected =
-    selectableSortedItems.some((shop) => selectedShopIdSet.has(shop.shop_id));
+    sortedItems.length > 0 && sortedItems.some((shop) => selectedShopIdSet.has(shop.shop_id));
 
   useEffect(() => {
-    setSelectedShopIds((current) =>
-      current.filter((shopId) => items.some((shop) => shop.shop_id === shopId && !isDefaultSmartPosShop(shop))),
-    );
+    setSelectedShopIds((current) => current.filter((shopId) => items.some((shop) => shop.shop_id === shopId)));
   }, [items]);
 
   useEffect(() => {
@@ -308,12 +290,7 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
     await onShopsChanged?.();
   }, [loadShops, onShopsChanged]);
 
-  const toggleShopSelection = useCallback((shop: AdminShopRow, checked: boolean) => {
-    if (isDefaultSmartPosShop(shop)) {
-      return;
-    }
-
-    const shopId = shop.shop_id;
+  const toggleShopSelection = useCallback((shopId: string, checked: boolean) => {
     setSelectedShopIds((current) => {
       if (checked) {
         if (current.includes(shopId)) {
@@ -332,18 +309,18 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
       setSelectedShopIds((current) => {
         if (checked) {
           const currentSet = new Set(current);
-          for (const shop of selectableSortedItems) {
+          for (const shop of sortedItems) {
             currentSet.add(shop.shop_id);
           }
 
           return Array.from(currentSet);
         }
 
-        const visibleIds = new Set(selectableSortedItems.map((shop) => shop.shop_id));
+        const visibleIds = new Set(sortedItems.map((shop) => shop.shop_id));
         return current.filter((shopId) => !visibleIds.has(shopId));
       });
     },
-    [selectableSortedItems],
+    [sortedItems],
   );
 
   const setSelectionToFailedIds = useCallback((failedIds: Set<string>) => {
@@ -583,11 +560,6 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
   }, [editForm, editingShop, refreshAll]);
 
   const handleDeactivate = useCallback(async (shop: AdminShopsLicensingSnapshotResponse["items"][number]) => {
-    if (isDefaultSmartPosShop(shop)) {
-      toast.error("The default shop cannot be deactivated.");
-      return;
-    }
-
     const confirmed = await openConfirmationDialog({
       title: "Deactivate shop?",
       description: `Deactivate shop '${shop.shop_code}' (${shop.shop_name})? You can delete it permanently after deactivation.`,
@@ -641,11 +613,6 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
   }, [openReactivatePrompt, refreshAll]);
 
   const handleDelete = useCallback(async (shop: AdminShopsLicensingSnapshotResponse["items"][number]) => {
-    if (isDefaultSmartPosShop(shop)) {
-      toast.error("The default shop cannot be deleted.");
-      return;
-    }
-
     if (shop.is_active !== false) {
       toast.error("Deactivate the shop before deleting it permanently.");
       return;
@@ -739,7 +706,7 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
                   aria-label="Select all shops"
                   checked={allVisibleShopsSelected}
                   onChange={(event) => toggleAllVisibleShops(event.target.checked)}
-                  disabled={selectableSortedItems.length === 0 || bulkSubmitting}
+                  disabled={sortedItems.length === 0 || bulkSubmitting}
                   className="h-4 w-4"
                 />
               </TableHead>
@@ -759,77 +726,66 @@ const AdminShopsPanel = ({ shops, onShopsChanged }: AdminShopsPanelProps) => {
                 </TableCell>
               </TableRow>
             ) : (
-              sortedItems.map((shop) => {
-                const isDefaultShop = isDefaultSmartPosShop(shop);
-
-                return (
-                  <TableRow key={shop.shop_id}>
-                    <TableCell className="w-12 px-2">
-                      <input
-                        type="checkbox"
-                        aria-label={`Select ${shop.shop_code}`}
-                        checked={selectedShopIdSet.has(shop.shop_id)}
-                        onChange={(event) => toggleShopSelection(shop, event.target.checked)}
-                        disabled={bulkSubmitting || isDefaultShop}
-                        className="h-4 w-4"
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <div className="space-y-1">
-                        <p className="font-medium">{shop.shop_name}</p>
-                        <div className="flex items-center gap-2">
-                          <p className="text-xs text-muted-foreground">{shop.shop_code}</p>
-                          {isDefaultShop ? (
-                            <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
-                              Protected
-                            </Badge>
-                          ) : null}
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={shop.is_active !== false ? "default" : "secondary"}>{shop.is_active !== false ? "Active" : "Inactive"}</Badge>
-                    </TableCell>
-                    <TableCell className="capitalize">{shop.plan}</TableCell>
-                    <TableCell className="text-right">{shop.active_seats}/{shop.seat_limit}</TableCell>
-                    <TableCell className="text-right">{shop.total_devices}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button size="sm" variant="outline" onClick={() => openEdit(shop)} disabled={bulkSubmitting}>
-                          Edit
-                        </Button>
-                        {shop.is_active !== false ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => void handleDeactivate(shop)}
-                            disabled={bulkSubmitting || isDefaultShop}
-                          >
-                            Deactivate
-                          </Button>
-                        ) : (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => void handleReactivate(shop)}
-                            disabled={bulkSubmitting}
-                          >
-                            Reactivate
-                          </Button>
-                        )}
+              sortedItems.map((shop) => (
+                <TableRow key={shop.shop_id}>
+                  <TableCell className="w-12 px-2">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${shop.shop_code}`}
+                      checked={selectedShopIdSet.has(shop.shop_id)}
+                      onChange={(event) => toggleShopSelection(shop.shop_id, event.target.checked)}
+                      disabled={bulkSubmitting}
+                      className="h-4 w-4"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <div className="space-y-1">
+                      <p className="font-medium">{shop.shop_name}</p>
+                      <p className="text-xs text-muted-foreground">{shop.shop_code}</p>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={shop.is_active !== false ? "default" : "secondary"}>{shop.is_active !== false ? "Active" : "Inactive"}</Badge>
+                  </TableCell>
+                  <TableCell className="capitalize">{shop.plan}</TableCell>
+                  <TableCell className="text-right">{shop.active_seats}/{shop.seat_limit}</TableCell>
+                  <TableCell className="text-right">{shop.total_devices}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-2">
+                      <Button size="sm" variant="outline" onClick={() => openEdit(shop)} disabled={bulkSubmitting}>
+                        Edit
+                      </Button>
+                      {shop.is_active !== false ? (
                         <Button
                           size="sm"
-                          variant="destructive"
-                          onClick={() => void handleDelete(shop)}
-                          disabled={bulkSubmitting || isDefaultShop}
+                          variant="outline"
+                          onClick={() => void handleDeactivate(shop)}
+                          disabled={bulkSubmitting}
                         >
-                          Delete
+                          Deactivate
                         </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void handleReactivate(shop)}
+                          disabled={bulkSubmitting}
+                        >
+                          Reactivate
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => void handleDelete(shop)}
+                        disabled={bulkSubmitting}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
             )}
           </TableBody>
         </Table>

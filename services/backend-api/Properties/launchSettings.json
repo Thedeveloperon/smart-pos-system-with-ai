@@ -14,11 +14,9 @@
       "dotnetRunMessages": true,
       "launchBrowser": true,
       "launchUrl": "swagger",
-      "applicationUrl": "http://localhost:5080",
+      "applicationUrl": "http://localhost:5102",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development",
-        "AiInsights__CloudRelayBaseUrl": "https://smartpos-backend-v7yd.onrender.com",
-        "Licensing__CloudRelayBaseUrl": "https://smartpos-backend-v7yd.onrender.com"
+        "ASPNETCORE_ENVIRONMENT": "Development"
       }
     },
     "https": {
@@ -26,11 +24,9 @@
       "dotnetRunMessages": true,
       "launchBrowser": true,
       "launchUrl": "swagger",
-      "applicationUrl": "https://localhost:7118;http://localhost:5080",
+      "applicationUrl": "https://localhost:7118;http://localhost:5102",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development",
-        "AiInsights__CloudRelayBaseUrl": "https://smartpos-backend-v7yd.onrender.com",
-        "Licensing__CloudRelayBaseUrl": "https://smartpos-backend-v7yd.onrender.com"
+        "ASPNETCORE_ENVIRONMENT": "Development"
       }
     },
     "IIS Express": {
@@ -38,9 +34,7 @@
       "launchBrowser": true,
       "launchUrl": "swagger",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development",
-        "AiInsights__CloudRelayBaseUrl": "https://smartpos-backend-v7yd.onrender.com",
-        "Licensing__CloudRelayBaseUrl": "https://smartpos-backend-v7yd.onrender.com"
+        "ASPNETCORE_ENVIRONMENT": "Development"
       }
     }
   }

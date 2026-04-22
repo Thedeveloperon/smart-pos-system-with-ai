@@ -622,9 +622,6 @@ public sealed class AdminShopLicensingSnapshotRow
     [JsonPropertyName("shop_name")]
     public string ShopName { get; set; } = string.Empty;
 
-    [JsonPropertyName("is_default_shop")]
-    public bool IsDefaultShop { get; set; }
-
     [JsonPropertyName("is_active")]
     public bool IsActive { get; set; } = true;
 
@@ -3090,5 +3087,4 @@ internal static class LicenseErrorCodes
     public const string DuplicateSubmission = "DUPLICATE_SUBMISSION";
     public const string CloudLicenseUnreachable = "CLOUD_LICENSE_UNREACHABLE";
     public const string CloudLicensingDisabled = "CLOUD_LICENSING_DISABLED";
-    public const string DefaultShopProtected = "DEFAULT_SHOP_PROTECTED";
 }

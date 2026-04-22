@@ -1147,8 +1147,8 @@ const IndexInner = () => {
                 expertMode={expertModeEnabled}
               />
             </div>
-            <div className="min-h-0 overflow-hidden bg-surface-elevated">
-              <div className="grid h-full min-h-0" style={{ gridTemplateRows: "34% 66%" }}>
+            <div className="scrollbar-thin min-h-0 overflow-y-auto bg-surface-elevated">
+              <div className="grid h-full min-h-0" style={{ gridTemplateRows: "38% 62%" }}>
                 <div className="min-h-0 overflow-hidden border-b border-border">
                   <CartPanel
                     items={cartItems}
@@ -1192,7 +1192,7 @@ const IndexInner = () => {
               </div>
             )}
             {mobileTab === "checkout" && (
-              <div className="h-full overflow-hidden">
+              <div className="h-full overflow-y-auto">
                 <CheckoutPanel
                   ref={mobileCheckoutRef}
                   items={cartItems}

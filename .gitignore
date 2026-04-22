@@ -33,8 +33,7 @@ services/backend-api/*.db-wal
 *.log
 
 # Deployment artifacts
-#release/
-release/lanka-pos-win-x64/app/backend.exe
+release/
 artifacts/
 tmp/
 tmp-*

@@ -5,7 +5,6 @@ public sealed class AuthSecurityOptions
     public const string SectionName = "AuthSecurity";
 
     public bool RequireMfaForSuperAdmins { get; set; } = true;
-    public bool ResetSeedUserPasswordsOnStartup { get; set; } = false;
     public int TotpStepSeconds { get; set; } = 30;
     public int TotpAllowedSkewWindows { get; set; } = 1;
     public int ImpossibleTravelLookbackMinutes { get; set; } = 30;

@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 
-type LabelPreset = "thermal" | "thermal-40x30" | "a4";
+type LabelPreset = "thermal" | "a4";
 type PrintRuntime = "chromium" | "electron";
 
 type BarcodeLabelPrintDialogProps = {
@@ -127,10 +127,8 @@ function buildLabelMarkup(product: CatalogProduct, showPrice: boolean): string {
       <div class="label-name">${name}</div>
       <div class="label-meta">SKU: ${sku}</div>
       <div class="barcode-wrap">${barcodeSvg}</div>
-      <div class="label-footer">
-        <div class="barcode-text">${barcode}</div>
-        ${showPrice ? `<div class="price">${escapeHtml(price)}</div>` : ""}
-      </div>
+      <div class="barcode-text">${barcode}</div>
+      ${showPrice ? `<div class="price">${escapeHtml(price)}</div>` : ""}
     </article>
   `;
 }
@@ -160,17 +158,11 @@ export function buildPrintDocumentHtml(
   });
 
   const labelMarkup = labels.map((product) => buildLabelMarkup(product, showPrice)).join("");
-  const isThermal = preset === "thermal" || preset === "thermal-40x30";
-  const isCompactThermal = preset === "thermal-40x30";
-  const thermalPageWidth = isCompactThermal ? "40mm" : "58mm";
-  const thermalPageHeight = isCompactThermal ? "30mm" : "40mm";
-  const thermalLabelPadding = isCompactThermal ? "1.3mm 1.6mm 1.2mm" : "2mm 2.4mm 1.8mm";
-  const thermalNameFontSize = isCompactThermal ? "9px" : "11px";
-  const thermalNameMaxHeight = isCompactThermal ? "4.4mm" : "6mm";
-  const thermalMetaFontSize = isCompactThermal ? "8px" : "9px";
-  const thermalBarcodeHeight = isCompactThermal ? "9.6mm" : "13.8mm";
-  const thermalFooterFontSize = isCompactThermal ? "8px" : "10px";
-  const thermalFooterGap = isCompactThermal ? "1mm" : "1.6mm";
+  const isThermal = preset === "thermal";
+  const runtimeNote =
+    runtime === "electron"
+      ? "Electron runtime detected: open the system print dialog and verify selected label printer before confirming."
+      : "Use browser print options to select the connected label printer.";
   const printScript =
     runtime === "electron"
       ? `window.onload = function () { setTimeout(function () { window.print(); }, 80); };`
@@ -183,87 +175,68 @@ export function buildPrintDocumentHtml(
     <title>Barcode Labels</title>
     <style>
       @page {
-        size: ${isThermal ? `${thermalPageWidth} ${thermalPageHeight}` : "A4"};
-        margin: ${isThermal ? "0" : "10mm"};
-      }
-      * {
-        box-sizing: border-box;
-      }
-      html {
-        ${isThermal ? `width: ${thermalPageWidth};` : ""}
+        size: ${isThermal ? "58mm 40mm" : "A4"};
+        margin: ${isThermal ? "2mm" : "10mm"};
       }
       body {
         margin: 0;
-        ${isThermal ? `width: ${thermalPageWidth};` : ""}
         font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
         color: #0f172a;
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
       }
       .sheet {
         display: ${isThermal ? "block" : "grid"};
         ${isThermal ? "" : "grid-template-columns: repeat(3, minmax(0, 1fr));"}
-        gap: ${isThermal ? "0" : "4mm"};
+        gap: ${isThermal ? "2mm" : "4mm"};
       }
       .label {
         box-sizing: border-box;
-        border: ${isThermal ? "none" : "1px solid #cbd5e1"};
-        border-radius: ${isThermal ? "0" : "3mm"};
-        padding: ${isThermal ? thermalLabelPadding : "3mm"};
-        width: ${isThermal ? thermalPageWidth : "100%"};
-        min-height: ${isThermal ? thermalPageHeight : "38mm"};
+        border: 1px solid #cbd5e1;
+        border-radius: 3mm;
+        padding: ${isThermal ? "2mm" : "3mm"};
+        width: ${isThermal ? "54mm" : "100%"};
+        min-height: ${isThermal ? "34mm" : "38mm"};
         break-inside: avoid;
-        ${isThermal ? "break-after: page; page-break-after: always;" : ""}
+        margin-bottom: ${isThermal ? "2mm" : "0"};
       }
-      .label:last-child { break-after: auto; page-break-after: auto; }
       .label-name {
-        font-size: ${isThermal ? thermalNameFontSize : "12px"};
+        font-size: ${isThermal ? "11px" : "12px"};
         font-weight: 700;
-        line-height: 1.2;
-        margin-bottom: ${isThermal ? (isCompactThermal ? "0.45mm" : "0.8mm") : "0.8mm"};
-        max-height: ${isThermal ? thermalNameMaxHeight : "7mm"};
+        line-height: 1.25;
+        margin-bottom: 1mm;
+        max-height: 7mm;
         overflow: hidden;
       }
       .label-meta {
-        font-size: ${isThermal ? thermalMetaFontSize : "10px"};
+        font-size: 10px;
         color: #475569;
-        margin-bottom: ${isThermal ? (isCompactThermal ? "0.5mm" : "1mm") : "1mm"};
+        margin-bottom: 1.5mm;
       }
       .barcode-wrap {
         width: 100%;
-        margin-bottom: ${isThermal ? (isCompactThermal ? "0.4mm" : "0.6mm") : "0.6mm"};
-      }
-      .barcode-wrap svg {
-        display: block;
-        width: 100%;
-        height: ${isThermal ? thermalBarcodeHeight : "66px"};
-      }
-      .label-footer {
-        display: flex;
-        align-items: flex-end;
-        justify-content: space-between;
-        gap: ${isThermal ? thermalFooterGap : "1.6mm"};
+        margin-bottom: 1mm;
       }
       .barcode-text {
-        flex: 1;
-        text-align: left;
+        text-align: center;
         letter-spacing: 0.08em;
-        font-size: ${isThermal ? thermalFooterFontSize : "11px"};
+        font-size: 11px;
         font-weight: 600;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
       }
       .price {
         text-align: right;
-        font-size: ${isThermal ? thermalFooterFontSize : "11px"};
+        font-size: 11px;
+        margin-top: 1mm;
         font-weight: 700;
-        white-space: nowrap;
+      }
+      .footer-note {
+        margin-top: 6mm;
+        font-size: 10px;
+        color: #64748b;
       }
     </style>
   </head>
   <body>
     <main class="sheet">${labelMarkup}</main>
+    <div class="footer-note">${runtimeNote}</div>
     <script>
       ${printScript}
     </script>
@@ -337,8 +310,7 @@ export default function BarcodeLabelPrintDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="thermal">Thermal (58mm x 40mm)</SelectItem>
-                  <SelectItem value="thermal-40x30">Thermal (40mm x 30mm)</SelectItem>
+                  <SelectItem value="thermal">Thermal (58mm)</SelectItem>
                   <SelectItem value="a4">A4 Grid (3 columns)</SelectItem>
                 </SelectContent>
               </Select>
@@ -380,11 +352,7 @@ export default function BarcodeLabelPrintDialog({
           <div className="space-y-2">
             <Label>Preview</Label>
             {previewProduct ? (
-              <div
-                className={`rounded-md border border-border bg-white p-3 ${
-                  preset === "thermal-40x30" ? "max-w-[220px]" : preset === "thermal" ? "max-w-[280px]" : "max-w-[340px]"
-                }`}
-              >
+              <div className={`rounded-md border border-border bg-white p-3 ${preset === "thermal" ? "max-w-[280px]" : "max-w-[340px]"}`}>
                 <p className="line-clamp-2 text-sm font-semibold">{previewProduct.name}</p>
                 <p className="mb-2 text-[11px] text-muted-foreground">SKU: {previewProduct.sku || "-"}</p>
                 <div

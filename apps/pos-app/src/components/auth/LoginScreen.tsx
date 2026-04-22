@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { AlertCircle, ArrowLeft, KeyRound, ShoppingBag, ShieldCheck } from "lucide-react";
+import { AlertCircle, ArrowLeft, ShoppingBag, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "./AuthContext";
@@ -9,13 +9,6 @@ type LoginScreenMode = "pos" | "admin";
 type LoginScreenProps = {
   mode?: LoginScreenMode;
 };
-
-const STATIC_SUPER_ADMIN_MFA_CODE = "123456";
-const MARKETING_WEBSITE_BASE_URL = (import.meta.env.VITE_MARKETING_WEBSITE_URL || "http://localhost:3000").replace(
-  /\/+$/,
-  "",
-);
-const MARKETING_ADMIN_LOGIN_URL = `${MARKETING_WEBSITE_BASE_URL}/admin/login`;
 
 const LoginScreen = ({ mode = "pos" }: LoginScreenProps) => {
   const { login } = useAuth();
@@ -79,34 +72,6 @@ const LoginScreen = ({ mode = "pos" }: LoginScreenProps) => {
                 </div>
               </div>
 
-              {isAdminMode ? (
-                <div className="rounded-2xl border border-border/80 bg-muted/20 p-4 text-sm text-muted-foreground">
-                  <p className="font-medium text-foreground">Super admin access</p>
-                  <p className="mt-1">
-                    Use <span className="font-medium text-foreground">support_admin</span>,{" "}
-                    <span className="font-medium text-foreground">billing_admin</span>, or{" "}
-                    <span className="font-medium text-foreground">security_admin</span>.
-                  </p>
-                  <p className="mt-2 flex flex-wrap gap-2">
-                    <span className="inline-flex items-center gap-1 rounded-full bg-background px-2.5 py-1 text-xs text-foreground">
-                      <KeyRound className="h-3.5 w-3.5" />
-                      MFA required
-                    </span>
-                    <span className="inline-flex items-center rounded-full bg-background px-2.5 py-1 text-xs text-foreground">
-                      Static code: {STATIC_SUPER_ADMIN_MFA_CODE}
-                    </span>
-                  </p>
-                </div>
-              ) : (
-                <div className="rounded-2xl border border-border/80 bg-muted/20 p-4 text-sm text-muted-foreground">
-                  <p className="font-medium text-foreground">Seeded users</p>
-                  <p className="mt-1">
-                    <code className="font-medium text-foreground">owner / owner123</code>,{" "}
-                    <code className="font-medium text-foreground">manager / manager123</code>, and{" "}
-                    <code className="font-medium text-foreground">cashier / cashier123</code>.
-                  </p>
-                </div>
-              )}
             </div>
 
             <div className="mt-8 grid gap-3 sm:grid-cols-3">
@@ -190,20 +155,6 @@ const LoginScreen = ({ mode = "pos" }: LoginScreenProps) => {
               </p>
             </form>
 
-            {isAdminMode ? (
-              <p className="mt-6 text-xs leading-6 text-muted-foreground">
-                Super admin seeded credentials:
-                <code className="font-medium text-foreground"> support_admin / support123</code>,
-                <code className="font-medium text-foreground"> billing_admin / billing123</code>, and
-                <code className="font-medium text-foreground"> security_admin / security123</code>.
-                Primary portal: <code className="font-medium text-foreground">{MARKETING_ADMIN_LOGIN_URL}</code>.
-              </p>
-            ) : (
-              <p className="mt-6 text-xs leading-6 text-muted-foreground">
-                Super admin portal is on the website:{" "}
-                <code className="font-medium text-foreground">{MARKETING_ADMIN_LOGIN_URL}</code>.
-              </p>
-            )}
           </div>
         </div>
       </div>

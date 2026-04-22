@@ -2,7 +2,6 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ProductManagementDialog from "./ProductManagementDialog";
 import {
-  bulkGenerateMissingProductBarcodes,
   deleteProduct,
   fetchBrands,
   fetchCategories,
@@ -137,6 +136,7 @@ describe("ProductManagementDialog barcode flow", () => {
 
   it("regenerates barcode and shows duplicate validation message", async () => {
     const productWithBarcode: CatalogProduct = { ...baseProduct, barcode: "4006381333931" };
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
 
     vi.mocked(fetchProductCatalogItems).mockResolvedValue([productWithBarcode]);
     vi.mocked(generateAndAssignProductBarcode).mockResolvedValue({
@@ -156,8 +156,6 @@ describe("ProductManagementDialog barcode flow", () => {
     await openEditorForFirstProduct();
 
     fireEvent.click(screen.getByRole("button", { name: "Reg" }));
-    expect(await screen.findByText("Replace barcode?")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Replace" }));
 
     await waitFor(() => {
       expect(generateAndAssignProductBarcode).toHaveBeenCalledWith("prod-1", {
@@ -165,6 +163,7 @@ describe("ProductManagementDialog barcode flow", () => {
         seed: "MILK-1L",
       });
     });
+    expect(confirmSpy).toHaveBeenCalled();
     expect(toast.success).toHaveBeenCalledWith("Barcode regenerated.");
 
     const barcodeInput = screen.getByLabelText("Barcode");
@@ -177,79 +176,6 @@ describe("ProductManagementDialog barcode flow", () => {
       exclude_product_id: "prod-1",
       check_existing: true,
     });
-  });
-
-  it("uses in-app confirmation before applying missing barcode generation", async () => {
-    const productWithoutBarcode: CatalogProduct = { ...baseProduct, barcode: undefined };
-    const confirmSpy = vi.spyOn(window, "confirm");
-
-    vi.mocked(fetchProductCatalogItems).mockResolvedValue([productWithoutBarcode]);
-    vi.mocked(bulkGenerateMissingProductBarcodes)
-      .mockResolvedValueOnce({
-        dry_run: true,
-        scanned: 1,
-        generated: 0,
-        would_generate: 1,
-        skipped_existing: 0,
-        failed: 0,
-        processed_at: "2026-04-03T00:00:00Z",
-        items: [
-          {
-            product_id: "prod-1",
-            name: "Milk 1L",
-            status: "would_generate",
-            barcode: null,
-            message: null,
-          },
-        ],
-      })
-      .mockResolvedValueOnce({
-        dry_run: false,
-        scanned: 1,
-        generated: 1,
-        would_generate: 0,
-        skipped_existing: 0,
-        failed: 0,
-        processed_at: "2026-04-03T00:00:02Z",
-        items: [
-          {
-            product_id: "prod-1",
-            name: "Milk 1L",
-            status: "generated",
-            barcode: "4006381333931",
-            message: null,
-          },
-        ],
-      });
-
-    renderDialog();
-    expect(await screen.findByText("Milk 1L")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Generate Missing" }));
-
-    await waitFor(() => {
-      expect(bulkGenerateMissingProductBarcodes).toHaveBeenCalledWith({
-        take: 200,
-        include_inactive: true,
-        dry_run: true,
-      });
-    });
-
-    expect(await screen.findByText("Generate missing barcodes?")).toBeInTheDocument();
-    expect(screen.getByText("Found 1 product(s) without barcodes. Generate now?")).toBeInTheDocument();
-    expect(confirmSpy).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
-
-    await waitFor(() => {
-      expect(bulkGenerateMissingProductBarcodes).toHaveBeenCalledWith({
-        take: 200,
-        include_inactive: true,
-        dry_run: false,
-      });
-    });
-    expect(toast.success).toHaveBeenCalledWith("Barcodes generated: 1, skipped existing: 0, failed: 0.");
-
     confirmSpy.mockRestore();
   });
 

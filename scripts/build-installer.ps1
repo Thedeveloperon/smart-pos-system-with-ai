@@ -3,7 +3,6 @@ param(
     [string]$Configuration = "Release",
     [string]$PackageOutputDir = "release/lanka-pos-win-x64",
     [string]$InstallerOutputDir = "release/installer",
-    [string]$FrontendApiBaseUrl = "http://127.0.0.1:5080",
     [string]$AppVersion = "1.0.0",
     [string]$ReleaseChannel = "stable",
     [string]$ReleaseNotesUrl = "",
@@ -93,7 +92,6 @@ if (-not $SkipPackaging) {
         Runtime = $Runtime
         Configuration = $Configuration
         OutputDir = $PackageOutputDir
-        FrontendApiBaseUrl = $FrontendApiBaseUrl
     }
 
     if ($SkipNpmCi) {
