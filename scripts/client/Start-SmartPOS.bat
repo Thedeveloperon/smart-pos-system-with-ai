@@ -43,6 +43,7 @@ if exist "%ROOT%client.env" (
 
 if "%ASPNETCORE_ENVIRONMENT%"=="" set "ASPNETCORE_ENVIRONMENT=Production"
 if "%ASPNETCORE_URLS%"=="" set "ASPNETCORE_URLS=http://127.0.0.1:5080"
+if "%Licensing__CloudRelayBaseUrl%"=="" if "%AiInsights__CloudRelayBaseUrl%"=="" set "Licensing__CloudRelayBaseUrl=https://smartpos-backend-v7yd.onrender.com"
 
 if "%SMARTPOS_JWT_SECRET%"=="" if not "%JwtAuth__SecretKey%"=="" set "SMARTPOS_JWT_SECRET=%JwtAuth__SecretKey%"
 if "%JwtAuth__SecretKey%"=="" if not "%SMARTPOS_JWT_SECRET%"=="" set "JwtAuth__SecretKey=%SMARTPOS_JWT_SECRET%"

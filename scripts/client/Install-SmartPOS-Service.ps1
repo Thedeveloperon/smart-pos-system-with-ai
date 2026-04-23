@@ -279,6 +279,7 @@ if (-not (Test-Path -LiteralPath $backendExe)) {
 }
 
 $envValues = Read-ClientEnv -Path $clientEnvPath
+$defaultCloudRelayBaseUrl = "https://smartpos-backend-v7yd.onrender.com"
 
 if (-not $envValues.Contains("ASPNETCORE_ENVIRONMENT") -or [string]::IsNullOrWhiteSpace([string]$envValues["ASPNETCORE_ENVIRONMENT"])) {
     $envValues["ASPNETCORE_ENVIRONMENT"] = "Production"
@@ -286,6 +287,22 @@ if (-not $envValues.Contains("ASPNETCORE_ENVIRONMENT") -or [string]::IsNullOrWhi
 
 if (-not $envValues.Contains("ASPNETCORE_URLS") -or [string]::IsNullOrWhiteSpace([string]$envValues["ASPNETCORE_URLS"])) {
     $envValues["ASPNETCORE_URLS"] = "http://127.0.0.1:5080"
+}
+
+$licensingRelayBaseUrl = if ($envValues.Contains("Licensing__CloudRelayBaseUrl")) {
+    [string]$envValues["Licensing__CloudRelayBaseUrl"]
+}
+else {
+    ""
+}
+$aiRelayBaseUrl = if ($envValues.Contains("AiInsights__CloudRelayBaseUrl")) {
+    [string]$envValues["AiInsights__CloudRelayBaseUrl"]
+}
+else {
+    ""
+}
+if ([string]::IsNullOrWhiteSpace($licensingRelayBaseUrl) -and [string]::IsNullOrWhiteSpace($aiRelayBaseUrl)) {
+    $envValues["Licensing__CloudRelayBaseUrl"] = $defaultCloudRelayBaseUrl
 }
 
 if (-not $envValues.Contains("SMARTPOS_JWT_SECRET") -or [string]::IsNullOrWhiteSpace([string]$envValues["SMARTPOS_JWT_SECRET"])) {
