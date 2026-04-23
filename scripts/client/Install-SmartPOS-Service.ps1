@@ -303,7 +303,25 @@ else {
 }
 if ([string]::IsNullOrWhiteSpace($licensingRelayBaseUrl) -and [string]::IsNullOrWhiteSpace($aiRelayBaseUrl)) {
     $envValues["Licensing__CloudRelayBaseUrl"] = $defaultCloudRelayBaseUrl
+    $licensingRelayBaseUrl = $defaultCloudRelayBaseUrl
 }
+
+if ([string]::IsNullOrWhiteSpace($aiRelayBaseUrl) -and -not [string]::IsNullOrWhiteSpace($licensingRelayBaseUrl)) {
+    $envValues["AiInsights__CloudRelayBaseUrl"] = $licensingRelayBaseUrl
+    $aiRelayBaseUrl = $licensingRelayBaseUrl
+}
+
+$aiCloudRelayEnabledRaw = if ($envValues.Contains("AiInsights__CloudRelayEnabled")) {
+    [string]$envValues["AiInsights__CloudRelayEnabled"]
+}
+else {
+    ""
+}
+if ([string]::IsNullOrWhiteSpace($aiCloudRelayEnabledRaw) -and -not [string]::IsNullOrWhiteSpace($aiRelayBaseUrl)) {
+    $envValues["AiInsights__CloudRelayEnabled"] = "true"
+    $aiCloudRelayEnabledRaw = "true"
+}
+$aiCloudRelayEnabled = @("1", "true", "yes", "on") -contains $aiCloudRelayEnabledRaw.Trim().ToLowerInvariant()
 
 if (-not $envValues.Contains("SMARTPOS_JWT_SECRET") -or [string]::IsNullOrWhiteSpace([string]$envValues["SMARTPOS_JWT_SECRET"])) {
     $envValues["SMARTPOS_JWT_SECRET"] = New-RandomSecret
@@ -338,7 +356,10 @@ if ([string]::IsNullOrWhiteSpace($openAiApiKey)) {
         $envValues["AiSuggestions__Enabled"] = "false"
     }
 
-    if (-not $envValues.Contains("AiInsights__Enabled") -or [string]::IsNullOrWhiteSpace([string]$envValues["AiInsights__Enabled"])) {
+    if ($aiCloudRelayEnabled -and -not [string]::IsNullOrWhiteSpace($aiRelayBaseUrl)) {
+        $envValues["AiInsights__Enabled"] = "true"
+    }
+    elseif (-not $envValues.Contains("AiInsights__Enabled") -or [string]::IsNullOrWhiteSpace([string]$envValues["AiInsights__Enabled"])) {
         $envValues["AiInsights__Enabled"] = "false"
     }
 }
