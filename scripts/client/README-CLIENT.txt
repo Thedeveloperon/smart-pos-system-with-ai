@@ -43,9 +43,10 @@ Notes:
 - If no licensing data encryption key is configured, service install/start scripts auto-generate SMARTPOS_LICENSE_DATA_ENCRYPTION_KEY and save it to client.env.
 - If no licensing signing private key is configured, service install/start scripts initialize app\license-signing-private-key.pem and save its path to SMARTPOS_LICENSE_SIGNING_PRIVATE_KEY_PEM in client.env.
 - If neither Licensing__CloudRelayBaseUrl nor AiInsights__CloudRelayBaseUrl is configured, service install/start scripts default Licensing__CloudRelayBaseUrl to https://smartpos-backend-v7yd.onrender.com for cloud account linking.
+- If AiInsights__CloudRelayBaseUrl is empty but Licensing__CloudRelayBaseUrl is set, service install/start scripts mirror that value to AiInsights__CloudRelayBaseUrl and set AiInsights__CloudRelayEnabled=true.
 - Activation keys must be generated against this same running backend instance (http://127.0.0.1:5080) and its current database.
 - Use Generate-Offline-Activation-Codes.bat from this package to avoid environment/database mismatch.
-- If OPENAI_API_KEY is not configured, Start-SmartPOS.bat disables AI suggestions/insights so startup still succeeds.
+- If OPENAI_API_KEY is not configured, Start-SmartPOS.bat keeps AI insights enabled when cloud relay is configured; otherwise it disables local AI suggestions/insights so startup still succeeds.
 - For OpenAI AI features: set OPENAI_API_KEY in client.env.
 - For your own AI endpoint: set ASPNETCORE_ENVIRONMENT=Development, AiSuggestions__Provider=Custom, and AiSuggestions__CustomEndpointUrl.
 - For local vision-based image suggestions, run scripts/vision-service on the same PC and set:
