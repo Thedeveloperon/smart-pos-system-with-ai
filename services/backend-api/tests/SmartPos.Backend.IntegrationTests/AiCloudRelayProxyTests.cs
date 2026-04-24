@@ -37,6 +37,7 @@ public sealed class AiCloudRelayProxyTests : IDisposable
             available_credits = 321.50m,
             updated_at = DateTimeOffset.UtcNow
         }));
+        await SeedLinkedCloudAccountAsync();
 
         await TestAuth.SignInAsManagerAsync(client);
 
@@ -58,6 +59,7 @@ public sealed class AiCloudRelayProxyTests : IDisposable
     [Fact]
     public async Task RelayEnabled_WhenCloudReturnsValidationError_ShouldPassThroughCloudError()
     {
+        var idempotencyKey = $"it-ai-relay-error-{Guid.NewGuid():N}";
         relayHandler.Enqueue(_ => JsonResponse(HttpStatusCode.BadRequest, new
         {
             error = new
@@ -66,13 +68,14 @@ public sealed class AiCloudRelayProxyTests : IDisposable
                 message = "Insufficient credits. Please top up to continue."
             }
         }));
+        await SeedLinkedCloudAccountAsync();
 
         await TestAuth.SignInAsManagerAsync(client);
 
         var response = await client.PostAsJsonAsync("/api/ai/insights", new
         {
             prompt = "Give me two practical actions for tomorrow.",
-            idempotency_key = $"it-ai-relay-error-{Guid.NewGuid():N}"
+            idempotency_key = idempotencyKey
         });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -81,6 +84,9 @@ public sealed class AiCloudRelayProxyTests : IDisposable
 
         Assert.Equal("INSUFFICIENT_CREDITS", payload["error"]?["code"]?.GetValue<string>());
         Assert.Equal("Insufficient credits. Please top up to continue.", payload["error"]?["message"]?.GetValue<string>());
+        Assert.Single(relayHandler.CapturedRequests);
+        var relayRequest = relayHandler.CapturedRequests[0];
+        Assert.True(relayRequest.Headers.ContainsKey("Idempotency-Key"));
     }
 
     [Fact]
@@ -92,6 +98,7 @@ public sealed class AiCloudRelayProxyTests : IDisposable
             updated_at = DateTimeOffset.UtcNow
         }));
         relayHandler.Enqueue(_ => throw new HttpRequestException("Cloud AI relay unavailable"));
+        await SeedLinkedCloudAccountAsync();
 
         await TestAuth.SignInAsManagerAsync(client);
 
@@ -114,23 +121,7 @@ public sealed class AiCloudRelayProxyTests : IDisposable
             updated_at = DateTimeOffset.UtcNow
         }));
 
-        using (var scope = appFactory.Services.CreateScope())
-        {
-            var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
-            dbContext.CloudAccountLinks.RemoveRange(dbContext.CloudAccountLinks);
-            dbContext.CloudAccountLinks.Add(new CloudAccountLink
-            {
-                Id = Guid.NewGuid(),
-                CloudUsername = "owner",
-                CloudFullName = "Owner",
-                CloudRole = "owner",
-                CloudShopCode = "default",
-                CloudAuthToken = "cloud-auth-token-it",
-                TokenExpiresAtUtc = DateTimeOffset.UtcNow.AddHours(1),
-                LinkedAtUtc = DateTimeOffset.UtcNow
-            });
-            dbContext.SaveChanges();
-        }
+        await SeedLinkedCloudAccountAsync();
 
         await TestAuth.SignInAsManagerAsync(client);
 
@@ -141,6 +132,37 @@ public sealed class AiCloudRelayProxyTests : IDisposable
         var relayRequest = relayHandler.CapturedRequests[0];
         Assert.Equal("Bearer cloud-auth-token-it", relayRequest.Headers["Authorization"]);
         Assert.Equal("smartpos_auth=cloud-auth-token-it", relayRequest.Headers["Cookie"]);
+    }
+
+    [Fact]
+    public async Task RelayEnabled_WhenCloudAccountIsNotLinked_ShouldReturnActionableReLinkError()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var response = await client.GetAsync("/api/ai/wallet");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonObject>()
+            ?? throw new InvalidOperationException("Expected AI relay error payload.");
+        Assert.Equal("AI_CLOUD_RELAY_CONTEXT_RESOLUTION_FAILED", payload["error"]?["code"]?.GetValue<string>());
+        Assert.Equal("No linked cloud account is available. Link the cloud account and try again.", payload["error"]?["message"]?.GetValue<string>());
+        Assert.Empty(relayHandler.CapturedRequests);
+    }
+
+    [Fact]
+    public async Task RelayEnabled_WhenCloudAccountSessionIsExpired_ShouldReturnActionableReLinkError()
+    {
+        await SeedLinkedCloudAccountAsync(expiresAtUtc: DateTimeOffset.UtcNow.AddSeconds(-5));
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var response = await client.GetAsync("/api/ai/wallet");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonObject>()
+            ?? throw new InvalidOperationException("Expected AI relay error payload.");
+        Assert.Equal("AI_CLOUD_RELAY_CONTEXT_RESOLUTION_FAILED", payload["error"]?["code"]?.GetValue<string>());
+        Assert.Equal("Linked cloud account session expired. Re-link the cloud account and try again.", payload["error"]?["message"]?.GetValue<string>());
+        Assert.Empty(relayHandler.CapturedRequests);
     }
 
     [Fact]
@@ -163,6 +185,27 @@ public sealed class AiCloudRelayProxyTests : IDisposable
                 Encoding.UTF8,
                 "application/json")
         };
+    }
+
+    private async Task SeedLinkedCloudAccountAsync(
+        string authToken = "cloud-auth-token-it",
+        DateTimeOffset? expiresAtUtc = null)
+    {
+        using var scope = appFactory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+        dbContext.CloudAccountLinks.RemoveRange(dbContext.CloudAccountLinks);
+        dbContext.CloudAccountLinks.Add(new CloudAccountLink
+        {
+            Id = Guid.NewGuid(),
+            CloudUsername = "owner",
+            CloudFullName = "Owner",
+            CloudRole = "owner",
+            CloudShopCode = "default",
+            CloudAuthToken = authToken,
+            TokenExpiresAtUtc = expiresAtUtc ?? DateTimeOffset.UtcNow.AddHours(1),
+            LinkedAtUtc = DateTimeOffset.UtcNow
+        });
+        await dbContext.SaveChangesAsync();
     }
 
     private sealed class RelayWebApplicationFactory(

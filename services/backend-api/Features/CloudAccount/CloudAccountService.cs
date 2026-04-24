@@ -204,6 +204,12 @@ public sealed class CloudAccountService(
 
     public async Task<string?> TryGetLinkedAuthTokenAsync(CancellationToken cancellationToken)
     {
+        var status = await GetLinkedAuthTokenStatusAsync(cancellationToken);
+        return status.AuthToken;
+    }
+
+    public async Task<LinkedCloudAuthTokenStatus> GetLinkedAuthTokenStatusAsync(CancellationToken cancellationToken)
+    {
         var link = (await dbContext.CloudAccountLinks
                 .AsNoTracking()
                 .ToListAsync(cancellationToken))
@@ -211,16 +217,21 @@ public sealed class CloudAccountService(
             .FirstOrDefault();
         if (link is null)
         {
-            return null;
+            return LinkedCloudAuthTokenStatus.NotLinked;
         }
 
-        if (link.TokenExpiresAtUtc <= DateTimeOffset.UtcNow.AddSeconds(30))
-        {
-            return null;
-        }
+        var expiresSoon = link.TokenExpiresAtUtc <= DateTimeOffset.UtcNow.AddSeconds(30);
+        var token = expiresSoon
+            ? null
+            : NormalizeOptionalValue(UnprotectSensitiveValue(link.CloudAuthToken));
 
-        var token = NormalizeOptionalValue(UnprotectSensitiveValue(link.CloudAuthToken));
-        return string.IsNullOrWhiteSpace(token) ? null : token;
+        return new LinkedCloudAuthTokenStatus(
+            IsLinked: true,
+            IsExpired: expiresSoon || string.IsNullOrWhiteSpace(token),
+            AuthToken: string.IsNullOrWhiteSpace(token) ? null : token,
+            CloudUsername: NormalizeOptionalValue(link.CloudUsername),
+            CloudShopCode: NormalizeOptionalValue(link.CloudShopCode),
+            TokenExpiresAtUtc: link.TokenExpiresAtUtc);
     }
 
     private async Task<string> ResolveLocalShopCodeAsync(CancellationToken cancellationToken)
@@ -1017,4 +1028,21 @@ public sealed class CloudAccountService(
         CloudLoginResponse Login,
         string AuthToken,
         string CookieHeader);
+}
+
+public sealed record LinkedCloudAuthTokenStatus(
+    bool IsLinked,
+    bool IsExpired,
+    string? AuthToken,
+    string? CloudUsername,
+    string? CloudShopCode,
+    DateTimeOffset? TokenExpiresAtUtc)
+{
+    public static LinkedCloudAuthTokenStatus NotLinked { get; } = new(
+        IsLinked: false,
+        IsExpired: false,
+        AuthToken: null,
+        CloudUsername: null,
+        CloudShopCode: null,
+        TokenExpiresAtUtc: null);
 }
