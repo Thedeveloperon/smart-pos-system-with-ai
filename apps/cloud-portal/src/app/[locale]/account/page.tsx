@@ -84,6 +84,7 @@ type AiCreditLedgerResponse = {
 
 type OwnerLicensePortalDeviceRow = {
   device_code: string;
+  terminal_id?: string | null;
   device_name: string;
   device_status: string;
   license_state: string;
@@ -1103,7 +1104,7 @@ export default function AccountPage() {
 
           <Button type="button" variant="outline" onClick={() => void handleRefresh()} disabled={isLoadingCommerce}>
             <RefreshCw className="h-4 w-4" />
-            Regenerate
+            Sync Portal
           </Button>
         </div>
       </SectionCard>
@@ -1126,6 +1127,9 @@ export default function AccountPage() {
                     <div key={`${device.device_code}-${index}`} className="flex items-center justify-between gap-4 px-4 py-4">
                       <div className="min-w-0">
                         <p className="font-medium">{device.device_name}</p>
+                        <p className="font-mono text-xs text-muted-foreground">
+                          Terminal ID: {device.terminal_id || device.device_code}
+                        </p>
                         <p className="text-sm text-muted-foreground">
                           Last seen: {formatRelativeTime(device.last_heartbeat_at || device.assigned_at)}
                         </p>

@@ -1309,6 +1309,7 @@ export type LicenseAccessDownloadTrackResponse = {
 
 export type CustomerLicensePortalDevice = {
   provisioned_device_id: string;
+  terminal_id?: string | null;
   device_code: string;
   device_name: string;
   device_status: "active" | "revoked" | string;
