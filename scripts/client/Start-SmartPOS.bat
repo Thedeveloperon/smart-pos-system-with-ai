@@ -145,10 +145,14 @@ if "%OPENAI_API_KEY%"=="" (
 
   if /I "%AiSuggestions__Enabled%"=="false" if /I "%AiInsights__Enabled%"=="false" (
     echo [Info] OPENAI_API_KEY is not set. AI suggestions and AI insights are disabled.
-  ) else if /I "%AiSuggestions__Enabled%"=="false" if /I "%AiInsights__CloudRelayEnabled%"=="true" (
+  ) else if /I "%AiSuggestions__Enabled%"=="false" if /I "%AiInsights__CloudRelayEnabled%"=="true" if not "%AiInsights__CloudRelayBaseUrl%"=="" (
     echo [Info] OPENAI_API_KEY is not set. AI suggestions are disabled. AI insights uses cloud relay.
   ) else (
-    echo [Info] OPENAI_API_KEY is not set. Configure OPENAI_API_KEY when enabling OpenAI AI features.
+    if /I "%AiInsights__CloudRelayEnabled%"=="true" if not "%AiInsights__CloudRelayBaseUrl%"=="" (
+      echo [Info] OPENAI_API_KEY is not set. AI insights will use cloud relay.
+    ) else (
+      echo [Info] OPENAI_API_KEY is not set. Configure OPENAI_API_KEY when enabling OpenAI AI features.
+    )
   )
 )
 
