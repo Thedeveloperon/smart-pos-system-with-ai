@@ -44,8 +44,10 @@ if exist "%ROOT%client.env" (
 if "%ASPNETCORE_ENVIRONMENT%"=="" set "ASPNETCORE_ENVIRONMENT=Production"
 if "%ASPNETCORE_URLS%"=="" set "ASPNETCORE_URLS=http://127.0.0.1:5080"
 if "%Licensing__CloudRelayBaseUrl%"=="" if "%AiInsights__CloudRelayBaseUrl%"=="" set "Licensing__CloudRelayBaseUrl=https://smartpos-backend-v7yd.onrender.com"
+if "%Licensing__CloudRelayBaseUrl%"=="" if not "%AiInsights__CloudRelayBaseUrl%"=="" set "Licensing__CloudRelayBaseUrl=%AiInsights__CloudRelayBaseUrl%"
 if "%AiInsights__CloudRelayBaseUrl%"=="" if not "%Licensing__CloudRelayBaseUrl%"=="" set "AiInsights__CloudRelayBaseUrl=%Licensing__CloudRelayBaseUrl%"
 if "%AiInsights__CloudRelayEnabled%"=="" if not "%AiInsights__CloudRelayBaseUrl%"=="" set "AiInsights__CloudRelayEnabled=true"
+if /I "%AiInsights__CloudRelayEnabled%"=="true" if "%AiInsights__Enabled%"=="" set "AiInsights__Enabled=true"
 
 if "%SMARTPOS_JWT_SECRET%"=="" if not "%JwtAuth__SecretKey%"=="" set "SMARTPOS_JWT_SECRET=%JwtAuth__SecretKey%"
 if "%JwtAuth__SecretKey%"=="" if not "%SMARTPOS_JWT_SECRET%"=="" set "JwtAuth__SecretKey=%SMARTPOS_JWT_SECRET%"
@@ -135,14 +137,16 @@ if not exist "%APP_EXE%" (
 
 if "%OPENAI_API_KEY%"=="" (
   if "%AiSuggestions__Enabled%"=="" set "AiSuggestions__Enabled=false"
-  if /I "%AiInsights__CloudRelayEnabled%"=="true" if not "%AiInsights__CloudRelayBaseUrl%"=="" (
-    set "AiInsights__Enabled=true"
+  if /I "%AiInsights__CloudRelayEnabled%"=="true" (
+    if "%AiInsights__Enabled%"=="" set "AiInsights__Enabled=true"
   ) else (
     if "%AiInsights__Enabled%"=="" set "AiInsights__Enabled=false"
   )
 
   if /I "%AiSuggestions__Enabled%"=="false" if /I "%AiInsights__Enabled%"=="false" (
     echo [Info] OPENAI_API_KEY is not set. AI suggestions and AI insights are disabled.
+  ) else if /I "%AiSuggestions__Enabled%"=="false" if /I "%AiInsights__CloudRelayEnabled%"=="true" if not "%AiInsights__CloudRelayBaseUrl%"=="" (
+    echo [Info] OPENAI_API_KEY is not set. AI suggestions are disabled. AI insights uses cloud relay.
   ) else (
     if /I "%AiInsights__CloudRelayEnabled%"=="true" if not "%AiInsights__CloudRelayBaseUrl%"=="" (
       echo [Info] OPENAI_API_KEY is not set. AI insights will use cloud relay.

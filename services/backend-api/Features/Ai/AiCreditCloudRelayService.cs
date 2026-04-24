@@ -399,11 +399,10 @@ public sealed class AiCreditCloudRelayService(
         HttpContext sourceContext,
         CancellationToken cancellationToken)
     {
-        string? cloudAuthToken = null;
+        LinkedCloudAuthTokenStatus cloudAuthStatus;
         try
         {
-            cloudAuthToken = NormalizeOptionalValue(
-                await cloudAccountService.TryGetLinkedAuthTokenAsync(cancellationToken));
+            cloudAuthStatus = await cloudAccountService.GetLinkedAuthTokenStatusAsync(cancellationToken);
         }
         catch (Exception exception) when (exception is InvalidOperationException or CryptographicException or FormatException)
         {
@@ -414,17 +413,24 @@ public sealed class AiCreditCloudRelayService(
         }
 
         var licenseToken = NormalizeOptionalValue(licenseService.ResolveLicenseToken(sourceContext));
-        var cacheIdentity = cloudAuthToken ?? licenseToken;
-
-        if (string.IsNullOrWhiteSpace(cacheIdentity))
+        if (!cloudAuthStatus.IsLinked)
         {
             throw new AiRelayException(
                 AiRelayErrorCodes.CloudRelayContextResolutionFailed,
-                "No linked cloud account token is available. Link the cloud account and try again.",
+                "No linked cloud account is available. Link the cloud account and try again.",
                 StatusCodes.Status401Unauthorized);
         }
 
-        return new RelayAuthContext(licenseToken, cloudAuthToken, cacheIdentity);
+        var cloudAuthToken = NormalizeOptionalValue(cloudAuthStatus.AuthToken);
+        if (string.IsNullOrWhiteSpace(cloudAuthToken) || cloudAuthStatus.IsExpired)
+        {
+            throw new AiRelayException(
+                AiRelayErrorCodes.CloudRelayContextResolutionFailed,
+                "Linked cloud account session expired. Re-link the cloud account and try again.",
+                StatusCodes.Status401Unauthorized);
+        }
+
+        return new RelayAuthContext(licenseToken, cloudAuthToken, cloudAuthToken);
     }
 
     private static HttpRequestMessage BuildCloudRequest(
@@ -445,7 +451,21 @@ public sealed class AiCreditCloudRelayService(
         var requestUri = $"{normalizedBaseUrl.TrimEnd('/')}/{normalizedPath}";
 
         var request = new HttpRequestMessage(method, requestUri);
-        CopyHeaderIfPresent(sourceRequest, request, CloudWriteRequestContract.IdempotencyHeaderName);
+        var resolvedIdempotencyKey = NormalizeOptionalValue(
+            sourceRequest.Headers[CloudWriteRequestContract.IdempotencyHeaderName]
+                .FirstOrDefault());
+        if (string.IsNullOrWhiteSpace(resolvedIdempotencyKey))
+        {
+            resolvedIdempotencyKey = ResolveBodyIdempotencyKey(body);
+        }
+
+        if (!string.IsNullOrWhiteSpace(resolvedIdempotencyKey))
+        {
+            request.Headers.TryAddWithoutValidation(
+                CloudWriteRequestContract.IdempotencyHeaderName,
+                resolvedIdempotencyKey);
+        }
+
         CopyHeaderIfPresent(sourceRequest, request, CloudWriteRequestContract.PosVersionHeaderName);
 
         var resolvedDeviceId = sourceRequest.Headers[CloudWriteRequestContract.DeviceIdHeaderName]
@@ -490,6 +510,17 @@ public sealed class AiCreditCloudRelayService(
         }
 
         target.Headers.TryAddWithoutValidation(headerName, value);
+    }
+
+    private static string? ResolveBodyIdempotencyKey(object? body)
+    {
+        return body switch
+        {
+            AiInsightRequestPayload insightRequest => NormalizeOptionalValue(insightRequest.IdempotencyKey),
+            AiCheckoutSessionRequest checkoutRequest => NormalizeOptionalValue(checkoutRequest.IdempotencyKey),
+            AiChatMessageCreateRequest chatRequest => NormalizeOptionalValue(chatRequest.IdempotencyKey),
+            _ => null
+        };
     }
 
     private static TResponse DeserializePayload<TResponse>(string responseBody)

@@ -341,6 +341,7 @@ public static class CloudAiRelayEndpoints
         SmartPosDbContext dbContext,
         CancellationToken cancellationToken)
     {
+        var licenseToken = licenseService.ResolveLicenseToken(httpContext, includeCookie: false);
         var authenticatedUserId = ResolveAuthenticatedUserId(httpContext.User);
         if (authenticatedUserId.HasValue)
         {
@@ -350,12 +351,36 @@ public static class CloudAiRelayEndpoints
                 cancellationToken);
             if (authenticatedContext is not null)
             {
-                return authenticatedContext.Value;
+                if (string.IsNullOrWhiteSpace(licenseToken))
+                {
+                    return authenticatedContext.Value;
+                }
+
+                var authenticatedLicenseContext = await ValidateRelayLicenseTokenAsync(
+                    licenseService,
+                    licenseToken,
+                    cancellationToken);
+                if (authenticatedLicenseContext.ShopId != authenticatedContext.Value.ShopId)
+                {
+                    throw new LicenseException(
+                        AiRelayErrorCodes.CloudRelayContextResolutionFailed,
+                        "Linked cloud account does not match the provisioned shop for this device. Re-link the cloud account and try again.",
+                        StatusCodes.Status403Forbidden);
+                }
+
+                return authenticatedContext.Value with { DeviceCode = authenticatedLicenseContext.DeviceCode };
             }
         }
 
-        var token = licenseService.ResolveLicenseToken(httpContext, includeCookie: false);
-        if (string.IsNullOrWhiteSpace(token))
+        if (HasCloudAuthCredential(httpContext.Request))
+        {
+            throw new LicenseException(
+                AiRelayErrorCodes.CloudRelayContextResolutionFailed,
+                "Linked cloud account session is invalid or expired. Re-link the cloud account and try again.",
+                StatusCodes.Status401Unauthorized);
+        }
+
+        if (string.IsNullOrWhiteSpace(licenseToken))
         {
             throw new LicenseException(
                 AiRelayErrorCodes.CloudRelayContextResolutionFailed,
@@ -363,8 +388,22 @@ public static class CloudAiRelayEndpoints
                 StatusCodes.Status401Unauthorized);
         }
 
-        var tokenContext = await licenseService.ValidateLicenseTokenAsync(token, cancellationToken);
-        var status = await licenseService.GetStatusAsync(tokenContext.DeviceCode, token, cancellationToken);
+        var tokenContext = await ValidateRelayLicenseTokenAsync(
+            licenseService,
+            licenseToken,
+            cancellationToken);
+
+        var actorUserId = await ResolveRelayActorUserIdAsync(dbContext, tokenContext.ShopId, cancellationToken);
+        return new CloudAiRelayRequestContext(tokenContext.ShopId, tokenContext.DeviceCode, actorUserId);
+    }
+
+    private static async Task<LicenseService.ValidatedLicenseTokenContext> ValidateRelayLicenseTokenAsync(
+        LicenseService licenseService,
+        string licenseToken,
+        CancellationToken cancellationToken)
+    {
+        var tokenContext = await licenseService.ValidateLicenseTokenAsync(licenseToken, cancellationToken);
+        var status = await licenseService.GetStatusAsync(tokenContext.DeviceCode, licenseToken, cancellationToken);
         var state = (status.State ?? string.Empty).Trim().ToLowerInvariant();
 
         if (state == LicenseState.Unprovisioned.ToString().ToLowerInvariant())
@@ -391,8 +430,7 @@ public static class CloudAiRelayEndpoints
                 StatusCodes.Status403Forbidden);
         }
 
-        var actorUserId = await ResolveRelayActorUserIdAsync(dbContext, tokenContext.ShopId, cancellationToken);
-        return new CloudAiRelayRequestContext(tokenContext.ShopId, tokenContext.DeviceCode, actorUserId);
+        return tokenContext;
     }
 
     private static async Task<CloudAiRelayRequestContext?> ResolveAuthenticatedRelayContextAsync(
@@ -504,6 +542,16 @@ public static class CloudAiRelayEndpoints
         var userId = principal.FindFirstValue(ClaimTypes.NameIdentifier) ??
                      principal.FindFirstValue("sub");
         return Guid.TryParse(userId, out var parsed) ? parsed : null;
+    }
+
+    private static bool HasCloudAuthCredential(HttpRequest request)
+    {
+        if (request.Headers.Authorization.Count > 0)
+        {
+            return true;
+        }
+
+        return request.Cookies.ContainsKey("smartpos_auth");
     }
 
     private static bool CanUseCloudAiRelay(AppUser user)
