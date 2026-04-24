@@ -60,6 +60,23 @@ type ApiErrorPayload = {
   };
 };
 
+type RequestFieldErrorState = Partial<
+  Record<
+    | "shopName"
+    | "shopAddress"
+    | "contactEmail"
+    | "ownerUsername"
+    | "ownerPassword"
+    | "ownerConfirmPassword"
+    | "ownerFullName"
+    | "ownerEmail"
+    | "ownerAddress",
+    string
+  >
+>;
+
+type PaymentFieldErrorState = Partial<Record<"amountPaid" | "bankReference", string>>;
+
 function normalizePlanCode(rawValue: string | null): PlanCode {
   const normalized = (rawValue || "").trim().toLowerCase();
   if (normalized === "pro" || normalized === "business") {
@@ -147,6 +164,8 @@ export default function StartPage() {
 
   const [requestError, setRequestError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [requestFieldErrors, setRequestFieldErrors] = useState<RequestFieldErrorState>({});
+  const [paymentFieldErrors, setPaymentFieldErrors] = useState<PaymentFieldErrorState>({});
   const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
 
@@ -232,11 +251,72 @@ export default function StartPage() {
     };
   };
 
+  const validateRequestFields = (): RequestFieldErrorState => {
+    const nextErrors: RequestFieldErrorState = {};
+
+    if (!shopName.trim()) nextErrors.shopName = "Shop name is required.";
+    if (!shopAddress.trim()) nextErrors.shopAddress = "Shop address is required.";
+    if (!contactEmail.trim()) nextErrors.contactEmail = "Shop contact email is required.";
+    if (!ownerUsername.trim()) nextErrors.ownerUsername = "Owner username is required.";
+    if (!ownerPassword.trim()) nextErrors.ownerPassword = "Owner password is required.";
+    if (!ownerConfirmPassword.trim()) nextErrors.ownerConfirmPassword = "Confirm password is required.";
+    if (!ownerFullName.trim()) nextErrors.ownerFullName = "Owner full name is required.";
+
+    if (!mirrorOwnerContactDetails && !ownerAddress.trim()) {
+      nextErrors.ownerAddress = "Owner address is required.";
+    }
+
+    if (!mirrorOwnerContactDetails && !ownerEmail.trim()) {
+      nextErrors.ownerEmail = "Owner email is required.";
+    }
+
+    if (ownerPassword.trim() && ownerPassword.trim().length < 8) {
+      nextErrors.ownerPassword = "Owner password must be at least 8 characters.";
+    }
+
+    if (ownerConfirmPassword.trim() && ownerPassword.trim() !== ownerConfirmPassword.trim()) {
+      nextErrors.ownerConfirmPassword = "Confirm password must match owner password.";
+    }
+
+    return nextErrors;
+  };
+
+  const validatePaymentFields = (): PaymentFieldErrorState => {
+    const nextErrors: PaymentFieldErrorState = {};
+
+    if (!amountPaid.trim()) {
+      nextErrors.amountPaid = "Amount paid is required.";
+    } else {
+      const parsedAmount = Number(amountPaid);
+      if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+        nextErrors.amountPaid = "Enter a valid paid amount.";
+      }
+    }
+
+    if (!bankReference.trim()) {
+      nextErrors.bankReference =
+        paymentMethod === "cash"
+          ? "Reference number is required for cash payments."
+          : "Bank reference is required for bank deposits.";
+    }
+
+    return nextErrors;
+  };
+
   const handleRequestCreate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setRequestError(null);
+    setRequestFieldErrors({});
     setSubmitError(null);
+    setPaymentFieldErrors({});
     setSubmitResult(null);
+
+    const fieldErrors = validateRequestFields();
+    if (Object.keys(fieldErrors).length > 0) {
+      setRequestFieldErrors(fieldErrors);
+      return;
+    }
+
     setIsSubmittingRequest(true);
 
     try {
@@ -286,21 +366,17 @@ export default function StartPage() {
     }
 
     setSubmitError(null);
+    setPaymentFieldErrors({});
     setIsSubmittingPayment(true);
     try {
-      const parsedAmount = Number(amountPaid);
-      if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-        throw new Error("Enter a valid paid amount.");
+      const fieldErrors = validatePaymentFields();
+      if (Object.keys(fieldErrors).length > 0) {
+        setPaymentFieldErrors(fieldErrors);
+        return;
       }
 
+      const parsedAmount = Number(amountPaid);
       const normalizedReference = bankReference.trim();
-      if (!normalizedReference) {
-        throw new Error(
-          paymentMethod === "cash"
-            ? "Reference number is required for cash payments."
-            : "Bank reference is required for bank deposits."
-        );
-      }
 
       const response = await fetch("/api/payment/submit", {
         method: "POST",
@@ -364,7 +440,7 @@ export default function StartPage() {
             </div>
           )}
 
-          <form className="mt-6 grid gap-4 md:grid-cols-2" onSubmit={handleRequestCreate}>
+          <form className="mt-6 grid gap-4 md:grid-cols-2" onSubmit={handleRequestCreate} noValidate>
             <div className="rounded-xl border border-border/70 bg-surface-muted p-4 md:col-span-2">
               <div className="mb-3">
                 <p className="portal-kicker">Plan & Payment Setup</p>
@@ -410,10 +486,14 @@ export default function StartPage() {
                   <input
                     className="field-shell"
                     value={shopName}
-                    onChange={(event) => setShopName(event.target.value)}
+                    onChange={(event) => {
+                      setShopName(event.target.value);
+                      setRequestFieldErrors((current) => ({ ...current, shopName: undefined }));
+                    }}
                     placeholder="Nelu Grocery"
-                    required
+                    aria-invalid={Boolean(requestFieldErrors.shopName)}
                   />
+                  {requestFieldErrors.shopName && <p className="text-xs text-destructive">{requestFieldErrors.shopName}</p>}
                 </label>
                 <label className="space-y-1 md:col-span-2">
                   <span className="portal-kicker inline-flex items-center gap-1">
@@ -422,10 +502,14 @@ export default function StartPage() {
                   <input
                     className="field-shell"
                     value={shopAddress}
-                    onChange={(event) => setShopAddress(event.target.value)}
+                    onChange={(event) => {
+                      setShopAddress(event.target.value);
+                      setRequestFieldErrors((current) => ({ ...current, shopAddress: undefined }));
+                    }}
                     placeholder="No. 12, Main Street, Colombo"
-                    required
+                    aria-invalid={Boolean(requestFieldErrors.shopAddress)}
                   />
+                  {requestFieldErrors.shopAddress && <p className="text-xs text-destructive">{requestFieldErrors.shopAddress}</p>}
                 </label>
                 <label className="space-y-1">
                   <span className="portal-kicker inline-flex items-center gap-1">
@@ -435,10 +519,14 @@ export default function StartPage() {
                     type="email"
                     className="field-shell"
                     value={contactEmail}
-                    onChange={(event) => setContactEmail(event.target.value)}
+                    onChange={(event) => {
+                      setContactEmail(event.target.value);
+                      setRequestFieldErrors((current) => ({ ...current, contactEmail: undefined }));
+                    }}
                     placeholder="owner@shop.lk"
-                    required
+                    aria-invalid={Boolean(requestFieldErrors.contactEmail)}
                   />
+                  {requestFieldErrors.contactEmail && <p className="text-xs text-destructive">{requestFieldErrors.contactEmail}</p>}
                 </label>
                 <label className="space-y-1 md:col-span-2">
                   <span className="portal-kicker">Shop Contact Phone (optional)</span>
@@ -456,10 +544,14 @@ export default function StartPage() {
                   <input
                     className="field-shell"
                     value={ownerFullName}
-                    onChange={(event) => setOwnerFullName(event.target.value)}
+                    onChange={(event) => {
+                      setOwnerFullName(event.target.value);
+                      setRequestFieldErrors((current) => ({ ...current, ownerFullName: undefined }));
+                    }}
                     placeholder="Shop Owner"
-                    required
+                    aria-invalid={Boolean(requestFieldErrors.ownerFullName)}
                   />
+                  {requestFieldErrors.ownerFullName && <p className="text-xs text-destructive">{requestFieldErrors.ownerFullName}</p>}
                 </label>
                 <label className="space-y-1">
                   <span className="portal-kicker inline-flex items-center gap-1">
@@ -469,11 +561,15 @@ export default function StartPage() {
                     type="email"
                     className="field-shell"
                     value={mirrorOwnerContactDetails ? contactEmail : ownerEmail}
-                    onChange={(event) => setOwnerEmail(event.target.value)}
+                    onChange={(event) => {
+                      setOwnerEmail(event.target.value);
+                      setRequestFieldErrors((current) => ({ ...current, ownerEmail: undefined }));
+                    }}
                     placeholder="owner.personal@shop.lk"
-                    required={!mirrorOwnerContactDetails}
                     disabled={mirrorOwnerContactDetails}
+                    aria-invalid={Boolean(requestFieldErrors.ownerEmail)}
                   />
+                  {requestFieldErrors.ownerEmail && <p className="text-xs text-destructive">{requestFieldErrors.ownerEmail}</p>}
                 </label>
                 <label className="space-y-1">
                   <span className="portal-kicker">Owner Phone (optional)</span>
@@ -491,11 +587,15 @@ export default function StartPage() {
                   <input
                     className="field-shell"
                     value={mirrorOwnerContactDetails ? shopAddress : ownerAddress}
-                    onChange={(event) => setOwnerAddress(event.target.value)}
+                    onChange={(event) => {
+                      setOwnerAddress(event.target.value);
+                      setRequestFieldErrors((current) => ({ ...current, ownerAddress: undefined }));
+                    }}
                     placeholder="Owner residence address"
-                    required={!mirrorOwnerContactDetails}
                     disabled={mirrorOwnerContactDetails}
+                    aria-invalid={Boolean(requestFieldErrors.ownerAddress)}
                   />
+                  {requestFieldErrors.ownerAddress && <p className="text-xs text-destructive">{requestFieldErrors.ownerAddress}</p>}
                 </label>
                 <label className="space-y-1 md:col-span-2">
                   <span className="portal-kicker">
@@ -503,7 +603,17 @@ export default function StartPage() {
                       type="checkbox"
                       className="mr-2 align-middle"
                       checked={mirrorOwnerContactDetails}
-                      onChange={(event) => setMirrorOwnerContactDetails(event.target.checked)}
+                      onChange={(event) => {
+                        const nextChecked = event.target.checked;
+                        setMirrorOwnerContactDetails(nextChecked);
+                        if (nextChecked) {
+                          setRequestFieldErrors((current) => ({
+                            ...current,
+                            ownerEmail: undefined,
+                            ownerAddress: undefined,
+                          }));
+                        }
+                      }}
                     />
                     Use shop address and shop contact email for the owner
                   </span>
@@ -532,10 +642,14 @@ export default function StartPage() {
                   <input
                     className="field-shell"
                     value={ownerUsername}
-                    onChange={(event) => setOwnerUsername(event.target.value)}
+                    onChange={(event) => {
+                      setOwnerUsername(event.target.value);
+                      setRequestFieldErrors((current) => ({ ...current, ownerUsername: undefined }));
+                    }}
                     placeholder="shopowner"
-                    required
+                    aria-invalid={Boolean(requestFieldErrors.ownerUsername)}
                   />
+                  {requestFieldErrors.ownerUsername && <p className="text-xs text-destructive">{requestFieldErrors.ownerUsername}</p>}
                 </label>
                 <label className="space-y-1">
                   <span className="portal-kicker inline-flex items-center gap-1">
@@ -545,10 +659,14 @@ export default function StartPage() {
                     type="password"
                     className="field-shell"
                     value={ownerPassword}
-                    onChange={(event) => setOwnerPassword(event.target.value)}
+                    onChange={(event) => {
+                      setOwnerPassword(event.target.value);
+                      setRequestFieldErrors((current) => ({ ...current, ownerPassword: undefined }));
+                    }}
                     placeholder="At least 8 characters"
-                    required
+                    aria-invalid={Boolean(requestFieldErrors.ownerPassword)}
                   />
+                  {requestFieldErrors.ownerPassword && <p className="text-xs text-destructive">{requestFieldErrors.ownerPassword}</p>}
                 </label>
                 <label className="space-y-1">
                   <span className="portal-kicker inline-flex items-center gap-1">
@@ -558,10 +676,16 @@ export default function StartPage() {
                     type="password"
                     className="field-shell"
                     value={ownerConfirmPassword}
-                    onChange={(event) => setOwnerConfirmPassword(event.target.value)}
+                    onChange={(event) => {
+                      setOwnerConfirmPassword(event.target.value);
+                      setRequestFieldErrors((current) => ({ ...current, ownerConfirmPassword: undefined }));
+                    }}
                     placeholder="Re-enter owner password"
-                    required
+                    aria-invalid={Boolean(requestFieldErrors.ownerConfirmPassword)}
                   />
+                  {requestFieldErrors.ownerConfirmPassword && (
+                    <p className="text-xs text-destructive">{requestFieldErrors.ownerConfirmPassword}</p>
+                  )}
                 </label>
               </div>
             </div>
@@ -627,7 +751,7 @@ export default function StartPage() {
                   <p className="text-sm text-muted-foreground">{requestResult.instructions.reference_hint}</p>
                 </div>
 
-                <form className="space-y-3" onSubmit={handlePaymentSubmit}>
+                <form className="space-y-3" onSubmit={handlePaymentSubmit} noValidate>
                   <h3 className="text-base font-semibold">I Have Paid</h3>
                   <div className="grid gap-3 md:grid-cols-2">
                     <label className="space-y-1">
@@ -635,19 +759,29 @@ export default function StartPage() {
                       <input
                         className="field-shell"
                         value={amountPaid}
-                        onChange={(event) => setAmountPaid(event.target.value)}
-                        required
+                        onChange={(event) => {
+                          setAmountPaid(event.target.value);
+                          setPaymentFieldErrors((current) => ({ ...current, amountPaid: undefined }));
+                        }}
+                        aria-invalid={Boolean(paymentFieldErrors.amountPaid)}
                       />
+                      {paymentFieldErrors.amountPaid && <p className="text-xs text-destructive">{paymentFieldErrors.amountPaid}</p>}
                     </label>
                     <label className="space-y-1">
                       <span className="portal-kicker">Reference Number</span>
                       <input
                         className="field-shell"
                         value={bankReference}
-                        onChange={(event) => setBankReference(event.target.value)}
+                        onChange={(event) => {
+                          setBankReference(event.target.value);
+                          setPaymentFieldErrors((current) => ({ ...current, bankReference: undefined }));
+                        }}
                         placeholder={paymentMethod === "cash" ? "Cash receipt/reference number" : "Deposit reference"}
-                        required
+                        aria-invalid={Boolean(paymentFieldErrors.bankReference)}
                       />
+                      {paymentFieldErrors.bankReference && (
+                        <p className="text-xs text-destructive">{paymentFieldErrors.bankReference}</p>
+                      )}
                     </label>
                   </div>
                   <label className="space-y-1">
