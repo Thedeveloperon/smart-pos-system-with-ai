@@ -48,18 +48,35 @@ const LicenseAccountDialog = ({ open, onOpenChange, onChanged }: LicenseAccountD
   const [deactivationTarget, setDeactivationTarget] = useState<CustomerLicensePortalDevice | null>(null);
   const [deactivationReason, setDeactivationReason] = useState("seat_recovery");
   const [manualCopyKey, setManualCopyKey] = useState<string | null>(null);
+  const currentDevice = useMemo(() => {
+    if (!data) {
+      return null;
+    }
+
+    return data.devices.find((device) => device.is_current_device) ?? data.devices[0] ?? null;
+  }, [data]);
 
   const loadPortal = async () => {
     setIsLoading(true);
     try {
       const next = await fetchCustomerLicensePortal();
       setData(next);
+      return true;
     } catch (error) {
       console.error(error);
       toast.error(error instanceof Error ? error.message : "Failed to load license account.");
       setData(null);
+      return false;
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const syncPortal = async () => {
+    const synced = await loadPortal();
+    onChanged?.();
+    if (synced) {
+      toast.success("License portal synced.");
     }
   };
 
@@ -174,7 +191,7 @@ const LicenseAccountDialog = ({ open, onOpenChange, onChanged }: LicenseAccountD
           </div>
         ) : data ? (
           <div className="space-y-4 py-1">
-            <div className="grid gap-3 md:grid-cols-4">
+            <div className="grid gap-3 md:grid-cols-5">
               <div className="rounded-xl border border-border p-3">
                 <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Shop</p>
                 <p className="mt-1 text-sm font-semibold">{data.shop_name}</p>
@@ -201,6 +218,11 @@ const LicenseAccountDialog = ({ open, onOpenChange, onChanged }: LicenseAccountD
                   Used {data.self_service_deactivations_used_today} / {data.self_service_deactivation_limit_per_day} today
                 </p>
               </div>
+              <div className="rounded-xl border border-border p-3">
+                <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Terminal ID</p>
+                <p className="mt-1 font-mono text-sm font-semibold">{currentDevice?.terminal_id || currentDevice?.device_code || "-"}</p>
+                <p className="text-xs text-muted-foreground">Current active terminal</p>
+              </div>
             </div>
 
             <div className="rounded-xl border border-border bg-muted/20 p-3">
@@ -214,9 +236,14 @@ const LicenseAccountDialog = ({ open, onOpenChange, onChanged }: LicenseAccountD
                     Expires {formatDateTime(data.latest_activation_entitlement?.expires_at)}
                   </p>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => void copyActivationKey()}>
-                  Copy Key
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" onClick={() => void copyActivationKey()}>
+                    Copy Key
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => void syncPortal()}>
+                    Sync Portal
+                  </Button>
+                </div>
               </div>
             </div>
 
@@ -230,6 +257,7 @@ const LicenseAccountDialog = ({ open, onOpenChange, onChanged }: LicenseAccountD
                 <TableHeader>
                   <TableRow>
                     <TableHead>Device</TableHead>
+                    <TableHead>Terminal ID</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>License</TableHead>
                     <TableHead>Last heartbeat</TableHead>
@@ -239,7 +267,7 @@ const LicenseAccountDialog = ({ open, onOpenChange, onChanged }: LicenseAccountD
                 <TableBody>
                   {sortedDevices.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                      <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
                         No devices found.
                       </TableCell>
                     </TableRow>
@@ -252,6 +280,9 @@ const LicenseAccountDialog = ({ open, onOpenChange, onChanged }: LicenseAccountD
                             <p className="font-mono text-xs text-muted-foreground">{device.device_code}</p>
                             {device.is_current_device && <Badge variant="secondary">Current</Badge>}
                           </div>
+                        </TableCell>
+                        <TableCell className="font-mono text-xs text-muted-foreground">
+                          {device.terminal_id || device.device_code}
                         </TableCell>
                         <TableCell className="capitalize">{toSentence(device.device_status)}</TableCell>
                         <TableCell className="capitalize">{toSentence(device.license_state)}</TableCell>
