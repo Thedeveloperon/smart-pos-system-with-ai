@@ -41,7 +41,10 @@ public sealed class AiCloudRelayProxyTests : IDisposable
 
         await TestAuth.SignInAsManagerAsync(client);
 
-        var response = await client.GetAsync("/api/ai/wallet");
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/ai/wallet");
+        request.Headers.Add("X-License-Token", "local-offline-license-token-it");
+
+        var response = await client.SendAsync(request);
         response.EnsureSuccessStatusCode();
 
         var payload = await TestJson.ReadObjectAsync(response);
@@ -53,7 +56,47 @@ public sealed class AiCloudRelayProxyTests : IDisposable
         Assert.EndsWith("/cloud/v1/ai/wallet", relayRequest.PathAndQuery, StringComparison.OrdinalIgnoreCase);
         Assert.Equal("integration-tests-device", relayRequest.Headers["X-Device-Id"]);
         Assert.Equal("it-pos-1.0.0", relayRequest.Headers["X-POS-Version"]);
-        Assert.True(relayRequest.Headers.ContainsKey("X-License-Token"));
+        Assert.False(relayRequest.Headers.ContainsKey("X-License-Token"));
+    }
+
+    [Fact]
+    public async Task RelayEnabled_WhenCloudLicensingRelayIsEnabled_ShouldForwardLicenseToken()
+    {
+        using var cloudCompatibleFactory = new RelayWebApplicationFactory(
+            relayHandler,
+            new Dictionary<string, string?>
+            {
+                ["Licensing:Mode"] = "CloudCompatible",
+                ["Licensing:CloudLicensingEndpointsEnabled"] = "true",
+                ["Licensing:CloudRelayEnabled"] = "true",
+                ["Licensing:CloudRelayBaseUrl"] = "https://relay.smartpos.test"
+            });
+        using var cloudCompatibleClient = cloudCompatibleFactory.CreateClient();
+
+        relayHandler.Enqueue(_ => JsonResponse(HttpStatusCode.OK, new
+        {
+            available_credits = 12.0m,
+            updated_at = DateTimeOffset.UtcNow
+        }));
+        await SeedLinkedCloudAccountAsync(factory: cloudCompatibleFactory);
+        var signInResponse = await cloudCompatibleClient.PostAsJsonAsync("/api/auth/login", new
+        {
+            username = "manager",
+            password = "manager123",
+            device_code = "integration-tests-device",
+            device_name = "Integration Tests"
+        });
+        signInResponse.EnsureSuccessStatusCode();
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/ai/wallet");
+        request.Headers.Add("X-License-Token", "cloud-license-token-it");
+
+        var response = await cloudCompatibleClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+
+        Assert.Single(relayHandler.CapturedRequests);
+        var relayRequest = relayHandler.CapturedRequests[0];
+        Assert.Equal("cloud-license-token-it", relayRequest.Headers["X-License-Token"]);
     }
 
     [Fact]
@@ -189,9 +232,10 @@ public sealed class AiCloudRelayProxyTests : IDisposable
 
     private async Task SeedLinkedCloudAccountAsync(
         string authToken = "cloud-auth-token-it",
-        DateTimeOffset? expiresAtUtc = null)
+        DateTimeOffset? expiresAtUtc = null,
+        RelayWebApplicationFactory? factory = null)
     {
-        using var scope = appFactory.Services.CreateScope();
+        using var scope = (factory ?? appFactory).Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
         dbContext.CloudAccountLinks.RemoveRange(dbContext.CloudAccountLinks);
         dbContext.CloudAccountLinks.Add(new CloudAccountLink

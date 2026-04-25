@@ -11,7 +11,7 @@ if (-not (Test-Path -LiteralPath $paths.BackendExePath)) {
     throw "backend.exe not found at '$($paths.BackendExePath)'."
 }
 
-$migrated = Invoke-SmartPosLegacyMigration -Paths $paths
+$migrated = @(Invoke-SmartPosLegacyMigration -Paths $paths)
 $envValues = Initialize-SmartPosClientEnv -Paths $paths
 $backendUrl = Get-SmartPosBackendUrl -Paths $paths -EnvValues $envValues
 
