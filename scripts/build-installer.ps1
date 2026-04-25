@@ -10,6 +10,7 @@ param(
     [string]$TrustManifestPath = "",
     [string[]]$AllowedSignerThumbprints = @(),
     [string]$IsccPath,
+    [string]$InnoSetupDockerImage = "amake/innosetup",
     [string]$SignTool,
     [switch]$SkipPackaging,
     [switch]$SkipNpmCi,
@@ -76,6 +77,71 @@ function Resolve-IsccPath {
     throw "Inno Setup compiler (ISCC.exe) was not found. Install Inno Setup 6 or set -IsccPath / ISCC_PATH."
 }
 
+function Test-DockerCompilerAvailability {
+    param([string]$Image)
+
+    $dockerCommand = Get-Command docker -ErrorAction SilentlyContinue
+    if ($null -eq $dockerCommand) {
+        return $false
+    }
+
+    try {
+        & $dockerCommand.Source version | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            return $false
+        }
+    }
+    catch {
+        return $false
+    }
+
+    return -not [string]::IsNullOrWhiteSpace($Image)
+}
+
+function Convert-ToDockerInnoPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$TargetPath
+    )
+
+    $relativePath = [System.IO.Path]::GetRelativePath($RepoRoot, $TargetPath)
+    if ($relativePath.StartsWith("..", [StringComparison]::Ordinal)) {
+        throw "Dockerized Inno Setup fallback only supports paths inside the repository root. Unsupported path: $TargetPath"
+    }
+
+    $normalized = $relativePath.Replace("/", "\")
+    if ([string]::IsNullOrWhiteSpace($normalized) -or $normalized -eq ".") {
+        return "Z:\work"
+    }
+
+    return "Z:\work\$normalized"
+}
+
+function Invoke-DockerInnoSetup {
+    param(
+        [Parameter(Mandatory = $true)][string]$Image,
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$IssFile,
+        [Parameter(Mandatory = $true)][string]$PackageDir,
+        [Parameter(Mandatory = $true)][string]$InstallerOutputDir,
+        [Parameter(Mandatory = $true)][string]$AppVersion
+    )
+
+    $dockerCommand = (Get-Command docker -ErrorAction Stop).Source
+    $dockerArgs = @(
+        "run",
+        "--rm",
+        "-v", "${RepoRoot}:/work",
+        $Image,
+        "/DAppVersion=$AppVersion",
+        "/DPackageDir=$(Convert-ToDockerInnoPath -RepoRoot $RepoRoot -TargetPath $PackageDir)",
+        "/DInstallerOutputDir=$(Convert-ToDockerInnoPath -RepoRoot $RepoRoot -TargetPath $InstallerOutputDir)",
+        (Convert-ToDockerInnoPath -RepoRoot $RepoRoot -TargetPath $IssFile)
+    )
+
+    Invoke-External -Label "Compiling Inno Setup installer (Docker fallback)" -Command $dockerCommand -Arguments $dockerArgs -WorkingDirectory $RepoRoot
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $packageScript = Join-Path $repoRoot "scripts/package-client.ps1"
 $trustVerificationScript = Join-Path $repoRoot "scripts/verify-installer-trust-chain.ps1"
@@ -118,21 +184,45 @@ if (-not (Test-Path $packageDir)) {
 }
 
 New-Item -ItemType Directory -Path $installerOutDir -Force | Out-Null
-$resolvedIscc = Resolve-IsccPath -ExplicitPath $IsccPath
+try {
+    $resolvedIscc = Resolve-IsccPath -ExplicitPath $IsccPath
 
-$isccArgs = @(
-    "/DAppVersion=$AppVersion",
-    "/DPackageDir=$packageDir",
-    "/DInstallerOutputDir=$installerOutDir",
-    $issFile
-)
-if (-not [string]::IsNullOrWhiteSpace($SignTool)) {
     $isccArgs = @(
-        "/DSignTool=$SignTool"
-    ) + $isccArgs
-}
+        "/DAppVersion=$AppVersion",
+        "/DPackageDir=$packageDir",
+        "/DInstallerOutputDir=$installerOutDir",
+        $issFile
+    )
+    if (-not [string]::IsNullOrWhiteSpace($SignTool)) {
+        $isccArgs = @(
+            "/DSignTool=$SignTool"
+        ) + $isccArgs
+    }
 
-Invoke-External -Label "Compiling Inno Setup installer" -Command $resolvedIscc -Arguments $isccArgs -WorkingDirectory $repoRoot
+    Invoke-External -Label "Compiling Inno Setup installer" -Command $resolvedIscc -Arguments $isccArgs -WorkingDirectory $repoRoot
+}
+catch {
+    if (-not [string]::IsNullOrWhiteSpace($IsccPath)) {
+        throw
+    }
+
+    if (-not (Test-DockerCompilerAvailability -Image $InnoSetupDockerImage)) {
+        throw
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($SignTool)) {
+        throw "Dockerized Inno Setup fallback does not currently support SignTool injection. Build on Windows with local ISCC.exe for signed installers."
+    }
+
+    Write-Warning "$($_.Exception.Message) Falling back to Docker image '$InnoSetupDockerImage'."
+    Invoke-DockerInnoSetup `
+        -Image $InnoSetupDockerImage `
+        -RepoRoot $repoRoot `
+        -IssFile $issFile `
+        -PackageDir $packageDir `
+        -InstallerOutputDir $installerOutDir `
+        -AppVersion $AppVersion
+}
 
 if ($VerifyTrustChain) {
     if (-not (Test-Path -LiteralPath $trustVerificationScript)) {

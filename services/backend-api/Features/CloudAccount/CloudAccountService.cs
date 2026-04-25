@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Security.Claims;
+using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -276,16 +277,13 @@ public sealed class CloudAccountService(
     }
 
     private static HttpRequestMessage BuildRequest(
-        HttpClient client,
         HttpMethod method,
         string cloudBaseUrl,
         string relativePath,
         string? body = null)
     {
         var normalizedPath = relativePath.TrimStart('/');
-        var requestUri = client.BaseAddress is null
-            ? $"{cloudBaseUrl.TrimEnd('/')}/{normalizedPath}"
-            : new Uri(client.BaseAddress, normalizedPath).ToString();
+        var requestUri = $"{cloudBaseUrl.TrimEnd('/')}/{normalizedPath}";
         var request = new HttpRequestMessage(method, requestUri);
         if (body is not null)
         {
@@ -313,7 +311,6 @@ public sealed class CloudAccountService(
         foreach (var path in loginPaths)
         {
             using var loginRequest = BuildRequest(
-                client,
                 HttpMethod.Post,
                 cloudBaseUrl,
                 path,
@@ -403,7 +400,6 @@ public sealed class CloudAccountService(
         CancellationToken cancellationToken)
     {
         using var tenantRequest = BuildRequest(
-            client,
             HttpMethod.Get,
             cloudBaseUrl,
             "/api/account/tenant-context");
@@ -441,7 +437,6 @@ public sealed class CloudAccountService(
         foreach (var path in fallbackPaths)
         {
             using var fallbackRequest = BuildRequest(
-                client,
                 HttpMethod.Get,
                 cloudBaseUrl,
                 path);
@@ -560,15 +555,39 @@ public sealed class CloudAccountService(
         {
             return await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         }
+        catch (HttpRequestException exception) when (exception.InnerException is AuthenticationException authenticationException)
+        {
+            throw new InvalidOperationException(BuildTlsHandshakeFailureMessage(request.RequestUri, authenticationException));
+        }
         catch (HttpRequestException exception)
         {
+            var requestUri = request.RequestUri?.ToString() ?? "the configured cloud account endpoint";
             throw new InvalidOperationException(
-                $"Unable to reach cloud account service. {exception.Message}");
+                $"Unable to reach cloud account service at '{requestUri}'. {exception.Message}");
         }
         catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new InvalidOperationException("Cloud account service timed out.");
+            var requestUri = request.RequestUri?.ToString() ?? "the configured cloud account endpoint";
+            var timeoutSeconds = client.Timeout == System.Threading.Timeout.InfiniteTimeSpan
+                ? 0
+                : Math.Max(1, (int)Math.Ceiling(client.Timeout.TotalSeconds));
+            var timeoutSuffix = timeoutSeconds > 0 ? $" after {timeoutSeconds} seconds" : string.Empty;
+            throw new InvalidOperationException(
+                $"Cloud account service timed out while calling '{requestUri}'{timeoutSuffix}.");
         }
+    }
+
+    private static string BuildTlsHandshakeFailureMessage(Uri? requestUri, AuthenticationException authenticationException)
+    {
+        var target = requestUri?.ToString() ?? "the configured cloud account endpoint";
+        var utcNow = DateTimeOffset.UtcNow;
+        var localNow = DateTimeOffset.Now;
+        var clockLooksWrong = utcNow.Year < 2024 || utcNow.Year > 2035;
+        var guidance = clockLooksWrong
+            ? $" Local system clock appears incorrect (local time {localNow:O}, UTC {utcNow:O}). Check Windows date, time, and timezone."
+            : $" Check Windows date/time, timezone, and trusted root certificates. Local time {localNow:O}.";
+
+        return $"Unable to reach cloud account service at '{target}'. TLS/SSL handshake failed. {authenticationException.Message}{guidance}";
     }
 
     private static string ParseCloudErrorMessage(
@@ -901,20 +920,7 @@ public sealed class CloudAccountService(
 
     private bool TryResolveCloudBaseUrl(out string baseUrl)
     {
-        var aiUrl = NormalizeOptionalValue(aiOptions.CloudRelayBaseUrl);
-        var licenseUrl = NormalizeOptionalValue(licenseOptions.CloudRelayBaseUrl);
-        // Cloud account login/tenant APIs are hosted on the account portal surface.
-        // Prefer licensing relay URL for account-link operations, then fall back to AI URL.
-        var candidate = licenseUrl ?? aiUrl;
-        if (string.IsNullOrWhiteSpace(candidate) ||
-            !Uri.TryCreate(candidate, UriKind.Absolute, out var uri))
-        {
-            baseUrl = string.Empty;
-            return false;
-        }
-
-        baseUrl = uri.ToString().TrimEnd('/');
-        return true;
+        return CloudAccountRelaySelection.TryResolve(aiOptions, licenseOptions, out baseUrl, out _);
     }
 
     private string ProtectSensitiveValue(string? value)

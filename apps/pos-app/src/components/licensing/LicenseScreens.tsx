@@ -125,7 +125,7 @@ export const LicenseActivationScreen = ({
               disabled={isBusy}
             />
             <p className="text-xs text-muted-foreground">
-              Enter the key shared after payment verification (cash or bank deposit).
+              Enter the activation key shared by your local licensing administrator.
             </p>
           </div>
 
@@ -225,7 +225,7 @@ export const LicenseBlockedScreen = ({
               disabled={isBusy}
             />
             <p className="text-xs text-muted-foreground">
-              Enter a valid activation key before retrying activation.
+              Enter a valid activation key from your local licensing administrator before retrying activation.
             </p>
           </div>
 

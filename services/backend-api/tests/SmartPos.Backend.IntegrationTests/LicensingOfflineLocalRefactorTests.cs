@@ -48,14 +48,13 @@ public sealed class LicensingOfflineLocalRefactorTests : IDisposable
     }
 
     [Fact]
-    public async Task OfflineBatchGeneration_ShouldGenerateTenKeys_AndActivationShouldSucceedWithGeneratedKey()
+    public async Task OfflineBatchGeneration_ShouldGenerateSingleKey_ForDefaultShop_AndActivationShouldSucceedWithGeneratedKey()
     {
         await SignInAsSupportAdminAsync(client);
 
         var batchResponse = await client.PostAsJsonAsync("/api/admin/licensing/offline/activation-entitlements/batch-generate", new
         {
-            shop_code = "default",
-            count = 10,
+            count = 1,
             actor = "integration-tests",
             reason_code = "offline_activation_batch_generated",
             actor_note = "integration test offline batch generation",
@@ -65,17 +64,18 @@ public sealed class LicensingOfflineLocalRefactorTests : IDisposable
 
         var batchPayload = await batchResponse.Content.ReadFromJsonAsync<JsonObject>()
             ?? throw new InvalidOperationException("Expected batch payload.");
-        Assert.Equal(10, batchPayload["generated_count"]?.GetValue<int>());
+        Assert.Equal("default", batchPayload["shop_code"]?.GetValue<string>());
+        Assert.Equal(1, batchPayload["generated_count"]?.GetValue<int>());
 
         var entitlementArray = batchPayload["entitlements"]?.AsArray()
             ?? throw new InvalidOperationException("Missing entitlements array.");
-        Assert.Equal(10, entitlementArray.Count);
+        Assert.Single(entitlementArray);
 
         var generatedKeys = entitlementArray
             .Select(node => node?["activation_entitlement_key"]?.GetValue<string>() ?? string.Empty)
             .ToList();
-        Assert.Equal(10, generatedKeys.Count);
-        Assert.Equal(10, generatedKeys.Distinct(StringComparer.Ordinal).Count());
+        Assert.Single(generatedKeys);
+        Assert.Single(generatedKeys.Distinct(StringComparer.Ordinal));
         Assert.DoesNotContain(generatedKeys, string.IsNullOrWhiteSpace);
 
         var activationKey = generatedKeys[0];
@@ -238,10 +238,7 @@ public sealed class LicensingOfflineLocalRefactorTests : IDisposable
             username = "support_admin",
             password = "support123",
             device_code = $"offline-support-admin-{Guid.NewGuid():N}",
-            device_name = "Offline Support Admin",
-            mfa_code = TotpMfa.GenerateCode(
-                "support-admin-mfa-secret-2026",
-                DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 30)
+            device_name = "Offline Support Admin"
         });
         response.EnsureSuccessStatusCode();
     }

@@ -3,113 +3,45 @@ param(
     [string]$AdminUsername = "support_admin",
     [string]$AdminPassword = "support123",
     [string]$AdminMfaCode = "",
-    [string]$AdminMfaSecret = "support-admin-mfa-secret-2026",
-    [int]$MfaStepSeconds = 30,
     [string]$DeviceCode = "offline-licensing-cli",
     [string]$DeviceName = "Offline Licensing CLI",
-    [string]$ShopCode = "default",
-    [int]$Count = 10,
+    [string]$ShopCode = "",
+    [int]$Count = 1,
     [int]$MaxActivations = 1000000,
     [int]$TtlDays = 3650,
     [bool]$AllowIfExistingBatch = $true,
-    [string]$OutputDir = ".",
+    [string]$OutputDir = "",
     [string]$Actor = "offline-licensing-operator",
     [string]$ReasonCode = "offline_activation_batch_generated",
-    [string]$ActorNote = "manual offline activation key batch generation"
+    [string]$ActorNote = "manual offline activation code generation"
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-if ($Count -ne 10) {
-    throw "Count must be exactly 10. Current value: $Count"
-}
+. (Join-Path $PSScriptRoot "SmartPOS-ClientCommon.ps1")
 
-function Get-TotpCode {
-    param(
-        [Parameter(Mandatory = $true)][string]$Secret,
-        [int]$StepSeconds = 30
-    )
-
-    $step = [Math]::Max(15, $StepSeconds)
-    $counter = [Int64][Math]::Floor([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() / $step)
-    $counterBytes = [BitConverter]::GetBytes($counter)
-    [Array]::Reverse($counterBytes)
-
-    $hmac = [System.Security.Cryptography.HMACSHA1]::new([Text.Encoding]::UTF8.GetBytes($Secret))
-    try {
-        $digest = $hmac.ComputeHash($counterBytes)
-    }
-    finally {
-        $hmac.Dispose()
-    }
-
-    $offset = $digest[$digest.Length - 1] -band 0x0F
-    $binaryCode =
-        (($digest[$offset] -band 0x7F) -shl 24) -bor
-        (($digest[$offset + 1] -band 0xFF) -shl 16) -bor
-        (($digest[$offset + 2] -band 0xFF) -shl 8) -bor
-        ($digest[$offset + 3] -band 0xFF)
-
-    return "{0:D6}" -f ($binaryCode % 1000000)
-}
-
-function Parse-ClientEnv {
-    param([Parameter(Mandatory = $true)][string]$Path)
-
-    $values = @{}
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return $values
-    }
-
-    foreach ($line in Get-Content -LiteralPath $Path) {
-        $trimmed = $line.Trim()
-        if ([string]::IsNullOrWhiteSpace($trimmed) -or $trimmed.StartsWith("#")) {
-            continue
-        }
-
-        $parts = $trimmed -split "=", 2
-        if ($parts.Length -ne 2) {
-            continue
-        }
-
-        $key = $parts[0].Trim()
-        $value = $parts[1].Trim()
-        if (-not [string]::IsNullOrWhiteSpace($key)) {
-            $values[$key] = $value
-        }
-    }
-
-    return $values
+if ($Count -lt 1 -or $Count -gt 10) {
+    throw "Count must be between 1 and 10. Current value: $Count"
 }
 
 try {
     $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-    $clientEnvPath = Join-Path $scriptRoot "client.env"
-    $clientEnv = Parse-ClientEnv -Path $clientEnvPath
+    $paths = Resolve-SmartPosPaths -RootPath $scriptRoot
+    $clientEnv = if (Test-Path -LiteralPath $paths.ClientEnvPath) {
+        Read-ClientEnv -Path $paths.ClientEnvPath
+    }
+    else {
+        $initializedEnv = Initialize-SmartPosClientEnv -Paths $paths
+        Write-ClientEnv -Path $paths.ClientEnvPath -Values $initializedEnv
+        $initializedEnv
+    }
 
     if ([string]::IsNullOrWhiteSpace($BackendUrl)) {
-        $backendFromEnv = if ($clientEnv.ContainsKey("SMARTPOS_BACKEND_URL")) { $clientEnv["SMARTPOS_BACKEND_URL"] } else { "" }
-        if ([string]::IsNullOrWhiteSpace($backendFromEnv) -and $clientEnv.ContainsKey("ASPNETCORE_URLS")) {
-            $candidateUrls = @($clientEnv["ASPNETCORE_URLS"] -split "[;,]" | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-            if ($candidateUrls.Length -gt 0) {
-                $backendFromEnv = $candidateUrls[0]
-            }
-        }
-
-        if ([string]::IsNullOrWhiteSpace($backendFromEnv)) {
-            $BackendUrl = "http://127.0.0.1:5080"
-        }
-        else {
-            $BackendUrl = $backendFromEnv
-        }
+        $BackendUrl = Get-SmartPosBackendUrl -Paths $paths -EnvValues $clientEnv
     }
 
     $BackendUrl = $BackendUrl.Trim().TrimEnd("/")
-
-    if ([string]::IsNullOrWhiteSpace($AdminMfaCode)) {
-        $AdminMfaCode = Get-TotpCode -Secret $AdminMfaSecret -StepSeconds $MfaStepSeconds
-    }
 
     $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 
@@ -118,8 +50,11 @@ try {
         password = $AdminPassword
         device_code = $DeviceCode
         device_name = $DeviceName
-        mfa_code = $AdminMfaCode
-    } | ConvertTo-Json
+    }
+    if (-not [string]::IsNullOrWhiteSpace($AdminMfaCode)) {
+        $loginPayload["mfa_code"] = $AdminMfaCode
+    }
+    $loginPayload = $loginPayload | ConvertTo-Json
 
     Invoke-RestMethod `
         -Uri "$BackendUrl/api/auth/login" `
@@ -129,7 +64,6 @@ try {
         -WebSession $session | Out-Null
 
     $batchPayload = @{
-        shop_code = $ShopCode
         count = $Count
         max_activations = $MaxActivations
         ttl_days = $TtlDays
@@ -137,7 +71,11 @@ try {
         reason_code = $ReasonCode
         actor_note = $ActorNote
         allow_if_existing_batch = $AllowIfExistingBatch
-    } | ConvertTo-Json
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ShopCode)) {
+        $batchPayload["shop_code"] = $ShopCode
+    }
+    $batchPayload = $batchPayload | ConvertTo-Json
 
     $response = Invoke-RestMethod `
         -Uri "$BackendUrl/api/admin/licensing/offline/activation-entitlements/batch-generate" `
@@ -147,7 +85,15 @@ try {
         -Body $batchPayload `
         -WebSession $session
 
-    $resolvedOutputDir = if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDir } else { Join-Path $scriptRoot $OutputDir }
+    if ([string]::IsNullOrWhiteSpace($OutputDir)) {
+        $resolvedOutputDir = $paths.ExportsDir
+    }
+    elseif ([System.IO.Path]::IsPathRooted($OutputDir)) {
+        $resolvedOutputDir = $OutputDir
+    }
+    else {
+        $resolvedOutputDir = Join-Path $scriptRoot $OutputDir
+    }
     New-Item -ItemType Directory -Path $resolvedOutputDir -Force | Out-Null
 
     $timestampUtc = [DateTimeOffset]::UtcNow.ToString("yyyyMMddTHHmmssZ")
@@ -155,7 +101,12 @@ try {
     $response.entitlements | Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8
 
     Write-Host ""
-    Write-Host "Offline activation code batch generated successfully." -ForegroundColor Green
+    if ($response.generated_count -eq 1) {
+        Write-Host "Offline activation code generated successfully." -ForegroundColor Green
+    }
+    else {
+        Write-Host "Offline activation code batch generated successfully." -ForegroundColor Green
+    }
     Write-Host "Backend URL: $BackendUrl"
     Write-Host "Shop code: $($response.shop_code)"
     Write-Host "Generated count: $($response.generated_count)"
@@ -220,6 +171,6 @@ catch {
     Write-Host "Tips:"
     Write-Host "- Ensure Start-SmartPOS.bat is running and backend is reachable."
     Write-Host "- Ensure you target the same backend instance as the POS activation screen."
-    Write-Host "- Verify support_admin credentials and MFA secret/code."
+    Write-Host "- Verify support_admin or security_admin credentials."
     exit 1
 }

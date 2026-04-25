@@ -9,6 +9,8 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+. (Join-Path $PSScriptRoot "SmartPOS-ClientCommon.ps1")
+
 function Assert-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
@@ -18,7 +20,9 @@ function Assert-Administrator {
 }
 
 function Invoke-Sc {
-    param([Parameter(Mandatory = $true)][string[]]$Arguments)
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Arguments
+    )
 
     $output = & sc.exe @Arguments 2>&1
     if ($LASTEXITCODE -ne 0) {
@@ -27,65 +31,6 @@ function Invoke-Sc {
     }
 
     return $output
-}
-
-function Read-ClientEnv {
-    param([Parameter(Mandatory = $true)][string]$Path)
-
-    $values = [ordered]@{}
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return $values
-    }
-
-    foreach ($line in Get-Content -LiteralPath $Path) {
-        if ($null -eq $line) {
-            continue
-        }
-
-        $trimmed = $line.Trim()
-        if ([string]::IsNullOrWhiteSpace($trimmed) -or $trimmed.StartsWith("#", [StringComparison]::Ordinal)) {
-            continue
-        }
-
-        $separatorIndex = $line.IndexOf("=")
-        if ($separatorIndex -lt 1) {
-            continue
-        }
-
-        $key = $line.Substring(0, $separatorIndex).Trim()
-        $value = $line.Substring($separatorIndex + 1)
-        if (-not [string]::IsNullOrWhiteSpace($key)) {
-            $values[$key] = $value
-        }
-    }
-
-    return $values
-}
-
-function Write-ClientEnv {
-    param(
-        [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][System.Collections.Specialized.OrderedDictionary]$Values
-    )
-
-    $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("# Auto-generated and managed by Lanka POS service scripts.")
-    $lines.Add("")
-
-    foreach ($entry in $Values.GetEnumerator()) {
-        if ([string]::IsNullOrWhiteSpace($entry.Key)) {
-            continue
-        }
-
-        $value = [string]$entry.Value
-        $lines.Add("$($entry.Key)=$value")
-    }
-
-    Set-Content -LiteralPath $Path -Value $lines -Encoding ASCII
-}
-
-function New-RandomSecret {
-    return ([guid]::NewGuid().ToString("N") + [guid]::NewGuid().ToString("N"))
 }
 
 function New-WindowsShortcut {
@@ -101,6 +46,7 @@ function New-WindowsShortcut {
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($ShortcutPath)
     $shortcut.TargetPath = $TargetPath
+
     if (-not [string]::IsNullOrWhiteSpace($Arguments)) {
         $shortcut.Arguments = $Arguments
     }
@@ -122,17 +68,19 @@ function New-WindowsShortcut {
 
 function Ensure-Shortcuts {
     param(
-        [Parameter(Mandatory = $true)][string]$RootPath,
-        [Parameter(Mandatory = $true)][string]$BackendExecutablePath
+        [Parameter(Mandatory = $true)]$Paths,
+        [Parameter(Mandatory = $true)][string]$BackendExecutablePath,
+        [Parameter(Mandatory = $true)][string]$BackendUrl
     )
 
-    $startBat = Join-Path $RootPath "Start-SmartPOS.bat"
-    $stopBat = Join-Path $RootPath "Stop-SmartPOS.bat"
-    $generateBat = Join-Path $RootPath "Generate-Offline-Activation-Codes.bat"
+    $stopBat = Get-SmartPosInternalToolPath -Paths $Paths -FileName "Stop-SmartPOS.bat" -RequireExisting
+    $activationManagerLauncher = Get-SmartPosInternalToolPath -Paths $Paths -FileName "Activation-Code-Manager.bat"
     $cmdExe = Join-Path $env:SystemRoot "System32\cmd.exe"
+    $openBrowserArguments = "/c start `"`" `"$BackendUrl`""
+
     $iconPath = "$BackendExecutablePath,0"
-    $packageIconPath = Join-Path $RootPath "lanka-pos.ico"
-    $webIconPath = Join-Path $RootPath "app\wwwroot\favicon.ico"
+    $packageIconPath = Get-SmartPosSupportFilePath -Paths $Paths -FileName "lanka-pos.ico"
+    $webIconPath = Join-Path $Paths.AppDir "wwwroot\favicon.ico"
     if (Test-Path -LiteralPath $packageIconPath) {
         $iconPath = $packageIconPath
     }
@@ -148,16 +96,16 @@ function Ensure-Shortcuts {
     New-WindowsShortcut `
         -ShortcutPath (Join-Path $commonDesktop "Open Lanka POS.lnk") `
         -TargetPath $cmdExe `
-        -Arguments "/c `"$startBat`"" `
-        -WorkingDirectory $RootPath `
+        -Arguments $openBrowserArguments `
+        -WorkingDirectory $Paths.RootPath `
         -Description "Open Lanka POS application" `
         -IconLocation $iconPath
 
     New-WindowsShortcut `
         -ShortcutPath (Join-Path $startMenuFolder "Open Lanka POS.lnk") `
         -TargetPath $cmdExe `
-        -Arguments "/c `"$startBat`"" `
-        -WorkingDirectory $RootPath `
+        -Arguments $openBrowserArguments `
+        -WorkingDirectory $Paths.RootPath `
         -Description "Open Lanka POS application" `
         -IconLocation $iconPath
 
@@ -165,99 +113,19 @@ function Ensure-Shortcuts {
         -ShortcutPath (Join-Path $startMenuFolder "Stop Lanka POS.lnk") `
         -TargetPath $cmdExe `
         -Arguments "/c `"$stopBat`"" `
-        -WorkingDirectory $RootPath `
+        -WorkingDirectory $Paths.RootPath `
         -Description "Stop Lanka POS backend" `
         -IconLocation $iconPath
 
-    if (Test-Path -LiteralPath $generateBat) {
+    if (Test-Path -LiteralPath $activationManagerLauncher) {
         New-WindowsShortcut `
             -ShortcutPath (Join-Path $startMenuFolder "Generate Offline Activation Codes.lnk") `
             -TargetPath $cmdExe `
-            -Arguments "/c `"$generateBat`"" `
-            -WorkingDirectory $RootPath `
-            -Description "Generate Lanka POS offline activation codes" `
+            -Arguments "/c `"$activationManagerLauncher`"" `
+            -WorkingDirectory $Paths.RootPath `
+            -Description "Open the Lanka POS activation code manager" `
             -IconLocation $iconPath
     }
-}
-
-function Test-LooksLikeBase64Key {
-    param([Parameter(Mandatory = $true)][string]$Candidate)
-
-    $compact = [regex]::Replace($Candidate, "\s", "")
-    if ($compact.Length -lt 128) {
-        return $false
-    }
-
-    return $compact -match "^[A-Za-z0-9+/=]+$"
-}
-
-function Ensure-SigningKeyPath {
-    param(
-        [string]$ConfiguredValue,
-        [Parameter(Mandatory = $true)][string]$KeyFilePath,
-        [Parameter(Mandatory = $true)][string]$DevelopmentSettingsPath
-    )
-
-    $raw = [string]$ConfiguredValue
-    if (-not [string]::IsNullOrWhiteSpace($raw)) {
-        $raw = $raw.Trim()
-        if ($raw.StartsWith('"', [StringComparison]::Ordinal) -and
-            $raw.EndsWith('"', [StringComparison]::Ordinal) -and
-            $raw.Length -ge 2) {
-            $raw = $raw.Substring(1, $raw.Length - 2)
-        }
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($raw)) {
-        if (Test-Path -LiteralPath $raw) {
-            return (Resolve-Path -LiteralPath $raw).Path
-        }
-
-        $material = $raw.Replace("\\n", [Environment]::NewLine)
-        $material = $material.Replace("\\", "")
-        $material = $material.Replace("-----BEGIN PRIVATE KEY-----", "")
-        $material = $material.Replace("-----END PRIVATE KEY-----", "")
-
-        if (Test-LooksLikeBase64Key -Candidate $material) {
-            $compact = [regex]::Replace($material, "\s", "")
-            $pem = "-----BEGIN PRIVATE KEY-----{0}{1}{0}-----END PRIVATE KEY-----" -f [Environment]::NewLine, $compact
-            Set-Content -LiteralPath $KeyFilePath -Value $pem -NoNewline
-            return (Resolve-Path -LiteralPath $KeyFilePath).Path
-        }
-
-        $trimmed = $raw.Trim()
-        if ($trimmed -match "^(?:[A-Za-z]:\\|\\\\|\.\\|\.\./|/|file://|~/)" -or
-            $trimmed.EndsWith(".pem", [StringComparison]::OrdinalIgnoreCase) -or
-            $trimmed.EndsWith(".key", [StringComparison]::OrdinalIgnoreCase)) {
-            throw "SMARTPOS_LICENSE_SIGNING_PRIVATE_KEY_PEM points to '$trimmed', but the file was not found."
-        }
-    }
-
-    if (Test-Path -LiteralPath $KeyFilePath) {
-        return (Resolve-Path -LiteralPath $KeyFilePath).Path
-    }
-
-    if (Test-Path -LiteralPath $DevelopmentSettingsPath) {
-        try {
-            $config = Get-Content -LiteralPath $DevelopmentSettingsPath -Raw | ConvertFrom-Json
-            $pemFromConfig = [string]$config.Licensing.SigningPrivateKeyPem
-            if (-not [string]::IsNullOrWhiteSpace($pemFromConfig)) {
-                $material = $pemFromConfig.Replace("-----BEGIN PRIVATE KEY-----", "")
-                $material = $material.Replace("-----END PRIVATE KEY-----", "")
-                if (Test-LooksLikeBase64Key -Candidate $material) {
-                    $compact = [regex]::Replace($material, "\s", "")
-                    $pem = "-----BEGIN PRIVATE KEY-----{0}{1}{0}-----END PRIVATE KEY-----" -f [Environment]::NewLine, $compact
-                    Set-Content -LiteralPath $KeyFilePath -Value $pem -NoNewline
-                    return (Resolve-Path -LiteralPath $KeyFilePath).Path
-                }
-            }
-        }
-        catch {
-            # Ignore malformed development config and fall through to explicit error.
-        }
-    }
-
-    throw "Licensing signing key is not configured. Set SMARTPOS_LICENSE_SIGNING_PRIVATE_KEY_PEM to a valid PEM file path and rerun."
 }
 
 if ($env:OS -ne "Windows_NT") {
@@ -266,76 +134,26 @@ if ($env:OS -ne "Windows_NT") {
 
 Assert-Administrator
 
-$root = Split-Path -Parent $PSCommandPath
-Set-Location -LiteralPath $root
-$appDir = Join-Path $root "app"
-$backendExe = Join-Path $appDir "backend.exe"
-$clientEnvPath = Join-Path $root "client.env"
-$developmentSettingsPath = Join-Path $appDir "appsettings.Development.json"
-$signingKeyPath = Join-Path $appDir "license-signing-private-key.pem"
+$paths = Resolve-SmartPosPaths `
+    -RootPath $PSScriptRoot `
+    -PreferredInstallMode "windows_service" `
+    -PreferredServiceName $ServiceName
 
-if (-not (Test-Path -LiteralPath $backendExe)) {
-    throw "backend.exe not found at '$backendExe'. Keep this installer next to the app folder."
+if (-not (Test-Path -LiteralPath $paths.BackendExePath)) {
+    throw "backend.exe not found at '$($paths.BackendExePath)'. Keep this installer next to the app folder."
 }
 
-$envValues = Read-ClientEnv -Path $clientEnvPath
-$defaultCloudRelayBaseUrl = "https://smartpos-backend-v7yd.onrender.com"
+$migrated = Invoke-SmartPosLegacyMigration -Paths $paths
+$envValues = Initialize-SmartPosClientEnv -Paths $paths
+$backendUrl = Get-SmartPosBackendUrl -Paths $paths -EnvValues $envValues
 
-if (-not $envValues.Contains("ASPNETCORE_ENVIRONMENT") -or [string]::IsNullOrWhiteSpace([string]$envValues["ASPNETCORE_ENVIRONMENT"])) {
-    $envValues["ASPNETCORE_ENVIRONMENT"] = "Production"
-}
-
-if (-not $envValues.Contains("ASPNETCORE_URLS") -or [string]::IsNullOrWhiteSpace([string]$envValues["ASPNETCORE_URLS"])) {
-    $envValues["ASPNETCORE_URLS"] = "http://127.0.0.1:5080"
-}
-
-$licensingRelayBaseUrl = if ($envValues.Contains("Licensing__CloudRelayBaseUrl")) {
-    [string]$envValues["Licensing__CloudRelayBaseUrl"]
-}
-else {
-    ""
-}
-$aiRelayBaseUrl = if ($envValues.Contains("AiInsights__CloudRelayBaseUrl")) {
-    [string]$envValues["AiInsights__CloudRelayBaseUrl"]
-}
-else {
-    ""
-}
-if ([string]::IsNullOrWhiteSpace($licensingRelayBaseUrl) -and [string]::IsNullOrWhiteSpace($aiRelayBaseUrl)) {
-    $envValues["Licensing__CloudRelayBaseUrl"] = $defaultCloudRelayBaseUrl
-    $licensingRelayBaseUrl = $defaultCloudRelayBaseUrl
-}
-
-if ([string]::IsNullOrWhiteSpace($aiRelayBaseUrl) -and -not [string]::IsNullOrWhiteSpace($licensingRelayBaseUrl)) {
-    $envValues["AiInsights__CloudRelayBaseUrl"] = $licensingRelayBaseUrl
-    $aiRelayBaseUrl = $licensingRelayBaseUrl
-}
-
-$aiCloudRelayEnabledRaw = if ($envValues.Contains("AiInsights__CloudRelayEnabled")) {
-    [string]$envValues["AiInsights__CloudRelayEnabled"]
-}
-else {
-    ""
-}
-if ([string]::IsNullOrWhiteSpace($aiCloudRelayEnabledRaw) -and -not [string]::IsNullOrWhiteSpace($aiRelayBaseUrl)) {
-    $envValues["AiInsights__CloudRelayEnabled"] = "true"
-    $aiCloudRelayEnabledRaw = "true"
-}
-$aiCloudRelayEnabled = @("1", "true", "yes", "on") -contains $aiCloudRelayEnabledRaw.Trim().ToLowerInvariant()
-
-if (-not $envValues.Contains("SMARTPOS_JWT_SECRET") -or [string]::IsNullOrWhiteSpace([string]$envValues["SMARTPOS_JWT_SECRET"])) {
-    $envValues["SMARTPOS_JWT_SECRET"] = New-RandomSecret
-}
-
-if (-not $envValues.Contains("SMARTPOS_LICENSE_DATA_ENCRYPTION_KEY") -or [string]::IsNullOrWhiteSpace([string]$envValues["SMARTPOS_LICENSE_DATA_ENCRYPTION_KEY"])) {
-    $envValues["SMARTPOS_LICENSE_DATA_ENCRYPTION_KEY"] = New-RandomSecret
-}
-
-$signingKeyResolvedPath = Ensure-SigningKeyPath `
-    -ConfiguredValue ($envValues["SMARTPOS_LICENSE_SIGNING_PRIVATE_KEY_PEM"]) `
-    -KeyFilePath $signingKeyPath `
-    -DevelopmentSettingsPath $developmentSettingsPath
-$envValues["SMARTPOS_LICENSE_SIGNING_PRIVATE_KEY_PEM"] = $signingKeyResolvedPath
+Write-ClientEnv -Path $paths.ClientEnvPath -Values $envValues
+Write-SmartPosInstallManifest `
+    -RootPath $paths.RootPath `
+    -InstallMode "windows_service" `
+    -DataRoot $paths.DataRoot `
+    -ServiceName $ServiceName `
+    -BackendUrl $backendUrl | Out-Null
 
 $legacyServiceName = "SmartPOSBackend"
 if ([string]::Equals($ServiceName, "LankaPOSBackend", [StringComparison]::OrdinalIgnoreCase)) {
@@ -350,24 +168,8 @@ if ([string]::Equals($ServiceName, "LankaPOSBackend", [StringComparison]::Ordina
     }
 }
 
-$openAiApiKey = if ($envValues.Contains("OPENAI_API_KEY")) { [string]$envValues["OPENAI_API_KEY"] } else { "" }
-if ([string]::IsNullOrWhiteSpace($openAiApiKey)) {
-    if (-not $envValues.Contains("AiSuggestions__Enabled") -or [string]::IsNullOrWhiteSpace([string]$envValues["AiSuggestions__Enabled"])) {
-        $envValues["AiSuggestions__Enabled"] = "false"
-    }
-
-    if ($aiCloudRelayEnabled -and -not [string]::IsNullOrWhiteSpace($aiRelayBaseUrl)) {
-        $envValues["AiInsights__Enabled"] = "true"
-    }
-    elseif (-not $envValues.Contains("AiInsights__Enabled") -or [string]::IsNullOrWhiteSpace([string]$envValues["AiInsights__Enabled"])) {
-        $envValues["AiInsights__Enabled"] = "false"
-    }
-}
-
-Write-ClientEnv -Path $clientEnvPath -Values $envValues
-
 $existingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-$binaryPath = '"{0}"' -f $backendExe
+$binaryPath = '"{0}"' -f $paths.BackendExePath
 
 if ($null -eq $existingService) {
     New-Service -Name $ServiceName -BinaryPathName $binaryPath -DisplayName $DisplayName -Description $Description -StartupType Automatic | Out-Null
@@ -381,15 +183,14 @@ else {
 $serviceRegPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
 $serviceEnvironment = [System.Collections.Generic.List[string]]::new()
 foreach ($entry in $envValues.GetEnumerator()) {
-    if ([string]::IsNullOrWhiteSpace($entry.Key)) {
+    if ([string]::IsNullOrWhiteSpace([string]$entry.Key)) {
         continue
     }
 
-    $serviceEnvironment.Add("$($entry.Key)=$([string]$entry.Value)")
+    $serviceEnvironment.Add("$($entry.Key)=$([string]$entry.Value)") | Out-Null
 }
 
 New-ItemProperty -Path $serviceRegPath -Name "Environment" -PropertyType MultiString -Value $serviceEnvironment.ToArray() -Force | Out-Null
-
 Invoke-Sc -Arguments @("failure", $ServiceName, "reset=", "86400", "actions=", "restart/5000/restart/5000/restart/5000") | Out-Null
 Invoke-Sc -Arguments @("failureflag", $ServiceName, "1") | Out-Null
 
@@ -404,7 +205,7 @@ if (-not $SkipStart) {
 }
 
 try {
-    Ensure-Shortcuts -RootPath $root -BackendExecutablePath $backendExe
+    Ensure-Shortcuts -Paths $paths -BackendExecutablePath $paths.BackendExePath -BackendUrl $backendUrl
 }
 catch {
     Write-Warning "Service was installed, but shortcut creation failed: $($_.Exception.Message)"
@@ -414,6 +215,14 @@ $finalState = (Get-Service -Name $ServiceName).Status
 Write-Host "Lanka POS service configured successfully." -ForegroundColor Green
 Write-Host "Service name: $ServiceName"
 Write-Host "Status: $finalState"
-Write-Host "Backend URL: $($envValues['ASPNETCORE_URLS'])"
-Write-Host "Signing key file: $signingKeyResolvedPath"
+Write-Host "Install root: $($paths.RootPath)"
+Write-Host "Data root: $($paths.DataRoot)"
+Write-Host "Config path: $($paths.ClientEnvPath)"
+Write-Host "Database path: $($paths.DbPath)"
+Write-Host "Signing key file: $($paths.SigningKeyPath)"
+Write-Host "Backend URL: $backendUrl"
 Write-Host "Desktop shortcut: Open Lanka POS"
+Write-Host "Start Menu shortcut: Generate Offline Activation Codes"
+if ($migrated.Count -gt 0) {
+    Write-Host "Migrated legacy files: $($migrated -join ', ')" -ForegroundColor Yellow
+}

@@ -33,5 +33,6 @@ public sealed class AuthSuperAdminPasswordOnlyLoginTests : IClassFixture<CustomW
         Assert.Equal(username, TestJson.GetString(payload, "username"));
         Assert.Equal("super_admin", TestJson.GetString(payload, "role"));
         Assert.Equal(expectedDeviceCode, TestJson.GetString(payload, "device_code"));
+        Assert.True(payload["mfa_verified"]?.GetValue<bool>());
     }
 }

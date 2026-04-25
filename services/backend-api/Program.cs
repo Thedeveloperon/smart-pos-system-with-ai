@@ -491,18 +491,16 @@ builder.Services.AddHttpClient("cloud-account-link", (serviceProvider, httpClien
 {
     var aiOptions = serviceProvider.GetRequiredService<IOptions<AiInsightOptions>>().Value;
     var licenseOptions = serviceProvider.GetRequiredService<IOptions<LicenseOptions>>().Value;
-    var aiBaseUrl = (aiOptions.CloudRelayBaseUrl ?? string.Empty).Trim();
-    var licenseBaseUrl = (licenseOptions.CloudRelayBaseUrl ?? string.Empty).Trim();
-    var baseUrl = !string.IsNullOrWhiteSpace(aiBaseUrl) ? aiBaseUrl : licenseBaseUrl;
-    if (Uri.TryCreate(baseUrl, UriKind.Absolute, out var relayUri))
+    var hasResolvedRelay = CloudAccountRelaySelection.TryResolve(
+        aiOptions,
+        licenseOptions,
+        out var baseUrl,
+        out var timeoutSeconds);
+    if (hasResolvedRelay && Uri.TryCreate(baseUrl, UriKind.Absolute, out var relayUri))
     {
         httpClient.BaseAddress = relayUri;
     }
 
-    var configuredTimeout = !string.IsNullOrWhiteSpace(aiBaseUrl)
-        ? aiOptions.CloudRelayTimeoutSeconds
-        : licenseOptions.CloudRelayTimeoutSeconds;
-    var timeoutSeconds = Math.Max(1, configuredTimeout);
     httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
 });
 builder.Services.AddHttpClient("openai-ocr");

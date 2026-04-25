@@ -119,6 +119,7 @@ if (-not $shortcutIconWritten) {
 }
 
 Copy-Item -Path (Join-Path $clientTemplatesDir "Start-SmartPOS.bat") -Destination $outputRoot -Force
+Copy-Item -Path (Join-Path $clientTemplatesDir "Start-SmartPOS.ps1") -Destination $outputRoot -Force
 Copy-Item -Path (Join-Path $clientTemplatesDir "Stop-SmartPOS.bat") -Destination $outputRoot -Force
 Copy-Item -Path (Join-Path $clientTemplatesDir "Install-SmartPOS-Service.bat") -Destination $outputRoot -Force
 Copy-Item -Path (Join-Path $clientTemplatesDir "Install-SmartPOS-Service.ps1") -Destination $outputRoot -Force
@@ -128,6 +129,10 @@ Copy-Item -Path (Join-Path $clientTemplatesDir "Precheck-SmartPOS-Host.bat") -De
 Copy-Item -Path (Join-Path $clientTemplatesDir "Precheck-SmartPOS-Host.ps1") -Destination $outputRoot -Force
 Copy-Item -Path (Join-Path $clientTemplatesDir "Generate-Offline-Activation-Codes.bat") -Destination $outputRoot -Force
 Copy-Item -Path (Join-Path $clientTemplatesDir "Generate-Offline-Activation-Codes.ps1") -Destination $outputRoot -Force
+Copy-Item -Path (Join-Path $clientTemplatesDir "Activation-Code-Manager.bat") -Destination $outputRoot -Force
+Copy-Item -Path (Join-Path $clientTemplatesDir "Activation-Code-Manager.ps1") -Destination $outputRoot -Force
+Copy-Item -Path (Join-Path $clientTemplatesDir "Setup-CurrentUser-Install.ps1") -Destination $outputRoot -Force
+Copy-Item -Path (Join-Path $clientTemplatesDir "SmartPOS-ClientCommon.ps1") -Destination $outputRoot -Force
 Copy-Item -Path (Join-Path $clientTemplatesDir "client.env.example") -Destination $outputRoot -Force
 Copy-Item -Path (Join-Path $clientTemplatesDir "README-CLIENT.txt") -Destination $outputRoot -Force
 
