@@ -26,7 +26,7 @@ public sealed class PurchaseService(
 {
     private static readonly string[] AllowedExtensions = [".pdf", ".png", ".jpg", ".jpeg"];
     private static readonly Regex CodeTokenRegex = new(@"[A-Za-z0-9\-]{3,}", RegexOptions.Compiled);
-    private static readonly ConcurrentDictionary<string, SemaphoreSlim> ConfirmLocks = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, ConfirmLockEntry> ConfirmLocks = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Meter PurchasingMeter = new("SmartPos.Purchasing", "1.0.0");
     private static readonly Counter<long> OcrDraftCounter = PurchasingMeter.CreateCounter<long>(
         "smartpos.purchasing.ocr_draft.total",
@@ -316,15 +316,26 @@ public sealed class PurchaseService(
             throw new InvalidOperationException("At least one mapped line item is required.");
         }
 
-        var semaphore = ConfirmLocks.GetOrAdd(importRequestId, _ => new SemaphoreSlim(1, 1));
-        await semaphore.WaitAsync(cancellationToken);
+        var lockEntry = AcquireConfirmLock(importRequestId);
+        var lockAcquired = false;
         try
         {
+            await lockEntry.Semaphore.WaitAsync(cancellationToken);
+            lockAcquired = true;
             return await ConfirmImportInternalAsync(importRequestId, request, cancellationToken);
         }
         finally
         {
-            semaphore.Release();
+            if (lockAcquired)
+            {
+                lockEntry.Semaphore.Release();
+            }
+
+            if (lockEntry.ReleaseReference() == 0)
+            {
+                ConfirmLocks.TryRemove(new KeyValuePair<string, ConfirmLockEntry>(importRequestId, lockEntry));
+                lockEntry.Dispose();
+            }
         }
     }
 
@@ -1577,6 +1588,28 @@ public sealed class PurchaseService(
         return "manual_review_required";
     }
 
+    private static ConfirmLockEntry AcquireConfirmLock(string importRequestId)
+    {
+        while (true)
+        {
+            if (ConfirmLocks.TryGetValue(importRequestId, out var existingEntry))
+            {
+                if (existingEntry.TryAddReference())
+                {
+                    return existingEntry;
+                }
+
+                continue;
+            }
+
+            var newEntry = new ConfirmLockEntry();
+            if (ConfirmLocks.TryAdd(importRequestId, newEntry))
+            {
+                return newEntry;
+            }
+        }
+    }
+
     private static void RecordConfirmTelemetry(string status)
     {
         ImportConfirmCounter.Add(
@@ -1630,6 +1663,40 @@ public sealed class PurchaseService(
         List<PurchaseOcrDraftLineItemResponse> Lines,
         List<string> BlockedReasons,
         bool ReviewRequired);
+
+    private sealed class ConfirmLockEntry : IDisposable
+    {
+        private int referenceCount = 1;
+
+        public SemaphoreSlim Semaphore { get; } = new(1, 1);
+
+        public bool TryAddReference()
+        {
+            while (true)
+            {
+                var currentCount = Volatile.Read(ref referenceCount);
+                if (currentCount == 0)
+                {
+                    return false;
+                }
+
+                if (Interlocked.CompareExchange(ref referenceCount, currentCount + 1, currentCount) == currentCount)
+                {
+                    return true;
+                }
+            }
+        }
+
+        public int ReleaseReference()
+        {
+            return Interlocked.Decrement(ref referenceCount);
+        }
+
+        public void Dispose()
+        {
+            Semaphore.Dispose();
+        }
+    }
 
     private enum BillFileKind
     {

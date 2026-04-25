@@ -48,21 +48,19 @@ public sealed class LicensingAbuseTests(CustomWebApplicationFactory factory)
         Assert.False(string.IsNullOrWhiteSpace(firstToken));
 
         var heartbeat = await TestJson.ReadObjectAsync(
-            await client.PostAsJsonAsync("/api/license/heartbeat", new
-            {
-                device_code = deviceCode,
-                license_token = firstToken
-            }));
+            await PostHeartbeatAsync(
+                deviceCode,
+                firstToken,
+                $"heartbeat-first-{Guid.NewGuid():N}"));
 
         var refreshedToken = TestJson.GetString(heartbeat, "license_token");
         Assert.False(string.IsNullOrWhiteSpace(refreshedToken));
         Assert.NotEqual(firstToken, refreshedToken);
 
-        var replayResponse = await client.PostAsJsonAsync("/api/license/heartbeat", new
-        {
-            device_code = deviceCode,
-            license_token = firstToken
-        });
+        var replayResponse = await PostHeartbeatAsync(
+            deviceCode,
+            firstToken,
+            $"heartbeat-replay-{Guid.NewGuid():N}");
 
         Assert.Equal(HttpStatusCode.Forbidden, replayResponse.StatusCode);
         var replayPayload = await ReadJsonAsync(replayResponse);
@@ -181,6 +179,24 @@ public sealed class LicensingAbuseTests(CustomWebApplicationFactory factory)
                 actor = "integration-tests",
                 reason = "test activation"
             }));
+    }
+
+    private async Task<HttpResponseMessage> PostHeartbeatAsync(
+        string deviceCode,
+        string licenseToken,
+        string idempotencyKey)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/license/heartbeat")
+        {
+            Content = JsonContent.Create(new
+            {
+                device_code = deviceCode,
+                license_token = licenseToken
+            })
+        };
+        request.Headers.Remove("Idempotency-Key");
+        request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey);
+        return await client.SendAsync(request);
     }
 
     private async Task DeactivateAsync(string deviceCode)

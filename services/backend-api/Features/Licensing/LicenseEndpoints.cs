@@ -1075,7 +1075,7 @@ public static class LicenseEndpoints
         .WithName("AdminDeleteShop")
         .WithOpenApi();
 
-        admin.MapGet("/users", [Authorize(Policy = SmartPosPolicies.SuperAdminOperator)] async (
+        admin.MapGet("/users", [Authorize(Policy = SmartPosPolicies.SupportOperator)] async (
             string? shop_code,
             string? search,
             string? role_code,
@@ -1104,7 +1104,7 @@ public static class LicenseEndpoints
         .WithName("AdminGetShopUsers")
         .WithOpenApi();
 
-        admin.MapPost("/users", [Authorize(Policy = SmartPosPolicies.SuperAdminOperator)] async (
+        admin.MapPost("/users", [Authorize(Policy = SmartPosPolicies.SupportOperator)] async (
             AdminShopUserCreateRequest request,
             HttpContext httpContext,
             LicenseService licenseService,
@@ -1125,7 +1125,7 @@ public static class LicenseEndpoints
         .WithName("AdminCreateShopUser")
         .WithOpenApi();
 
-        admin.MapPut("/users/{user_id:guid}", [Authorize(Policy = SmartPosPolicies.SuperAdminOperator)] async (
+        admin.MapPut("/users/{user_id:guid}", [Authorize(Policy = SmartPosPolicies.SupportOperator)] async (
             Guid user_id,
             AdminShopUserUpdateRequest request,
             HttpContext httpContext,
@@ -1147,7 +1147,7 @@ public static class LicenseEndpoints
         .WithName("AdminUpdateShopUser")
         .WithOpenApi();
 
-        admin.MapDelete("/users/{user_id:guid}", [Authorize(Policy = SmartPosPolicies.SuperAdminOperator)] async (
+        admin.MapDelete("/users/{user_id:guid}", [Authorize(Policy = SmartPosPolicies.SupportOperator)] async (
             Guid user_id,
             HttpContext httpContext,
             LicenseService licenseService,
@@ -1170,7 +1170,7 @@ public static class LicenseEndpoints
         .WithName("AdminDeactivateShopUser")
         .WithOpenApi();
 
-        admin.MapPost("/users/{user_id:guid}/reactivate", [Authorize(Policy = SmartPosPolicies.SuperAdminOperator)] async (
+        admin.MapPost("/users/{user_id:guid}/reactivate", [Authorize(Policy = SmartPosPolicies.SupportOperator)] async (
             Guid user_id,
             AdminShopUserReactivateRequest request,
             HttpContext httpContext,
@@ -1192,7 +1192,7 @@ public static class LicenseEndpoints
         .WithName("AdminReactivateShopUser")
         .WithOpenApi();
 
-        admin.MapDelete("/users/{user_id:guid}/hard-delete", [Authorize(Policy = SmartPosPolicies.SuperAdminOperator)] async (
+        admin.MapDelete("/users/{user_id:guid}/hard-delete", [Authorize(Policy = SmartPosPolicies.SupportOperator)] async (
             Guid user_id,
             HttpContext httpContext,
             LicenseService licenseService,
@@ -1215,7 +1215,7 @@ public static class LicenseEndpoints
         .WithName("AdminDeleteShopUser")
         .WithOpenApi();
 
-        admin.MapPost("/users/{user_id:guid}/reset-password", [Authorize(Policy = SmartPosPolicies.SuperAdminOperator)] async (
+        admin.MapPost("/users/{user_id:guid}/reset-password", [Authorize(Policy = SmartPosPolicies.SupportOperator)] async (
             Guid user_id,
             AdminShopUserPasswordResetRequest request,
             HttpContext httpContext,

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -7,6 +8,7 @@ using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SmartPos.Backend.Domain;
+using SmartPos.Backend.Features.Ai;
 using SmartPos.Backend.Features.Licensing;
 using SmartPos.Backend.Infrastructure;
 
@@ -125,6 +127,79 @@ public sealed class AiInsightsCreditFlowTests(CustomWebApplicationFactory factor
 
         var netDelta = ledgerEntries.Sum(x => x.DeltaCredits);
         Assert.Equal(-chargedCredits, netDelta);
+    }
+
+    [Fact]
+    public async Task SettleReservation_WithNonInvariantCulture_ShouldPersistValidJsonMetadata()
+    {
+        await ResetWalletAsync("billing_admin");
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+        var billingService = scope.ServiceProvider.GetRequiredService<AiCreditBillingService>();
+
+        var userId = await dbContext.Users
+            .Where(x => x.Username == "billing_admin")
+            .Select(x => x.Id)
+            .SingleAsync();
+        var user = await dbContext.Users
+            .SingleAsync(x => x.Id == userId);
+        var requestId = Guid.NewGuid();
+
+        dbContext.AiInsightRequests.Add(new AiInsightRequest
+        {
+            Id = requestId,
+            UserId = userId,
+            IdempotencyKey = $"it-culture-{Guid.NewGuid():N}",
+            Status = AiInsightRequestStatus.Pending,
+            Provider = "local",
+            Model = "integration-test",
+            UsageType = AiUsageType.QuickInsights,
+            PromptHash = Guid.NewGuid().ToString("N"),
+            PromptCharCount = 32,
+            ReservedCredits = 0m,
+            ChargedCredits = 0m,
+            InputTokens = 0,
+            OutputTokens = 0,
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+            UpdatedAtUtc = DateTimeOffset.UtcNow,
+            User = user
+        });
+        await dbContext.SaveChangesAsync();
+
+        await billingService.AddCreditsAsync(
+            userId,
+            10m,
+            $"it-culture-topup-{Guid.NewGuid():N}",
+            "integration_test_culture_topup",
+            CancellationToken.None);
+
+        var previousCulture = CultureInfo.CurrentCulture;
+        var previousUiCulture = CultureInfo.CurrentUICulture;
+
+        try
+        {
+            var frenchCulture = CultureInfo.GetCultureInfo("fr-FR");
+            CultureInfo.CurrentCulture = frenchCulture;
+            CultureInfo.CurrentUICulture = frenchCulture;
+
+            await billingService.ReserveCreditsAsync(userId, requestId, 5m, CancellationToken.None);
+            await billingService.SettleReservationAsync(userId, requestId, 5m, 3.5m, CancellationToken.None);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previousCulture;
+            CultureInfo.CurrentUICulture = previousUiCulture;
+        }
+
+        var chargeEntry = await dbContext.AiCreditLedgerEntries
+            .SingleAsync(x =>
+                x.AiInsightRequestId == requestId &&
+                x.EntryType == AiCreditLedgerEntryType.Charge);
+
+        using var document = JsonDocument.Parse(chargeEntry.MetadataJson ?? throw new InvalidOperationException("Charge metadata was missing."));
+        Assert.Equal(3.5m, document.RootElement.GetProperty("charged_credits").GetDecimal());
+        Assert.Equal(0m, document.RootElement.GetProperty("overage_credits").GetDecimal());
     }
 
     [Fact]

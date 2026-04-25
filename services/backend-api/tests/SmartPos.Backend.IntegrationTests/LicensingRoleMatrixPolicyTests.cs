@@ -11,7 +11,7 @@ public sealed class LicensingRoleMatrixPolicyTests(CustomWebApplicationFactory f
     [Fact]
     public async Task LicenseAccountPortal_WithManager_ShouldReturnOk()
     {
-        await TestAuth.SignInAsManagerAsync(client);
+        await TestAuth.SignInAsManagerAccountAsync(client);
 
         var response = await client.GetAsync("/api/license/account/licenses");
 
@@ -24,7 +24,7 @@ public sealed class LicensingRoleMatrixPolicyTests(CustomWebApplicationFactory f
     [Fact]
     public async Task LicenseAccountPortal_WithCashier_ShouldReturnForbidden()
     {
-        await TestAuth.SignInAsCashierAsync(client);
+        await TestAuth.SignInAsCashierAccountAsync(client);
 
         var response = await client.GetAsync("/api/license/account/licenses");
 

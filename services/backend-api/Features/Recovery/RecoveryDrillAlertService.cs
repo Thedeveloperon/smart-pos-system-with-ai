@@ -16,7 +16,7 @@ public sealed class RecoveryDrillAlertService(
     : BackgroundService
 {
     private readonly RecoveryOpsOptions options = optionsAccessor.Value;
-    private readonly string repoRootPath = Path.GetFullPath(Path.Combine(environment.ContentRootPath, ".."));
+    private readonly string repoRootPath = RecoveryPathResolver.ResolveRepositoryRoot(environment.ContentRootPath);
     private readonly Dictionary<string, DateTimeOffset> lastAlertByIssue = new(StringComparer.OrdinalIgnoreCase);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

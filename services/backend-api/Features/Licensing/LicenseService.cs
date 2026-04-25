@@ -6216,6 +6216,13 @@ public sealed class LicenseService(
 
         var quote = ResolveMarketingPlanQuote(request.PlanCode);
         var normalizedDeviceCode = NormalizeDeviceCode(request.DeviceCode);
+        if (quote.RequiresPayment && string.IsNullOrWhiteSpace(normalizedDeviceCode))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "device_code is required for paid plans.",
+                StatusCodes.Status400BadRequest);
+        }
 
         var paymentMethod = ResolveMarketingPaymentMethod(request.PaymentMethod);
         var normalizedCurrency = ResolveCurrency(request.Currency ?? quote.Currency);
@@ -6454,6 +6461,13 @@ public sealed class LicenseService(
 
         var normalizedCurrency = ResolveCurrency(request.Currency ?? quote.Currency);
         var normalizedDeviceCode = NormalizeDeviceCode(request.DeviceCode);
+        if (string.IsNullOrWhiteSpace(normalizedDeviceCode))
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidAdminRequest,
+                "device_code is required for paid plans.",
+                StatusCodes.Status400BadRequest);
+        }
         var normalizedCampaign = NormalizeOptionalValue(request.Campaign);
         var normalizedLocale = NormalizeOptionalValue(request.Locale);
         var customerNotes = NormalizeOptionalValue(request.Notes);

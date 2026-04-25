@@ -1,8 +1,10 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Reflection;
 using System.Text;
 using System.Text.Json.Nodes;
+using SmartPos.Backend.Features.Purchases;
 
 namespace SmartPos.Backend.IntegrationTests;
 
@@ -185,6 +187,7 @@ public sealed class PurchaseOcrImportTests(CustomWebApplicationFactory factory)
 
         var stockAfterReplay = await GetStockByBarcodeAsync(barcode);
         Assert.Equal(stockAfterFirstConfirm, stockAfterReplay);
+        AssertConfirmLockReleased(importRequestId);
     }
 
     [Fact]
@@ -434,6 +437,48 @@ public sealed class PurchaseOcrImportTests(CustomWebApplicationFactory factory)
             throw new FileNotFoundException($"Fixture file not found: {fixturePath}");
         }
 
-        return await File.ReadAllBytesAsync(fixturePath);
+        var bytes = await File.ReadAllBytesAsync(fixturePath);
+        return NormalizeFixtureBytes(fixtureFile, bytes);
+    }
+
+    private static byte[] NormalizeFixtureBytes(string fixtureFile, byte[] bytes)
+    {
+        if (!fixtureFile.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
+            bytes.Length < 7 ||
+            bytes[0] != 0x89 ||
+            bytes[1] != 0x50 ||
+            bytes[2] != 0x4E ||
+            bytes[3] != 0x47 ||
+            bytes[4] != 0x0A ||
+            bytes[5] != 0x1A ||
+            bytes[6] != 0x0A)
+        {
+            return bytes;
+        }
+
+        var normalized = new byte[bytes.Length + 1];
+        normalized[0] = 0x89;
+        normalized[1] = 0x50;
+        normalized[2] = 0x4E;
+        normalized[3] = 0x47;
+        normalized[4] = 0x0D;
+        normalized[5] = 0x0A;
+        normalized[6] = 0x1A;
+        normalized[7] = 0x0A;
+        Array.Copy(bytes, 7, normalized, 8, bytes.Length - 7);
+        return normalized;
+    }
+
+    private static void AssertConfirmLockReleased(string importRequestId)
+    {
+        var field = typeof(PurchaseService).GetField("ConfirmLocks", BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException("PurchaseService confirm lock dictionary was not found.");
+        var dictionary = field.GetValue(null)
+            ?? throw new InvalidOperationException("PurchaseService confirm lock dictionary was not initialized.");
+        var containsKeyMethod = dictionary.GetType().GetMethod("ContainsKey", [typeof(string)])
+            ?? throw new InvalidOperationException("Confirm lock dictionary does not expose ContainsKey.");
+        var stillPresent = (bool?)containsKeyMethod.Invoke(dictionary, [importRequestId]) ?? false;
+
+        Assert.False(stillPresent);
     }
 }

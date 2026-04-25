@@ -407,6 +407,103 @@ describe("Account page credentials-only commerce flow", () => {
     expect(container.textContent).toContain("4,771.9");
   });
 
+  it("shows succeeded AI payments when no purchase order record exists yet", async () => {
+    vi.mocked(global.fetch).mockImplementation(async (input) => {
+      const requestUrl = normalizeFetchUrl(resolveRequestUrl(input));
+
+      if (requestUrl === "/api/account/me") {
+        return jsonResponse({
+          user_id: "11111111-1111-1111-1111-111111111111",
+          username: "owner",
+          full_name: "Store Owner",
+          role: "owner",
+          session_id: "sess-wallet-02",
+          shop_id: "33333333-3333-3333-3333-333333333333",
+          shop_code: "default",
+          expires_at: "2026-04-20T00:00:00Z",
+          mfa_verified: true,
+          auth_session_version: 1,
+        });
+      }
+
+      if (requestUrl === "/api/account/products?take=120") {
+        return jsonResponse({ generated_at: "2026-04-13T00:00:00Z", count: 0, items: [] });
+      }
+
+      if (requestUrl === "/api/account/purchases?take=80") {
+        return jsonResponse({ generated_at: "2026-04-13T00:00:00Z", count: 0, items: [] });
+      }
+
+      if (requestUrl === "/api/account/ai/invoices?take=80") {
+        return jsonResponse({ generated_at: "2026-04-13T00:00:00Z", count: 0, items: [] });
+      }
+
+      if (requestUrl === "/api/account/ai/wallet") {
+        return jsonResponse({
+          available_credits: 100,
+          updated_at: "2026-04-13T00:00:00Z",
+        });
+      }
+
+      if (requestUrl === "/api/account/ai/ledger?take=30") {
+        return jsonResponse({ items: [] });
+      }
+
+      if (requestUrl === "/api/account/ai/payments?take=30") {
+        return jsonResponse({
+          items: [
+            {
+              payment_id: "pay-succeeded-01",
+              payment_status: "succeeded",
+              payment_method: "card",
+              provider: "stripe",
+              credits: 100,
+              amount: 5,
+              currency: "USD",
+              external_reference: "ref-succeeded-01",
+              created_at: "2026-04-13T00:00:00Z",
+              completed_at: "2026-04-13T00:01:00Z",
+            },
+          ],
+        });
+      }
+
+      if (requestUrl === "/api/account/license-portal") {
+        return jsonResponse({
+          shop_code: "default",
+          latest_activation_entitlement: null,
+          devices: [],
+        });
+      }
+
+      throw new Error(`Unexpected fetch URL: ${requestUrl}`);
+    });
+
+    await act(async () => {
+      root.render(
+        <I18nProvider locale="en" messages={{}}>
+          <AccountPage />
+        </I18nProvider>,
+      );
+      await flushUi();
+    });
+
+    await waitForCondition(() => container.textContent?.includes("Owner Account") ?? false);
+
+    const walletNavButton = getButtonByText(container, "AI Credit Wallet");
+    expect(walletNavButton).toBeTruthy();
+
+    await act(async () => {
+      walletNavButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flushUi();
+    });
+
+    await waitForCondition(() => container.textContent?.includes("Recent Transactions") ?? false);
+    expect(container.textContent).toContain("Credit Purchase Request");
+    expect(container.textContent).toContain("ref-succeeded-01");
+    expect(container.textContent).toContain("succeeded");
+  });
+
   it("creates purchase request as owner without device dependency", async () => {
     let hasCreatedPurchase = false;
 

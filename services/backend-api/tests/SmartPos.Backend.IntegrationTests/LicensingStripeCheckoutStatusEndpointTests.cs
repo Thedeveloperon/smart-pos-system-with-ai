@@ -22,6 +22,7 @@ public sealed class LicensingStripeCheckoutStatusEndpointTests
             shop_name = "Stripe Status Shop",
             contact_name = "Owner",
             contact_email = "owner@example.com",
+            device_code = "stripe-status-device-001",
             plan_code = "pro",
             payment_method = "bank_deposit",
             source = "website_pricing",

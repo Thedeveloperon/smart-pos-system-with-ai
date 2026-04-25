@@ -13,6 +13,8 @@ public sealed class AiCreditPaymentRateLimitTests(AiCreditPaymentRateLimitWebApp
     public async Task CheckoutEndpoint_WhenRateLimitExceeded_ShouldReturnTooManyRequests()
     {
         await TestAuth.SignInAsManagerAsync(client);
+        client.DefaultRequestHeaders.Remove("X-Device-Code");
+        client.DefaultRequestHeaders.Add("X-Device-Code", $"ai-checkout-rate-limit-{Guid.NewGuid():N}");
 
         var firstResponse = await client.PostAsJsonAsync("/api/ai/payments/checkout", new
         {
@@ -42,6 +44,8 @@ public sealed class AiCreditPaymentRateLimitTests(AiCreditPaymentRateLimitWebApp
     public async Task PaymentStatusEndpoint_WhenRateLimitExceeded_ShouldReturnTooManyRequests()
     {
         await TestAuth.SignInAsManagerAsync(client);
+        client.DefaultRequestHeaders.Remove("X-Device-Code");
+        client.DefaultRequestHeaders.Add("X-Device-Code", $"ai-status-rate-limit-{Guid.NewGuid():N}");
 
         var firstResponse = await client.GetAsync("/api/ai/payments?take=5");
         Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);

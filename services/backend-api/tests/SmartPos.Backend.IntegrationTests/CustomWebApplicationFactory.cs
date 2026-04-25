@@ -252,6 +252,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 ["AiInsights:CreditPacks:0:Currency"] = "USD",
                 ["AiInsights:EnableManualWalletTopUp"] = "true",
                 ["AiInsights:EnableManualPaymentFallback"] = "true",
+                ["AiInsights:CloudRelayEnabled"] = "false",
+                ["AiInsights:MaxRequestsPerMinute"] = "600",
                 ["AiInsights:PaymentCheckoutRateLimitPerMinute"] = "600",
                 ["AiInsights:PaymentStatusRateLimitPerMinute"] = "600",
                 ["AiInsights:PaymentWebhook:RequireSignature"] = "true",

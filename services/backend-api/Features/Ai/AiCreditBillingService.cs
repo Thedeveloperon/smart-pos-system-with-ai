@@ -11,6 +11,8 @@ public sealed class AiCreditBillingService(
     SmartPosDbContext dbContext,
     AuditLogService auditLogService)
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     public async Task<AiWalletResponse> GetWalletAsync(Guid userId, CancellationToken cancellationToken)
     {
         var context = await ResolveUserShopContextAsync(userId, cancellationToken);
@@ -355,7 +357,11 @@ public sealed class AiCreditBillingService(
                 DeltaCredits = -overageCharge,
                 BalanceAfterCredits = runningBalance,
                 Description = "ai_charge",
-                MetadataJson = $$"""{"charged_credits":{{normalizedCharge}},"overage_credits":{{overageCharge}}}""",
+                MetadataJson = JsonSerializer.Serialize(new
+                {
+                    charged_credits = normalizedCharge,
+                    overage_credits = overageCharge
+                }, JsonOptions),
                 CreatedAtUtc = now,
                 Wallet = wallet,
                 User = context.User

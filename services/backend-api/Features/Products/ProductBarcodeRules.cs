@@ -164,13 +164,13 @@ internal static class ProductBarcodeRules
                 : Invalid("EAN-13 checksum is invalid.", digits, "ean-13"),
             12 => HasValidGtinChecksum(digits)
                 ? Valid(digits, "upc-a")
-                : Valid(digits, "numeric-custom"),
+                : Invalid("UPC-A checksum is invalid.", digits, "upc-a"),
             8 => HasValidGtinChecksum(digits)
                 ? Valid(digits, "ean-8")
-                : Valid(digits, "numeric-custom"),
+                : Invalid("EAN-8 checksum is invalid.", digits, "ean-8"),
             14 => HasValidGtinChecksum(digits)
                 ? Valid(digits, "gtin-14")
-                : Valid(digits, "numeric-custom"),
+                : Invalid("GTIN-14 checksum is invalid.", digits, "gtin-14"),
             _ => Valid(digits, "numeric-custom")
         };
     }

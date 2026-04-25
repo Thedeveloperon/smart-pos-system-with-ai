@@ -12,7 +12,7 @@ public sealed class RecoveryOpsService(
 {
     private const int OutputTailMaxLength = 4_000;
     private readonly RecoveryOpsOptions options = optionsAccessor.Value;
-    private readonly string repoRootPath = Path.GetFullPath(Path.Combine(environment.ContentRootPath, ".."));
+    private readonly string repoRootPath = RecoveryPathResolver.ResolveRepositoryRoot(environment.ContentRootPath);
 
     public Task<RecoveryStatusResponse> GetStatusAsync(CancellationToken cancellationToken)
     {

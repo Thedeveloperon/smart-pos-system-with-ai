@@ -29,6 +29,11 @@ internal static class TestAuth
         response.EnsureSuccessStatusCode();
     }
 
+    public static async Task SignInAsManagerAccountAsync(HttpClient client)
+    {
+        await SignInAsAccountAsync(client, "manager", "manager123");
+    }
+
     public static async Task SignInAsCashierAsync(HttpClient client)
     {
         await EnsureProvisionedAsync(client);
@@ -42,6 +47,11 @@ internal static class TestAuth
         });
 
         response.EnsureSuccessStatusCode();
+    }
+
+    public static async Task SignInAsCashierAccountAsync(HttpClient client)
+    {
+        await SignInAsAccountAsync(client, "cashier", "cashier123");
     }
 
     public static async Task SignInAsSupportAdminAsync(HttpClient client)
@@ -87,6 +97,24 @@ internal static class TestAuth
             device_code = DeviceCode,
             device_name = DeviceName,
             mfa_code = TotpMfa.GenerateCode(SecurityAdminMfaSecret, now.ToUnixTimeSeconds() / 30)
+        });
+
+        response.EnsureSuccessStatusCode();
+    }
+
+    private static async Task SignInAsAccountAsync(
+        HttpClient client,
+        string username,
+        string password,
+        string? mfaCode = null)
+    {
+        await EnsureProvisionedAsync(client);
+
+        var response = await client.PostAsJsonAsync("/api/account/login", new
+        {
+            username,
+            password,
+            mfa_code = mfaCode
         });
 
         response.EnsureSuccessStatusCode();
