@@ -12,7 +12,7 @@ param(
     [int]$MaxActivations = 1000000,
     [int]$TtlDays = 3650,
     [bool]$AllowIfExistingBatch = $true,
-    [string]$OutputDir = ".",
+    [string]$OutputDir = "",
     [string]$Actor = "offline-licensing-operator",
     [string]$ReasonCode = "offline_activation_batch_generated",
     [string]$ActorNote = "manual offline activation key batch generation"
@@ -20,6 +20,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+
+. (Join-Path $PSScriptRoot "SmartPOS-ClientCommon.ps1")
 
 if ($Count -ne 10) {
     throw "Count must be exactly 10. Current value: $Count"
@@ -54,55 +56,20 @@ function Get-TotpCode {
     return "{0:D6}" -f ($binaryCode % 1000000)
 }
 
-function Parse-ClientEnv {
-    param([Parameter(Mandatory = $true)][string]$Path)
-
-    $values = @{}
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return $values
-    }
-
-    foreach ($line in Get-Content -LiteralPath $Path) {
-        $trimmed = $line.Trim()
-        if ([string]::IsNullOrWhiteSpace($trimmed) -or $trimmed.StartsWith("#")) {
-            continue
-        }
-
-        $parts = $trimmed -split "=", 2
-        if ($parts.Length -ne 2) {
-            continue
-        }
-
-        $key = $parts[0].Trim()
-        $value = $parts[1].Trim()
-        if (-not [string]::IsNullOrWhiteSpace($key)) {
-            $values[$key] = $value
-        }
-    }
-
-    return $values
-}
-
 try {
     $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-    $clientEnvPath = Join-Path $scriptRoot "client.env"
-    $clientEnv = Parse-ClientEnv -Path $clientEnvPath
+    $paths = Resolve-SmartPosPaths -RootPath $scriptRoot
+    $clientEnv = if (Test-Path -LiteralPath $paths.ClientEnvPath) {
+        Read-ClientEnv -Path $paths.ClientEnvPath
+    }
+    else {
+        $initializedEnv = Initialize-SmartPosClientEnv -Paths $paths
+        Write-ClientEnv -Path $paths.ClientEnvPath -Values $initializedEnv
+        $initializedEnv
+    }
 
     if ([string]::IsNullOrWhiteSpace($BackendUrl)) {
-        $backendFromEnv = if ($clientEnv.ContainsKey("SMARTPOS_BACKEND_URL")) { $clientEnv["SMARTPOS_BACKEND_URL"] } else { "" }
-        if ([string]::IsNullOrWhiteSpace($backendFromEnv) -and $clientEnv.ContainsKey("ASPNETCORE_URLS")) {
-            $candidateUrls = @($clientEnv["ASPNETCORE_URLS"] -split "[;,]" | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-            if ($candidateUrls.Length -gt 0) {
-                $backendFromEnv = $candidateUrls[0]
-            }
-        }
-
-        if ([string]::IsNullOrWhiteSpace($backendFromEnv)) {
-            $BackendUrl = "http://127.0.0.1:5080"
-        }
-        else {
-            $BackendUrl = $backendFromEnv
-        }
+        $BackendUrl = Get-SmartPosBackendUrl -Paths $paths -EnvValues $clientEnv
     }
 
     $BackendUrl = $BackendUrl.Trim().TrimEnd("/")
@@ -147,7 +114,15 @@ try {
         -Body $batchPayload `
         -WebSession $session
 
-    $resolvedOutputDir = if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDir } else { Join-Path $scriptRoot $OutputDir }
+    if ([string]::IsNullOrWhiteSpace($OutputDir)) {
+        $resolvedOutputDir = $paths.ExportsDir
+    }
+    elseif ([System.IO.Path]::IsPathRooted($OutputDir)) {
+        $resolvedOutputDir = $OutputDir
+    }
+    else {
+        $resolvedOutputDir = Join-Path $scriptRoot $OutputDir
+    }
     New-Item -ItemType Directory -Path $resolvedOutputDir -Force | Out-Null
 
     $timestampUtc = [DateTimeOffset]::UtcNow.ToString("yyyyMMddTHHmmssZ")

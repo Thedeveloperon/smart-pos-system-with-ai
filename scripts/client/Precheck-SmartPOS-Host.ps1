@@ -7,6 +7,11 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+$commonScriptPath = Join-Path $PSScriptRoot "SmartPOS-ClientCommon.ps1"
+if (Test-Path -LiteralPath $commonScriptPath) {
+    . $commonScriptPath
+}
+
 $passes = [System.Collections.Generic.List[string]]::new()
 $warnings = [System.Collections.Generic.List[string]]::new()
 $failures = [System.Collections.Generic.List[string]]::new()
@@ -34,6 +39,18 @@ function Get-ConfiguredPort {
 
     $defaultPort = 5080
     $clientEnvPath = Join-Path $RootPath "client.env"
+    if (Get-Command Resolve-SmartPosPaths -ErrorAction SilentlyContinue) {
+        try {
+            $paths = Resolve-SmartPosPaths -RootPath $RootPath
+            if (Test-Path -LiteralPath $paths.ClientEnvPath) {
+                $clientEnvPath = $paths.ClientEnvPath
+            }
+        }
+        catch {
+            $clientEnvPath = Join-Path $RootPath "client.env"
+        }
+    }
+
     if (-not (Test-Path -LiteralPath $clientEnvPath)) {
         return $defaultPort
     }

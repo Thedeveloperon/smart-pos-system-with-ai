@@ -15,6 +15,7 @@ Output:
 Prerequisites:
 - Inno Setup 6 installed (contains `ISCC.exe`)
 - Optional: set `ISCC_PATH` if `ISCC.exe` is in a custom location
+- Alternative on macOS/Linux: Docker Desktop or a running Docker daemon; `scripts/build-installer.ps1` now falls back to `amake/innosetup` automatically when local `ISCC.exe` is unavailable
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build-installer.ps1 -AppVersion 1.0.0
@@ -25,14 +26,25 @@ Output:
 
 ## 3. Installer behavior
 
-- Installs to: `%LOCALAPPDATA%\Lanka POS` (per-user, no admin required)
-- Adds Start Menu shortcuts (`Start Lanka POS`, `Stop Lanka POS`)
+- Guided install modes:
+  - `Current user`: installs to `%LOCALAPPDATA%\Lanka POS`
+  - `Windows service`: installs to `%ProgramFiles%\Lanka POS`
+- Adds Start Menu shortcuts:
+  - `Open Lanka POS`
+  - `Stop Lanka POS`
+  - `Generate Offline Activation Codes`
 - Optional desktop shortcut
 - Optional post-install app launch
+- Current-user install initializes external runtime data under `%LOCALAPPDATA%\Lanka POS\data`
+- Windows service install initializes external runtime data under `%ProgramData%\Lanka POS`
 
 ## 4. Client runtime settings
 
-Inside install folder, create `client.env` (or edit from `client.env.example`) to set:
+Edit the generated `client.env` outside the install folder:
+- current-user mode: `%LOCALAPPDATA%\Lanka POS\data\config\client.env`
+- Windows service mode: `%ProgramData%\Lanka POS\config\client.env`
+
+Use `client.env.example` as the reference template for:
 - Local name-based suggestions are enabled by default (no API key needed)
 - `OPENAI_API_KEY=` only if you switch provider to OpenAI
 - Or use your own vision/model endpoint:
@@ -135,6 +147,14 @@ Optional environment overrides:
 Security behavior:
 - Script prints plaintext keys once to console.
 - CSV is created with restrictive permissions (`umask 077`, `chmod 600`).
+
+Installed Windows client packages now also include a GUI admin tool:
+- Start Menu > `Lanka POS` > `Generate Offline Activation Codes`
+- Requires explicit `support_admin` or `security_admin` login with MFA
+- Uses the same local backend instance as the installed POS runtime
+
+Windows installer QA reference:
+- `GUI_WINDOWS_INSTALLER_SMOKE_TEST_2026-04-25.md`
 
 ## 10. Support runbook pointers
 
