@@ -15,6 +15,7 @@ if (Test-Path -LiteralPath $commonScriptPath) {
 $passes = [System.Collections.Generic.List[string]]::new()
 $warnings = [System.Collections.Generic.List[string]]::new()
 $failures = [System.Collections.Generic.List[string]]::new()
+$paths = $null
 
 function Add-Pass {
     param([Parameter(Mandatory = $true)][string]$Message)
@@ -172,9 +173,30 @@ else {
     Add-Failure "This setup requires 64-bit Windows."
 }
 
-$root = Split-Path -Parent $PSCommandPath
+$root = ""
+if (Get-Command Get-SmartPosInstallRoot -ErrorAction SilentlyContinue) {
+    try {
+        $root = Get-SmartPosInstallRoot -BasePath $PSScriptRoot
+    }
+    catch {
+        $root = ""
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($root)) {
-    $root = (Get-Location).Path
+    $root = $PSScriptRoot
+    if ([string]::IsNullOrWhiteSpace($root)) {
+        $root = (Get-Location).Path
+    }
+}
+
+if (Get-Command Resolve-SmartPosPaths -ErrorAction SilentlyContinue) {
+    try {
+        $paths = Resolve-SmartPosPaths -RootPath $root
+    }
+    catch {
+        $paths = $null
+    }
 }
 
 if ($root.StartsWith("\\", [StringComparison]::Ordinal)) {
@@ -204,19 +226,45 @@ else {
     Add-Failure "PowerShell 5.1 or newer is required."
 }
 
+$localClock = Get-Date
+if ($localClock.Year -lt 2024 -or $localClock.Year -gt 2035) {
+    Add-Warning "System clock appears incorrect ($($localClock.ToString("u"))). HTTPS cloud services may fail until Windows date, time, and timezone are corrected."
+}
+else {
+    Add-Pass "System clock looks sane for HTTPS certificate validation ($($localClock.ToString("u")))."
+}
+
 $requiredFiles = @(
-    "app\backend.exe",
-    "Start-SmartPOS.bat",
-    "Install-SmartPOS-Service.ps1"
+    @{
+        Label = "app\backend.exe"
+        Path = Join-Path $root "app\backend.exe"
+    },
+    @{
+        Label = "Start launcher"
+        Path = if ($null -ne $paths) {
+            Get-SmartPosInternalToolPath -Paths $paths -FileName "Start-SmartPOS.bat"
+        }
+        else {
+            Join-Path $root "Start-SmartPOS.bat"
+        }
+    },
+    @{
+        Label = "Service installer script"
+        Path = if ($null -ne $paths) {
+            Get-SmartPosInternalToolPath -Paths $paths -FileName "Install-SmartPOS-Service.ps1"
+        }
+        else {
+            Join-Path $root "Install-SmartPOS-Service.ps1"
+        }
+    }
 )
 
-foreach ($relativePath in $requiredFiles) {
-    $fullPath = Join-Path $root $relativePath
-    if (Test-Path -LiteralPath $fullPath) {
-        Add-Pass "Found required file: $relativePath"
+foreach ($requiredFile in $requiredFiles) {
+    if (Test-Path -LiteralPath $requiredFile.Path) {
+        Add-Pass "Found required file: $($requiredFile.Label)"
     }
     else {
-        Add-Failure "Missing required file: $relativePath"
+        Add-Failure "Missing required file: $($requiredFile.Label)"
     }
 }
 

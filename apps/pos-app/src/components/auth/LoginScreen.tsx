@@ -32,6 +32,7 @@ const LoginScreen = ({ mode = "pos" }: LoginScreenProps) => {
   };
 
   const isAdminMode = mode === "admin";
+  const showMfaField = isAdminMode;
 
   return (
     <div className="min-h-screen px-4 py-4 sm:px-6 lg:px-8">
@@ -120,18 +121,20 @@ const LoginScreen = ({ mode = "pos" }: LoginScreenProps) => {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                  MFA Code {isAdminMode ? "(Optional)" : "(Super Admin)"}
-                </label>
-                <Input
-                  value={mfaCode}
-                  onChange={(e) => setMfaCode(e.target.value)}
-                  placeholder={isAdminMode ? "123456" : "6-digit code"}
-                  className="h-12 rounded-2xl bg-muted/40"
-                  inputMode="numeric"
-                />
-              </div>
+              {showMfaField ? (
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                    MFA Code (Optional)
+                  </label>
+                  <Input
+                    value={mfaCode}
+                    onChange={(e) => setMfaCode(e.target.value)}
+                    placeholder="123456"
+                    className="h-12 rounded-2xl bg-muted/40"
+                    inputMode="numeric"
+                  />
+                </div>
+              ) : null}
 
               {error && (
                 <div className="flex items-start gap-2 rounded-2xl border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">

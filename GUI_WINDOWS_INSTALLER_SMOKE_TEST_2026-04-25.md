@@ -28,6 +28,11 @@ Expected output:
 
 Expected results:
 - Install root: `%LOCALAPPDATA%\Lanka POS`
+- Install root is minimal and should mainly contain:
+  - `app\`
+  - `tools\`
+  - `smartpos.install.json`
+  - uninstaller files
 - Data root: `%LOCALAPPDATA%\Lanka POS\data`
 - Config file exists: `%LOCALAPPDATA%\Lanka POS\data\config\client.env`
 - Database file is created after first successful launch: `%LOCALAPPDATA%\Lanka POS\data\smartpos.db`
@@ -47,6 +52,11 @@ Expected results:
 
 Expected results:
 - Install root: `%ProgramFiles%\Lanka POS`
+- Install root is minimal and should mainly contain:
+  - `app\`
+  - `tools\`
+  - `smartpos.install.json`
+  - uninstaller files
 - Data root: `%ProgramData%\Lanka POS`
 - Config file exists: `%ProgramData%\Lanka POS\config\client.env`
 - Database file is created after first successful launch: `%ProgramData%\Lanka POS\smartpos.db`
@@ -65,18 +75,18 @@ Run from Start Menu:
 Expected behavior:
 - GUI window title is `Lanka POS Activation Code Manager`
 - Backend URL resolves to the installed local backend
-- Login requires explicit username, password, and MFA code
-- `support_admin` or `security_admin` can generate a batch
-- Batch size is exactly `10`
+- Login requires explicit username and password
+- `support_admin` or `security_admin` can generate a code without entering MFA
+- Generation defaults to the local default shop without prompting for shop code
+- Generated count is `1`
 - GUI displays:
   - backend URL
-  - shop code
   - generated count
   - source reference
-  - plaintext activation keys
+  - plaintext activation key
 - `Copy Selected`, `Copy All`, and `Export CSV` work
 - Export only happens to a user-selected path
-- Password and MFA fields are cleared after generation
+- Password field is cleared after generation
 
 Negative checks:
 - `owner` or `manager` credentials must fail authorization

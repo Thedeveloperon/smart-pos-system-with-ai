@@ -68,18 +68,19 @@ function New-WindowsShortcut {
 
 function Ensure-Shortcuts {
     param(
-        [Parameter(Mandatory = $true)][string]$RootPath,
-        [Parameter(Mandatory = $true)][string]$BackendExecutablePath
+        [Parameter(Mandatory = $true)]$Paths,
+        [Parameter(Mandatory = $true)][string]$BackendExecutablePath,
+        [Parameter(Mandatory = $true)][string]$BackendUrl
     )
 
-    $startBat = Join-Path $RootPath "Start-SmartPOS.bat"
-    $stopBat = Join-Path $RootPath "Stop-SmartPOS.bat"
-    $activationManagerLauncher = Join-Path $RootPath "Activation-Code-Manager.bat"
+    $stopBat = Get-SmartPosInternalToolPath -Paths $Paths -FileName "Stop-SmartPOS.bat" -RequireExisting
+    $activationManagerLauncher = Get-SmartPosInternalToolPath -Paths $Paths -FileName "Activation-Code-Manager.bat"
     $cmdExe = Join-Path $env:SystemRoot "System32\cmd.exe"
+    $openBrowserArguments = "/c start `"`" `"$BackendUrl`""
 
     $iconPath = "$BackendExecutablePath,0"
-    $packageIconPath = Join-Path $RootPath "lanka-pos.ico"
-    $webIconPath = Join-Path $RootPath "app\wwwroot\favicon.ico"
+    $packageIconPath = Get-SmartPosSupportFilePath -Paths $Paths -FileName "lanka-pos.ico"
+    $webIconPath = Join-Path $Paths.AppDir "wwwroot\favicon.ico"
     if (Test-Path -LiteralPath $packageIconPath) {
         $iconPath = $packageIconPath
     }
@@ -95,16 +96,16 @@ function Ensure-Shortcuts {
     New-WindowsShortcut `
         -ShortcutPath (Join-Path $commonDesktop "Open Lanka POS.lnk") `
         -TargetPath $cmdExe `
-        -Arguments "/c `"$startBat`"" `
-        -WorkingDirectory $RootPath `
+        -Arguments $openBrowserArguments `
+        -WorkingDirectory $Paths.RootPath `
         -Description "Open Lanka POS application" `
         -IconLocation $iconPath
 
     New-WindowsShortcut `
         -ShortcutPath (Join-Path $startMenuFolder "Open Lanka POS.lnk") `
         -TargetPath $cmdExe `
-        -Arguments "/c `"$startBat`"" `
-        -WorkingDirectory $RootPath `
+        -Arguments $openBrowserArguments `
+        -WorkingDirectory $Paths.RootPath `
         -Description "Open Lanka POS application" `
         -IconLocation $iconPath
 
@@ -112,7 +113,7 @@ function Ensure-Shortcuts {
         -ShortcutPath (Join-Path $startMenuFolder "Stop Lanka POS.lnk") `
         -TargetPath $cmdExe `
         -Arguments "/c `"$stopBat`"" `
-        -WorkingDirectory $RootPath `
+        -WorkingDirectory $Paths.RootPath `
         -Description "Stop Lanka POS backend" `
         -IconLocation $iconPath
 
@@ -121,7 +122,7 @@ function Ensure-Shortcuts {
             -ShortcutPath (Join-Path $startMenuFolder "Generate Offline Activation Codes.lnk") `
             -TargetPath $cmdExe `
             -Arguments "/c `"$activationManagerLauncher`"" `
-            -WorkingDirectory $RootPath `
+            -WorkingDirectory $Paths.RootPath `
             -Description "Open the Lanka POS activation code manager" `
             -IconLocation $iconPath
     }
@@ -204,7 +205,7 @@ if (-not $SkipStart) {
 }
 
 try {
-    Ensure-Shortcuts -RootPath $paths.RootPath -BackendExecutablePath $paths.BackendExePath
+    Ensure-Shortcuts -Paths $paths -BackendExecutablePath $paths.BackendExePath -BackendUrl $backendUrl
 }
 catch {
     Write-Warning "Service was installed, but shortcut creation failed: $($_.Exception.Message)"

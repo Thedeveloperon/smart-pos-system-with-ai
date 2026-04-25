@@ -128,9 +128,9 @@ Effects:
 - Cloud billing/licensing public surfaces (`/api/license/public/*`, webhooks, cloud v1 compatibility entry points) return `503` with `CLOUD_LICENSING_DISABLED`.
 - License status and heartbeat continue to work locally against backend + local DB.
 
-## 9. Operator batch key generation
+## 9. Operator activation code generation
 
-Use the local script to generate the locked policy batch (`count=10`) and write secure CSV output:
+Use the local script to generate local offline activation code(s) and write secure CSV output:
 
 ```bash
 ./scripts/licensing/generate-offline-activation-codes.sh
@@ -140,8 +140,9 @@ Optional environment overrides:
 - `SMARTPOS_BACKEND_URL` (default `http://127.0.0.1:5102`)
 - `SMARTPOS_ADMIN_USERNAME`
 - `SMARTPOS_ADMIN_PASSWORD`
-- `SMARTPOS_ADMIN_MFA_CODE`
+- `SMARTPOS_ADMIN_MFA_CODE` (optional; not required for seeded support/security admins)
 - `SMARTPOS_SHOP_CODE`
+- `SMARTPOS_BATCH_COUNT` (default `1`, allowed range `1` to `10`)
 - `SMARTPOS_OUTPUT_DIR` (default `./secure/licensing`)
 
 Security behavior:
@@ -150,8 +151,10 @@ Security behavior:
 
 Installed Windows client packages now also include a GUI admin tool:
 - Start Menu > `Lanka POS` > `Generate Offline Activation Codes`
-- Requires explicit `support_admin` or `security_admin` login with MFA
+- Requires explicit `support_admin` or `security_admin` username/password login
+- Generates one activation code at a time without prompting for MFA code or shop code
 - Uses the same local backend instance as the installed POS runtime
+- Installer layout keeps customer-facing shortcuts in Start Menu/Desktop and places operational scripts under `tools\internal` instead of the install root
 
 Windows installer QA reference:
 - `GUI_WINDOWS_INSTALLER_SMOKE_TEST_2026-04-25.md`

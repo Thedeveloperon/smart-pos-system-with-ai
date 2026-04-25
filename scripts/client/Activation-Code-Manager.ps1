@@ -97,8 +97,8 @@ $script:LastActivationBackendUrl = $script:ActivationManagerContext.BackendUrl
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Lanka POS Activation Code Manager"
 $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
-$form.Size = New-Object System.Drawing.Size(760, 720)
-$form.MinimumSize = New-Object System.Drawing.Size(760, 720)
+$form.Size = New-Object System.Drawing.Size(760, 660)
+$form.MinimumSize = New-Object System.Drawing.Size(760, 660)
 $form.MaximizeBox = $false
 
 $headerLabel = New-Object System.Windows.Forms.Label
@@ -111,7 +111,7 @@ $form.Controls.Add($headerLabel)
 $subLabel = New-Object System.Windows.Forms.Label
 $subLabel.Location = New-Object System.Drawing.Point(20, 60)
 $subLabel.Size = New-Object System.Drawing.Size(700, 42)
-$subLabel.Text = "Support and security admins only. Sign in with MFA, generate the current 10-key batch, then copy or export the plaintext keys immediately."
+$subLabel.Text = "Support and security admins only. Sign in with username and password, generate one activation code, then copy or export it immediately."
 $form.Controls.Add($subLabel)
 
 $backendTitleLabel = New-Object System.Windows.Forms.Label
@@ -149,47 +149,23 @@ $passwordTextBox.Size = New-Object System.Drawing.Size(230, 23)
 $passwordTextBox.UseSystemPasswordChar = $true
 $form.Controls.Add($passwordTextBox)
 
-$mfaLabel = New-Object System.Windows.Forms.Label
-$mfaLabel.Location = New-Object System.Drawing.Point(20, 195)
-$mfaLabel.Size = New-Object System.Drawing.Size(120, 23)
-$mfaLabel.Text = "MFA code"
-$form.Controls.Add($mfaLabel)
-
-$mfaTextBox = New-Object System.Windows.Forms.TextBox
-$mfaTextBox.Location = New-Object System.Drawing.Point(145, 192)
-$mfaTextBox.Size = New-Object System.Drawing.Size(120, 23)
-$mfaTextBox.MaxLength = 6
-$form.Controls.Add($mfaTextBox)
-
-$shopCodeLabel = New-Object System.Windows.Forms.Label
-$shopCodeLabel.Location = New-Object System.Drawing.Point(385, 195)
-$shopCodeLabel.Size = New-Object System.Drawing.Size(100, 23)
-$shopCodeLabel.Text = "Shop code"
-$form.Controls.Add($shopCodeLabel)
-
-$shopCodeTextBox = New-Object System.Windows.Forms.TextBox
-$shopCodeTextBox.Location = New-Object System.Drawing.Point(490, 192)
-$shopCodeTextBox.Size = New-Object System.Drawing.Size(230, 23)
-$shopCodeTextBox.Text = "default"
-$form.Controls.Add($shopCodeTextBox)
-
 $generateButton = New-Object System.Windows.Forms.Button
-$generateButton.Location = New-Object System.Drawing.Point(20, 235)
+$generateButton.Location = New-Object System.Drawing.Point(20, 195)
 $generateButton.Size = New-Object System.Drawing.Size(180, 34)
-$generateButton.Text = "Generate 10 Codes"
+$generateButton.Text = "Generate Activation Code"
 $form.Controls.Add($generateButton)
 
 $warningLabel = New-Object System.Windows.Forms.Label
-$warningLabel.Location = New-Object System.Drawing.Point(220, 242)
+$warningLabel.Location = New-Object System.Drawing.Point(220, 202)
 $warningLabel.Size = New-Object System.Drawing.Size(500, 40)
 $warningLabel.ForeColor = [System.Drawing.Color]::FromArgb(156, 87, 0)
-$warningLabel.Text = "Plaintext activation keys are shown once per generated batch. Copy or export them before closing this window."
+$warningLabel.Text = "The plaintext activation code is shown once. Copy or export it before closing this window."
 $form.Controls.Add($warningLabel)
 
 $detailsGroup = New-Object System.Windows.Forms.GroupBox
-$detailsGroup.Location = New-Object System.Drawing.Point(20, 290)
-$detailsGroup.Size = New-Object System.Drawing.Size(700, 110)
-$detailsGroup.Text = "Batch Details"
+$detailsGroup.Location = New-Object System.Drawing.Point(20, 250)
+$detailsGroup.Size = New-Object System.Drawing.Size(700, 95)
+$detailsGroup.Text = "Activation Details"
 $form.Controls.Add($detailsGroup)
 
 $detailBackendLabel = New-Object System.Windows.Forms.Label
@@ -198,28 +174,22 @@ $detailBackendLabel.Size = New-Object System.Drawing.Size(670, 20)
 $detailBackendLabel.Text = "Backend URL: "
 $detailsGroup.Controls.Add($detailBackendLabel)
 
-$detailShopLabel = New-Object System.Windows.Forms.Label
-$detailShopLabel.Location = New-Object System.Drawing.Point(15, 50)
-$detailShopLabel.Size = New-Object System.Drawing.Size(250, 20)
-$detailShopLabel.Text = "Shop code: "
-$detailsGroup.Controls.Add($detailShopLabel)
-
 $detailCountLabel = New-Object System.Windows.Forms.Label
-$detailCountLabel.Location = New-Object System.Drawing.Point(280, 50)
-$detailCountLabel.Size = New-Object System.Drawing.Size(180, 20)
+$detailCountLabel.Location = New-Object System.Drawing.Point(15, 50)
+$detailCountLabel.Size = New-Object System.Drawing.Size(220, 20)
 $detailCountLabel.Text = "Generated count: "
 $detailsGroup.Controls.Add($detailCountLabel)
 
 $detailSourceLabel = New-Object System.Windows.Forms.Label
-$detailSourceLabel.Location = New-Object System.Drawing.Point(15, 75)
+$detailSourceLabel.Location = New-Object System.Drawing.Point(250, 50)
 $detailSourceLabel.Size = New-Object System.Drawing.Size(670, 20)
 $detailSourceLabel.Text = "Source reference: "
 $detailsGroup.Controls.Add($detailSourceLabel)
 
 $keysGroup = New-Object System.Windows.Forms.GroupBox
-$keysGroup.Location = New-Object System.Drawing.Point(20, 415)
+$keysGroup.Location = New-Object System.Drawing.Point(20, 360)
 $keysGroup.Size = New-Object System.Drawing.Size(700, 215)
-$keysGroup.Text = "Plaintext Activation Keys"
+$keysGroup.Text = "Plaintext Activation Code"
 $form.Controls.Add($keysGroup)
 
 $keysListBox = New-Object System.Windows.Forms.ListBox
@@ -250,7 +220,7 @@ $exportCsvButton.Enabled = $false
 $keysGroup.Controls.Add($exportCsvButton)
 
 $statusLabel = New-Object System.Windows.Forms.Label
-$statusLabel.Location = New-Object System.Drawing.Point(20, 645)
+$statusLabel.Location = New-Object System.Drawing.Point(20, 590)
 $statusLabel.Size = New-Object System.Drawing.Size(700, 24)
 $statusLabel.Text = "Ready."
 $form.Controls.Add($statusLabel)
@@ -311,8 +281,6 @@ $exportCsvButton.Add_Click({
 $generateButton.Add_Click({
     $username = $usernameTextBox.Text.Trim()
     $password = $passwordTextBox.Text
-    $mfaCode = $mfaTextBox.Text.Trim()
-    $shopCode = $shopCodeTextBox.Text.Trim()
 
     if ([string]::IsNullOrWhiteSpace($username)) {
         [System.Windows.Forms.MessageBox]::Show(
@@ -334,28 +302,8 @@ $generateButton.Add_Click({
         return
     }
 
-    if ([string]::IsNullOrWhiteSpace($mfaCode)) {
-        [System.Windows.Forms.MessageBox]::Show(
-            "Enter the current MFA code.",
-            "Missing MFA Code",
-            [System.Windows.Forms.MessageBoxButtons]::OK,
-            [System.Windows.Forms.MessageBoxIcon]::Warning
-        ) | Out-Null
-        return
-    }
-
-    if ([string]::IsNullOrWhiteSpace($shopCode)) {
-        [System.Windows.Forms.MessageBox]::Show(
-            "Enter a shop code.",
-            "Missing Shop Code",
-            [System.Windows.Forms.MessageBoxButtons]::OK,
-            [System.Windows.Forms.MessageBoxIcon]::Warning
-        ) | Out-Null
-        return
-    }
-
     $generateButton.Enabled = $false
-    $statusLabel.Text = "Checking backend and generating activation codes..."
+    $statusLabel.Text = "Checking backend and generating an activation code..."
 
     try {
         $script:ActivationManagerContext = Resolve-ActivationManagerContext
@@ -376,7 +324,6 @@ $generateButton.Add_Click({
             password = $password
             device_code = $deviceCode
             device_name = $deviceName
-            mfa_code = $mfaCode
         } | ConvertTo-Json
 
         Invoke-RestMethod `
@@ -387,13 +334,12 @@ $generateButton.Add_Click({
             -WebSession $session | Out-Null
 
         $batchPayload = @{
-            shop_code = $shopCode
-            count = 10
+            count = 1
             max_activations = 1000000
             ttl_days = 3650
             actor = $username
             reason_code = "offline_activation_batch_generated"
-            actor_note = "manual offline activation key batch generation via activation code manager"
+            actor_note = "manual offline activation code generation via activation code manager"
             allow_if_existing_batch = $true
         } | ConvertTo-Json
 
@@ -409,7 +355,6 @@ $generateButton.Add_Click({
         $script:LastActivationBackendUrl = $backendUrl
 
         $detailBackendLabel.Text = "Backend URL: $backendUrl"
-        $detailShopLabel.Text = "Shop code: $($response.shop_code)"
         $detailCountLabel.Text = "Generated count: $($response.generated_count)"
         $detailSourceLabel.Text = "Source reference: $($response.source_reference)"
 
@@ -421,7 +366,7 @@ $generateButton.Add_Click({
         $copySelectedButton.Enabled = $keysListBox.Items.Count -gt 0
         $copyAllButton.Enabled = $keysListBox.Items.Count -gt 0
         $exportCsvButton.Enabled = $keysListBox.Items.Count -gt 0
-        $statusLabel.Text = "Generated $($response.generated_count) activation codes. Copy or export them now."
+        $statusLabel.Text = "Generated $($response.generated_count) activation code. Copy or export it now."
     }
     catch {
         $statusLabel.Text = "Activation code generation failed."
@@ -434,7 +379,6 @@ $generateButton.Add_Click({
     }
     finally {
         $passwordTextBox.Clear()
-        $mfaTextBox.Clear()
         $generateButton.Enabled = $true
     }
 })

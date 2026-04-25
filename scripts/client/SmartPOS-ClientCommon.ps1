@@ -1,16 +1,60 @@
 Set-StrictMode -Version Latest
 
+$script:SmartPosDefaultCloudRelayBaseUrl = "https://smartpos-backend.onrender.com"
+$script:SmartPosLegacyCloudRelayBaseUrls = @(
+    "https://smartpos-backend-v7yd.onrender.com"
+)
+
+function Test-SmartPosInstallRootCandidate {
+    param(
+        [Parameter(Mandatory = $true)][string]$CandidatePath
+    )
+
+    if (-not (Test-Path -LiteralPath $CandidatePath -PathType Container)) {
+        return $false
+    }
+
+    if (Test-Path -LiteralPath (Join-Path $CandidatePath "app\backend.exe")) {
+        return $true
+    }
+
+    if (Test-Path -LiteralPath (Join-Path $CandidatePath "smartpos.install.json")) {
+        return $true
+    }
+
+    return $false
+}
+
 function Get-SmartPosInstallRoot {
     param(
         [Parameter(Mandatory = $true)][string]$BasePath
     )
 
+    $candidate = ""
     if (Test-Path -LiteralPath $BasePath -PathType Container) {
-        return (Resolve-Path -LiteralPath $BasePath).Path
+        $candidate = (Resolve-Path -LiteralPath $BasePath).Path
+    }
+    else {
+        $resolvedFile = Resolve-Path -LiteralPath $BasePath -ErrorAction Stop
+        $candidate = Split-Path -Parent $resolvedFile.Path
     }
 
-    $resolvedFile = Resolve-Path -LiteralPath $BasePath -ErrorAction Stop
-    return Split-Path -Parent $resolvedFile.Path
+    $searchPath = $candidate
+    while (-not [string]::IsNullOrWhiteSpace($searchPath)) {
+        if (Test-SmartPosInstallRootCandidate -CandidatePath $searchPath) {
+            return $searchPath
+        }
+
+        $parent = Split-Path -Parent $searchPath
+        if ([string]::IsNullOrWhiteSpace($parent) -or
+            [string]::Equals($parent, $searchPath, [StringComparison]::OrdinalIgnoreCase)) {
+            break
+        }
+
+        $searchPath = $parent
+    }
+
+    return $candidate
 }
 
 function Get-SmartPosManifestPath {
@@ -169,21 +213,31 @@ function Resolve-SmartPosPaths {
     }
 
     $appDir = Join-Path $resolvedRoot "app"
+    $toolsDir = Join-Path $resolvedRoot "tools"
+    $internalToolsDir = Join-Path $toolsDir "internal"
+    $supportDir = Join-Path $toolsDir "support"
     $configDir = Join-Path $dataRoot "config"
     $keyDir = Join-Path $dataRoot "keys"
     $logsDir = Join-Path $dataRoot "logs"
     $exportsDir = Join-Path (Join-Path $dataRoot "exports") "activation-codes"
+    $clientEnvExamplePath = Join-Path $supportDir "client.env.example"
+    if (-not (Test-Path -LiteralPath $clientEnvExamplePath)) {
+        $clientEnvExamplePath = Join-Path $resolvedRoot "client.env.example"
+    }
 
     return [pscustomobject][ordered]@{
         RootPath = $resolvedRoot
         AppDir = $appDir
+        ToolsDir = $toolsDir
+        InternalToolsDir = $internalToolsDir
+        SupportDir = $supportDir
         BackendExePath = Join-Path $appDir "backend.exe"
         ManifestPath = Get-SmartPosManifestPath -RootPath $resolvedRoot
         InstallMode = $installMode
         DataRoot = $dataRoot
         ConfigDir = $configDir
         ClientEnvPath = Join-Path $configDir "client.env"
-        ClientEnvExamplePath = Join-Path $resolvedRoot "client.env.example"
+        ClientEnvExamplePath = $clientEnvExamplePath
         DbPath = Join-Path $dataRoot "smartpos.db"
         KeyDir = $keyDir
         SigningKeyPath = Join-Path $keyDir "license-signing-private-key.pem"
@@ -201,6 +255,52 @@ function Resolve-SmartPosPaths {
             "http://127.0.0.1:5080"
         }
     }
+}
+
+function Get-SmartPosInternalToolPath {
+    param(
+        [Parameter(Mandatory = $true)]$Paths,
+        [Parameter(Mandatory = $true)][string]$FileName,
+        [switch]$RequireExisting
+    )
+
+    foreach ($candidate in @(
+        (Join-Path $Paths.InternalToolsDir $FileName),
+        (Join-Path $Paths.RootPath $FileName)
+    )) {
+        if (Test-Path -LiteralPath $candidate) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+
+    if ($RequireExisting) {
+        throw "Could not find Lanka POS internal tool '$FileName'."
+    }
+
+    return Join-Path $Paths.InternalToolsDir $FileName
+}
+
+function Get-SmartPosSupportFilePath {
+    param(
+        [Parameter(Mandatory = $true)]$Paths,
+        [Parameter(Mandatory = $true)][string]$FileName,
+        [switch]$RequireExisting
+    )
+
+    foreach ($candidate in @(
+        (Join-Path $Paths.SupportDir $FileName),
+        (Join-Path $Paths.RootPath $FileName)
+    )) {
+        if (Test-Path -LiteralPath $candidate) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+
+    if ($RequireExisting) {
+        throw "Could not find Lanka POS support file '$FileName'."
+    }
+
+    return Join-Path $Paths.SupportDir $FileName
 }
 
 function Ensure-SmartPosDataLayout {
@@ -459,8 +559,6 @@ function Initialize-SmartPosClientEnv {
             $envValues[$entry.Key] = [string]$entry.Value
         }
     }
-    $defaultCloudRelayBaseUrl = "https://smartpos-backend-v7yd.onrender.com"
-
     if (-not $envValues.Contains("ASPNETCORE_ENVIRONMENT") -or [string]::IsNullOrWhiteSpace([string]$envValues["ASPNETCORE_ENVIRONMENT"])) {
         $envValues["ASPNETCORE_ENVIRONMENT"] = "Production"
     }
@@ -486,9 +584,21 @@ function Initialize-SmartPosClientEnv {
         ""
     }
 
+    $normalizedLicensingRelayBaseUrl = $licensingRelayBaseUrl.Trim().TrimEnd("/")
+    $normalizedAiRelayBaseUrl = $aiRelayBaseUrl.Trim().TrimEnd("/")
+    if ($script:SmartPosLegacyCloudRelayBaseUrls -contains $normalizedLicensingRelayBaseUrl) {
+        $envValues["Licensing__CloudRelayBaseUrl"] = $script:SmartPosDefaultCloudRelayBaseUrl
+        $licensingRelayBaseUrl = $script:SmartPosDefaultCloudRelayBaseUrl
+    }
+
+    if ($script:SmartPosLegacyCloudRelayBaseUrls -contains $normalizedAiRelayBaseUrl) {
+        $envValues["AiInsights__CloudRelayBaseUrl"] = $script:SmartPosDefaultCloudRelayBaseUrl
+        $aiRelayBaseUrl = $script:SmartPosDefaultCloudRelayBaseUrl
+    }
+
     if ([string]::IsNullOrWhiteSpace($licensingRelayBaseUrl) -and [string]::IsNullOrWhiteSpace($aiRelayBaseUrl)) {
-        $envValues["Licensing__CloudRelayBaseUrl"] = $defaultCloudRelayBaseUrl
-        $licensingRelayBaseUrl = $defaultCloudRelayBaseUrl
+        $envValues["Licensing__CloudRelayBaseUrl"] = $script:SmartPosDefaultCloudRelayBaseUrl
+        $licensingRelayBaseUrl = $script:SmartPosDefaultCloudRelayBaseUrl
     }
 
     if ([string]::IsNullOrWhiteSpace($aiRelayBaseUrl) -and -not [string]::IsNullOrWhiteSpace($licensingRelayBaseUrl)) {

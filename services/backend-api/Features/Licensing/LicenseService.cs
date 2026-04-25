@@ -61,7 +61,8 @@ public sealed class LicenseService(
     private const int MarketingBankReferenceMaxLength = 128;
     private const string LocalOfflineMode = "LocalOffline";
     private const string OfflineLocalManualBatchEntitlementSource = "offline_local_batch_manual";
-    private const int OfflineLocalManualBatchEntitlementCount = 10;
+    private const int OfflineLocalManualBatchDefaultEntitlementCount = 1;
+    private const int OfflineLocalManualBatchMaxEntitlementCount = 10;
     private const int OfflineLocalManualBatchMaxActivations = 1000000;
     private const int OfflineLocalManualBatchTtlDays = 3650;
     private static readonly char[] AllowedBranchCodeCharacters = "abcdefghijklmnopqrstuvwxyz0123456789-_".ToCharArray();
@@ -7896,13 +7897,14 @@ public sealed class LicenseService(
         var actor = overrideContext.Actor;
 
         var requestedCount = request.Count <= 0
-            ? OfflineLocalManualBatchEntitlementCount
+            ? OfflineLocalManualBatchDefaultEntitlementCount
             : request.Count;
-        if (requestedCount != OfflineLocalManualBatchEntitlementCount)
+        if (requestedCount < OfflineLocalManualBatchDefaultEntitlementCount ||
+            requestedCount > OfflineLocalManualBatchMaxEntitlementCount)
         {
             throw new LicenseException(
                 LicenseErrorCodes.InvalidAdminRequest,
-                $"count must be exactly {OfflineLocalManualBatchEntitlementCount}.",
+                $"count must be between {OfflineLocalManualBatchDefaultEntitlementCount} and {OfflineLocalManualBatchMaxEntitlementCount}.",
                 StatusCodes.Status400BadRequest);
         }
 

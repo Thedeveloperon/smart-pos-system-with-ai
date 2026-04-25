@@ -2657,7 +2657,7 @@ public sealed class AdminOfflineActivationEntitlementBatchGenerateRequest
     public string? ShopCode { get; set; }
 
     [JsonPropertyName("count")]
-    public int Count { get; set; } = 10;
+    public int Count { get; set; } = 1;
 
     [JsonPropertyName("max_activations")]
     public int? MaxActivations { get; set; }
