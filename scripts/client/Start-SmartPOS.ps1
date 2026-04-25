@@ -46,22 +46,16 @@ $service = Get-ExistingService
 if ($null -ne $service) {
     $serviceName = $service.Name
     if ($service.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Running) {
-        Write-Host "Lanka POS Windows service detected. Starting service..." -ForegroundColor Cyan
-        Start-Service -Name $serviceName
-    }
-    else {
-        Write-Host "Lanka POS Windows service is already running." -ForegroundColor Cyan
+        throw "Lanka POS Windows service '$serviceName' is installed but not running. Start the service from Services or rerun Install-SmartPOS-Service.bat as Administrator."
     }
 
-    $envValues = Initialize-SmartPosClientEnv -Paths $paths
+    Write-Host "Lanka POS Windows service is already running." -ForegroundColor Cyan
+
+    # Service mode is configured during installation. The daily-use launcher
+    # must stay read-only so standard users can open the app without needing
+    # write access to ProgramData or the install manifest under Program Files.
+    $envValues = Read-ClientEnv -Path $paths.ClientEnvPath
     $backendUrl = Get-SmartPosBackendUrl -Paths $paths -EnvValues $envValues
-    Write-ClientEnv -Path $paths.ClientEnvPath -Values $envValues
-    Write-SmartPosInstallManifest `
-        -RootPath $paths.RootPath `
-        -InstallMode "windows_service" `
-        -DataRoot $paths.DataRoot `
-        -ServiceName $serviceName `
-        -BackendUrl $backendUrl | Out-Null
 
     Start-Process $backendUrl | Out-Null
     Write-Host "Lanka POS is running via Windows service." -ForegroundColor Green
