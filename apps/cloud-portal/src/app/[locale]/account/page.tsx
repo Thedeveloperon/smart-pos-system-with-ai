@@ -584,7 +584,6 @@ export default function AccountPage() {
       });
 
     const paymentTransactions: WalletTransaction[] = aiPayments
-      .filter((payment) => payment.payment_status !== "succeeded")
       .map((payment) => ({
         id: `payment-${payment.payment_id}`,
         kind: "purchase",

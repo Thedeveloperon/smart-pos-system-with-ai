@@ -19,6 +19,7 @@ public sealed class CheckoutService(
         var cart = await BuildCartAsync(request.Items, request.DiscountPercent, request.Role, cancellationToken);
         var sale = new Sale
         {
+            StoreId = cart.StoreId,
             SaleNumber = CreateSaleNumber("HLD"),
             Status = SaleStatus.Held,
             Subtotal = cart.Subtotal,
@@ -80,6 +81,7 @@ public sealed class CheckoutService(
             var cart = await BuildCartAsync(request.Items, request.DiscountPercent, request.Role, cancellationToken);
             sale = new Sale
             {
+                StoreId = cart.StoreId,
                 SaleNumber = CreateSaleNumber("SAL"),
                 Status = SaleStatus.Held,
                 Subtotal = cart.Subtotal,
@@ -108,6 +110,11 @@ public sealed class CheckoutService(
             await dbContext.SaveChangesAsync(cancellationToken);
         }
 
+        var productStoreIds = await LoadProductStoreIdsAsync(
+            sale.Items.Select(x => x.ProductId),
+            cancellationToken);
+        sale.StoreId = ResolveStoreId(productStoreIds.Values, "Sale");
+
         var paymentRecords = BuildPayments(request.Payments, sale.Id);
         var paidTotal = paymentRecords.Sum(x => x.Amount);
         if (paidTotal < sale.GrandTotal)
@@ -125,10 +132,11 @@ public sealed class CheckoutService(
 
             if (inventoryRecord is null)
             {
+                var productStoreId = productStoreIds[saleItem.ProductId];
                 inventoryRecord = new InventoryRecord
                 {
                     ProductId = saleItem.ProductId,
-                    StoreId = sale.StoreId,
+                    StoreId = productStoreId,
                     QuantityOnHand = 0m,
                     ReorderLevel = 0m,
                     SafetyStock = 0m,
@@ -138,7 +146,7 @@ public sealed class CheckoutService(
                 };
                 dbContext.Inventory.Add(inventoryRecord);
             }
-            inventoryRecord.StoreId = sale.StoreId;
+            inventoryRecord.StoreId = productStoreIds[saleItem.ProductId];
 
             inventoryRecord.QuantityOnHand -= saleItem.Quantity;
             inventoryRecord.UpdatedAtUtc = DateTimeOffset.UtcNow;
@@ -147,6 +155,7 @@ public sealed class CheckoutService(
         dbContext.Payments.AddRange(paymentRecords);
         dbContext.Ledger.Add(new LedgerEntry
         {
+            StoreId = sale.StoreId,
             SaleId = sale.Id,
             EntryType = LedgerEntryType.Sale,
             Description = $"Sale {sale.SaleNumber}",
@@ -156,6 +165,7 @@ public sealed class CheckoutService(
         });
         dbContext.Ledger.Add(new LedgerEntry
         {
+            StoreId = sale.StoreId,
             SaleId = sale.Id,
             EntryType = LedgerEntryType.Payment,
             Description = $"Payment for {sale.SaleNumber}",
@@ -435,10 +445,51 @@ public sealed class CheckoutService(
         return new CartComputation
         {
             Items = cartLines,
+            StoreId = ResolveStoreId(cartLines.Select(x => x.Product.StoreId), "Cart"),
             Subtotal = subtotal,
             DiscountTotal = discountTotal,
             GrandTotal = grandTotal
         };
+    }
+
+    private async Task<Dictionary<Guid, Guid?>> LoadProductStoreIdsAsync(
+        IEnumerable<Guid> productIds,
+        CancellationToken cancellationToken)
+    {
+        var distinctProductIds = productIds
+            .Distinct()
+            .ToArray();
+
+        var storeIds = await dbContext.Products
+            .AsNoTracking()
+            .Where(x => distinctProductIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.StoreId })
+            .ToDictionaryAsync(x => x.Id, x => x.StoreId, cancellationToken);
+
+        if (storeIds.Count != distinctProductIds.Length)
+        {
+            throw new InvalidOperationException("Some products are missing.");
+        }
+
+        return storeIds;
+    }
+
+    private static Guid? ResolveStoreId(IEnumerable<Guid?> storeIds, string owner)
+    {
+        var distinctStoreIds = storeIds
+            .Where(x => x.HasValue)
+            .Select(x => x.GetValueOrDefault())
+            .Distinct()
+            .ToArray();
+
+        if (distinctStoreIds.Length > 1)
+        {
+            throw new InvalidOperationException($"{owner} contains products from multiple stores.");
+        }
+
+        return distinctStoreIds.Length == 0
+            ? null
+            : distinctStoreIds[0];
     }
 
     private static List<Payment> BuildPayments(IEnumerable<PaymentRequest> requestPayments, Guid saleId)
@@ -598,6 +649,7 @@ public sealed class CheckoutService(
     private sealed class CartComputation
     {
         public List<CartLine> Items { get; set; } = [];
+        public Guid? StoreId { get; set; }
         public decimal Subtotal { get; set; }
         public decimal DiscountTotal { get; set; }
         public decimal GrandTotal { get; set; }

@@ -130,10 +130,10 @@ public sealed class LicensingDeviceKeyBindingTests(CustomWebApplicationFactory f
             challenge_signature = Base64UrlEncode(signature)
         };
 
-        var firstResponse = await client.PostAsJsonAsync("/api/provision/activate", requestPayload);
+        var firstResponse = await PostActivationAsync(requestPayload, $"device-activation-first-{Guid.NewGuid():N}");
         firstResponse.EnsureSuccessStatusCode();
 
-        var replayResponse = await client.PostAsJsonAsync("/api/provision/activate", requestPayload);
+        var replayResponse = await PostActivationAsync(requestPayload, $"device-activation-replay-{Guid.NewGuid():N}");
         Assert.Equal(HttpStatusCode.Conflict, replayResponse.StatusCode);
 
         var replayPayload = await ReadJsonAsync(replayResponse);
@@ -144,6 +144,17 @@ public sealed class LicensingDeviceKeyBindingTests(CustomWebApplicationFactory f
     {
         var payload = await response.Content.ReadFromJsonAsync<JsonObject>();
         return payload ?? throw new InvalidOperationException("Response body was empty.");
+    }
+
+    private async Task<HttpResponseMessage> PostActivationAsync(object payload, string idempotencyKey)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/provision/activate")
+        {
+            Content = JsonContent.Create(payload)
+        };
+        request.Headers.Remove("Idempotency-Key");
+        request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey);
+        return await client.SendAsync(request);
     }
 
     private static string BuildActivationPayload(string challengeId, string nonce, string deviceCode)

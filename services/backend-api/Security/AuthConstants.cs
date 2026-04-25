@@ -30,6 +30,7 @@ public static class SmartPosPolicies
     public const string ManagerOrOwner = "manager_or_owner";
     public const string SuperAdmin = "super_admin";
     public const string SuperAdminOperator = "super_admin_operator";
+    public const string SupportOperator = "support_operator";
     public const string SupportOrSecurity = "support_or_security";
     public const string SupportOrBilling = "support_or_billing";
     public const string BillingOrSecurity = "billing_or_security";

@@ -1,5 +1,9 @@
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using SmartPos.Backend.Domain;
+using SmartPos.Backend.Infrastructure;
 
 namespace SmartPos.Backend.IntegrationTests;
 
@@ -18,6 +22,7 @@ public sealed class CheckoutRefundFlowTests(CustomWebApplicationFactory factory)
 
         var firstProduct = FirstObjectFromArray(productSearch, "items");
         var productId = Guid.Parse(TestJson.GetString(firstProduct, "id"));
+        var productStoreId = await GetProductStoreIdAsync(productId);
 
         var completePayload = new
         {
@@ -52,6 +57,7 @@ public sealed class CheckoutRefundFlowTests(CustomWebApplicationFactory factory)
         var saleItemId = Guid.Parse(TestJson.GetString(firstSaleItem, "sale_item_id"));
 
         Assert.Equal("completed", TestJson.GetString(completeSale, "status"));
+        await AssertSaleStoreScopeAsync(saleId, productId, productStoreId);
 
         var summaryBefore = await TestJson.ReadObjectAsync(
             await client.GetAsync($"/api/refunds/sale/{saleId}"));
@@ -93,6 +99,7 @@ public sealed class CheckoutRefundFlowTests(CustomWebApplicationFactory factory)
             }));
 
         Assert.Equal("refundedfully", TestJson.GetString(secondRefund, "sale_status"));
+        await AssertRefundStoreScopeAsync(saleId, productId, productStoreId);
 
         var finalReceipt = await TestJson.ReadObjectAsync(
             await client.GetAsync($"/api/receipts/{saleId}"));
@@ -101,6 +108,61 @@ public sealed class CheckoutRefundFlowTests(CustomWebApplicationFactory factory)
         var paymentBreakdown = FirstObjectFromArray(finalReceipt, "payment_breakdown");
         var reversedAmount = TestJson.GetDecimal(paymentBreakdown, "reversed_amount");
         Assert.Equal(saleGrandTotal, reversedAmount);
+    }
+
+    [Fact]
+    public async Task HoldAndCompleteSale_ShouldPersistStoreScopeOnSaleAndInventory()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var productSearch = await TestJson.ReadObjectAsync(
+            await client.GetAsync("/api/products/search"));
+
+        var firstProduct = FirstObjectFromArray(productSearch, "items");
+        var productId = Guid.Parse(TestJson.GetString(firstProduct, "id"));
+        var productStoreId = await GetProductStoreIdAsync(productId);
+
+        var holdSale = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/checkout/hold", new
+            {
+                items = new[]
+                {
+                    new
+                    {
+                        product_id = productId,
+                        quantity = 1m
+                    }
+                },
+                discount_percent = 0m,
+                role = "cashier"
+            }));
+
+        var saleId = Guid.Parse(TestJson.GetString(holdSale, "sale_id"));
+        var grandTotal = TestJson.GetDecimal(holdSale, "grand_total");
+
+        Assert.Equal("held", TestJson.GetString(holdSale, "status"));
+        await AssertSaleStoreScopeAsync(saleId, productId, productStoreId);
+
+        var completeSale = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/checkout/complete", new
+            {
+                sale_id = saleId,
+                items = Array.Empty<object>(),
+                discount_percent = 0m,
+                role = "cashier",
+                payments = new[]
+                {
+                    new
+                    {
+                        method = "cash",
+                        amount = grandTotal,
+                        reference_number = (string?)null
+                    }
+                }
+            }));
+
+        Assert.Equal("completed", TestJson.GetString(completeSale, "status"));
+        await AssertSaleStoreScopeAsync(saleId, productId, productStoreId);
     }
 
     [Fact]
@@ -199,5 +261,52 @@ public sealed class CheckoutRefundFlowTests(CustomWebApplicationFactory factory)
                    .OfType<JsonObject>()
                    .FirstOrDefault()
                ?? throw new InvalidOperationException($"Array '{propertyName}' was empty.");
+    }
+
+    private async Task<Guid?> GetProductStoreIdAsync(Guid productId)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+        return await dbContext.Products
+            .Where(x => x.Id == productId)
+            .Select(x => x.StoreId)
+            .SingleAsync();
+    }
+
+    private async Task AssertSaleStoreScopeAsync(Guid saleId, Guid productId, Guid? expectedStoreId)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+
+        var sale = await dbContext.Sales
+            .SingleAsync(x => x.Id == saleId);
+        var inventory = await dbContext.Inventory
+            .SingleAsync(x => x.ProductId == productId);
+        var ledgerEntries = await dbContext.Ledger
+            .Where(x => x.SaleId == saleId)
+            .ToListAsync();
+
+        Assert.Equal(expectedStoreId, sale.StoreId);
+        Assert.Equal(expectedStoreId, inventory.StoreId);
+        Assert.All(ledgerEntries, entry => Assert.Equal(expectedStoreId, entry.StoreId));
+    }
+
+    private async Task AssertRefundStoreScopeAsync(Guid saleId, Guid productId, Guid? expectedStoreId)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+
+        var inventory = await dbContext.Inventory
+            .SingleAsync(x => x.ProductId == productId);
+        var refunds = await dbContext.Refunds
+            .Where(x => x.SaleId == saleId)
+            .ToListAsync();
+        var refundLedgerEntries = await dbContext.Ledger
+            .Where(x => x.SaleId == saleId && (x.EntryType == LedgerEntryType.Refund || x.EntryType == LedgerEntryType.Reversal))
+            .ToListAsync();
+
+        Assert.Equal(expectedStoreId, inventory.StoreId);
+        Assert.All(refunds, refund => Assert.Equal(expectedStoreId, refund.StoreId));
+        Assert.All(refundLedgerEntries, entry => Assert.Equal(expectedStoreId, entry.StoreId));
     }
 }

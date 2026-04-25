@@ -271,7 +271,7 @@ public sealed class AiInsightService(
         {
             await dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException exception)
         {
             for (var attempt = 0; attempt < 4; attempt++)
             {
@@ -289,7 +289,14 @@ public sealed class AiInsightService(
                 await Task.Delay(TimeSpan.FromMilliseconds(25 * (attempt + 1)), cancellationToken);
             }
 
-            throw new InvalidOperationException("This request is still processing. Please retry shortly.");
+            logger.LogWarning(
+                exception,
+                "AI insight request persistence failed without a recoverable replay. UserId={UserId}, IdempotencyKey={IdempotencyKey}.",
+                userId,
+                normalizedIdempotencyKey);
+            throw new InvalidOperationException(
+                "This request is still processing. Please retry shortly.",
+                exception);
         }
 
         try

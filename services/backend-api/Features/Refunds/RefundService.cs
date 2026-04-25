@@ -157,9 +157,15 @@ public sealed class RefundService(
         var reversalAllocations = AllocateReversals(paymentBalances, grandTotal);
         var refundNumber = CreateRefundNumber();
         var now = DateTimeOffset.UtcNow;
+        var productStoreIds = await LoadProductStoreIdsAsync(
+            refundItems.Select(x => x.ProductId),
+            cancellationToken);
+        var resolvedSaleStoreId = ResolveStoreId(productStoreIds.Values, "Refund");
+        sale.StoreId = resolvedSaleStoreId;
 
         var refund = new Refund
         {
+            StoreId = resolvedSaleStoreId,
             SaleId = sale.Id,
             RefundNumber = refundNumber,
             Reason = reason,
@@ -207,10 +213,11 @@ public sealed class RefundService(
 
             if (inventoryRecord is null)
             {
+                var productStoreId = productStoreIds[refundItem.ProductId];
                 inventoryRecord = new InventoryRecord
                 {
                     ProductId = refundItem.ProductId,
-                    StoreId = sale.StoreId,
+                    StoreId = productStoreId,
                     QuantityOnHand = 0m,
                     ReorderLevel = 0m,
                     SafetyStock = 0m,
@@ -220,7 +227,7 @@ public sealed class RefundService(
                 };
                 dbContext.Inventory.Add(inventoryRecord);
             }
-            inventoryRecord.StoreId = sale.StoreId;
+            inventoryRecord.StoreId = productStoreIds[refundItem.ProductId];
 
             inventoryRecord.QuantityOnHand += refundItem.Quantity;
             inventoryRecord.UpdatedAtUtc = now;
@@ -228,6 +235,7 @@ public sealed class RefundService(
 
         dbContext.Ledger.Add(new LedgerEntry
         {
+            StoreId = resolvedSaleStoreId,
             SaleId = sale.Id,
             EntryType = LedgerEntryType.Refund,
             Description = $"Refund {refundNumber} for {sale.SaleNumber} (tax reversed {taxAmount:0.00})",
@@ -237,6 +245,7 @@ public sealed class RefundService(
         });
         dbContext.Ledger.Add(new LedgerEntry
         {
+            StoreId = resolvedSaleStoreId,
             SaleId = sale.Id,
             EntryType = LedgerEntryType.Reversal,
             Description = $"Payment reversal {refundNumber} for {sale.SaleNumber}",
@@ -455,6 +464,46 @@ public sealed class RefundService(
     private static string CreateRefundNumber()
     {
         return $"REF-{DateTime.UtcNow:yyyyMMddHHmmss}-{Random.Shared.Next(100, 999)}";
+    }
+
+    private async Task<Dictionary<Guid, Guid?>> LoadProductStoreIdsAsync(
+        IEnumerable<Guid> productIds,
+        CancellationToken cancellationToken)
+    {
+        var distinctProductIds = productIds
+            .Distinct()
+            .ToArray();
+
+        var storeIds = await dbContext.Products
+            .AsNoTracking()
+            .Where(x => distinctProductIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.StoreId })
+            .ToDictionaryAsync(x => x.Id, x => x.StoreId, cancellationToken);
+
+        if (storeIds.Count != distinctProductIds.Length)
+        {
+            throw new InvalidOperationException("Some products are missing.");
+        }
+
+        return storeIds;
+    }
+
+    private static Guid? ResolveStoreId(IEnumerable<Guid?> storeIds, string owner)
+    {
+        var distinctStoreIds = storeIds
+            .Where(x => x.HasValue)
+            .Select(x => x.GetValueOrDefault())
+            .Distinct()
+            .ToArray();
+
+        if (distinctStoreIds.Length > 1)
+        {
+            throw new InvalidOperationException($"{owner} contains products from multiple stores.");
+        }
+
+        return distinctStoreIds.Length == 0
+            ? null
+            : distinctStoreIds[0];
     }
 
     private static decimal RoundMoney(decimal amount)

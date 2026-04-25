@@ -25,7 +25,7 @@ public sealed class LicensingCustomerPortalTests : IDisposable
     [Fact]
     public async Task CustomerPortal_ShouldListDevices_AndAllowSelfServiceDeactivation()
     {
-        await TestAuth.SignInAsManagerAsync(client);
+        await TestAuth.SignInAsManagerAccountAsync(client);
 
         var deviceA = $"cust-portal-a-{Guid.NewGuid():N}";
         var deviceB = $"cust-portal-b-{Guid.NewGuid():N}";
@@ -58,7 +58,7 @@ public sealed class LicensingCustomerPortalTests : IDisposable
     [Fact]
     public async Task CustomerPortal_SelfServiceDeactivation_ShouldEnforceDailyLimit()
     {
-        await TestAuth.SignInAsManagerAsync(client);
+        await TestAuth.SignInAsManagerAccountAsync(client);
 
         var deviceA = $"cust-limit-a-{Guid.NewGuid():N}";
         var deviceB = $"cust-limit-b-{Guid.NewGuid():N}";
