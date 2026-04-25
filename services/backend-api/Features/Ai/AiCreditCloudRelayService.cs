@@ -14,6 +14,7 @@ namespace SmartPos.Backend.Features.Ai;
 
 public sealed class AiCreditCloudRelayService(
     IOptions<AiInsightOptions> optionsAccessor,
+    IOptions<LicenseOptions> licenseOptionsAccessor,
     IHttpClientFactory httpClientFactory,
     LicenseService licenseService,
     CloudAccountService cloudAccountService,
@@ -412,7 +413,9 @@ public sealed class AiCreditCloudRelayService(
                 StatusCodes.Status400BadRequest);
         }
 
-        var licenseToken = NormalizeOptionalValue(licenseService.ResolveLicenseToken(sourceContext));
+        var licenseToken = ShouldForwardLicenseToken()
+            ? NormalizeOptionalValue(licenseService.ResolveLicenseToken(sourceContext))
+            : null;
         if (!cloudAuthStatus.IsLinked)
         {
             throw new AiRelayException(
@@ -431,6 +434,11 @@ public sealed class AiCreditCloudRelayService(
         }
 
         return new RelayAuthContext(licenseToken, cloudAuthToken, cloudAuthToken);
+    }
+
+    private bool ShouldForwardLicenseToken()
+    {
+        return licenseOptionsAccessor.Value.CloudRelayEnabled;
     }
 
     private static HttpRequestMessage BuildCloudRequest(
