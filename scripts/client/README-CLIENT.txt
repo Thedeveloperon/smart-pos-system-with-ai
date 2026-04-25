@@ -54,7 +54,7 @@ Notes:
 - If no JWT secret is configured, service install/start scripts auto-generate SMARTPOS_JWT_SECRET and save it to the generated client.env.
 - If no licensing data encryption key is configured, service install/start scripts auto-generate SMARTPOS_LICENSE_DATA_ENCRYPTION_KEY and save it to the generated client.env.
 - If no licensing signing private key is configured, service install/start scripts initialize keys\license-signing-private-key.pem under the external data root and save its path to SMARTPOS_LICENSE_SIGNING_PRIVATE_KEY_PEM in client.env.
-- If neither Licensing__CloudRelayBaseUrl nor AiInsights__CloudRelayBaseUrl is configured, service install/start scripts default Licensing__CloudRelayBaseUrl to https://smartpos-backend.onrender.com for cloud account linking.
+- If neither Licensing__CloudRelayBaseUrl nor AiInsights__CloudRelayBaseUrl is configured, service install/start scripts default Licensing__CloudRelayBaseUrl to https://smartpos-backend-v7yd.onrender.com for cloud account linking.
 - If AiInsights__CloudRelayBaseUrl is empty but Licensing__CloudRelayBaseUrl is set, service install/start scripts mirror that value to AiInsights__CloudRelayBaseUrl and set AiInsights__CloudRelayEnabled=true.
 - Activation keys must be generated against this same running backend instance (http://127.0.0.1:5080) and its current database.
 - Use the GUI activation manager or Generate-Offline-Activation-Codes.bat from this package to avoid environment/database mismatch.

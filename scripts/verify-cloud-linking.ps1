@@ -1,6 +1,6 @@
 ﻿param(
   [string]$PortalBaseUrl = 'https://smartpos-marketing-website.onrender.com',
-  [string]$BackendBaseUrl = 'https://smartpos-backend.onrender.com'
+  [string]$BackendBaseUrl = 'https://smartpos-backend-v7yd.onrender.com'
 )
 
 $ErrorActionPreference = 'Stop'

@@ -1,8 +1,8 @@
 Set-StrictMode -Version Latest
 
-$script:SmartPosDefaultCloudRelayBaseUrl = "https://smartpos-backend.onrender.com"
+$script:SmartPosDefaultCloudRelayBaseUrl = "https://smartpos-backend-v7yd.onrender.com"
 $script:SmartPosLegacyCloudRelayBaseUrls = @(
-    "https://smartpos-backend-v7yd.onrender.com"
+    "https://smartpos-backend.onrender.com"
 )
 
 function Test-SmartPosInstallRootCandidate {
