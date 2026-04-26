@@ -14,6 +14,8 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Camera, Check, ChevronsUpDown, Keyboard, Package, Plus, ScanBarcode, Search } from "lucide-react";
+import { BrowserMultiFormatReader, type IScannerControls } from "@zxing/browser";
+import { NotFoundException } from "@zxing/library";
 import ProductCard from "./ProductCard";
 import type { Product } from "./types";
 import { POS_SHORTCUT_INLINE_HINT, POS_SHORTCUT_LABELS } from "./shortcuts";
@@ -21,11 +23,9 @@ import { POS_SHORTCUT_INLINE_HINT, POS_SHORTCUT_LABELS } from "./shortcuts";
 const SCANNER_BURST_INTERVAL_MS = 45;
 const SCANNER_ENTER_GRACE_MS = 120;
 const SCANNER_BURST_MIN_CHARS = 6;
-const CAMERA_SCAN_INTERVAL_MS = 140;
 const CAMERA_SCAN_DUPLICATE_COOLDOWN_MS = 1300;
 const normalizeBarcode = (value: string) => value.trim().toLowerCase();
 const isBarcodeFeatureEnabled = import.meta.env.VITE_BARCODE_FEATURE_ENABLED !== "false";
-const CAMERA_SCAN_FORMATS = ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "itf", "codabar"];
 const DEFAULT_CATEGORY = "Uncategorized";
 const DEFAULT_BRAND = "Unbranded";
 
@@ -49,27 +49,6 @@ const resolveBrandName = (product: Product) => {
 
   return raw.trim();
 };
-
-type BarcodeDetectionResultLike = {
-  rawValue?: string | null;
-};
-
-interface BarcodeDetectorLike {
-  detect: (source: ImageBitmapSource) => Promise<BarcodeDetectionResultLike[]>;
-}
-
-interface BarcodeDetectorConstructorLike {
-  new (options?: { formats?: string[] }): BarcodeDetectorLike;
-  getSupportedFormats?: () => Promise<string[]>;
-}
-
-function getBarcodeDetectorConstructor(): BarcodeDetectorConstructorLike | null {
-  const maybeGlobal = globalThis as typeof globalThis & {
-    BarcodeDetector?: BarcodeDetectorConstructorLike;
-  };
-
-  return maybeGlobal.BarcodeDetector ?? null;
-}
 
 interface ProductSearchPanelProps {
   products: Product[];
@@ -98,10 +77,7 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
     const [cameraFeedback, setCameraFeedback] = useState<string | null>(null);
     const searchInputRef = useRef<HTMLInputElement>(null);
     const cameraVideoRef = useRef<HTMLVideoElement>(null);
-    const cameraDetectorRef = useRef<BarcodeDetectorLike | null>(null);
-    const cameraStreamRef = useRef<MediaStream | null>(null);
-    const cameraLoopTimerRef = useRef<number | null>(null);
-    const cameraLoopBusyRef = useRef(false);
+    const scannerControlsRef = useRef<IScannerControls | null>(null);
     const lastCameraScanRef = useRef({ value: "", at: 0 });
     const scannerBurstRef = useRef({ charCount: 0, lastKeyAt: 0 });
     const lastAutoAddKeyRef = useRef<string | null>(null);
@@ -121,23 +97,13 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
     }, []);
 
     const stopCameraStream = useCallback(() => {
-      if (cameraLoopTimerRef.current !== null) {
-        window.clearTimeout(cameraLoopTimerRef.current);
-        cameraLoopTimerRef.current = null;
-      }
-
-      cameraLoopBusyRef.current = false;
-
-      if (cameraStreamRef.current) {
-        cameraStreamRef.current.getTracks().forEach((track) => track.stop());
-        cameraStreamRef.current = null;
-      }
+      scannerControlsRef.current?.stop();
+      scannerControlsRef.current = null;
 
       if (cameraVideoRef.current) {
         cameraVideoRef.current.srcObject = null;
       }
 
-      cameraDetectorRef.current = null;
       lastCameraScanRef.current = { value: "", at: 0 };
     }, []);
 
@@ -146,7 +112,7 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
         return false;
       }
 
-      return Boolean(navigator.mediaDevices?.getUserMedia) && getBarcodeDetectorConstructor() !== null;
+      return Boolean(navigator.mediaDevices?.getUserMedia);
     }, []);
 
     const processBarcodeValue = useCallback(
@@ -465,95 +431,63 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
         setCameraStarting(true);
 
         try {
-          const barcodeDetectorCtor = getBarcodeDetectorConstructor();
-          if (!barcodeDetectorCtor) {
-            throw new Error("BarcodeDetector API is not available.");
-          }
-
-          const supportedFormats = typeof barcodeDetectorCtor.getSupportedFormats === "function"
-            ? await barcodeDetectorCtor.getSupportedFormats()
-            : [];
-          const enabledFormats = supportedFormats.length
-            ? CAMERA_SCAN_FORMATS.filter((format) => supportedFormats.includes(format))
-            : CAMERA_SCAN_FORMATS;
-          const detector = enabledFormats.length
-            ? new barcodeDetectorCtor({ formats: enabledFormats })
-            : new barcodeDetectorCtor();
-
-          const stream = await navigator.mediaDevices.getUserMedia({
-            audio: false,
-            video: {
-              facingMode: { ideal: "environment" },
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
-            },
-          });
-
-          if (disposed) {
-            stream.getTracks().forEach((track) => track.stop());
-            return;
-          }
-
-          cameraStreamRef.current = stream;
-          cameraDetectorRef.current = detector;
-
+          const reader = new BrowserMultiFormatReader();
           const video = cameraVideoRef.current;
           if (!video) {
             throw new Error("Could not open camera preview.");
           }
 
-          video.srcObject = stream;
-          await video.play();
-          setCameraFeedback("Camera is active. Hold barcode in frame.");
-
-          const scanFrame = async () => {
-            if (disposed || !cameraOpen || !cameraDetectorRef.current) {
-              return;
-            }
-
-            if (cameraLoopBusyRef.current) {
-              cameraLoopTimerRef.current = window.setTimeout(scanFrame, CAMERA_SCAN_INTERVAL_MS);
-              return;
-            }
-
-            const currentVideo = cameraVideoRef.current;
-            if (!currentVideo || currentVideo.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
-              cameraLoopTimerRef.current = window.setTimeout(scanFrame, CAMERA_SCAN_INTERVAL_MS);
-              return;
-            }
-
-            try {
-              cameraLoopBusyRef.current = true;
-              const results = await cameraDetectorRef.current.detect(currentVideo);
-              const detectedValue = results.find((item) => item.rawValue?.trim())?.rawValue?.trim();
-              if (detectedValue) {
-                const now = Date.now();
-                const last = lastCameraScanRef.current;
-                if (
-                  last.value === detectedValue &&
-                  now - last.at < CAMERA_SCAN_DUPLICATE_COOLDOWN_MS
-                ) {
-                  return;
-                }
-
-                lastCameraScanRef.current = { value: detectedValue, at: now };
-                setCameraFeedback(`Detected barcode ${detectedValue}.`);
-                processBarcodeValue(detectedValue, true, false);
+          const controls = await reader.decodeFromConstraints(
+            {
+              audio: false,
+              video: {
+                facingMode: { ideal: "environment" },
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+              },
+            },
+            video,
+            (result, error) => {
+              if (disposed) {
+                return;
               }
-            } catch {
-              if (!disposed) {
+
+              if (result) {
+                const detectedValue = result.getText().trim();
+                if (detectedValue) {
+                  const now = Date.now();
+                  const last = lastCameraScanRef.current;
+                  if (
+                    last.value === detectedValue &&
+                    now - last.at < CAMERA_SCAN_DUPLICATE_COOLDOWN_MS
+                  ) {
+                    return;
+                  }
+
+                  lastCameraScanRef.current = { value: detectedValue, at: now };
+                  setCameraFeedback(`Detected barcode ${detectedValue}.`);
+                  processBarcodeValue(detectedValue, true, false);
+                }
+              }
+
+              if (error && !(error instanceof NotFoundException)) {
                 setCameraFeedback("Camera scan is running, but barcode detection is unstable. Try better lighting.");
               }
-            } finally {
-              cameraLoopBusyRef.current = false;
-              if (!disposed && cameraOpen) {
-                cameraLoopTimerRef.current = window.setTimeout(scanFrame, CAMERA_SCAN_INTERVAL_MS);
-              }
-            }
-          };
+            },
+          );
 
-          cameraLoopTimerRef.current = window.setTimeout(scanFrame, CAMERA_SCAN_INTERVAL_MS);
+          if (disposed) {
+            controls.stop();
+            return;
+          }
+
+          scannerControlsRef.current = controls;
+          setCameraFeedback("Camera is active. Hold barcode in frame.");
         } catch (error) {
+          if (disposed) {
+            return;
+          }
+
           const errorName = error instanceof DOMException ? error.name : "";
           if (errorName === "NotAllowedError") {
             setCameraFeedback("Camera permission was denied. Allow camera access and try again.");
