@@ -10,6 +10,7 @@ import {
 } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -376,25 +377,28 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
       setCameraFeedback(null);
     }, [searchMode, stopCameraStream]);
 
-    const toggleCameraScanner = useCallback(() => {
-      if (cameraOpen) {
-        stopCameraStream();
-        setCameraOpen(false);
-        setCameraStarting(false);
-        setCameraFeedback("Camera scanner stopped.");
-        return;
-      }
+    const handleCameraSwitchChange = useCallback(
+      (enabled: boolean) => {
+        if (!enabled) {
+          stopCameraStream();
+          setCameraOpen(false);
+          setCameraStarting(false);
+          setCameraFeedback("Camera scanner stopped.");
+          return;
+        }
 
-      if (!canUseCameraScanner()) {
-        setCameraFeedback("Camera barcode scan is unavailable in this browser. Use scanner input and Enter.");
-        return;
-      }
+        if (!canUseCameraScanner()) {
+          setCameraFeedback("Camera barcode scan is unavailable in this browser. Use scanner input and Enter.");
+          return;
+        }
 
-      setCameraFeedback(null);
-      setBarcodeFeedback(null);
-      setSearchQuery("");
-      setCameraOpen(true);
-    }, [cameraOpen, canUseCameraScanner, stopCameraStream]);
+        setCameraFeedback(null);
+        setBarcodeFeedback(null);
+        setSearchQuery("");
+        setCameraOpen(true);
+      },
+      [canUseCameraScanner, stopCameraStream],
+    );
 
     useEffect(() => {
       if (searchMode !== "barcode") {
@@ -437,44 +441,58 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
             throw new Error("Could not open camera preview.");
           }
 
-          const controls = await reader.decodeFromConstraints(
-            {
-              audio: false,
-              video: {
-                facingMode: { ideal: "environment" },
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
-              },
-            },
-            video,
-            (result, error) => {
-              if (disposed) {
-                return;
-              }
+          const onDecode = (result: { getText: () => string } | undefined, error: unknown) => {
+            if (disposed) {
+              return;
+            }
 
-              if (result) {
-                const detectedValue = result.getText().trim();
-                if (detectedValue) {
-                  const now = Date.now();
-                  const last = lastCameraScanRef.current;
-                  if (
-                    last.value === detectedValue &&
-                    now - last.at < CAMERA_SCAN_DUPLICATE_COOLDOWN_MS
-                  ) {
-                    return;
-                  }
-
-                  lastCameraScanRef.current = { value: detectedValue, at: now };
-                  setCameraFeedback(`Detected barcode ${detectedValue}.`);
-                  processBarcodeValue(detectedValue, true, false);
+            if (result) {
+              const detectedValue = result.getText().trim();
+              if (detectedValue) {
+                const now = Date.now();
+                const last = lastCameraScanRef.current;
+                if (
+                  last.value === detectedValue &&
+                  now - last.at < CAMERA_SCAN_DUPLICATE_COOLDOWN_MS
+                ) {
+                  return;
                 }
-              }
 
-              if (error && !(error instanceof NotFoundException)) {
-                setCameraFeedback("Camera scan is running, but barcode detection is unstable. Try better lighting.");
+                lastCameraScanRef.current = { value: detectedValue, at: now };
+                setCameraFeedback(`Detected barcode ${detectedValue}.`);
+                processBarcodeValue(detectedValue, true, false);
               }
+            }
+
+            if (error && !(error instanceof NotFoundException)) {
+              setCameraFeedback("Camera scan is running, but barcode detection is unstable. Try better lighting.");
+            }
+          };
+
+          const preferredConstraints: MediaStreamConstraints = {
+            audio: false,
+            video: {
+              facingMode: { ideal: "environment" },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
             },
-          );
+          };
+          const relaxedConstraints: MediaStreamConstraints = {
+            audio: false,
+            video: true,
+          };
+
+          let controls: IScannerControls;
+          try {
+            controls = await reader.decodeFromConstraints(preferredConstraints, video, onDecode);
+          } catch (error) {
+            const isPreferredNotFound = error instanceof DOMException && error.name === "NotFoundError";
+            if (!isPreferredNotFound) {
+              throw error;
+            }
+
+            controls = await reader.decodeFromConstraints(relaxedConstraints, video, onDecode);
+          }
 
           if (disposed) {
             controls.stop();
@@ -710,19 +728,17 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
           {isBarcodeFeatureEnabled && searchMode === "barcode" && (
             <div className="mt-2 space-y-2">
               <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  variant={cameraOpen ? "default" : "outline"}
-                  size="sm"
-                  className="h-8 rounded-lg"
-                  onClick={toggleCameraScanner}
-                  disabled={cameraStarting}
-                  aria-label={cameraOpen ? "Stop camera barcode scan" : "Start camera barcode scan"}
-                  title="Use inbuilt camera for barcode scanning"
-                >
-                  <Camera className="mr-1.5 h-3.5 w-3.5" />
-                  {cameraOpen ? "Stop camera" : "Scan with camera"}
-                </Button>
+                <div className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5">
+                  <Camera className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="text-[11px] font-medium text-foreground">Camera</span>
+                  <Switch
+                    checked={cameraOpen}
+                    onCheckedChange={handleCameraSwitchChange}
+                    aria-label="Camera barcode scanner"
+                    className="scale-90"
+                  />
+                  <span className="text-[11px] text-muted-foreground">{cameraOpen ? "On" : "Off"}</span>
+                </div>
                 {cameraStarting && <span className="text-[11px] text-muted-foreground">Opening camera...</span>}
                 {cameraFeedback && (
                   <span className="text-[11px] text-muted-foreground" role="status" aria-live="polite">

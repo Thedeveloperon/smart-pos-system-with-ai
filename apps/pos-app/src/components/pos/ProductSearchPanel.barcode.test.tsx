@@ -16,13 +16,21 @@ const sampleProducts: Product[] = [
   },
 ];
 
+const openBarcodeMode = () => {
+  fireEvent.click(screen.getByRole("button", { name: "Switch to barcode mode" }));
+};
+
+const toggleCameraSwitch = () => {
+  fireEvent.click(screen.getByRole("switch", { name: "Camera barcode scanner" }));
+};
+
 describe("ProductSearchPanel barcode mode", () => {
   it("adds exact barcode match to cart when Enter is pressed in barcode mode", () => {
     const onAddToCart = vi.fn();
 
     render(<ProductSearchPanel products={sampleProducts} onAddToCart={onAddToCart} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Switch to barcode mode" }));
+    openBarcodeMode();
     const input = screen.getByPlaceholderText("Scan or enter barcode...");
 
     fireEvent.change(input, { target: { value: "1234567890128" } });
@@ -37,7 +45,7 @@ describe("ProductSearchPanel barcode mode", () => {
 
     render(<ProductSearchPanel products={sampleProducts} onAddToCart={onAddToCart} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Switch to barcode mode" }));
+    openBarcodeMode();
     const input = screen.getByPlaceholderText("Scan or enter barcode...");
 
     for (const key of "9999999999999") {
@@ -95,8 +103,8 @@ describe("ProductSearchPanel barcode mode", () => {
     try {
       render(<ProductSearchPanel products={sampleProducts} onAddToCart={onAddToCart} />);
 
-      fireEvent.click(screen.getByRole("button", { name: "Switch to barcode mode" }));
-      fireEvent.click(screen.getByRole("button", { name: "Start camera barcode scan" }));
+      openBarcodeMode();
+      toggleCameraSwitch();
 
       await waitFor(() => expect(decodeSpy).toHaveBeenCalledOnce());
       expect(
@@ -111,13 +119,131 @@ describe("ProductSearchPanel barcode mode", () => {
     }
   });
 
+  it("keeps camera running until cashier turns switch off", async () => {
+    const onAddToCart = vi.fn();
+    const originalMediaDevices = navigator.mediaDevices;
+    const stopSpy = vi.fn();
+    const decodeSpy = vi.spyOn(BrowserMultiFormatReader.prototype, "decodeFromConstraints").mockResolvedValue({
+      stop: stopSpy,
+    });
+
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn(),
+      },
+    });
+
+    try {
+      render(<ProductSearchPanel products={sampleProducts} onAddToCart={onAddToCart} />);
+
+      openBarcodeMode();
+      const cameraSwitch = screen.getByRole("switch", { name: "Camera barcode scanner" });
+      expect(cameraSwitch).toHaveAttribute("aria-checked", "false");
+
+      toggleCameraSwitch();
+
+      await waitFor(() => expect(decodeSpy).toHaveBeenCalledOnce());
+      expect(cameraSwitch).toHaveAttribute("aria-checked", "true");
+      expect(stopSpy).not.toHaveBeenCalled();
+
+      toggleCameraSwitch();
+
+      await waitFor(() => expect(stopSpy).toHaveBeenCalledOnce());
+      expect(cameraSwitch).toHaveAttribute("aria-checked", "false");
+    } finally {
+      decodeSpy.mockRestore();
+      Object.defineProperty(navigator, "mediaDevices", {
+        configurable: true,
+        value: originalMediaDevices,
+      });
+    }
+  });
+
+  it("retries with relaxed camera constraints when preferred constraints fail with NotFoundError", async () => {
+    const onAddToCart = vi.fn();
+    const originalMediaDevices = navigator.mediaDevices;
+    const decodeSpy = vi
+      .spyOn(BrowserMultiFormatReader.prototype, "decodeFromConstraints")
+      .mockRejectedValueOnce(new DOMException("No preferred camera", "NotFoundError"))
+      .mockResolvedValueOnce({
+        stop: vi.fn(),
+      });
+
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn(),
+      },
+    });
+
+    try {
+      render(<ProductSearchPanel products={sampleProducts} onAddToCart={onAddToCart} />);
+
+      openBarcodeMode();
+      toggleCameraSwitch();
+
+      await waitFor(() => expect(decodeSpy).toHaveBeenCalledTimes(2));
+      expect(decodeSpy.mock.calls[0]?.[0]).toMatchObject({
+        audio: false,
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+      });
+      expect(decodeSpy.mock.calls[1]?.[0]).toEqual({
+        audio: false,
+        video: true,
+      });
+    } finally {
+      decodeSpy.mockRestore();
+      Object.defineProperty(navigator, "mediaDevices", {
+        configurable: true,
+        value: originalMediaDevices,
+      });
+    }
+  });
+
+  it("shows no-camera feedback only after both startup attempts fail", async () => {
+    const onAddToCart = vi.fn();
+    const originalMediaDevices = navigator.mediaDevices;
+    const decodeSpy = vi
+      .spyOn(BrowserMultiFormatReader.prototype, "decodeFromConstraints")
+      .mockRejectedValue(new DOMException("No camera devices", "NotFoundError"));
+
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn(),
+      },
+    });
+
+    try {
+      render(<ProductSearchPanel products={sampleProducts} onAddToCart={onAddToCart} />);
+
+      openBarcodeMode();
+      toggleCameraSwitch();
+
+      await waitFor(() => expect(decodeSpy).toHaveBeenCalledTimes(2));
+      expect(screen.getByText("No camera device was found on this system.")).toBeInTheDocument();
+      expect(screen.getByRole("switch", { name: "Camera barcode scanner" })).toHaveAttribute("aria-checked", "false");
+    } finally {
+      decodeSpy.mockRestore();
+      Object.defineProperty(navigator, "mediaDevices", {
+        configurable: true,
+        value: originalMediaDevices,
+      });
+    }
+  });
+
   it("shows clear fallback when camera scan is unavailable", () => {
     const onAddToCart = vi.fn();
 
     render(<ProductSearchPanel products={sampleProducts} onAddToCart={onAddToCart} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Switch to barcode mode" }));
-    fireEvent.click(screen.getByRole("button", { name: "Start camera barcode scan" }));
+    openBarcodeMode();
+    toggleCameraSwitch();
 
     expect(
       screen.getByText("Camera barcode scan is unavailable in this browser. Use scanner input and Enter."),
