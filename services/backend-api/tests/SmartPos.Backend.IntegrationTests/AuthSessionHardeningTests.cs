@@ -121,6 +121,21 @@ public sealed class AuthSessionHardeningTests : IDisposable
         Assert.Equal(HttpStatusCode.Unauthorized, meA.StatusCode);
     }
 
+    [Fact]
+    public async Task PosLogin_ShouldUpgradeSessionVersion_AndAllowLicenseAccountPortal()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var sessionPayload = await TestJson.ReadObjectAsync(await client.GetAsync("/api/auth/me"));
+        Assert.Equal(2, sessionPayload["auth_session_version"]?.GetValue<int>());
+
+        var portalResponse = await client.GetAsync("/api/license/account/licenses");
+        portalResponse.EnsureSuccessStatusCode();
+
+        var portalPayload = await TestJson.ReadObjectAsync(portalResponse);
+        Assert.Equal("default", portalPayload["shop_code"]?.GetValue<string>());
+    }
+
     private static async Task LoginAsync(HttpClient httpClient, string deviceCode)
     {
         var loginResponse = await httpClient.PostAsJsonAsync("/api/auth/login", new

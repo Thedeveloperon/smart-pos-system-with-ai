@@ -1,5 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ApiError, bootstrapSession, login as apiLogin, logout as apiLogout } from "@/lib/api";
+import {
+  AUTH_SESSION_INVALIDATED_EVENT,
+  ApiError,
+  bootstrapSession,
+  login as apiLogin,
+  logout as apiLogout,
+} from "@/lib/api";
 import { mapBackendRoleToUserRole, type AppUser } from "@/lib/auth";
 
 interface AuthContextValue {
@@ -32,6 +38,18 @@ function toAppUser(session: { username: string; full_name: string; role: string;
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<AppUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const handleAuthSessionInvalidated = () => {
+      setUser(null);
+      setIsLoading(false);
+    };
+
+    window.addEventListener(AUTH_SESSION_INVALIDATED_EVENT, handleAuthSessionInvalidated);
+    return () => {
+      window.removeEventListener(AUTH_SESSION_INVALIDATED_EVENT, handleAuthSessionInvalidated);
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;

@@ -111,7 +111,7 @@ public sealed class AuthService(
                     ? isSuperAdminScope ? "Admin Portal" : "POS Browser"
                     : request.DeviceName.Trim(),
                 IsTrusted = true,
-                AuthSessionVersion = 1,
+                AuthSessionVersion = 2,
                 CreatedAtUtc = now,
                 LastAuthIssuedAtUtc = now,
                 LastSeenAtUtc = now
@@ -125,7 +125,9 @@ public sealed class AuthService(
                 ? device.Name
                 : request.DeviceName.Trim();
             device.IsTrusted = true;
-            device.AuthSessionVersion = Math.Max(1, device.AuthSessionVersion);
+            // Fresh logins must mint the current auth session generation so POS sign-in
+            // can access account/license surfaces without a forced re-auth loop.
+            device.AuthSessionVersion = Math.Max(2, device.AuthSessionVersion);
             device.AuthSessionRevokedAtUtc = null;
             device.AuthSessionRevocationReason = null;
             device.LastAuthIssuedAtUtc = now;
