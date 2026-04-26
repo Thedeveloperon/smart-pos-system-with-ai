@@ -22,6 +22,7 @@ function getDefaultApiBaseUrl() {
 const DEFAULT_API_BASE_URL = getDefaultApiBaseUrl();
 
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL).replace(/\/$/, "");
+export const AUTH_SESSION_INVALIDATED_EVENT = "smartpos:auth-session-invalidated";
 const DEFAULT_POS_VERSION = "1.0.0";
 export const POS_CLIENT_VERSION = (import.meta.env.VITE_POS_VERSION || DEFAULT_POS_VERSION).trim() || DEFAULT_POS_VERSION;
 
@@ -1781,6 +1782,14 @@ type RequestExecutionOptions = {
   licenseTokenRecoveryAttempted?: boolean;
 };
 
+function notifyAuthSessionInvalidated() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.dispatchEvent(new Event(AUTH_SESSION_INVALIDATED_EVENT));
+}
+
 async function request<T>(path: string, init: RequestInit = {}, options: RequestExecutionOptions = {}) {
   const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
   const terminalId = getAuthTerminalId();
@@ -1850,6 +1859,10 @@ async function request<T>(path: string, init: RequestInit = {}, options: Request
 
     return await parseResponse<T>(response);
   } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      notifyAuthSessionInvalidated();
+    }
+
     if (
       error instanceof ApiError &&
       isLicenseTokenRecoveryErrorCode(error.code) &&
