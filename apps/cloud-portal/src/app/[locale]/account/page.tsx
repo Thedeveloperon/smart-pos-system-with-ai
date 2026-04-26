@@ -2,8 +2,11 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Copy,
   CircleUserRound,
   Clock3,
+  Eye,
+  EyeOff,
   KeyRound,
   LayoutGrid,
   LogOut,
@@ -274,6 +277,10 @@ const ownerNavItems: Array<{ id: OwnerSectionId; label: string; icon: typeof Lay
   { id: "settings", label: "Account Settings", icon: Settings2 },
 ];
 
+function isOwnerSectionId(value: string | null): value is OwnerSectionId {
+  return ownerNavItems.some((item) => item.id === value);
+}
+
 const OwnerOnlyMessage = "Only shop owners can create package and AI credit purchases.";
 
 const ownerCatalogFallbackProducts: CloudProductRow[] = [
@@ -468,6 +475,7 @@ export default function AccountPage() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [activeSection, setActiveSection] = useState<OwnerSectionId>("dashboard");
+  const [showActivationKey, setShowActivationKey] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [catalogFilter, setCatalogFilter] = useState<ProductCatalogFilter>("all");
   const [purchaseFilter, setPurchaseFilter] = useState<PurchaseFilter>("all");
@@ -632,6 +640,17 @@ export default function AccountPage() {
       .sort((left, right) => parseTimestamp(right.occurredAt) - parseTimestamp(left.occurredAt))
       .slice(0, 30);
   }, [aiLedger, aiPayments, purchases]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const requestedSection = new URLSearchParams(window.location.search).get("section");
+    if (isOwnerSectionId(requestedSection)) {
+      setActiveSection(requestedSection);
+    }
+  }, []);
 
   const getWalletTransactionTypeLabel = (kind: WalletTransactionKind, source: WalletTransactionSource) => {
     if (kind === "purchase" && source !== "ledger") {
@@ -1497,6 +1516,27 @@ export default function AccountPage() {
     await loadCommerceData();
     setCommerceMessage("Commerce data refreshed.");
   };
+
+  const copyActivationKey = useCallback(async () => {
+    const key = licensePortal?.latest_activation_entitlement?.activation_entitlement_key?.trim();
+    if (!key) {
+      return;
+    }
+
+    setShowActivationKey(true);
+
+    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+      setCommerceMessage("Activation key revealed. Copy it manually.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(key);
+      setCommerceMessage("Activation key copied.");
+    } catch {
+      setCommerceMessage("Activation key revealed. Copy it manually.");
+    }
+  }, [licensePortal?.latest_activation_entitlement?.activation_entitlement_key]);
 
   const closeOrderDialog = useCallback(() => {
     if (isSubmittingPurchase) {

@@ -24,6 +24,14 @@ public sealed class AiChatService(
     private const string UsageTypeQuickInsights = "quick_insights";
     private const string UsageTypeAdvancedAnalysis = "advanced_analysis";
     private const string UsageTypeSmartReports = "smart_reports";
+    private const string OutputLanguageEnglish = "english";
+    private const string OutputLanguageSinhala = "sinhala";
+    private const string OutputLanguageTamil = "tamil";
+    private const int PromptHistoryMessageLimit = 10;
+
+    private sealed record ChatPromptHistoryEntry(
+        string Role,
+        string Content);
 
     public async Task<AiChatSessionSummaryResponse> CreateSessionAsync(
         Guid userId,
@@ -252,19 +260,30 @@ public sealed class AiChatService(
 
         try
         {
+            var requestedOutputLanguage = ResolveRequestedOutputLanguage(normalizedMessage);
+            var promptHistory = await LoadPromptHistoryAsync(
+                sessionId,
+                PromptHistoryMessageLimit,
+                cancellationToken);
             var grounding = await BuildGroundingSnapshotAsync(normalizedMessage, cancellationToken);
             var structuredResponse = await structuredResponseBuilder.BuildAsync(
                 sanitizedMessageForProvider,
                 grounding,
+                requestedOutputLanguage,
                 cancellationToken);
-            var aiPrompt = BuildAiPrompt(sanitizedMessageForProvider, grounding);
+            var aiPrompt = BuildAiPrompt(
+                sanitizedMessageForProvider,
+                grounding,
+                promptHistory,
+                requestedOutputLanguage);
             var aiIdempotencyKey = BuildAiInsightIdempotencyKey(conversation.Id, normalizedIdempotencyKey);
             var insight = await aiInsightService.GenerateInsightAsync(
                 userId,
                 aiPrompt,
                 aiIdempotencyKey,
                 MapUsageType(usageType),
-                cancellationToken);
+                cancellationToken,
+                preferredOutputLanguageOverride: requestedOutputLanguage);
 
             var assistantMessage = new AiConversationMessage
             {
@@ -277,7 +296,8 @@ public sealed class AiChatService(
                     ResolveAssistantContent(
                         grounding,
                         insight.Insight,
-                        structuredResponse.CompanionContent)),
+                        structuredResponse.CompanionContent,
+                        requestedOutputLanguage)),
                 IdempotencyKey = normalizedIdempotencyKey,
                 Confidence = grounding.Confidence,
                 CitationsJson = SerializeCitations(grounding.Citations),
@@ -347,6 +367,325 @@ public sealed class AiChatService(
             await dbContext.SaveChangesAsync(cancellationToken);
             throw;
         }
+    }
+
+    public async Task StreamMessageAsync(
+        Guid userId,
+        Guid sessionId,
+        AiChatMessageCreateRequest request,
+        string? idempotencyKey,
+        Func<AiChatStreamEventResponse, CancellationToken, Task> emitEvent,
+        CancellationToken cancellationToken)
+    {
+        var conversation = await dbContext.AiConversations
+            .FirstOrDefaultAsync(x => x.Id == sessionId && x.UserId == userId, cancellationToken)
+            ?? throw new InvalidOperationException("Chat session was not found.");
+
+        var normalizedMessage = NormalizeMessage(request.Message);
+        var sanitizedMessageForStorage = aiPrivacyGovernanceService.RedactForStorage(normalizedMessage);
+        var sanitizedMessageForProvider = aiPrivacyGovernanceService.RedactForProvider(normalizedMessage);
+        var normalizedIdempotencyKey = NormalizeOptionalIdempotencyKey(request.IdempotencyKey)
+                                     ?? NormalizeOptionalIdempotencyKey(idempotencyKey)
+                                     ?? $"chat-{Guid.NewGuid():N}";
+
+        AiConversationMessage? existingAssistantMessage;
+        var existingAssistantQuery = dbContext.AiConversationMessages
+            .AsNoTracking()
+            .Where(x => x.ConversationId == sessionId &&
+                        x.Role == AiConversationMessageRole.Assistant &&
+                        x.IdempotencyKey == normalizedIdempotencyKey);
+        if (dbContext.Database.IsSqlite())
+        {
+            existingAssistantMessage = (await existingAssistantQuery.ToListAsync(cancellationToken))
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .FirstOrDefault();
+        }
+        else
+        {
+            existingAssistantMessage = await existingAssistantQuery
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        if (existingAssistantMessage is not null)
+        {
+            AiConversationMessage? existingUserMessage;
+            var existingUserQuery = dbContext.AiConversationMessages
+                .AsNoTracking()
+                .Where(x => x.ConversationId == sessionId &&
+                            x.Role == AiConversationMessageRole.User &&
+                            x.IdempotencyKey == normalizedIdempotencyKey);
+            if (dbContext.Database.IsSqlite())
+            {
+                existingUserMessage = (await existingUserQuery.ToListAsync(cancellationToken))
+                    .OrderByDescending(x => x.CreatedAtUtc)
+                    .FirstOrDefault();
+            }
+            else
+            {
+                existingUserMessage = await existingUserQuery
+                    .OrderByDescending(x => x.CreatedAtUtc)
+                    .FirstOrDefaultAsync(cancellationToken);
+            }
+
+            var wallet = await creditBillingService.GetWalletAsync(userId, cancellationToken);
+            var messageCount = await dbContext.AiConversationMessages
+                .AsNoTracking()
+                .CountAsync(x => x.ConversationId == sessionId, cancellationToken);
+
+            await emitEvent(new AiChatStreamEventResponse
+            {
+                Type = "complete",
+                Session = MapSessionSummary(conversation, messageCount),
+                UserMessage = existingUserMessage is null
+                    ? BuildSyntheticUserReplayMessage(sanitizedMessageForStorage)
+                    : MapMessageResponse(existingUserMessage),
+                AssistantMessage = MapMessageResponse(existingAssistantMessage),
+                RemainingCredits = wallet.AvailableCredits
+            }, cancellationToken);
+            return;
+        }
+
+        var usageType = ResolveUsageType(request.UsageType, fallback: conversation.DefaultUsageType);
+        var now = DateTimeOffset.UtcNow;
+        var user = await ResolveUserAsync(userId, cancellationToken);
+        var userMessage = new AiConversationMessage
+        {
+            ConversationId = conversation.Id,
+            UserId = userId,
+            Role = AiConversationMessageRole.User,
+            Status = AiConversationMessageStatus.Succeeded,
+            UsageType = usageType,
+            Content = sanitizedMessageForStorage,
+            IdempotencyKey = normalizedIdempotencyKey,
+            Confidence = null,
+            CitationsJson = null,
+            BlocksJson = null,
+            ReservedCredits = 0m,
+            ChargedCredits = 0m,
+            RefundedCredits = 0m,
+            InputTokens = 0,
+            OutputTokens = 0,
+            CreatedAtUtc = now,
+            CompletedAtUtc = now,
+            ErrorCode = null,
+            ErrorMessage = null,
+            Conversation = conversation,
+            User = user
+        };
+
+        dbContext.AiConversationMessages.Add(userMessage);
+
+        AiConversationMessage? assistantMessage = null;
+        try
+        {
+            var requestedOutputLanguage = ResolveRequestedOutputLanguage(normalizedMessage);
+            var promptHistory = await LoadPromptHistoryAsync(
+                sessionId,
+                PromptHistoryMessageLimit,
+                cancellationToken);
+            var grounding = await BuildGroundingSnapshotAsync(normalizedMessage, cancellationToken);
+            var structuredResponse = await structuredResponseBuilder.BuildAsync(
+                sanitizedMessageForProvider,
+                grounding,
+                requestedOutputLanguage,
+                cancellationToken);
+
+            assistantMessage = new AiConversationMessage
+            {
+                ConversationId = conversation.Id,
+                UserId = userId,
+                Role = AiConversationMessageRole.Assistant,
+                Status = AiConversationMessageStatus.Pending,
+                UsageType = usageType,
+                Content = string.Empty,
+                IdempotencyKey = normalizedIdempotencyKey,
+                Confidence = grounding.Confidence,
+                CitationsJson = SerializeCitations(grounding.Citations),
+                BlocksJson = SerializeBlocks(structuredResponse.Blocks),
+                ReservedCredits = 0m,
+                ChargedCredits = 0m,
+                RefundedCredits = 0m,
+                InputTokens = 0,
+                OutputTokens = 0,
+                CreatedAtUtc = DateTimeOffset.UtcNow,
+                CompletedAtUtc = null,
+                ErrorCode = null,
+                ErrorMessage = null,
+                Conversation = conversation,
+                User = user
+            };
+
+            await emitEvent(new AiChatStreamEventResponse
+            {
+                Type = "start",
+                AssistantMessage = MapMessageResponse(assistantMessage)
+            }, cancellationToken);
+
+            var aiPrompt = BuildAiPrompt(
+                sanitizedMessageForProvider,
+                grounding,
+                promptHistory,
+                requestedOutputLanguage);
+            var aiIdempotencyKey = BuildAiInsightIdempotencyKey(conversation.Id, normalizedIdempotencyKey);
+            var insight = await aiInsightService.GenerateInsightStreamAsync(
+                userId,
+                aiPrompt,
+                aiIdempotencyKey,
+                MapUsageType(usageType),
+                async (delta, token) =>
+                {
+                    if (string.IsNullOrEmpty(delta) || assistantMessage is null)
+                    {
+                        return;
+                    }
+
+                    await emitEvent(new AiChatStreamEventResponse
+                    {
+                        Type = "delta",
+                        MessageId = assistantMessage.Id,
+                        Delta = delta
+                    }, token);
+                },
+                cancellationToken,
+                preferredOutputLanguageOverride: requestedOutputLanguage);
+
+            assistantMessage.Status = AiConversationMessageStatus.Succeeded;
+            assistantMessage.Content = aiPrivacyGovernanceService.RedactForStorage(
+                ResolveAssistantContent(
+                    grounding,
+                    insight.Insight,
+                    structuredResponse.CompanionContent,
+                    requestedOutputLanguage));
+            assistantMessage.ReservedCredits = insight.ReservedCredits;
+            assistantMessage.ChargedCredits = insight.ChargedCredits;
+            assistantMessage.RefundedCredits = insight.RefundedCredits;
+            assistantMessage.InputTokens = insight.InputTokens;
+            assistantMessage.OutputTokens = insight.OutputTokens;
+            assistantMessage.CreatedAtUtc = insight.CreatedAt;
+            assistantMessage.CompletedAtUtc = insight.CompletedAt;
+
+            conversation.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            conversation.LastMessageAtUtc = assistantMessage.CompletedAtUtc ?? conversation.UpdatedAtUtc;
+            dbContext.AiConversationMessages.Add(assistantMessage);
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            var messageCount = await dbContext.AiConversationMessages
+                .AsNoTracking()
+                .CountAsync(x => x.ConversationId == sessionId, cancellationToken);
+
+            await emitEvent(new AiChatStreamEventResponse
+            {
+                Type = "complete",
+                Session = MapSessionSummary(conversation, messageCount),
+                UserMessage = MapMessageResponse(userMessage),
+                AssistantMessage = MapMessageResponse(assistantMessage),
+                RemainingCredits = insight.RemainingCredits
+            }, cancellationToken);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException)
+        {
+            logger.LogWarning(exception, "Streaming AI chat request failed for session {SessionId}", sessionId);
+
+            var failedAssistantMessage = assistantMessage ?? new AiConversationMessage
+            {
+                ConversationId = conversation.Id,
+                UserId = userId,
+                Role = AiConversationMessageRole.Assistant,
+                UsageType = usageType,
+                IdempotencyKey = normalizedIdempotencyKey,
+                CreatedAtUtc = DateTimeOffset.UtcNow,
+                Conversation = conversation,
+                User = user
+            };
+
+            failedAssistantMessage.Status = AiConversationMessageStatus.Failed;
+            failedAssistantMessage.Content = string.Empty;
+            failedAssistantMessage.CitationsJson = null;
+            failedAssistantMessage.BlocksJson = null;
+            failedAssistantMessage.Confidence = null;
+            failedAssistantMessage.ReservedCredits = 0m;
+            failedAssistantMessage.ChargedCredits = 0m;
+            failedAssistantMessage.RefundedCredits = 0m;
+            failedAssistantMessage.InputTokens = 0;
+            failedAssistantMessage.OutputTokens = 0;
+            failedAssistantMessage.CompletedAtUtc = DateTimeOffset.UtcNow;
+            failedAssistantMessage.ErrorCode = "invalid_operation";
+            failedAssistantMessage.ErrorMessage = aiPrivacyGovernanceService.RedactForStorage(exception.Message);
+
+            conversation.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            conversation.LastMessageAtUtc = failedAssistantMessage.CompletedAtUtc;
+            if (assistantMessage is null)
+            {
+                dbContext.AiConversationMessages.Add(failedAssistantMessage);
+            }
+            else
+            {
+                dbContext.AiConversationMessages.Add(failedAssistantMessage);
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            await emitEvent(new AiChatStreamEventResponse
+            {
+                Type = "error",
+                MessageId = failedAssistantMessage.Id,
+                ErrorMessage = exception.Message
+            }, cancellationToken);
+        }
+    }
+
+    private async Task<List<ChatPromptHistoryEntry>> LoadPromptHistoryAsync(
+        Guid sessionId,
+        int take,
+        CancellationToken cancellationToken)
+    {
+        var normalizedTake = Math.Clamp(take, 0, 20);
+        if (normalizedTake == 0)
+        {
+            return [];
+        }
+
+        var baseQuery = dbContext.AiConversationMessages
+            .AsNoTracking()
+            .Where(x => x.ConversationId == sessionId &&
+                        x.Status == AiConversationMessageStatus.Succeeded &&
+                        (x.Role == AiConversationMessageRole.User || x.Role == AiConversationMessageRole.Assistant));
+
+        List<AiConversationMessage> messages;
+        if (dbContext.Database.IsSqlite())
+        {
+            messages = (await baseQuery.ToListAsync(cancellationToken))
+                .Where(HasPromptHistoryContent)
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Take(normalizedTake)
+                .OrderBy(x => x.CreatedAtUtc)
+                .ToList();
+        }
+        else
+        {
+            messages = await baseQuery
+                .Where(x => x.Content != string.Empty)
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Take(normalizedTake)
+                .ToListAsync(cancellationToken);
+            messages = messages
+                .Where(HasPromptHistoryContent)
+                .OrderBy(x => x.CreatedAtUtc)
+                .ToList();
+        }
+
+        return messages
+            .Select(x => new ChatPromptHistoryEntry(
+                x.Role == AiConversationMessageRole.Assistant ? "assistant" : "user",
+                aiPrivacyGovernanceService.RedactForProvider(x.Content.Trim())))
+            .Where(x => !string.IsNullOrWhiteSpace(x.Content))
+            .ToList();
+    }
+
+    private static bool HasPromptHistoryContent(AiConversationMessage message)
+    {
+        return !string.IsNullOrWhiteSpace(message.Content);
     }
 
     private async Task<AiChatGroundingResult> BuildGroundingSnapshotAsync(
@@ -489,13 +828,26 @@ public sealed class AiChatService(
             UnsupportedReason: null);
     }
 
-    private static string BuildAiPrompt(string message, AiChatGroundingResult grounding)
+    private static string BuildAiPrompt(
+        string message,
+        AiChatGroundingResult grounding,
+        IReadOnlyList<ChatPromptHistoryEntry> history,
+        string outputLanguage)
     {
         var missingDataSection = grounding.MissingData.Count == 0
             ? "None."
             : string.Join(Environment.NewLine, grounding.MissingData.Select(x => $"- {x}"));
+        var historySection = history.Count == 0
+            ? "None."
+            : string.Join(
+                Environment.NewLine,
+                history.Select(x => $"[{x.Role}]: {x.Content}"));
+        var outputLanguageLabel = MapOutputLanguageLabel(outputLanguage);
 
         return $"""
+               Conversation history (most recent last):
+               {historySection}
+
                User question:
                {message}
 
@@ -506,6 +858,11 @@ public sealed class AiChatService(
                {missingDataSection}
 
                Instructions:
+               - Detect the user's message language and mirror it in the response.
+               - Respond fully in {outputLanguageLabel}.
+               - If the user's message is in Sinhala script, respond in Sinhala.
+               - If the user's message is in Tamil script, respond in Tamil.
+               - If the user's message is in English or another unsupported language, respond in English.
                - Use only grounded bucket values for factual claims.
                - If data is insufficient, explicitly say what is missing.
                - Do not fabricate values, counts, percentages, dates, or entities.
@@ -516,11 +873,12 @@ public sealed class AiChatService(
     private static string ResolveAssistantContent(
         AiChatGroundingResult grounding,
         string modelContent,
-        string? companionContent)
+        string? companionContent,
+        string outputLanguage)
     {
         if (grounding.IsUnsupported)
         {
-            return BuildUnsupportedAssistantMessage(grounding);
+            return BuildUnsupportedAssistantMessage(grounding, outputLanguage);
         }
 
         // Prefer model output so cloud OpenAI responses remain visible in chat.
@@ -541,7 +899,7 @@ public sealed class AiChatService(
             builder.AppendLine();
         }
 
-        builder.AppendLine("Missing data:");
+        builder.AppendLine(Localize("Missing data:", "අස්ථානගත දත්ත:", "பற்றாக்குறை தரவு:", outputLanguage));
         foreach (var missing in grounding.MissingData)
         {
             builder.AppendLine($"- {missing}");
@@ -550,24 +908,42 @@ public sealed class AiChatService(
         return builder.ToString().Trim();
     }
 
-    private static string BuildUnsupportedAssistantMessage(AiChatGroundingResult grounding)
+    private static string BuildUnsupportedAssistantMessage(
+        AiChatGroundingResult grounding,
+        string outputLanguage)
     {
         var headline = grounding.UnsupportedReason switch
         {
             AiChatUnsupportedReason.CustomersCategoryNotInV1 =>
-                "Customer-related questions are not supported in POS chatbot V1.",
+                Localize(
+                    "Customer-related questions are not supported in POS chatbot V1.",
+                    "පාරිභෝගික සම්බන්ධ ප්‍රශ්න POS chatbot V1 තුළ සහය නොදක්වයි.",
+                    "வாடிக்கையாளர் தொடர்பான கேள்விகள் POS chatbot V1 இல் ஆதரிக்கப்படவில்லை.",
+                    outputLanguage),
             AiChatUnsupportedReason.AlertsAndExceptionsCategoryNotInV1 =>
-                "Alerts and exception questions are not supported in POS chatbot V1.",
+                Localize(
+                    "Alerts and exception questions are not supported in POS chatbot V1.",
+                    "අවවාද සහ විශේෂත්ව ප්‍රශ්න POS chatbot V1 තුළ සහය නොදක්වයි.",
+                    "அலர்ட்கள் மற்றும் விதிவிலக்கு கேள்விகள் POS chatbot V1 இல் ஆதரிக்கப்படவில்லை.",
+                    outputLanguage),
             _ =>
-                "This request is outside POS chatbot V1 scope."
+                Localize(
+                    "This request is outside POS chatbot V1 scope.",
+                    "මෙම ඉල්ලීම POS chatbot V1 සීමාවෙන් පිටත වේ.",
+                    "இந்த கோரிக்கை POS chatbot V1 வரம்பிற்கு வெளியே உள்ளது.",
+                    outputLanguage)
         };
 
         var builder = new StringBuilder();
         builder.AppendLine(headline);
-        builder.AppendLine("Supported V1 categories: Stock, Sales, Purchasing, Pricing, Cashier Operations, Reports.");
+        builder.AppendLine(Localize(
+            "Supported V1 categories: Stock, Sales, Purchasing, Pricing, Cashier Operations, Reports.",
+            "V1 තුළ සහය දක්වන කාණ්ඩ: තොග, විකුණුම්, මිලදී ගැනීම්, මිල/ලාභ, කැෂියර් මෙහෙයුම්, වාර්තා.",
+            "V1 ஆதரிக்கும் பிரிவுகள்: சரக்கு, விற்பனை, கொள்முதல், விலை/லாபம், காசாளர் செயல்பாடுகள், அறிக்கைகள்.",
+            outputLanguage));
         if (grounding.MissingData.Count > 0)
         {
-            builder.AppendLine("Missing data:");
+            builder.AppendLine(Localize("Missing data:", "අස්ථානගත දත්ත:", "பற்றாக்குறை தரவு:", outputLanguage));
             foreach (var item in grounding.MissingData)
             {
                 builder.AppendLine($"- {item}");
@@ -618,6 +994,60 @@ public sealed class AiChatService(
         }
 
         return normalized;
+    }
+
+    private static string ResolveRequestedOutputLanguage(string message)
+    {
+        var tamilChars = CountCharsInRange(message, '\u0B80', '\u0BFF');
+        var sinhalaChars = CountCharsInRange(message, '\u0D80', '\u0DFF');
+
+        if (sinhalaChars == 0 && tamilChars == 0)
+        {
+            return OutputLanguageEnglish;
+        }
+
+        return sinhalaChars >= tamilChars
+            ? OutputLanguageSinhala
+            : OutputLanguageTamil;
+    }
+
+    private static int CountCharsInRange(string value, char fromInclusive, char toInclusive)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return 0;
+        }
+
+        var count = 0;
+        foreach (var ch in value)
+        {
+            if (ch >= fromInclusive && ch <= toInclusive)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private static string MapOutputLanguageLabel(string outputLanguage)
+    {
+        return outputLanguage switch
+        {
+            OutputLanguageSinhala => "Sinhala",
+            OutputLanguageTamil => "Tamil",
+            _ => "English"
+        };
+    }
+
+    private static string Localize(string english, string sinhala, string tamil, string outputLanguage)
+    {
+        return outputLanguage switch
+        {
+            OutputLanguageSinhala => sinhala,
+            OutputLanguageTamil => tamil,
+            _ => english
+        };
     }
 
     private static string? NormalizeOptionalIdempotencyKey(string? value)

@@ -97,6 +97,74 @@ public static class AiChatEndpoints
         .WithName("PostAiChatMessage")
         .WithOpenApi();
 
+        group.MapPost("/sessions/{id:guid}/messages/stream", async (
+            Guid id,
+            AiChatMessageCreateRequest request,
+            HttpContext httpContext,
+            ClaimsPrincipal user,
+            IOptions<AiInsightOptions> aiInsightOptions,
+            AiCreditCloudRelayService cloudRelayService,
+            AiChatService chatService,
+            CancellationToken cancellationToken) =>
+        {
+            var userId = ResolveUserId(user);
+            if (!userId.HasValue)
+            {
+                return Results.Unauthorized();
+            }
+
+            if (!IsAiInsightsEnabledForUser(aiInsightOptions.Value, user))
+            {
+                return Results.Forbid();
+            }
+
+            try
+            {
+                if (cloudRelayService.IsEnabled)
+                {
+                    await cloudRelayService.ProxyChatMessageStreamAsync(
+                        id,
+                        request,
+                        httpContext,
+                        httpContext.Response,
+                        cancellationToken);
+                }
+                else
+                {
+                    AiChatSseWriter.Configure(httpContext.Response);
+                    await chatService.StreamMessageAsync(
+                        userId.Value,
+                        id,
+                        request,
+                        ResolveOptionalHeaderIdempotencyKey(httpContext),
+                        async (payload, token) => await AiChatSseWriter.WriteEventAsync(httpContext.Response, payload, token),
+                        cancellationToken);
+                }
+
+                return Results.Empty;
+            }
+            catch (AiRelayException exception)
+            {
+                if (httpContext.Response.HasStarted)
+                {
+                    return Results.Empty;
+                }
+
+                return ToAiErrorResult(exception);
+            }
+            catch (InvalidOperationException exception)
+            {
+                if (httpContext.Response.HasStarted)
+                {
+                    return Results.Empty;
+                }
+
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .WithName("PostAiChatMessageStream")
+        .WithOpenApi();
+
         group.MapGet("/sessions/{id:guid}", async (
             Guid id,
             int? take,

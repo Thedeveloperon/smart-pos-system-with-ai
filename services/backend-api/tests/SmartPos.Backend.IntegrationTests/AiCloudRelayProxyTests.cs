@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Json;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -206,6 +207,63 @@ public sealed class AiCloudRelayProxyTests : IDisposable
         Assert.Equal("AI_CLOUD_RELAY_CONTEXT_RESOLUTION_FAILED", payload["error"]?["code"]?.GetValue<string>());
         Assert.Equal("Linked cloud account session expired. Re-link the cloud account and try again.", payload["error"]?["message"]?.GetValue<string>());
         Assert.Empty(relayHandler.CapturedRequests);
+    }
+
+    [Fact]
+    public async Task RelayEnabled_ChatMessageStream_ShouldProxySseFromCloud()
+    {
+        relayHandler.Enqueue(_ =>
+        {
+            var content = new StringContent(
+                """
+                data: {"type":"start","assistant_message":{"message_id":"assistant-1","role":"assistant","status":"pending","usage_type":"quick_insights","content":"","citations":[],"blocks":[],"input_tokens":0,"output_tokens":0,"reserved_credits":0,"charged_credits":0,"refunded_credits":0,"created_at":"2026-04-26T10:00:00Z","completed_at":null,"error_message":null}}
+
+                data: {"type":"delta","message_id":"assistant-1","delta":"Hello"}
+
+                data: {"type":"complete","session":{"session_id":"11111111-1111-1111-1111-111111111111","title":"Relay stream","default_usage_type":"quick_insights","message_count":2,"created_at":"2026-04-26T10:00:00Z","updated_at":"2026-04-26T10:00:02Z","last_message_at":"2026-04-26T10:00:02Z"},"user_message":{"message_id":"user-1","role":"user","status":"succeeded","usage_type":"quick_insights","content":"Hello","citations":[],"blocks":[],"input_tokens":0,"output_tokens":0,"reserved_credits":0,"charged_credits":0,"refunded_credits":0,"created_at":"2026-04-26T10:00:00Z","completed_at":null,"error_message":null},"assistant_message":{"message_id":"assistant-1","role":"assistant","status":"succeeded","usage_type":"quick_insights","content":"Hello","citations":[],"blocks":[],"input_tokens":0,"output_tokens":0,"reserved_credits":0,"charged_credits":1.25,"refunded_credits":0,"created_at":"2026-04-26T10:00:00Z","completed_at":"2026-04-26T10:00:02Z","error_message":null},"remaining_credits":10.5}
+
+                """,
+                Encoding.UTF8);
+            content.Headers.ContentType = new MediaTypeHeaderValue("text/event-stream");
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = content
+            };
+        });
+        await SeedLinkedCloudAccountAsync();
+
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var sessionId = Guid.NewGuid();
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/ai/chat/sessions/{sessionId}/messages/stream")
+        {
+            Content = JsonContent.Create(new
+            {
+                message = "Hello",
+                usage_type = "quick_insights",
+                idempotency_key = $"it-relay-stream-{Guid.NewGuid():N}"
+            })
+        };
+        request.Headers.Add("X-License-Token", "local-offline-license-token-it");
+
+        var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+        response.EnsureSuccessStatusCode();
+
+        Assert.Equal("text/event-stream", response.Content.Headers.ContentType?.MediaType);
+
+        var streamBody = await response.Content.ReadAsStringAsync();
+        Assert.Contains("\"type\":\"start\"", streamBody, StringComparison.Ordinal);
+        Assert.Contains("\"type\":\"delta\"", streamBody, StringComparison.Ordinal);
+        Assert.Contains("\"type\":\"complete\"", streamBody, StringComparison.Ordinal);
+
+        Assert.Single(relayHandler.CapturedRequests);
+        var relayRequest = relayHandler.CapturedRequests[0];
+        Assert.EndsWith(
+            $"/cloud/v1/ai/chat/sessions/{sessionId:D}/messages/stream",
+            relayRequest.PathAndQuery,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

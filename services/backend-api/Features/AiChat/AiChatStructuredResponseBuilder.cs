@@ -22,6 +22,7 @@ public sealed class AiChatStructuredResponseBuilder(
     public async Task<AiChatStructuredResponseBuildResult> BuildAsync(
         string message,
         AiChatGroundingResult grounding,
+        string? outputLanguageOverride,
         CancellationToken cancellationToken)
     {
         if (grounding.IsUnsupported)
@@ -32,7 +33,8 @@ public sealed class AiChatStructuredResponseBuilder(
         var classification = intentClassifier.Classify(message);
         var entities = await entityResolver.ResolveAsync(message, cancellationToken);
         var normalized = entities.NormalizedMessage;
-        var outputLanguage = await ResolveOutputLanguageAsync(cancellationToken);
+        var outputLanguage = ResolveOutputLanguage(outputLanguageOverride)
+                             ?? await ResolveOutputLanguageAsync(cancellationToken);
 
         if (ShouldRenderProductStockSnapshot(normalized, classification.Intents, entities))
         {
@@ -87,15 +89,18 @@ public sealed class AiChatStructuredResponseBuilder(
             ? Localize(
                 "No low-stock items found at or below the current threshold.",
                 "වත්මන් සීමාවට සමාන හෝ ඊට අඩු තොග සහිත භාණ්ඩ හමු නොවීය.",
+                "தற்போதைய வரம்பில் அல்லது அதற்கு கீழே குறைந்த சரக்கு பொருட்கள் எதுவும் இல்லை.",
                 outputLanguage)
             : fallbackMode
                 ? Localize(
                     "No rows matched threshold 10. Showing nearest stock rows for quick review.",
                     "10 සීමාවට ගැළපෙන පේළි නොමැත. ඉක්මන් සමාලෝචනය සඳහා ආසන්නතම තොග පේළි පෙන්වයි.",
+                    "10 வரம்புக்கு பொருந்தும் வரிசைகள் இல்லை. விரைவான மதிப்பீட்டிற்காக அருகிலுள்ள சரக்கு வரிசைகள் காட்டப்படுகின்றன.",
                     outputLanguage)
                 : Localize(
                     $"{attentionCount} item(s) need attention.",
                     $"භාණ්ඩ {attentionCount}ක් සඳහා අවධානය අවශ්‍යයි.",
+                    $"{attentionCount} பொருட்களுக்கு கவனம் தேவை.",
                     outputLanguage);
 
         var block = new AiChatMessageBlockResponse
@@ -103,7 +108,11 @@ public sealed class AiChatStructuredResponseBuilder(
             Type = "stock_table",
             StockTable = new AiChatStockTableBlockResponse
             {
-                Title = Localize("Stock & Inventory Update", "තොග සහ ඉන්වෙන්ටරි යාවත්කාලීන කිරීම", outputLanguage),
+                Title = Localize(
+                    "Stock & Inventory Update",
+                    "තොග සහ ඉන්වෙන්ටරි යාවත්කාලීන කිරීම",
+                    "சரக்கு மற்றும் இன்வெண்டரி புதுப்பிப்பு",
+                    outputLanguage),
                 Rows = rows,
                 FooterNote = footer
             }
@@ -115,10 +124,12 @@ public sealed class AiChatStructuredResponseBuilder(
                 ? Localize(
                     "All tracked items are currently above the low-stock threshold.",
                     "නිරීක්ෂණය වන සියලු භාණ්ඩ මේ මොහොතේ අඩු තොග සීමාවට ඉහළින් ඇත.",
+                    "கண்காணிக்கப்பட்ட அனைத்து பொருட்களும் தற்போது குறைந்த சரக்கு வரம்பிற்கு மேலாக உள்ளன.",
                     outputLanguage)
                 : Localize(
                     "Structured stock snapshot generated from the latest low-stock report.",
                     "නවතම අඩු තොග වාර්තාවෙන් ව්‍යුහගත තොග සංක්ෂිප්තයක් නිර්මාණය කර ඇත.",
+                    "சமீபத்திய குறைந்த சரக்கு அறிக்கையிலிருந்து கட்டமைக்கப்பட்ட சரக்கு சுருக்கம் உருவாக்கப்பட்டது.",
                     outputLanguage));
     }
 
@@ -146,16 +157,27 @@ public sealed class AiChatStructuredResponseBuilder(
             Type = "stock_table",
             StockTable = new AiChatStockTableBlockResponse
             {
-                Title = "Product Stock Snapshot",
+                Title = Localize(
+                    "Product Stock Snapshot",
+                    "භාණ්ඩ තොග සංක්ෂිප්තය",
+                    "பொருள் சரக்கு சுருக்கம்",
+                    outputLanguage),
                 Rows = [row],
-                FooterNote = $"Stock value: {stockItem.StockValue:0.##}"
+                FooterNote = Localize(
+                    $"Stock value: {stockItem.StockValue:0.##}",
+                    $"තොග වටිනාකම: {stockItem.StockValue:0.##}",
+                    $"சரக்கு மதிப்பு: {stockItem.StockValue:0.##}",
+                    outputLanguage)
             }
         };
 
         return new AiChatStructuredResponseBuildResult(
             Blocks: [block],
-            CompanionContent:
-            $"{stockItem.ProductName} currently has {stockItem.QuantityOnHand:0.###} units on hand (reorder level {stockItem.ReorderLevel:0.###}).");
+            CompanionContent: Localize(
+                $"{stockItem.ProductName} currently has {stockItem.QuantityOnHand:0.###} units on hand (reorder level {stockItem.ReorderLevel:0.###}).",
+                $"{stockItem.ProductName} හි දැනට {stockItem.QuantityOnHand:0.###} ඒකක ඇත (නැවත ඇණවුම් මට්ටම {stockItem.ReorderLevel:0.###}).",
+                $"{stockItem.ProductName} தற்போது {stockItem.QuantityOnHand:0.###} அலகுகள் கையிருப்பில் உள்ளது (மறு ஆர்டர் நிலை {stockItem.ReorderLevel:0.###}).",
+                outputLanguage));
     }
 
     private async Task<AiChatStructuredResponseBuildResult> BuildSalesKpiAsync(
@@ -186,7 +208,7 @@ public sealed class AiChatStructuredResponseBuilder(
             Type = "sales_kpi",
             SalesKpi = new AiChatSalesKpiBlockResponse
             {
-                Title = Localize("Today's Sales Summary", "අද විකුණුම් සාරාංශය", outputLanguage),
+                Title = Localize("Today's Sales Summary", "අද විකුණුම් සාරාංශය", "இன்றைய விற்பனை சுருக்கம்", outputLanguage),
                 FromDate = daily.FromDate,
                 ToDate = daily.ToDate,
                 Revenue = daily.NetSalesTotal,
@@ -197,6 +219,7 @@ public sealed class AiChatStructuredResponseBuilder(
                     : Localize(
                         $"{topSeller.ProductName} ({topSeller.NetQuantity:0.###} units)",
                         $"{topSeller.ProductName} ({topSeller.NetQuantity:0.###} ඒකක)",
+                        $"{topSeller.ProductName} ({topSeller.NetQuantity:0.###} அலகுகள்)",
                         outputLanguage),
                 TrendPercent = comparison.DeltaPercent,
                 TrendLabel = trendLabel
@@ -209,6 +232,7 @@ public sealed class AiChatStructuredResponseBuilder(
             Localize(
                 $"Sales snapshot for {daily.FromDate:yyyy-MM-dd} to {daily.ToDate:yyyy-MM-dd}.",
                 $"{daily.FromDate:yyyy-MM-dd} සිට {daily.ToDate:yyyy-MM-dd} දක්වා විකුණුම් සංක්ෂිප්තය.",
+                $"{daily.FromDate:yyyy-MM-dd} முதல் {daily.ToDate:yyyy-MM-dd} வரை விற்பனை சுருக்கம்.",
                 outputLanguage));
     }
 
@@ -230,22 +254,27 @@ public sealed class AiChatStructuredResponseBuilder(
             Localize(
                 $"Net sales: {daily.NetSalesTotal:0.##} from {daily.FromDate:yyyy-MM-dd} to {daily.ToDate:yyyy-MM-dd}.",
                 $"ශුද්ධ විකුණුම්: {daily.FromDate:yyyy-MM-dd} සිට {daily.ToDate:yyyy-MM-dd} දක්වා {daily.NetSalesTotal:0.##}.",
+                $"நிகர விற்பனை: {daily.FromDate:yyyy-MM-dd} முதல் {daily.ToDate:yyyy-MM-dd} வரை {daily.NetSalesTotal:0.##}.",
                 outputLanguage),
             Localize(
                 $"Transactions: {daily.SalesCount} (refunds: {daily.RefundCount}).",
                 $"ගනුදෙනු: {daily.SalesCount} (ආපසු ගෙවීම්: {daily.RefundCount}).",
+                $"பரிவர்த்தனைகள்: {daily.SalesCount} (பணத்தீர்வுகள்: {daily.RefundCount}).",
                 outputLanguage),
             Localize(
                 $"Low-stock items (threshold 10): {lowStock.Items.Count}.",
                 $"අඩු තොග භාණ්ඩ (සීමාව 10): {lowStock.Items.Count}.",
+                $"குறைந்த சரக்கு பொருட்கள் (வரம்பு 10): {lowStock.Items.Count}.",
                 outputLanguage),
             Localize(
                 $"Period trend vs previous window: {comparison.DeltaPercent:0.##}%.",
                 $"පෙර කාලය සමඟ සැසඳූ ප්‍රවණතාව: {comparison.DeltaPercent:0.##}%.",
+                $"முந்தைய காலப்பகுதியுடன் ஒப்பிடும் போக்கு: {comparison.DeltaPercent:0.##}%.",
                 outputLanguage),
             Localize(
                 $"Next-month forecast: {forecast.ForecastNextMonthNetSales:0.##} ({forecast.Confidence} confidence).",
                 $"ඊළඟ මාස අනාවැකිය: {forecast.ForecastNextMonthNetSales:0.##} ({forecast.Confidence} විශ්වාස මට්ටම).",
+                $"அடுத்த மாத முன்னறிவு: {forecast.ForecastNextMonthNetSales:0.##} ({forecast.Confidence} நம்பிக்கை நிலை).",
                 outputLanguage)
         };
 
@@ -254,7 +283,7 @@ public sealed class AiChatStructuredResponseBuilder(
             Type = "summary_list",
             SummaryList = new AiChatSummaryListBlockResponse
             {
-                Title = Localize("Business Summary", "ව්‍යාපාර සාරාංශය", outputLanguage),
+                Title = Localize("Business Summary", "ව්‍යාපාර සාරාංශය", "வணிக சுருக்கம்", outputLanguage),
                 Items = items
             }
         };
@@ -264,6 +293,7 @@ public sealed class AiChatStructuredResponseBuilder(
             CompanionContent: Localize(
                 "Structured business summary generated from current report buckets.",
                 "වත්මන් වාර්තා දත්ත මත ව්‍යුහගත ව්‍යාපාර සාරාංශයක් නිර්මාණය කර ඇත.",
+                "தற்போதைய அறிக்கை தரவுகளிலிருந்து கட்டமைக்கப்பட்ட வணிக சுருக்கம் உருவாக்கப்பட்டது.",
                 outputLanguage));
     }
 
@@ -426,11 +456,22 @@ public sealed class AiChatStructuredResponseBuilder(
         };
     }
 
-    private static string Localize(string english, string sinhala, string outputLanguage)
+    private static string? ResolveOutputLanguage(string? outputLanguageOverride)
+    {
+        if (string.IsNullOrWhiteSpace(outputLanguageOverride))
+        {
+            return null;
+        }
+
+        return NormalizeOutputLanguage(outputLanguageOverride);
+    }
+
+    private static string Localize(string english, string sinhala, string tamil, string outputLanguage)
     {
         return outputLanguage switch
         {
             OutputLanguageSinhala => sinhala,
+            OutputLanguageTamil => tamil,
             _ => english
         };
     }

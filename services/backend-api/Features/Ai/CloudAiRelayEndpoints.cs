@@ -207,6 +207,51 @@ public static class CloudAiRelayEndpoints
         .WithName("CloudAiRelayPostChatMessage")
         .WithOpenApi();
 
+        group.MapPost("/chat/sessions/{id:guid}/messages/stream", async (
+            Guid id,
+            AiChatMessageCreateRequest request,
+            HttpContext httpContext,
+            LicenseService licenseService,
+            SmartPosDbContext dbContext,
+            AiChatService chatService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var context = await ResolveRelayContextAsync(httpContext, licenseService, dbContext, cancellationToken);
+                AiChatSseWriter.Configure(httpContext.Response);
+                await chatService.StreamMessageAsync(
+                    context.ActorUserId,
+                    id,
+                    request,
+                    ResolveOptionalHeaderIdempotencyKey(httpContext),
+                    async (payload, token) => await AiChatSseWriter.WriteEventAsync(httpContext.Response, payload, token),
+                    cancellationToken);
+                return Results.Empty;
+            }
+            catch (LicenseException exception)
+            {
+                if (httpContext.Response.HasStarted)
+                {
+                    return Results.Empty;
+                }
+
+                return ToErrorResult(exception);
+            }
+            catch (InvalidOperationException exception)
+            {
+                if (httpContext.Response.HasStarted)
+                {
+                    return Results.Empty;
+                }
+
+                return ToValidationErrorResult(exception);
+            }
+        })
+        .AllowAnonymous()
+        .WithName("CloudAiRelayPostChatMessageStream")
+        .WithOpenApi();
+
         group.MapGet("/chat/sessions/{id:guid}", async (
             Guid id,
             int? take,

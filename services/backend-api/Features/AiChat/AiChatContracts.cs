@@ -53,6 +53,33 @@ public sealed class AiChatPostMessageResponse
     public decimal RemainingCredits { get; set; }
 }
 
+public sealed class AiChatStreamEventResponse
+{
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = string.Empty;
+
+    [JsonPropertyName("message_id")]
+    public Guid? MessageId { get; set; }
+
+    [JsonPropertyName("delta")]
+    public string? Delta { get; set; }
+
+    [JsonPropertyName("session")]
+    public AiChatSessionSummaryResponse? Session { get; set; }
+
+    [JsonPropertyName("user_message")]
+    public AiChatMessageResponse? UserMessage { get; set; }
+
+    [JsonPropertyName("assistant_message")]
+    public AiChatMessageResponse? AssistantMessage { get; set; }
+
+    [JsonPropertyName("remaining_credits")]
+    public decimal? RemainingCredits { get; set; }
+
+    [JsonPropertyName("error_message")]
+    public string? ErrorMessage { get; set; }
+}
+
 public sealed class AiChatSessionSummaryResponse
 {
     [JsonPropertyName("session_id")]

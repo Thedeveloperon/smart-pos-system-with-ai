@@ -301,19 +301,31 @@ function renderStructuredBlock(
   );
 }
 
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function formatInline(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*(.+?)\*/g, "<em>$1</em>");
+  const codeTokens: string[] = [];
+  let formatted = escapeHtml(text).replace(/`([^`]+)`/g, (_, code: string) => {
+    const token = `__INLINE_CODE_${codeTokens.length}__`;
+    codeTokens.push(
+      `<code class="rounded bg-foreground/10 px-1 py-0.5 font-mono text-[0.95em] text-foreground">${code}</code>`,
+    );
+    return token;
+  });
+
+  formatted = formatted.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/\*(.+?)\*/g, "<em>$1</em>");
+
+  return formatted.replace(/__INLINE_CODE_(\d+)__/g, (_, index: string) => codeTokens[Number(index)] ?? "");
 }
 
 function SimpleMarkdown({ content }: { content: string }) {
   const lines = useMemo(() => content.split("\n"), [content]);
   const elements: ReactNode[] = [];
   let tableRows: string[][] = [];
+  let codeBlockLines: string[] | null = null;
+  let codeBlockLanguage = "";
 
   const flushTable = () => {
     if (tableRows.length < 2) {
@@ -353,8 +365,50 @@ function SimpleMarkdown({ content }: { content: string }) {
     tableRows = [];
   };
 
+  const flushCodeBlock = () => {
+    if (!codeBlockLines) {
+      return;
+    }
+
+    const blockContent = codeBlockLines.join("\n");
+    elements.push(
+      <div key={`code-${elements.length}`} className="my-2 overflow-x-auto rounded-lg border border-border/70 bg-background/90">
+        {codeBlockLanguage ? (
+          <div className="border-b border-border/70 px-3 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            {codeBlockLanguage}
+          </div>
+        ) : null}
+        <pre className="p-3 text-[11px] leading-relaxed text-foreground">
+          <code>{blockContent}</code>
+        </pre>
+      </div>,
+    );
+    codeBlockLines = null;
+    codeBlockLanguage = "";
+  };
+
   lines.forEach((line, index) => {
     const trimmed = line.trim();
+
+    if (trimmed.startsWith("```")) {
+      if (tableRows.length > 0) {
+        flushTable();
+      }
+
+      if (codeBlockLines) {
+        flushCodeBlock();
+      } else {
+        codeBlockLines = [];
+        codeBlockLanguage = trimmed.slice(3).trim();
+      }
+      return;
+    }
+
+    if (codeBlockLines) {
+      codeBlockLines.push(line);
+      return;
+    }
+
     const isTableLine = trimmed.startsWith("|") && trimmed.endsWith("|");
 
     if (isTableLine) {
@@ -368,6 +422,27 @@ function SimpleMarkdown({ content }: { content: string }) {
 
     if (!trimmed) {
       elements.push(<div key={`spacer-${index}`} className="h-2" />);
+      return;
+    }
+
+    const headingMatch = trimmed.match(/^(#{1,3})\s+(.+)$/);
+    if (headingMatch) {
+      const level = headingMatch[1].length;
+      const headingText = headingMatch[2];
+      const headingClassName =
+        level === 1
+          ? "text-base font-semibold"
+          : level === 2
+            ? "text-sm font-semibold"
+            : "text-xs font-semibold uppercase tracking-wide text-muted-foreground";
+
+      elements.push(
+        <p
+          key={`heading-${index}`}
+          className={headingClassName}
+          dangerouslySetInnerHTML={{ __html: formatInline(headingText) }}
+        />,
+      );
       return;
     }
 
@@ -395,6 +470,10 @@ function SimpleMarkdown({ content }: { content: string }) {
 
   if (tableRows.length > 0) {
     flushTable();
+  }
+
+  if (codeBlockLines) {
+    flushCodeBlock();
   }
 
   return <div className="space-y-0.5 text-xs leading-relaxed">{elements}</div>;
@@ -454,6 +533,7 @@ export function ChatConversation({
           {messages.map((message) => {
             const bodyText = (message.content || message.error_message || "").trim();
             const isAssistant = message.role === "assistant";
+            const isPending = message.status === "pending";
             const hasBlocks = isAssistant && Array.isArray(message.blocks) && message.blocks.length > 0;
             const hasBodyText = bodyText.length > 0;
 
@@ -465,6 +545,7 @@ export function ChatConversation({
                     isAssistant
                       ? "rounded-bl-sm border border-primary/25 bg-primary/5 text-foreground"
                       : "rounded-br-sm bg-primary text-primary-foreground",
+                    isPending ? "opacity-90" : null,
                   )}
                 >
                   <div className="mb-1 flex items-center gap-2 text-[11px]">
@@ -474,6 +555,7 @@ export function ChatConversation({
                     <span className={cn(isAssistant ? "text-muted-foreground" : "text-primary-foreground/80")}>
                       {new Date(message.created_at).toLocaleString()}
                     </span>
+                    {isPending ? <Loader2 className={cn("h-3 w-3 animate-spin", isAssistant ? "text-muted-foreground" : "text-primary-foreground/80")} /> : null}
                     {message.charged_credits > 0 ? (
                       <span className={cn("ml-auto", isAssistant ? "text-muted-foreground" : "text-primary-foreground/85")}>
                         {message.charged_credits.toFixed(2)} {uiText.creditsSuffix}

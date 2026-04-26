@@ -166,6 +166,26 @@ public sealed class AiCreditCloudRelayService(
             cancellationToken);
     }
 
+    public async Task ProxyChatMessageStreamAsync(
+        Guid sessionId,
+        AiChatMessageCreateRequest request,
+        HttpContext sourceContext,
+        HttpResponse destinationResponse,
+        CancellationToken cancellationToken)
+    {
+        var authContext = await ResolveRelayAuthContextAsync(sourceContext, cancellationToken);
+
+        await RelayStreamAsync(
+            HttpMethod.Post,
+            $"cloud/v1/ai/chat/sessions/{sessionId:D}/messages/stream",
+            request,
+            sourceContext,
+            destinationResponse,
+            endpointName: "chat_post_message_stream",
+            authContext,
+            cancellationToken);
+    }
+
     public async Task<AiChatSessionDetailResponse> GetChatSessionAsync(
         Guid sessionId,
         int take,
@@ -329,6 +349,74 @@ public sealed class AiCreditCloudRelayService(
                 return (TResponse)(object)cachedWallet;
             }
 
+            throw CreateCloudUnreachableException();
+        }
+    }
+
+    private async Task RelayStreamAsync(
+        HttpMethod method,
+        string relativePath,
+        object? body,
+        HttpContext sourceContext,
+        HttpResponse destinationResponse,
+        string endpointName,
+        RelayAuthContext authContext,
+        CancellationToken cancellationToken)
+    {
+        var options = optionsAccessor.Value;
+        using var request = BuildCloudRequest(
+            method,
+            relativePath,
+            body,
+            sourceContext.Request,
+            authContext.LicenseToken,
+            authContext.CloudAuthToken,
+            options.CloudRelayBaseUrl);
+        var httpClient = httpClientFactory.CreateClient(CloudRelayClientName);
+        using var timeoutCts = BuildTimeoutCancellationTokenSource(options.CloudRelayTimeoutSeconds, cancellationToken);
+
+        try
+        {
+            using var cloudResponse = await httpClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                timeoutCts.Token);
+
+            if (!cloudResponse.IsSuccessStatusCode)
+            {
+                var responseBody = cloudResponse.Content is null
+                    ? string.Empty
+                    : await cloudResponse.Content.ReadAsStringAsync(timeoutCts.Token);
+
+                relayMetrics.RecordRelayFailure(endpointName, $"http_{(int)cloudResponse.StatusCode}");
+
+                if ((int)cloudResponse.StatusCode >= StatusCodes.Status500InternalServerError)
+                {
+                    throw CreateCloudUnreachableException();
+                }
+
+                throw ToCloudErrorException(cloudResponse.StatusCode, responseBody);
+            }
+
+            destinationResponse.StatusCode = (int)cloudResponse.StatusCode;
+            destinationResponse.ContentType = cloudResponse.Content.Headers.ContentType?.ToString() ?? "text/event-stream";
+            destinationResponse.Headers.CacheControl = "no-cache";
+            destinationResponse.Headers.Append("X-Accel-Buffering", "no");
+
+            await using var upstreamStream = await cloudResponse.Content.ReadAsStreamAsync(timeoutCts.Token);
+            await upstreamStream.CopyToAsync(destinationResponse.Body, timeoutCts.Token);
+            await destinationResponse.Body.FlushAsync(timeoutCts.Token);
+
+            relayMetrics.RecordRelaySuccess(endpointName);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            relayMetrics.RecordRelayFailure(endpointName, "timeout");
+            throw CreateCloudUnreachableException();
+        }
+        catch (HttpRequestException)
+        {
+            relayMetrics.RecordRelayFailure(endpointName, "network_error");
             throw CreateCloudUnreachableException();
         }
     }

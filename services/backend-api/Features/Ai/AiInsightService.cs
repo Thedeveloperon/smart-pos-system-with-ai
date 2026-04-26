@@ -207,7 +207,8 @@ public sealed class AiInsightService(
         string prompt,
         string idempotencyKey,
         string? usageType,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? preferredOutputLanguageOverride = null)
     {
         var aiOptions = options.Value;
         if (!aiOptions.Enabled)
@@ -312,7 +313,8 @@ public sealed class AiInsightService(
             await dbContext.SaveChangesAsync(cancellationToken);
 
             var posFacts = await BuildPosInsightFactsAsync(requestRecord.User, cancellationToken);
-            var preferredOutputLanguage = await ResolvePreferredOutputLanguageAsync(cancellationToken);
+            var preferredOutputLanguage = ResolveOutputLanguageOverride(preferredOutputLanguageOverride)
+                                          ?? await ResolvePreferredOutputLanguageAsync(cancellationToken);
             var preferredOutputLanguageLabel = MapOutputLanguageLabel(preferredOutputLanguage);
             var groundedPromptPayload = aiPrivacyGovernanceService.FilterProviderPayload(
                 new Dictionary<string, string?>
@@ -337,7 +339,8 @@ public sealed class AiInsightService(
                     model,
                     sanitizedPromptForProvider,
                     groundedPrompt,
-                    posFacts);
+                    posFacts,
+                    preferredOutputLanguage);
             }
             else
             {
@@ -349,6 +352,7 @@ public sealed class AiInsightService(
                     posFacts,
                     aiOptions,
                     usagePolicy.MaxOutputTokens,
+                    preferredOutputLanguage,
                     preferredOutputLanguageLabel,
                     cancellationToken);
             }
@@ -358,7 +362,8 @@ public sealed class AiInsightService(
             var normalizedInsight = NormalizeInsightText(
                 providerResult.Insight,
                 posFacts,
-                sanitizedPromptForProvider);
+                sanitizedPromptForProvider,
+                preferredOutputLanguage);
             await ValidateOutputGuardrailsAsync(normalizedInsight, aiOptions, cancellationToken);
             var persistedInsight = aiPrivacyGovernanceService.RedactForStorage(normalizedInsight);
 
@@ -432,6 +437,249 @@ public sealed class AiInsightService(
         catch (Exception exception)
         {
             logger.LogError(exception, "AI insight request {RequestId} failed unexpectedly.", requestRecord.Id);
+            await FailAndRefundAsync(
+                requestRecord,
+                userId,
+                "unexpected_error",
+                "AI insight request failed unexpectedly.",
+                cancellationToken);
+            throw new InvalidOperationException("AI insight request failed. Reserved credits were refunded.");
+        }
+    }
+
+    public async Task<AiInsightResponse> GenerateInsightStreamAsync(
+        Guid userId,
+        string prompt,
+        string idempotencyKey,
+        string? usageType,
+        Func<string, CancellationToken, Task> onDelta,
+        CancellationToken cancellationToken,
+        string? preferredOutputLanguageOverride = null)
+    {
+        var aiOptions = options.Value;
+        if (!aiOptions.Enabled)
+        {
+            throw new InvalidOperationException("AI insights are disabled.");
+        }
+
+        ArgumentNullException.ThrowIfNull(onDelta);
+
+        var normalizedPrompt = NormalizePrompt(prompt);
+        var sanitizedPromptForProvider = aiPrivacyGovernanceService.RedactForProvider(normalizedPrompt);
+        var normalizedIdempotencyKey = NormalizeIdempotencyKey(idempotencyKey);
+        var provider = NormalizeProvider(aiOptions.Provider);
+
+        if (!string.Equals(provider, ProviderOpenAi, StringComparison.OrdinalIgnoreCase))
+        {
+            var fallbackResponse = await GenerateInsightAsync(
+                userId,
+                prompt,
+                idempotencyKey,
+                usageType,
+                cancellationToken,
+                preferredOutputLanguageOverride);
+            await StreamTextInChunksAsync(fallbackResponse.Insight, onDelta, cancellationToken);
+            return fallbackResponse;
+        }
+
+        var existingRequest = await dbContext.AiInsightRequests
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                x => x.UserId == userId &&
+                     x.IdempotencyKey == normalizedIdempotencyKey,
+                cancellationToken);
+
+        if (existingRequest is not null)
+        {
+            var replay = await BuildReplayResponseAsync(existingRequest, userId, cancellationToken);
+            await StreamTextInChunksAsync(replay.Insight, onDelta, cancellationToken);
+            return replay;
+        }
+
+        await ValidatePromptGuardrailsAsync(
+            normalizedPrompt,
+            aiOptions,
+            runModeration: true,
+            cancellationToken);
+        var usagePolicy = ResolveUsagePolicy(usageType, aiOptions);
+        var estimate = BuildInsightEstimate(normalizedPrompt, aiOptions, usagePolicy);
+        await EnforceUsageLimitsAsync(
+            userId,
+            estimate.EstimatedChargeCredits,
+            aiOptions,
+            cancellationToken);
+
+        var model = ResolveModelForUsageType(aiOptions, provider, usagePolicy);
+        var requestRecord = new AiInsightRequest
+        {
+            UserId = userId,
+            IdempotencyKey = normalizedIdempotencyKey,
+            Status = AiInsightRequestStatus.Pending,
+            Provider = provider,
+            Model = model,
+            UsageType = usagePolicy.UsageType,
+            PromptHash = ComputePromptHash(sanitizedPromptForProvider),
+            PromptCharCount = sanitizedPromptForProvider.Length,
+            ReservedCredits = 0m,
+            ChargedCredits = 0m,
+            InputTokens = 0,
+            OutputTokens = 0,
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+            UpdatedAtUtc = DateTimeOffset.UtcNow,
+            User = await ResolveUserAsync(userId, cancellationToken)
+        };
+
+        dbContext.AiInsightRequests.Add(requestRecord);
+
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception)
+        {
+            for (var attempt = 0; attempt < 4; attempt++)
+            {
+                var conflicted = await dbContext.AiInsightRequests
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(
+                        x => x.UserId == userId &&
+                             x.IdempotencyKey == normalizedIdempotencyKey,
+                        cancellationToken);
+                if (conflicted is not null)
+                {
+                    var replay = await BuildReplayResponseAsync(conflicted, userId, cancellationToken);
+                    await StreamTextInChunksAsync(replay.Insight, onDelta, cancellationToken);
+                    return replay;
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(25 * (attempt + 1)), cancellationToken);
+            }
+
+            logger.LogWarning(
+                exception,
+                "AI insight stream persistence failed without a recoverable replay. UserId={UserId}, IdempotencyKey={IdempotencyKey}.",
+                userId,
+                normalizedIdempotencyKey);
+            throw new InvalidOperationException(
+                "This request is still processing. Please retry shortly.",
+                exception);
+        }
+
+        try
+        {
+            var reservation = await creditBillingService.ReserveCreditsAsync(
+                userId,
+                requestRecord.Id,
+                estimate.ReserveCredits,
+                cancellationToken);
+
+            requestRecord.ReservedCredits = reservation.ReservedCredits;
+            requestRecord.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            var posFacts = await BuildPosInsightFactsAsync(requestRecord.User, cancellationToken);
+            var preferredOutputLanguage = ResolveOutputLanguageOverride(preferredOutputLanguageOverride)
+                                          ?? await ResolvePreferredOutputLanguageAsync(cancellationToken);
+            var preferredOutputLanguageLabel = MapOutputLanguageLabel(preferredOutputLanguage);
+            var groundedPromptPayload = aiPrivacyGovernanceService.FilterProviderPayload(
+                new Dictionary<string, string?>
+                {
+                    ["customer_question"] = sanitizedPromptForProvider,
+                    ["verified_pos_facts_json"] = posFacts.ContextJson,
+                    ["rules"] = "Use only verified facts from the JSON block. Do not invent values.",
+                    ["output_language"] = preferredOutputLanguageLabel
+                });
+            var groundedPrompt = BuildGroundedPrompt(groundedPromptPayload);
+            var providerStopwatch = Stopwatch.StartNew();
+
+            var providerResult = await GenerateWithOpenAiStreamAsync(
+                model,
+                groundedPrompt,
+                aiOptions,
+                usagePolicy.MaxOutputTokens,
+                preferredOutputLanguageLabel,
+                onDelta,
+                cancellationToken);
+
+            providerStopwatch.Stop();
+
+            var normalizedInsight = NormalizeInsightText(
+                providerResult.Insight,
+                posFacts,
+                sanitizedPromptForProvider,
+                preferredOutputLanguage);
+            await ValidateOutputGuardrailsAsync(normalizedInsight, aiOptions, cancellationToken);
+            var persistedInsight = aiPrivacyGovernanceService.RedactForStorage(normalizedInsight);
+
+            var chargedCredits = CalculateCredits(
+                providerResult.InputTokens,
+                providerResult.OutputTokens,
+                aiOptions,
+                usagePolicy.CreditMultiplier);
+
+            var settled = await creditBillingService.SettleReservationAsync(
+                userId,
+                requestRecord.Id,
+                requestRecord.ReservedCredits,
+                chargedCredits,
+                cancellationToken);
+
+            requestRecord.Provider = providerResult.Provider;
+            requestRecord.Model = providerResult.Model;
+            requestRecord.Status = AiInsightRequestStatus.Succeeded;
+            requestRecord.ChargedCredits = settled.ChargedCredits;
+            requestRecord.InputTokens = providerResult.InputTokens;
+            requestRecord.OutputTokens = providerResult.OutputTokens;
+            requestRecord.ResponseText = persistedInsight;
+            requestRecord.ErrorCode = null;
+            requestRecord.ErrorMessage = null;
+            requestRecord.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            requestRecord.CompletedAtUtc = DateTimeOffset.UtcNow;
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            logger.LogInformation(
+                "AI insight stream request {RequestId} completed. Provider={Provider} Model={Model} LatencyMs={LatencyMs} InputTokens={InputTokens} OutputTokens={OutputTokens} ChargedCredits={ChargedCredits} RemainingCredits={RemainingCredits}",
+                requestRecord.Id,
+                requestRecord.Provider,
+                requestRecord.Model,
+                providerStopwatch.ElapsedMilliseconds,
+                providerResult.InputTokens,
+                providerResult.OutputTokens,
+                settled.ChargedCredits,
+                settled.RemainingCredits);
+
+            return new AiInsightResponse
+            {
+                RequestId = requestRecord.Id,
+                Status = "succeeded",
+                Provider = requestRecord.Provider,
+                Model = requestRecord.Model,
+                PricingRulesVersion = ResolvePricingRulesVersion(aiOptions),
+                Insight = persistedInsight,
+                InputTokens = providerResult.InputTokens,
+                OutputTokens = providerResult.OutputTokens,
+                ReservedCredits = requestRecord.ReservedCredits,
+                ChargedCredits = settled.ChargedCredits,
+                RefundedCredits = settled.RefundedCredits,
+                RemainingCredits = settled.RemainingCredits,
+                UsageType = usagePolicy.ApiValue,
+                CreatedAt = requestRecord.CreatedAtUtc,
+                CompletedAt = requestRecord.CompletedAtUtc ?? DateTimeOffset.UtcNow
+            };
+        }
+        catch (InvalidOperationException exception)
+        {
+            await FailAndRefundAsync(
+                requestRecord,
+                userId,
+                "invalid_operation",
+                aiPrivacyGovernanceService.RedactForStorage(NormalizeErrorMessageForPersistence(exception.Message)),
+                cancellationToken);
+            throw;
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "AI insight stream request {RequestId} failed unexpectedly.", requestRecord.Id);
             await FailAndRefundAsync(
                 requestRecord,
                 userId,
@@ -526,6 +774,7 @@ public sealed class AiInsightService(
         PosInsightFacts posFacts,
         AiInsightOptions aiOptions,
         int maxOutputTokens,
+        string outputLanguage,
         string outputLanguageLabel,
         CancellationToken cancellationToken)
     {
@@ -538,7 +787,7 @@ public sealed class AiInsightService(
                 maxOutputTokens,
                 outputLanguageLabel,
                 cancellationToken),
-            ProviderLocal => GenerateWithLocalProvider(model, originalPrompt, posFacts),
+            ProviderLocal => GenerateWithLocalProvider(model, originalPrompt, posFacts, outputLanguage),
             _ => throw new InvalidOperationException("Unsupported AI provider.")
         };
     }
@@ -666,12 +915,251 @@ public sealed class AiInsightService(
             responseModel);
     }
 
+    private async Task<AiProviderResult> GenerateWithOpenAiStreamAsync(
+        string model,
+        string groundedPrompt,
+        AiInsightOptions aiOptions,
+        int maxOutputTokens,
+        string outputLanguageLabel,
+        Func<string, CancellationToken, Task> onDelta,
+        CancellationToken cancellationToken)
+    {
+        var apiBaseUrl = (aiOptions.ApiBaseUrl ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(apiBaseUrl))
+        {
+            throw new InvalidOperationException("AiInsights:ApiBaseUrl is not configured.");
+        }
+
+        var (apiKey, apiKeyEnvironmentVariable) = ResolveOpenAiApiKey(configuration, aiOptions);
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            throw new InvalidOperationException(
+                $"OpenAI API key is not configured. Set environment variable '{apiKeyEnvironmentVariable}'.");
+        }
+
+        using var message = new HttpRequestMessage(HttpMethod.Post, $"{apiBaseUrl.TrimEnd('/')}/responses")
+        {
+            Content = new StringContent(
+                JsonSerializer.Serialize(new
+                {
+                    model,
+                    input = new object[]
+                    {
+                        new
+                        {
+                            role = "system",
+                            content = new object[]
+                            {
+                                new
+                                {
+                                    type = "input_text",
+                                    text = $"You are a retail POS analyst. Use only verified facts provided by the system. Write all text in {outputLanguageLabel}. Keep the answer practical, concise, and focused on POS operations."
+                                }
+                            }
+                        },
+                        new
+                        {
+                            role = "user",
+                            content = new object[]
+                            {
+                                new
+                                {
+                                    type = "input_text",
+                                    text = groundedPrompt
+                                }
+                            }
+                        }
+                    },
+                    text = new
+                    {
+                        format = new
+                        {
+                            type = "text"
+                        }
+                    },
+                    max_output_tokens = Math.Clamp(maxOutputTokens, 128, 2000),
+                    stream = true
+                }, JsonOptions),
+                Encoding.UTF8,
+                "application/json")
+        };
+
+        message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromMilliseconds(Math.Clamp(aiOptions.RequestTimeoutMs, 1000, 60000)));
+
+        using var response = await httpClient.SendAsync(
+            message,
+            HttpCompletionOption.ResponseHeadersRead,
+            timeoutCts.Token);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var rawError = await response.Content.ReadAsStringAsync(timeoutCts.Token);
+            var statusCode = (int)response.StatusCode;
+            var errorMessage = aiPrivacyGovernanceService.RedactForStorage(BuildOpenAiFailureMessage(statusCode, rawError));
+            logger.LogWarning(
+                "OpenAI streaming insight request failed with status {StatusCode}. Body preview: {BodyPreview}",
+                statusCode,
+                aiPrivacyGovernanceService.RedactForLogPreview(rawError));
+            throw new InvalidOperationException(errorMessage);
+        }
+
+        await using var responseStream = await response.Content.ReadAsStreamAsync(timeoutCts.Token);
+        using var reader = new StreamReader(responseStream);
+
+        var streamedText = new StringBuilder();
+        string? completedText = null;
+        var inputTokens = 0;
+        var outputTokens = 0;
+        var responseModel = model;
+        string? eventName = null;
+        var dataBuilder = new StringBuilder();
+
+        async Task ProcessEventAsync(string? currentEventName, string rawData)
+        {
+            if (string.IsNullOrWhiteSpace(rawData) || string.Equals(rawData, "[DONE]", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            using var document = JsonDocument.Parse(rawData);
+            var root = document.RootElement;
+            var effectiveEvent = !string.IsNullOrWhiteSpace(currentEventName)
+                ? currentEventName
+                : root.TryGetProperty("type", out var typeElement) && typeElement.ValueKind == JsonValueKind.String
+                    ? typeElement.GetString()
+                    : null;
+
+            if (string.Equals(effectiveEvent, "response.output_text.delta", StringComparison.Ordinal))
+            {
+                if (root.TryGetProperty("delta", out var deltaElement) &&
+                    deltaElement.ValueKind == JsonValueKind.String)
+                {
+                    var delta = deltaElement.GetString() ?? string.Empty;
+                    if (!string.IsNullOrEmpty(delta))
+                    {
+                        streamedText.Append(delta);
+                        await onDelta(delta, cancellationToken);
+                    }
+                }
+
+                return;
+            }
+
+            if (string.Equals(effectiveEvent, "response.output_text.done", StringComparison.Ordinal))
+            {
+                if (root.TryGetProperty("text", out var textElement) &&
+                    textElement.ValueKind == JsonValueKind.String)
+                {
+                    completedText = textElement.GetString();
+                }
+
+                return;
+            }
+
+            if (string.Equals(effectiveEvent, "response.completed", StringComparison.Ordinal))
+            {
+                if (root.TryGetProperty("response", out var responseElement) &&
+                    responseElement.ValueKind == JsonValueKind.Object)
+                {
+                    completedText = ExtractOutputTextFromRoot(responseElement);
+                    inputTokens = ExtractUsageToken(responseElement, "input_tokens");
+                    outputTokens = ExtractUsageToken(responseElement, "output_tokens");
+                    if (responseElement.TryGetProperty("model", out var modelElement) &&
+                        modelElement.ValueKind == JsonValueKind.String)
+                    {
+                        responseModel = modelElement.GetString() ?? model;
+                    }
+                }
+
+                return;
+            }
+
+            if (string.Equals(effectiveEvent, "error", StringComparison.Ordinal) ||
+                string.Equals(effectiveEvent, "response.failed", StringComparison.Ordinal) ||
+                string.Equals(effectiveEvent, "response.incomplete", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(TryResolveStreamingErrorMessage(root) ?? "AI insight stream failed.");
+            }
+        }
+
+        while (true)
+        {
+            var line = await reader.ReadLineAsync(timeoutCts.Token);
+            if (line is null)
+            {
+                break;
+            }
+
+            if (line.Length == 0)
+            {
+                if (dataBuilder.Length > 0)
+                {
+                    await ProcessEventAsync(eventName, dataBuilder.ToString());
+                    eventName = null;
+                    dataBuilder.Clear();
+                }
+
+                continue;
+            }
+
+            if (line.StartsWith("event:", StringComparison.Ordinal))
+            {
+                eventName = line[6..].Trim();
+                continue;
+            }
+
+            if (line.StartsWith("data:", StringComparison.Ordinal))
+            {
+                if (dataBuilder.Length > 0)
+                {
+                    dataBuilder.Append('\n');
+                }
+
+                dataBuilder.Append(line[5..].TrimStart());
+            }
+        }
+
+        if (dataBuilder.Length > 0)
+        {
+            await ProcessEventAsync(eventName, dataBuilder.ToString());
+        }
+
+        var outputText = string.IsNullOrWhiteSpace(completedText)
+            ? streamedText.ToString()
+            : completedText;
+        if (string.IsNullOrWhiteSpace(outputText))
+        {
+            throw new InvalidOperationException("AI insight response was empty.");
+        }
+
+        if (inputTokens <= 0)
+        {
+            inputTokens = EstimateTokenCount(groundedPrompt);
+        }
+
+        if (outputTokens <= 0)
+        {
+            outputTokens = EstimateTokenCount(outputText);
+        }
+
+        return new AiProviderResult(
+            outputText.Trim(),
+            Math.Max(1, inputTokens),
+            Math.Max(1, outputTokens),
+            ProviderOpenAi,
+            responseModel);
+    }
+
     private static AiProviderResult GenerateWithLocalProvider(
         string model,
         string prompt,
-        PosInsightFacts posFacts)
+        PosInsightFacts posFacts,
+        string outputLanguage)
     {
-        var structured = BuildLocalStructuredInsight(prompt, posFacts);
+        var structured = BuildLocalStructuredInsight(prompt, posFacts, outputLanguage);
         var rawResponse = JsonSerializer.Serialize(structured, JsonOptions);
 
         return new AiProviderResult(
@@ -687,9 +1175,10 @@ public sealed class AiInsightService(
         string model,
         string prompt,
         string groundedPrompt,
-        PosInsightFacts posFacts)
+        PosInsightFacts posFacts,
+        string outputLanguage)
     {
-        var structured = BuildInsufficientDataStructuredInsight(prompt, posFacts);
+        var structured = BuildInsufficientDataStructuredInsight(prompt, posFacts, outputLanguage);
         var rawResponse = JsonSerializer.Serialize(structured, JsonOptions);
         var fallbackModel = $"{model}-fallback";
 
@@ -699,6 +1188,28 @@ public sealed class AiInsightService(
             Math.Max(1, EstimateTokenCount(rawResponse)),
             provider,
             fallbackModel);
+    }
+
+    private static async Task StreamTextInChunksAsync(
+        string text,
+        Func<string, CancellationToken, Task> onDelta,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        const int ChunkSize = 48;
+        for (var index = 0; index < text.Length; index += ChunkSize)
+        {
+            var length = Math.Min(ChunkSize, text.Length - index);
+            var chunk = text.Substring(index, length);
+            if (!string.IsNullOrEmpty(chunk))
+            {
+                await onDelta(chunk, cancellationToken);
+            }
+        }
     }
 
     private async Task EnforceUsageLimitsAsync(
@@ -1357,6 +1868,16 @@ public sealed class AiInsightService(
         };
     }
 
+    private static string? ResolveOutputLanguageOverride(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return NormalizeOutputLanguage(value);
+    }
+
     private static string MapOutputLanguageLabel(string normalizedLanguage)
     {
         return normalizedLanguage switch
@@ -1364,6 +1885,16 @@ public sealed class AiInsightService(
             OutputLanguageSinhala => "Sinhala",
             OutputLanguageTamil => "Tamil",
             _ => "English"
+        };
+    }
+
+    private static string LocalizeOutputText(string english, string sinhala, string tamil, string outputLanguage)
+    {
+        return outputLanguage switch
+        {
+            OutputLanguageSinhala => sinhala,
+            OutputLanguageTamil => tamil,
+            _ => english
         };
     }
 
@@ -1445,11 +1976,14 @@ public sealed class AiInsightService(
             : fallback;
     }
 
-    private static StructuredInsightPayload BuildLocalStructuredInsight(string prompt, PosInsightFacts posFacts)
+    private static StructuredInsightPayload BuildLocalStructuredInsight(
+        string prompt,
+        PosInsightFacts posFacts,
+        string outputLanguage)
     {
         if (posFacts.IsInsufficientData)
         {
-            return BuildInsufficientDataStructuredInsight(prompt, posFacts);
+            return BuildInsufficientDataStructuredInsight(prompt, posFacts, outputLanguage);
         }
 
         var topProduct = posFacts.TopProducts.FirstOrDefault();
@@ -1459,43 +1993,75 @@ public sealed class AiInsightService(
         var actions = new List<string>();
         if (!string.IsNullOrWhiteSpace(topProduct.ProductName))
         {
-            actions.Add($"Protect sales momentum for '{topProduct.ProductName}' with targeted placement and avoid stock interruptions.");
+            actions.Add(LocalizeOutputText(
+                $"Protect sales momentum for '{topProduct.ProductName}' with targeted placement and avoid stock interruptions.",
+                $"'{topProduct.ProductName}' සඳහා ඉලක්කගත ප්‍රදර්ශනය භාවිතා කර විකුණුම් වේගය ආරක්ෂා කර තොග බාධා වලක්වන්න.",
+                $"'{topProduct.ProductName}' க்கான விற்பனை வேகத்தை பாதுகாக்க இலக்கு மையப்படுத்தப்பட்ட காட்சியமைப்பைப் பயன்படுத்தி சரக்கு தடைப்படுதலை தவிர்க்கவும்.",
+                outputLanguage));
         }
 
         if (!string.IsNullOrWhiteSpace(lowMargin.ProductName))
         {
-            actions.Add($"Review pricing or supplier cost for '{lowMargin.ProductName}' to improve margin performance.");
+            actions.Add(LocalizeOutputText(
+                $"Review pricing or supplier cost for '{lowMargin.ProductName}' to improve margin performance.",
+                $"ලාභ ප්‍රතිඵල වැඩි දියුණු කිරීම සඳහා '{lowMargin.ProductName}' සඳහා මිලකරණය හෝ සැපයුම්කරු පිරිවැය සමාලෝචනය කරන්න.",
+                $"லாப செயல்திறனை மேம்படுத்த '{lowMargin.ProductName}' க்கான விலை நிர்ணயம் அல்லது விநியோகஸ்தர் செலவை மதிப்பாய்வு செய்யவும்.",
+                outputLanguage));
         }
 
         if (!string.IsNullOrWhiteSpace(lowStock.ProductName))
         {
-            actions.Add($"Replenish '{lowStock.ProductName}' soon because quantity is {lowStock.QuantityOnHand:0.###} against reorder level {lowStock.ReorderLevel:0.###}.");
+            actions.Add(LocalizeOutputText(
+                $"Replenish '{lowStock.ProductName}' soon because quantity is {lowStock.QuantityOnHand:0.###} against reorder level {lowStock.ReorderLevel:0.###}.",
+                $"'{lowStock.ProductName}' ඉක්මනින් නැවත තොග කරන්න. පවතින ප්‍රමාණය {lowStock.QuantityOnHand:0.###}ක් වන අතර නැවත ඇණවුම් මට්ටම {lowStock.ReorderLevel:0.###}කි.",
+                $"'{lowStock.ProductName}' ஐ விரைவில் மீண்டும் சரக்கு சேர்க்கவும். தற்போதைய அளவு {lowStock.QuantityOnHand:0.###}, மறு ஆர்டர் நிலை {lowStock.ReorderLevel:0.###}.",
+                outputLanguage));
         }
 
         if (actions.Count == 0)
         {
-            actions.Add("Run a 7-day product and margin review report before changing pricing or promotion strategy.");
+            actions.Add(LocalizeOutputText(
+                "Run a 7-day product and margin review report before changing pricing or promotion strategy.",
+                "මිලකරණය හෝ ප්‍රවර්ධන උපාය මාර්ගය වෙනස් කිරීමට පෙර දින 7ක භාණ්ඩ සහ ලාභ සමාලෝචන වාර්තාවක් ක්‍රියාත්මක කරන්න.",
+                "விலை நிர்ணயம் அல்லது விளம்பர மூலோபாயத்தை மாற்றுவதற்கு முன் 7 நாள் பொருள் மற்றும் லாப மதிப்பாய்வு அறிக்கையை இயக்கவும்.",
+                outputLanguage));
         }
 
         var risks = new List<string>();
         if (posFacts.RevenueTrendPercent < 0m)
         {
-            risks.Add($"Revenue trend is declining ({posFacts.RevenueTrendPercent:0.##}% versus previous 7 days). Continue monitoring daily.");
+            risks.Add(LocalizeOutputText(
+                $"Revenue trend is declining ({posFacts.RevenueTrendPercent:0.##}% versus previous 7 days). Continue monitoring daily.",
+                $"ආදායම් ප්‍රවණතාව පහළ යමින් පවතී (පසුගිය දින 7ට සාපේක්ෂව {posFacts.RevenueTrendPercent:0.##}%). දිනපතා නිරීක්ෂණය කරගෙන යන්න.",
+                $"வருமான போக்கு குறைந்து வருகிறது (முந்தைய 7 நாட்களுடன் ஒப்பிடும்போது {posFacts.RevenueTrendPercent:0.##}%). தினசரி கண்காணிப்பை தொடரவும்.",
+                outputLanguage));
         }
 
         if (!string.IsNullOrWhiteSpace(lowStock.ProductName))
         {
-            risks.Add($"Potential stock-out risk for '{lowStock.ProductName}'.");
+            risks.Add(LocalizeOutputText(
+                $"Potential stock-out risk for '{lowStock.ProductName}'.",
+                $"'{lowStock.ProductName}' සඳහා තොග අවසන් වීමේ අවදානමක් ඇත.",
+                $"'{lowStock.ProductName}' க்கு சரக்கு தீர்ந்துவிடும் அபாயம் உள்ளது.",
+                outputLanguage));
         }
 
         if (risks.Count == 0)
         {
-            risks.Add("Current trend is stable, but demand can shift quickly without daily monitoring.");
+            risks.Add(LocalizeOutputText(
+                "Current trend is stable, but demand can shift quickly without daily monitoring.",
+                "වත්මන් ප්‍රවණතාව ස්ථාවරය, නමුත් දෛනික නිරීක්ෂණයකින් තොරව ඉල්ලුම වේගයෙන් වෙනස් විය හැක.",
+                "தற்போதைய போக்கு நிலையாக உள்ளது, ஆனால் தினசரி கண்காணிப்பு இல்லையெனில் தேவை விரைவாக மாறலாம்.",
+                outputLanguage));
         }
 
         return new StructuredInsightPayload
         {
-            Summary = $"Last 7 days show {posFacts.TransactionsLast7Days} completed sales with revenue {posFacts.RevenueLast7Days:0.00}. Revenue trend vs prior 7 days is {posFacts.RevenueTrendPercent:0.##}%.",
+            Summary = LocalizeOutputText(
+                $"Last 7 days show {posFacts.TransactionsLast7Days} completed sales with revenue {posFacts.RevenueLast7Days:0.00}. Revenue trend vs prior 7 days is {posFacts.RevenueTrendPercent:0.##}%.",
+                $"පසුගිය දින 7 තුළ සම්පූර්ණ විකුණුම් {posFacts.TransactionsLast7Days}ක් සහ ආදායම {posFacts.RevenueLast7Days:0.00}කි. පෙර දින 7ට සාපේක්ෂ ආදායම් ප්‍රවණතාව {posFacts.RevenueTrendPercent:0.##}%කි.",
+                $"கடந்த 7 நாட்களில் {posFacts.TransactionsLast7Days} முடிக்கப்பட்ட விற்பனைகள் மற்றும் {posFacts.RevenueLast7Days:0.00} வருமானம் பதிவாகியுள்ளது. முந்தைய 7 நாட்களுடன் ஒப்பிடும் வருமான போக்கு {posFacts.RevenueTrendPercent:0.##}%.",
+                outputLanguage),
             RecommendedActions = actions,
             Risks = risks,
             MissingData = posFacts.MissingData.ToList(),
@@ -1504,23 +2070,46 @@ public sealed class AiInsightService(
         };
     }
 
-    private static StructuredInsightPayload BuildInsufficientDataStructuredInsight(string prompt, PosInsightFacts posFacts)
+    private static StructuredInsightPayload BuildInsufficientDataStructuredInsight(
+        string prompt,
+        PosInsightFacts posFacts,
+        string outputLanguage)
     {
         var missingData = posFacts.MissingData.Count == 0
-            ? ["Not enough reliable POS data is available for this timeframe."]
+            ? [LocalizeOutputText(
+                "Not enough reliable POS data is available for this timeframe.",
+                "මෙම කාල පරාසය සඳහා විශ්වාසදායක POS දත්ත ප්‍රමාණවත් නොවේ.",
+                "இந்த காலப்பகுதிக்கான நம்பத்தகுந்த POS தரவு போதவில்லை.",
+                outputLanguage)]
             : posFacts.MissingData.ToList();
 
         return new StructuredInsightPayload
         {
-            Summary = "Insufficient data to provide reliable AI insights from POS facts.",
+            Summary = LocalizeOutputText(
+                "Insufficient data to provide reliable AI insights from POS facts.",
+                "POS දත්ත මත විශ්වාසදායක AI අවබෝධ ලබා දීමට දත්ත ප්‍රමාණවත් නොවේ.",
+                "POS தரவின் அடிப்படையில் நம்பத்தகுந்த AI பார்வைகளை வழங்க தரவு போதவில்லை.",
+                outputLanguage),
             RecommendedActions =
             [
-                "Collect at least 3 completed sales across multiple time periods, then retry the same question.",
-                "Ensure products, cost prices, and inventory reorder levels are up to date."
+                LocalizeOutputText(
+                    "Collect at least 3 completed sales across multiple time periods, then retry the same question.",
+                    "විවිධ කාල පරාසයන් තුළ අවම වශයෙන් සම්පූර්ණ විකුණුම් 3ක් එකතු කර එම ප්‍රශ්නය නැවත උත්සාහ කරන්න.",
+                    "பல்வேறு காலப்பகுதிகளில் குறைந்தது 3 முடிக்கப்பட்ட விற்பனைகளை சேகரித்து அதே கேள்வியை மீண்டும் முயற்சிக்கவும்.",
+                    outputLanguage),
+                LocalizeOutputText(
+                    "Ensure products, cost prices, and inventory reorder levels are up to date.",
+                    "භාණ්ඩ, පිරිවැය මිල සහ ඉන්වෙන්ටරි නැවත ඇණවුම් මට්ටම් යාවත්කාලීනව ඇති බව තහවුරු කරන්න.",
+                    "பொருட்கள், செலவு விலைகள் மற்றும் இன்வெண்டரி மறு ஆர்டர் நிலைகள் புதுப்பிக்கப்பட்டுள்ளனவா என்பதை உறுதிப்படுத்தவும்.",
+                    outputLanguage)
             ],
             Risks =
             [
-                "Any recommendation now may be inaccurate because key POS facts are missing."
+                LocalizeOutputText(
+                    "Any recommendation now may be inaccurate because key POS facts are missing.",
+                    "ප්‍රධාන POS දත්ත නොමැති බැවින් දැන් ලබාදෙන ඕනෑම නිර්දේශයක් අක්‍රමවත් විය හැක.",
+                    "முக்கிய POS தரவுகள் இல்லாததால் இப்போது வழங்கப்படும் எந்த பரிந்துரையும் துல்லியமற்றதாக இருக்கலாம்.",
+                    outputLanguage)
             ],
             MissingData = missingData,
             InsufficientData = true,
@@ -1531,20 +2120,21 @@ public sealed class AiInsightService(
     private static string NormalizeInsightText(
         string rawInsight,
         PosInsightFacts posFacts,
-        string prompt)
+        string prompt,
+        string outputLanguage)
     {
         StructuredInsightPayload payload;
         if (!TryParseStructuredInsight(rawInsight, out var parsedPayload))
         {
-            payload = BuildBestEffortStructuredInsight(rawInsight, prompt, posFacts);
+            payload = BuildBestEffortStructuredInsight(rawInsight, prompt, posFacts, outputLanguage);
         }
         else
         {
             payload = parsedPayload;
         }
 
-        var normalized = NormalizeStructuredInsightPayload(payload, posFacts, rawInsight);
-        return FormatStructuredInsight(normalized);
+        var normalized = NormalizeStructuredInsightPayload(payload, posFacts, rawInsight, outputLanguage);
+        return FormatStructuredInsight(normalized, outputLanguage);
     }
 
     private static bool TryParseStructuredInsight(string rawInsight, out StructuredInsightPayload payload)
@@ -1595,23 +2185,40 @@ public sealed class AiInsightService(
     private static StructuredInsightPayload BuildBestEffortStructuredInsight(
         string rawInsight,
         string prompt,
-        PosInsightFacts posFacts)
+        PosInsightFacts posFacts,
+        string outputLanguage)
     {
         var summary = SummarizeText(rawInsight, 320);
         if (string.IsNullOrWhiteSpace(summary))
         {
-            summary = posFacts.IsInsufficientData
-                ? "Insufficient data to provide reliable AI insights from POS facts."
-                : "AI insight generated with partial structure.";
+            summary = LocalizeOutputText(
+                posFacts.IsInsufficientData
+                    ? "Insufficient data to provide reliable AI insights from POS facts."
+                    : "AI insight generated with partial structure.",
+                posFacts.IsInsufficientData
+                    ? "POS දත්ත මත විශ්වාසදායක AI අවබෝධ ලබා දීමට දත්ත ප්‍රමාණවත් නොවේ."
+                    : "අර්ධ ව්‍යුහයකින් AI අවබෝධයක් නිර්මාණය කරන ලදී.",
+                posFacts.IsInsufficientData
+                    ? "POS தரவின் அடிப்படையில் நம்பத்தகுந்த AI பார்வைகளை வழங்க தரவு போதவில்லை."
+                    : "பகுதி கட்டமைப்புடன் AI பார்வை உருவாக்கப்பட்டது.",
+                outputLanguage);
         }
 
         var actions = new List<string>();
         if (posFacts.TopProducts.Count > 0)
         {
-            actions.Add($"Prioritize monitoring '{posFacts.TopProducts[0].ProductName}' as a leading sales contributor.");
+            actions.Add(LocalizeOutputText(
+                $"Prioritize monitoring '{posFacts.TopProducts[0].ProductName}' as a leading sales contributor.",
+                $"ප්‍රමුඛ විකුණුම් දායකයෙකු ලෙස '{posFacts.TopProducts[0].ProductName}' වෙත ප්‍රමුඛ නිරීක්ෂණයක් ලබා දෙන්න.",
+                $"முன்னணி விற்பனை பங்களிப்பாளராக '{posFacts.TopProducts[0].ProductName}' ஐ முன்னுரிமையுடன் கண்காணிக்கவும்.",
+                outputLanguage));
         }
 
-        actions.Add("Review daily sales, margin, and stock movement before applying permanent pricing changes.");
+        actions.Add(LocalizeOutputText(
+            "Review daily sales, margin, and stock movement before applying permanent pricing changes.",
+            "ස්ථිර මිල වෙනස්කම් කිරීමට පෙර දෛනික විකුණුම්, ලාභ අනුපාතය සහ තොග චලනය සමාලෝචනය කරන්න.",
+            "நிலையான விலை மாற்றங்களைச் செய்வதற்கு முன் தினசரி விற்பனை, லாப விகிதம் மற்றும் சரக்கு நகர்வை மதிப்பாய்வு செய்யவும்.",
+            outputLanguage));
 
         return new StructuredInsightPayload
         {
@@ -1619,7 +2226,11 @@ public sealed class AiInsightService(
             RecommendedActions = actions,
             Risks =
             [
-                "Output was not fully structured; validate actions against raw POS reports before rollout."
+                LocalizeOutputText(
+                    "Output was not fully structured; validate actions against raw POS reports before rollout.",
+                    "ප්‍රතිදානය සම්පූර්ණයෙන් ව්‍යුහගත නොවීය; ක්‍රියාත්මක කිරීමට පෙර raw POS වාර්තා සමඟ ක්‍රියාමාර්ග තහවුරු කරන්න.",
+                    "வெளியீடு முழுமையாக கட்டமைக்கப்படவில்லை; செயல்படுத்துவதற்கு முன் raw POS அறிக்கைகளுடன் நடவடிக்கைகளை சரிபார்க்கவும்.",
+                    outputLanguage)
             ],
             MissingData = posFacts.MissingData.ToList(),
             InsufficientData = posFacts.IsInsufficientData,
@@ -1630,7 +2241,8 @@ public sealed class AiInsightService(
     private static StructuredInsightPayload NormalizeStructuredInsightPayload(
         StructuredInsightPayload payload,
         PosInsightFacts posFacts,
-        string rawInsight)
+        string rawInsight,
+        string outputLanguage)
     {
         var summary = SummarizeText(payload.Summary, 380);
         if (string.IsNullOrWhiteSpace(summary))
@@ -1640,21 +2252,37 @@ public sealed class AiInsightService(
 
         if (string.IsNullOrWhiteSpace(summary))
         {
-            summary = posFacts.IsInsufficientData
-                ? "Insufficient data to provide reliable AI insights from POS facts."
-                : "AI insight generated from available POS facts.";
+            summary = LocalizeOutputText(
+                posFacts.IsInsufficientData
+                    ? "Insufficient data to provide reliable AI insights from POS facts."
+                    : "AI insight generated from available POS facts.",
+                posFacts.IsInsufficientData
+                    ? "POS දත්ත මත විශ්වාසදායක AI අවබෝධ ලබා දීමට දත්ත ප්‍රමාණවත් නොවේ."
+                    : "පවතින POS දත්ත මත AI අවබෝධයක් නිර්මාණය කරන ලදී.",
+                posFacts.IsInsufficientData
+                    ? "POS தரவின் அடிப்படையில் நம்பத்தகுந்த AI பார்வைகளை வழங்க தரவு போதவில்லை."
+                    : "கிடைக்கக்கூடிய POS தரவின் அடிப்படையில் AI பார்வை உருவாக்கப்பட்டது.",
+                outputLanguage);
         }
 
         var actions = SanitizeStringList(payload.RecommendedActions, minItems: 1, maxItems: 5);
         if (actions.Count == 0)
         {
-            actions.Add("Review daily sales, margin, and inventory reports to confirm the next operational action.");
+            actions.Add(LocalizeOutputText(
+                "Review daily sales, margin, and inventory reports to confirm the next operational action.",
+                "මීළඟ මෙහෙයුම් ක්‍රියාව තහවුරු කිරීම සඳහා දෛනික විකුණුම්, ලාභ සහ ඉන්වෙන්ටරි වාර්තා සමාලෝචනය කරන්න.",
+                "அடுத்த செயல்பாட்டு நடவடிக்கையை உறுதிப்படுத்த தினசரி விற்பனை, லாபம் மற்றும் இன்வெண்டரி அறிக்கைகளை மதிப்பாய்வு செய்யவும்.",
+                outputLanguage));
         }
 
         var risks = SanitizeStringList(payload.Risks, minItems: 0, maxItems: 5);
         if (risks.Count == 0)
         {
-            risks.Add("Recommendations should be validated against current POS reports before full rollout.");
+            risks.Add(LocalizeOutputText(
+                "Recommendations should be validated against current POS reports before full rollout.",
+                "සම්පූර්ණ ක්‍රියාත්මක කිරීමට පෙර නිර්දේශ වත්මන් POS වාර්තා සමඟ තහවුරු කළ යුතුය.",
+                "முழுமையான செயல்படுத்தலுக்கு முன் பரிந்துரைகள் தற்போதைய POS அறிக்கைகளுடன் சரிபார்க்கப்பட வேண்டும்.",
+                outputLanguage));
         }
 
         var missingData = SanitizeStringList(payload.MissingData, minItems: 0, maxItems: 8)
@@ -1666,7 +2294,11 @@ public sealed class AiInsightService(
         var insufficientData = payload.InsufficientData || posFacts.IsInsufficientData;
         if (insufficientData && missingData.Count == 0)
         {
-            missingData.Add("Not enough verified POS context is available.");
+            missingData.Add(LocalizeOutputText(
+                "Not enough verified POS context is available.",
+                "තහවුරු කළ POS පසුබිම් දත්ත ප්‍රමාණවත් නොවේ.",
+                "சரிபார்க்கப்பட்ட POS பின்னணி தரவு போதவில்லை.",
+                outputLanguage));
         }
 
         var confidence = NormalizeConfidence(payload.Confidence, insufficientData ? "low" : "medium");
@@ -1682,32 +2314,32 @@ public sealed class AiInsightService(
         };
     }
 
-    private static string FormatStructuredInsight(StructuredInsightPayload payload)
+    private static string FormatStructuredInsight(StructuredInsightPayload payload, string outputLanguage)
     {
         var builder = new StringBuilder();
 
-        builder.AppendLine("Summary:");
+        builder.AppendLine(LocalizeOutputText("Summary:", "සාරාංශය:", "சுருக்கம்:", outputLanguage));
         builder.AppendLine(payload.Summary);
         builder.AppendLine();
 
-        builder.AppendLine("Recommended actions:");
+        builder.AppendLine(LocalizeOutputText("Recommended actions:", "නිර්දේශිත ක්‍රියාමාර්ග:", "பரிந்துரைக்கப்பட்ட நடவடிக்கைகள்:", outputLanguage));
         for (var index = 0; index < payload.RecommendedActions.Count; index++)
         {
             builder.Append(index + 1).Append(". ").AppendLine(payload.RecommendedActions[index]);
         }
 
         builder.AppendLine();
-        builder.AppendLine("Risks to watch:");
+        builder.AppendLine(LocalizeOutputText("Risks to watch:", "සැලකිලිමත් විය යුතු අවදානම්:", "கவனிக்க வேண்டிய அபாயங்கள்:", outputLanguage));
         foreach (var risk in payload.Risks)
         {
             builder.Append("- ").AppendLine(risk);
         }
 
         builder.AppendLine();
-        builder.AppendLine("Missing data:");
+        builder.AppendLine(LocalizeOutputText("Missing data:", "අස්ථානගත දත්ත:", "பற்றாக்குறை தரவு:", outputLanguage));
         if (payload.MissingData.Count == 0)
         {
-            builder.AppendLine("- None identified.");
+            builder.AppendLine("- " + LocalizeOutputText("None identified.", "කිසිවක් හඳුනාගෙන නොමැත.", "எதுவும் கண்டறியப்படவில்லை.", outputLanguage));
         }
         else
         {
@@ -1795,6 +2427,47 @@ public sealed class AiInsightService(
         }
 
         return $"OpenAI insight request failed (HTTP {statusCode}): {details}";
+    }
+
+    private static string? TryResolveStreamingErrorMessage(JsonElement root)
+    {
+        if (root.TryGetProperty("error", out var errorElement) &&
+            errorElement.ValueKind == JsonValueKind.Object &&
+            errorElement.TryGetProperty("message", out var messageElement) &&
+            messageElement.ValueKind == JsonValueKind.String)
+        {
+            var message = messageElement.GetString();
+            if (!string.IsNullOrWhiteSpace(message))
+            {
+                return message.Trim();
+            }
+        }
+
+        if (root.TryGetProperty("response", out var responseElement) &&
+            responseElement.ValueKind == JsonValueKind.Object &&
+            responseElement.TryGetProperty("error", out var responseErrorElement) &&
+            responseErrorElement.ValueKind == JsonValueKind.Object &&
+            responseErrorElement.TryGetProperty("message", out var responseMessageElement) &&
+            responseMessageElement.ValueKind == JsonValueKind.String)
+        {
+            var responseMessage = responseMessageElement.GetString();
+            if (!string.IsNullOrWhiteSpace(responseMessage))
+            {
+                return responseMessage.Trim();
+            }
+        }
+
+        if (root.TryGetProperty("message", out var topMessageElement) &&
+            topMessageElement.ValueKind == JsonValueKind.String)
+        {
+            var topMessage = topMessageElement.GetString();
+            if (!string.IsNullOrWhiteSpace(topMessage))
+            {
+                return topMessage.Trim();
+            }
+        }
+
+        return null;
     }
 
     private static string? ExtractOpenAiFailureDetail(string raw)
