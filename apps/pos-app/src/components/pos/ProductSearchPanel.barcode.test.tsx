@@ -1,6 +1,7 @@
 import { createRef } from "react";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { BrowserMultiFormatReader } from "@zxing/browser";
 import ProductSearchPanel, { type ProductSearchPanelHandle } from "./ProductSearchPanel";
 import type { Product } from "./types";
 
@@ -75,6 +76,39 @@ describe("ProductSearchPanel barcode mode", () => {
     });
 
     expect(input).toHaveFocus();
+  });
+
+  it("enables camera scan when mediaDevices is available even without BarcodeDetector", async () => {
+    const onAddToCart = vi.fn();
+    const originalMediaDevices = navigator.mediaDevices;
+    const decodeSpy = vi.spyOn(BrowserMultiFormatReader.prototype, "decodeFromConstraints").mockResolvedValue({
+      stop: vi.fn(),
+    });
+
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn(),
+      },
+    });
+
+    try {
+      render(<ProductSearchPanel products={sampleProducts} onAddToCart={onAddToCart} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Switch to barcode mode" }));
+      fireEvent.click(screen.getByRole("button", { name: "Start camera barcode scan" }));
+
+      await waitFor(() => expect(decodeSpy).toHaveBeenCalledOnce());
+      expect(
+        screen.queryByText("Camera barcode scan is unavailable in this browser. Use scanner input and Enter."),
+      ).not.toBeInTheDocument();
+    } finally {
+      decodeSpy.mockRestore();
+      Object.defineProperty(navigator, "mediaDevices", {
+        configurable: true,
+        value: originalMediaDevices,
+      });
+    }
   });
 
   it("shows clear fallback when camera scan is unavailable", () => {
