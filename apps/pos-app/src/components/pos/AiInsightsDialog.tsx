@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, MessageCircle, Minus, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -6,12 +6,12 @@ import {
   fetchAiChatHistory,
   fetchAiChatSession,
   fetchAiWallet,
-  postAiChatMessage,
   type AiChatMessage,
   type AiChatSessionSummary,
   type AiInsightsUsageType,
   type ShopProfileLanguage,
 } from "@/lib/api";
+import { streamAiChatMessage } from "@/lib/aiChatStream";
 import { Button } from "@/components/ui/button";
 import { FaqBrowser } from "@/components/chatbot/FaqBrowser";
 import { ChatConversation } from "@/components/chatbot/ChatConversation";
@@ -43,6 +43,29 @@ type AiInsightsDialogText = {
   failedToCreateChatSession: string;
   failedToSendChatMessage: string;
 };
+
+function buildOptimisticUserMessage(messageId: string, content: string): AiChatMessage {
+  const createdAt = new Date().toISOString();
+
+  return {
+    message_id: messageId,
+    role: "user",
+    status: "pending",
+    usage_type: CHAT_USAGE_TYPE,
+    content,
+    confidence: null,
+    citations: [],
+    blocks: [],
+    input_tokens: 0,
+    output_tokens: 0,
+    reserved_credits: 0,
+    charged_credits: 0,
+    refunded_credits: 0,
+    created_at: createdAt,
+    completed_at: null,
+    error_message: null,
+  };
+}
 
 function getAiInsightsDialogText(language: ShopProfileLanguage): AiInsightsDialogText {
   if (language === "sinhala") {
@@ -115,6 +138,10 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, language = "eng
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [walletCredits, setWalletCredits] = useState<number | null>(null);
   const uiText = useMemo(() => getAiInsightsDialogText(language), [language]);
+  const hasPendingAssistantMessage = useMemo(
+    () => chatMessages.some((message) => message.role === "assistant" && message.status === "pending"),
+    [chatMessages],
+  );
 
   const sessionLabel = useMemo(() => {
     if (!activeChatSessionId) {
@@ -134,7 +161,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, language = "eng
     return normalizedTitle.length > 30 ? `${normalizedTitle.slice(0, 30)}...` : normalizedTitle;
   }, [activeChatSessionId, chatSessions, uiText.newChatSessionLabel, uiText.savedChat]);
 
-  const loadWallet = async () => {
+  const loadWallet = useCallback(async () => {
     try {
       const wallet = await fetchAiWallet();
       setWalletCredits(wallet.available_credits);
@@ -142,9 +169,9 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, language = "eng
     } catch (error) {
       console.error(error);
     }
-  };
+  }, [onBalanceChange]);
 
-  const loadChatSession = async (sessionId: string) => {
+  const loadChatSession = useCallback(async (sessionId: string) => {
     setIsLoadingChat(true);
     try {
       const response = await fetchAiChatSession(sessionId, 80);
@@ -157,9 +184,9 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, language = "eng
     } finally {
       setIsLoadingChat(false);
     }
-  };
+  }, [uiText.failedToLoadChatSession]);
 
-  const loadChatHistory = async () => {
+  const loadChatHistory = useCallback(async () => {
     setIsLoadingChat(true);
     try {
       const response = await fetchAiChatHistory(30);
@@ -170,7 +197,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, language = "eng
     } finally {
       setIsLoadingChat(false);
     }
-  };
+  }, [uiText.failedToLoadChatHistory]);
 
   const handleCreateChatSession = async () => {
     setIsCreatingChatSession(true);
@@ -197,10 +224,20 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, language = "eng
       return;
     }
 
+    const idKey =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const optimisticMessageId = `temp-${idKey}`;
+    const optimisticUserMessage = buildOptimisticUserMessage(optimisticMessageId, normalizedMessage);
+    let sessionId = activeChatSessionId;
+
+    setChatView("chat");
+    setChatMessages((previous) =>
+      [...previous, optimisticUserMessage].sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at)),
+    );
     setIsSendingChatMessage(true);
     try {
-      setChatView("chat");
-      let sessionId = activeChatSessionId;
       if (!sessionId) {
         const created = await createAiChatSession({
           title: "",
@@ -211,30 +248,66 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, language = "eng
         setActiveChatSessionId(created.session_id);
       }
 
-      const idKey =
-        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-          ? crypto.randomUUID()
-          : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const response = await postAiChatMessage(sessionId, {
+      let pendingAssistantMessageId: string | null = null;
+      await streamAiChatMessage(sessionId, {
         message: normalizedMessage,
         usage_type: CHAT_USAGE_TYPE,
         idempotency_key: `chat-${idKey}`,
-      });
+      }, {
+        onStart: (assistantMessage) => {
+          pendingAssistantMessageId = assistantMessage.message_id;
+          setChatMessages((previous) => {
+            const map = new Map<string, AiChatMessage>();
+            previous.forEach((message) => {
+              map.set(message.message_id, message);
+            });
+            map.set(assistantMessage.message_id, assistantMessage);
+            return Array.from(map.values()).sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at));
+          });
+        },
+        onDelta: (messageId, delta) => {
+          const targetMessageId = messageId || pendingAssistantMessageId;
+          if (!targetMessageId) {
+            return;
+          }
 
-      setChatMessages((previous) => {
-        const map = new Map<string, AiChatMessage>();
-        previous.forEach((message) => {
-          map.set(message.message_id, message);
-        });
-        map.set(response.user_message.message_id, response.user_message);
-        map.set(response.assistant_message.message_id, response.assistant_message);
-        return Array.from(map.values()).sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at));
-      });
+          setChatMessages((previous) =>
+            previous.map((message) =>
+              message.message_id === targetMessageId
+                ? {
+                    ...message,
+                    status: "pending",
+                    content: `${message.content || ""}${delta}`,
+                  }
+                : message,
+            ),
+          );
+        },
+        onComplete: ({ userMessage, assistantMessage, remainingCredits }) => {
+          setChatMessages((previous) => {
+            const map = new Map<string, AiChatMessage>();
+            previous
+              .filter((message) => message.message_id !== optimisticMessageId)
+              .forEach((message) => {
+                map.set(message.message_id, message);
+              });
+            map.set(userMessage.message_id, userMessage);
+            map.set(assistantMessage.message_id, assistantMessage);
+            return Array.from(map.values()).sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at));
+          });
 
-      setWalletCredits(response.remaining_credits);
-      onBalanceChange?.(response.remaining_credits);
+          setWalletCredits(remainingCredits);
+          onBalanceChange?.(remainingCredits);
+        },
+      });
       await loadChatHistory();
     } catch (error) {
+      setChatMessages((previous) =>
+        previous.filter((message) => message.message_id !== optimisticMessageId && message.status !== "pending"),
+      );
+      if (!sessionId) {
+        setChatView("faq");
+      }
       console.error(error);
       toast.error(error instanceof Error ? error.message : uiText.failedToSendChatMessage);
     } finally {
@@ -249,7 +322,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, language = "eng
 
     setIsCollapsed(false);
     void Promise.all([loadWallet(), loadChatHistory()]);
-  }, [open]);
+  }, [loadChatHistory, loadWallet, open]);
 
   if (!open) {
     return null;
@@ -344,7 +417,7 @@ const AiInsightsDialog = ({ open, onOpenChange, onBalanceChange, language = "eng
                 ) : (
                   <ChatConversation
                     messages={chatMessages}
-                    isTyping={isLoadingChat || isSendingChatMessage}
+                    isTyping={isLoadingChat || (isSendingChatMessage && !hasPendingAssistantMessage)}
                     language={language}
                     onSendMessage={(question) => {
                       void handleSendChatMessage(question);

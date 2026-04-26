@@ -99,6 +99,26 @@ export async function forwardUpstreamRequest(options: ForwardUpstreamOptions) {
     const contentType = backendResponse.headers.get("content-type") || "application/json";
     const setCookie = backendResponse.headers.get("set-cookie");
     const contentDisposition = backendResponse.headers.get("content-disposition");
+
+    if (backendResponse.ok && contentType.toLowerCase().includes("text/event-stream")) {
+      const responseHeaders = new Headers();
+      responseHeaders.set("Content-Type", contentType);
+      responseHeaders.set("Cache-Control", "no-cache");
+      responseHeaders.set("X-Accel-Buffering", "no");
+      if (setCookie) {
+        responseHeaders.set("Set-Cookie", setCookie);
+      }
+
+      if (contentDisposition) {
+        responseHeaders.set("Content-Disposition", contentDisposition);
+      }
+
+      return new NextResponse(backendResponse.body, {
+        status: backendResponse.status,
+        headers: responseHeaders,
+      });
+    }
+
     const bodyText = await backendResponse.text();
 
     if (!bodyText.trim()) {

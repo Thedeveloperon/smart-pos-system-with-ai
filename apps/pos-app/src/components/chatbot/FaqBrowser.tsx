@@ -6,10 +6,8 @@ import {
   Monitor,
   Package,
   Send,
-  TriangleAlert,
   Truck,
   TrendingUp,
-  Users,
 } from "lucide-react";
 import type { ShopProfileLanguage } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -27,9 +25,7 @@ const iconMap: Record<string, ElementType> = {
   sales: TrendingUp,
   purchasing_suppliers: Truck,
   pricing_profit: DollarSign,
-  customers: Users,
   cashier_operations: Monitor,
-  alerts_exceptions: TriangleAlert,
   reports_summaries: BarChart3,
 };
 

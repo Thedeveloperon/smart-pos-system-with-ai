@@ -54,11 +54,77 @@ const placeholderLabels: Record<string, LocalizedValue> = {
     sinhala: "කාණ්ඩය",
     tamil: "வகை",
   },
-  customer_name: {
-    english: "customer name",
-    sinhala: "පාරිභෝගික නම",
-    tamil: "வாடிக்கையாளர் பெயர்",
-  },
+};
+
+const tamilTemplateFallbacks: Record<string, string> = {
+  "What is the current stock count of {item_name}?": "{item_name} இன் தற்போதைய சரக்கு அளவு என்ன?",
+  "How many units of {item_name} are available right now?": "இப்போது {item_name} எத்தனை அலகுகள் கிடைக்கின்றன?",
+  "Which items are currently low in stock?": "தற்போது குறைந்த சரக்கில் உள்ள பொருட்கள் எவை?",
+  "What are the low stock items of {brand}?": "{brand} பிராண்டின் குறைந்த சரக்கு பொருட்கள் எவை?",
+  "What are the low stock items of {supplier}?": "{supplier} வழங்குநரின் குறைந்த சரக்கு பொருட்கள் எவை?",
+  "Which items are out of stock?": "சரக்கு முடிந்த பொருட்கள் எவை?",
+  "Which items will run out soon?": "விரைவில் சரக்கு முடிவடைய உள்ள பொருட்கள் எவை?",
+  "What are the overstocked items?": "அதிக சரக்கில் உள்ள பொருட்கள் எவை?",
+  "Which products have not been restocked recently?": "சமீபத்தில் மறுசரக்கு செய்யப்படாத பொருட்கள் எவை?",
+  "Which items were restocked today?": "இன்று மறுசரக்கு செய்யப்பட்ட பொருட்கள் எவை?",
+  "What is the stock value of {item_name}?": "{item_name} இன் சரக்கு மதிப்பு என்ன?",
+  "What is the total stock value of {brand}?": "{brand} பிராண்டின் மொத்த சரக்கு மதிப்பு என்ன?",
+  "Show me stock movement for {item_name}.": "{item_name} க்கான சரக்கு நகர்வைக் காட்டு.",
+  "Which items have zero sales but still have stock?": "விற்பனை இல்லாவிட்டும் இன்னும் சரக்கு உள்ள பொருட்கள் எவை?",
+  "Which items are expiring soon?": "விரைவில் காலாவதியாக உள்ள பொருட்கள் எவை?",
+  "Which expired items are still in stock?": "காலாவதியானும் இன்னும் சரக்கில் உள்ள பொருட்கள் எவை?",
+  "What are the best-selling items today?": "இன்று அதிகம் விற்ற பொருட்கள் எவை?",
+  "What are the best-selling items this week?": "இந்த வாரம் அதிகம் விற்ற பொருட்கள் எவை?",
+  "What are the worst-selling items this month?": "இந்த மாதம் குறைவாக விற்ற பொருட்கள் எவை?",
+  "How many units of {item_name} were sold today?": "இன்று {item_name} எத்தனை அலகுகள் விற்கப்பட்டன?",
+  "What were the sales of {brand} today?": "இன்று {brand} பிராண்டின் விற்பனை எவ்வளவு?",
+  "What were the sales of {category} this week?": "இந்த வாரம் {category} வகையின் விற்பனை எவ்வளவு?",
+  "Which items had no sales today?": "இன்று விற்பனை ஆகாத பொருட்கள் எவை?",
+  "What is the total sales amount today?": "இன்றைய மொத்த விற்பனை தொகை என்ன?",
+  "What is the average bill value today?": "இன்றைய சராசரி பில் மதிப்பு என்ன?",
+  "How many transactions were made today?": "இன்று எத்தனை பரிவர்த்தனைகள் நடந்தன?",
+  "Which cashier made the highest sales today?": "இன்று அதிக விற்பனை செய்த காசாளர் யார்?",
+  "What were the busiest sales hours today?": "இன்று மிக அதிக பரபரப்பான விற்பனை நேரங்கள் எவை?",
+  "Compare today's sales with yesterday.": "இன்றைய விற்பனையை நேற்றுைய விற்பனையுடன் ஒப்பிடு.",
+  "Compare this week's sales with last week.": "இந்த வார விற்பனையை கடந்த வாரத்துடன் ஒப்பிடு.",
+  "Which products generate the highest revenue?": "அதிக வருமானம் உருவாக்கும் பொருட்கள் எவை?",
+  "Which items should I reorder now?": "இப்போது நான் மறுஆர்டர் செய்ய வேண்டிய பொருட்கள் எவை?",
+  "What are the low stock items from {supplier}?": "{supplier} வழங்குநரிடமிருந்து வரும் குறைந்த சரக்கு பொருட்கள் எவை?",
+  "Which supplier provides {item_name}?": "{item_name} ஐ வழங்கும் வழங்குநர் யார்?",
+  "What was the last purchase date of {item_name}?": "{item_name} இன் கடைசி கொள்முதல் தேதி என்ன?",
+  "What was the last purchase price of {item_name}?": "{item_name} இன் கடைசி கொள்முதல் விலை என்ன?",
+  "Which supplier orders are still pending?": "இன்னும் நிலுவையில் உள்ள வழங்குநர் ஆர்டர்கள் எவை?",
+  "Which items have not been purchased recently?": "சமீபத்தில் கொள்முதல் செய்யப்படாத பொருட்கள் எவை?",
+  "What items did we buy from {supplier} this month?": "இந்த மாதம் {supplier} இலிருந்து நாம் வாங்கிய பொருட்கள் எவை?",
+  "Which suppliers have the highest purchase value?": "அதிக கொள்முதல் மதிப்பு கொண்ட வழங்குநர்கள் எவை?",
+  "Show recent purchase history for {item_name}.": "{item_name} க்கான சமீபத்திய கொள்முதல் வரலாற்றைக் காட்டு.",
+  "What is the selling price of {item_name}?": "{item_name} இன் விற்பனை விலை என்ன?",
+  "What is the cost price of {item_name}?": "{item_name} இன் கொள்முதல் செலவு விலை என்ன?",
+  "What is the profit margin of {item_name}?": "{item_name} இன் லாப விகிதம் என்ன?",
+  "Which items have the highest profit margin?": "அதிக லாப விகிதம் கொண்ட பொருட்கள் எவை?",
+  "Which items have the lowest profit margin?": "குறைந்த லாப விகிதம் கொண்ட பொருட்கள் எவை?",
+  "Which products are being sold below expected margin?": "எதிர்பார்க்கப்பட்ட லாப விகிதத்திற்குக் கீழே விற்கப்படும் பொருட்கள் எவை?",
+  "Show me discounted items today.": "இன்றைய தள்ளுபடி செய்யப்பட்ட பொருட்களைக் காட்டு.",
+  "Which items had price changes recently?": "சமீபத்தில் விலை மாற்றம் ஏற்பட்ட பொருட்கள் எவை?",
+  "What is the profit earned today?": "இன்று சம்பாதிக்கப்பட்ட லாபம் என்ன?",
+  "What is the profit from {brand} this month?": "இந்த மாதம் {brand} பிராண்டிலிருந்து கிடைத்த லாபம் என்ன?",
+  "Who opened the cashier session today?": "இன்று காசாளர் அமர்வைத் தொடங்கியது யார்?",
+  "Is the cashier session currently open?": "காசாளர் அமர்வு தற்போது திறந்திருக்கிறதா?",
+  "What is the current cash balance in the drawer?": "ட்ராயரில் தற்போதைய பண இருப்பு என்ன?",
+  "What were the total cash sales today?": "இன்றைய மொத்த பண விற்பனை எவ்வளவு?",
+  "What were the total card sales today?": "இன்றைய மொத்த அட்டை விற்பனை எவ்வளவு?",
+  "Were there any refunds today?": "இன்று பணத்தீர்வுகள் ஏதேனும் இருந்தனவா?",
+  "Which items were refunded today?": "இன்று பணத்தீர்வு செய்யப்பட்ட பொருட்கள் எவை?",
+  "Which cashier handled the most transactions today?": "இன்று அதிக பரிவர்த்தனைகளை கையாள்ந்த காசாளர் யார்?",
+  "Show voided bills from today.": "இன்றைய ரத்து செய்யப்பட்ட பில்களைக் காட்டு.",
+  "Were there any suspicious discounts today?": "இன்று சந்தேகத்திற்கிடமான தள்ளுபடிகள் இருந்தனவா?",
+  "Give me a summary of today's sales.": "இன்றைய விற்பனையின் சுருக்கத்தை கொடு.",
+  "Give me a summary of today's stock changes.": "இன்றைய சரக்கு மாற்றங்களின் சுருக்கத்தை கொடு.",
+  "Show me today's business performance.": "இன்றைய வணிக செயல்திறனை காட்டு.",
+  "What are the key insights for this week?": "இந்த வாரத்தின் முக்கிய உள்ளடக்கங்கள் என்ன?",
+  "What should I restock based on recent sales?": "சமீபத்திய விற்பனையின் அடிப்படையில் நான் எதை மறுசரக்கு செய்ய வேண்டும்?",
+  "Which products need attention today?": "இன்று கவனம் தேவைப்படும் பொருட்கள் எவை?",
+  "What are the top issues in inventory right now?": "தற்போது இன்வெண்டரியில் உள்ள முக்கிய பிரச்சினைகள் எவை?",
 };
 
 const rawCategories: ReadonlyArray<{
@@ -311,48 +377,6 @@ const rawCategories: ReadonlyArray<{
     ],
   },
   {
-    id: "customers",
-    label: {
-      english: "Customers",
-      sinhala: "පාරිභෝගිකයින්",
-      tamil: "வாடிக்கையாளர்கள்",
-    },
-    templates: [
-      {
-        english: "Which customers bought {item_name} recently?",
-        sinhala: "පසුකාලීනව {item_name} මිලදී ගත් පාරිභෝගිකයින් කවුද?",
-      },
-      {
-        english: "Who are the top customers this month?",
-        sinhala: "මෙම මාසයේ ප්‍රමුඛ පාරිභෝගිකයින් කවුද?",
-      },
-      {
-        english: "Which customers have not purchased recently?",
-        sinhala: "පසුකාලීනව මිලදී නොගත් පාරිභෝගිකයින් කවුද?",
-      },
-      {
-        english: "What did {customer_name} buy last time?",
-        sinhala: "{customer_name} අවසන් වරට මිලදී ගත්තේ මොනවාද?",
-      },
-      {
-        english: "How much has {customer_name} spent this month?",
-        sinhala: "මෙම මාසයේ {customer_name} වියදම් කළ මුදල කොපමණද?",
-      },
-      {
-        english: "Which items are most popular among customers?",
-        sinhala: "පාරිභෝගිකයින් අතර වැඩිපුර ජනප්‍රිය භාණ්ඩ මොනවාද?",
-      },
-      {
-        english: "Which customers have pending payments?",
-        sinhala: "ගෙවීමට ඉතිරි මුදල් ඇති පාරිභෝගිකයින් කවුද?",
-      },
-      {
-        english: "Show recent sales for {customer_name}.",
-        sinhala: "{customer_name} සඳහා මෑත විකුණුම් පෙන්වන්න.",
-      },
-    ],
-  },
-  {
     id: "cashier_operations",
     label: {
       english: "Cashier & Operations",
@@ -399,52 +423,6 @@ const rawCategories: ReadonlyArray<{
       {
         english: "Were there any suspicious discounts today?",
         sinhala: "අද සැකසහිත වට්ටම් තිබුණාද?",
-      },
-    ],
-  },
-  {
-    id: "alerts_exceptions",
-    label: {
-      english: "Alerts & Exceptions",
-      sinhala: "අවවාද සහ විශේෂත්ව",
-      tamil: "அலர்ட்கள் மற்றும் விதிவிலக்குகள்",
-    },
-    templates: [
-      {
-        english: "Show me items that need immediate restocking.",
-        sinhala: "තාක්ෂණිකවම තොග කළ යුතු භාණ්ඩ පෙන්වන්න.",
-      },
-      {
-        english: "Which items are below minimum stock level?",
-        sinhala: "අවම තොග මට්ටමට පහළ භාණ්ඩ මොනවාද?",
-      },
-      {
-        english: "Which items are selling unusually fast today?",
-        sinhala: "අද අසාමාන්‍ය ලෙස වේගයෙන් විකුණන භාණ්ඩ මොනවාද?",
-      },
-      {
-        english: "Which items are not selling at all this week?",
-        sinhala: "මෙම සතියේ කිසිසේත්ම විකුණන නොවන භාණ්ඩ මොනවාද?",
-      },
-      {
-        english: "Are there any stock mismatches for {item_name}?",
-        sinhala: "{item_name} සඳහා තොග නොගැළපීම් තිබේද?",
-      },
-      {
-        english: "Which products have negative stock?",
-        sinhala: "ඍණ තොග ඇති භාණ්ඩ මොනවාද?",
-      },
-      {
-        english: "Which items were manually adjusted today?",
-        sinhala: "අද අතින් සංශෝධනය කළ භාණ්ඩ මොනවාද?",
-      },
-      {
-        english: "Show unusual sales activity today.",
-        sinhala: "අද අසාමාන්‍ය විකුණුම් ක්‍රියාකාරකම් පෙන්වන්න.",
-      },
-      {
-        english: "Which items have frequent returns?",
-        sinhala: "නිතර ආපසු එන භාණ්ඩ මොනවාද?",
       },
     ],
   },
@@ -504,6 +482,14 @@ function resolveLocalizedValue(value: LocalizedValue, language: ShopProfileLangu
   return value.english;
 }
 
+function resolveLocalizedTemplate(value: LocalizedValue, language: ShopProfileLanguage): string {
+  if (language !== "tamil") {
+    return resolveLocalizedValue(value, language);
+  }
+
+  return value.tamil ?? tamilTemplateFallbacks[value.english] ?? value.english;
+}
+
 function resolvePlaceholderLabel(key: string, language: ShopProfileLanguage): string {
   const labels = placeholderLabels[key];
   if (!labels) {
@@ -529,7 +515,7 @@ export function getPosChatbotFaqCategories(language: ShopProfileLanguage = "engl
       id: category.id,
       label: resolveLocalizedValue(category.label, language),
       questions: category.templates.map((template, index) => {
-        const localizedTemplate = resolveLocalizedValue(template, language);
+        const localizedTemplate = resolveLocalizedTemplate(template, language);
         const placeholderKeys = extractPlaceholders(localizedTemplate);
         const placeholders = placeholderKeys.map((key) => ({
           key,

@@ -23,7 +23,7 @@ const DEFAULT_API_BASE_URL = getDefaultApiBaseUrl();
 
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL).replace(/\/$/, "");
 const DEFAULT_POS_VERSION = "1.0.0";
-const POS_CLIENT_VERSION = (import.meta.env.VITE_POS_VERSION || DEFAULT_POS_VERSION).trim() || DEFAULT_POS_VERSION;
+export const POS_CLIENT_VERSION = (import.meta.env.VITE_POS_VERSION || DEFAULT_POS_VERSION).trim() || DEFAULT_POS_VERSION;
 
 export class ApiError extends Error {
   status: number;
@@ -1517,7 +1517,7 @@ type HoldSaleRequest = {
   role: string;
 };
 
-function getStoredLicenseToken() {
+export function getStoredLicenseToken() {
   if (typeof window === "undefined") {
     return null;
   }
@@ -1557,7 +1557,7 @@ function migrateLegacyLicenseTokenOnce() {
   localStorage.removeItem(LEGACY_LICENSE_TOKEN_STORAGE_KEY);
 }
 
-function createIdempotencyKey() {
+export function createIdempotencyKey() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
@@ -1565,7 +1565,7 @@ function createIdempotencyKey() {
   return `idemp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function getAuthTerminalId() {
+export function getAuthTerminalId() {
   if (typeof window === "undefined") {
     return "server-terminal";
   }
