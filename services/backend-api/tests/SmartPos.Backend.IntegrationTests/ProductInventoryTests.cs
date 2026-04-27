@@ -121,6 +121,68 @@ public sealed class ProductInventoryTests(CustomWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task ProductUpdate_ShouldExposeAndCorrectInitialStock()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+        var createProduct = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"Initial Stock Product {runId}",
+                sku = $"INIT-{runId}",
+                unit_price = 150m,
+                cost_price = 100m,
+                initial_stock_quantity = 5m,
+                reorder_level = 2m,
+                safety_stock = 1m,
+                target_stock_level = 8m,
+                allow_negative_stock = false,
+                is_active = true
+            }));
+
+        var productId = Guid.Parse(TestJson.GetString(createProduct, "product_id"));
+        Assert.Equal(5m, TestJson.GetDecimal(createProduct, "stock_quantity"));
+        Assert.Equal(5m, TestJson.GetDecimal(createProduct, "initial_stock_quantity"));
+
+        var stockAdjust = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync($"/api/products/{productId}/stock-adjustments", new
+            {
+                delta_quantity = -2m,
+                reason = "manual_count_correction"
+            }));
+        Assert.Equal(5m, TestJson.GetDecimal(stockAdjust, "previous_quantity"));
+        Assert.Equal(3m, TestJson.GetDecimal(stockAdjust, "new_quantity"));
+
+        var updatedProduct = await TestJson.ReadObjectAsync(
+            await client.PutAsJsonAsync($"/api/products/{productId}", new
+            {
+                name = $"Initial Stock Product {runId}",
+                sku = $"INIT-{runId}",
+                barcode = (string?)null,
+                category_id = (Guid?)null,
+                brand_id = (Guid?)null,
+                unit_price = 150m,
+                cost_price = 100m,
+                initial_stock_quantity = 7m,
+                reorder_level = 2m,
+                safety_stock = 1m,
+                target_stock_level = 8m,
+                allow_negative_stock = false,
+                is_active = true
+            }));
+
+        Assert.Equal(7m, TestJson.GetDecimal(updatedProduct, "initial_stock_quantity"));
+        Assert.Equal(5m, TestJson.GetDecimal(updatedProduct, "stock_quantity"));
+
+        var productCatalog = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/products/catalog?q={Uri.EscapeDataString($"Initial Stock Product {runId}")}&take=20"));
+        var catalogItem = FindObjectInArray(productCatalog, "items", "product_id", productId.ToString());
+        Assert.Equal(7m, TestJson.GetDecimal(catalogItem, "initial_stock_quantity"));
+        Assert.Equal(5m, TestJson.GetDecimal(catalogItem, "stock_quantity"));
+    }
+
+    [Fact]
     public async Task ProductBarcodeEndpoints_ShouldGenerateValidateAssignAndBulkGenerateMissing()
     {
         await TestAuth.SignInAsManagerAsync(client);

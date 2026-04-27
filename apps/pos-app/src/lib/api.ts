@@ -198,6 +198,7 @@ type BackendProductCatalogItem = {
   unit_price: number;
   cost_price: number;
   stock_quantity: number;
+  initial_stock_quantity?: number;
   reorder_level: number;
   safety_stock?: number;
   target_stock_level?: number;
@@ -682,6 +683,7 @@ export type CatalogProduct = {
   unitPrice: number;
   costPrice: number;
   stockQuantity: number;
+  initialStockQuantity?: number;
   reorderLevel: number;
   alertLevel: number;
   allowNegativeStock: boolean;
@@ -2270,6 +2272,7 @@ function mapCatalogProductItem(item: BackendProductCatalogItem): CatalogProduct 
     unitPrice: Number(item.unit_price),
     costPrice: Number(item.cost_price),
     stockQuantity: Number(item.stock_quantity),
+    initialStockQuantity: Number(item.initial_stock_quantity ?? item.stock_quantity),
     reorderLevel: Number(item.reorder_level),
     safetyStock: Number(item.safety_stock ?? 0),
     targetStockLevel: Number(item.target_stock_level ?? 0),
@@ -3334,6 +3337,7 @@ export type UpdateProductRequest = {
   brand_id?: string | null;
   unit_price: number;
   cost_price: number;
+  initial_stock_quantity: number;
   reorder_level: number;
   safety_stock: number;
   target_stock_level: number;

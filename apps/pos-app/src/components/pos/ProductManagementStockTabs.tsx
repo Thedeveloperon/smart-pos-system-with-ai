@@ -1179,6 +1179,7 @@ export function ProductSettingsTab() {
             brand_id: item.brandId || null,
             unit_price: item.unitPrice,
             cost_price: item.costPrice,
+            initial_stock_quantity: item.initialStockQuantity ?? item.stockQuantity,
             reorder_level: item.reorderLevel,
             safety_stock: item.safetyStock,
             target_stock_level: item.targetStockLevel,

@@ -69,6 +69,8 @@ public sealed class ShopProfileReceiptTests(CustomWebApplicationFactory factory)
         Assert.Contains("Matugama", html);
         Assert.Contains("INV. NO", html);
         Assert.Contains("BALANCE", html);
+        Assert.DoesNotContain("Refund in POS", html);
+        Assert.DoesNotContain("smartpos-open-refund", html);
     }
 
     private static JsonObject FirstObjectFromArray(JsonNode root, string propertyName)

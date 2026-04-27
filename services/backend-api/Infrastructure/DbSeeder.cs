@@ -106,6 +106,7 @@ public static class DbSeeder
                 {
                     Product = product,
                     StoreId = product.StoreId,
+                    InitialStockQuantity = 50m,
                     QuantityOnHand = 50m,
                     ReorderLevel = 10m,
                     SafetyStock = 0m,

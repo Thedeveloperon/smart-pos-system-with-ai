@@ -316,6 +316,9 @@ public sealed class ProductCatalogItemResponse
     [JsonPropertyName("stock_quantity")]
     public decimal StockQuantity { get; set; }
 
+    [JsonPropertyName("initial_stock_quantity")]
+    public decimal InitialStockQuantity { get; set; }
+
     [JsonPropertyName("reorder_level")]
     public decimal ReorderLevel { get; set; }
 
@@ -417,6 +420,9 @@ public sealed class UpdateProductRequest
 
     [JsonPropertyName("cost_price")]
     public decimal CostPrice { get; set; }
+
+    [JsonPropertyName("initial_stock_quantity")]
+    public decimal? InitialStockQuantity { get; set; }
 
     [JsonPropertyName("reorder_level")]
     public decimal ReorderLevel { get; set; }
