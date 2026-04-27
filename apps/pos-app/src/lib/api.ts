@@ -25,6 +25,7 @@ export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BA
 export const AUTH_SESSION_INVALIDATED_EVENT = "smartpos:auth-session-invalidated";
 const DEFAULT_POS_VERSION = "1.0.0";
 export const POS_CLIENT_VERSION = (import.meta.env.VITE_POS_VERSION || DEFAULT_POS_VERSION).trim() || DEFAULT_POS_VERSION;
+const NON_INVALIDATING_AUTH_ERROR_CODES = new Set(["AI_CLOUD_RELAY_CONTEXT_RESOLUTION_FAILED"]);
 
 export class ApiError extends Error {
   status: number;
@@ -1790,6 +1791,18 @@ function notifyAuthSessionInvalidated() {
   window.dispatchEvent(new Event(AUTH_SESSION_INVALIDATED_EVENT));
 }
 
+function shouldInvalidateAuthSession(error: ApiError) {
+  if (error.status !== 401) {
+    return false;
+  }
+
+  if (error.code && NON_INVALIDATING_AUTH_ERROR_CODES.has(error.code)) {
+    return false;
+  }
+
+  return true;
+}
+
 async function request<T>(path: string, init: RequestInit = {}, options: RequestExecutionOptions = {}) {
   const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
   const terminalId = getAuthTerminalId();
@@ -1859,7 +1872,7 @@ async function request<T>(path: string, init: RequestInit = {}, options: Request
 
     return await parseResponse<T>(response);
   } catch (error) {
-    if (error instanceof ApiError && error.status === 401) {
+    if (error instanceof ApiError && shouldInvalidateAuthSession(error)) {
       notifyAuthSessionInvalidated();
     }
 
