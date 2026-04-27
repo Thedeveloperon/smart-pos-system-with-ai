@@ -281,6 +281,17 @@ public static class DbSchemaUpdater
         await dbContext.Database.ExecuteSqlRawAsync(
             """CREATE INDEX IF NOT EXISTS "IX_products_BrandId" ON "products" ("BrandId");""",
             cancellationToken);
+        var initialStockExists = await ColumnExistsAsync(dbContext, "inventory", "InitialStockQuantity", cancellationToken);
+        await EnsureSqliteColumnAsync(dbContext, "inventory", "InitialStockQuantity", """ALTER TABLE "inventory" ADD COLUMN "InitialStockQuantity" TEXT NOT NULL DEFAULT '0';""", cancellationToken);
+        if (!initialStockExists)
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                UPDATE "inventory"
+                SET "InitialStockQuantity" = "QuantityOnHand";
+                """,
+                cancellationToken);
+        }
         await EnsureSqliteColumnAsync(dbContext, "inventory", "SafetyStock", """ALTER TABLE "inventory" ADD COLUMN "SafetyStock" TEXT NOT NULL DEFAULT '0';""", cancellationToken);
         await EnsureSqliteColumnAsync(dbContext, "inventory", "TargetStockLevel", """ALTER TABLE "inventory" ADD COLUMN "TargetStockLevel" TEXT NOT NULL DEFAULT '0';""", cancellationToken);
         await EnsureSqliteColumnAsync(dbContext, "shop_stock_settings", "ThresholdMultiplier", """ALTER TABLE "shop_stock_settings" ADD COLUMN "ThresholdMultiplier" TEXT NOT NULL DEFAULT '1';""", cancellationToken);
@@ -359,6 +370,19 @@ public static class DbSchemaUpdater
         await dbContext.Database.ExecuteSqlRawAsync(
             """CREATE INDEX IF NOT EXISTS "IX_products_BrandId" ON products("BrandId");""",
             cancellationToken);
+        var initialStockExists = await ColumnExistsAsync(dbContext, "inventory", "InitialStockQuantity", cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE inventory ADD COLUMN IF NOT EXISTS "InitialStockQuantity" numeric(18,3) NOT NULL DEFAULT 0;""",
+            cancellationToken);
+        if (!initialStockExists)
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                UPDATE inventory
+                SET "InitialStockQuantity" = "QuantityOnHand";
+                """,
+                cancellationToken);
+        }
         await dbContext.Database.ExecuteSqlRawAsync(
             """ALTER TABLE inventory ADD COLUMN IF NOT EXISTS "SafetyStock" numeric(18,3) NOT NULL DEFAULT 0;""",
             cancellationToken);

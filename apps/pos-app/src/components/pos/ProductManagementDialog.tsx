@@ -65,6 +65,7 @@ type ProductFormState = {
   preferredSupplierId: string;
   unitPrice: string;
   costPrice: string;
+  initialStockQuantity: string;
   reorderLevel: string;
   safetyStock: string;
   targetStockLevel: string;
@@ -82,6 +83,7 @@ const buildFormState = (product: CatalogProduct): ProductFormState => ({
   preferredSupplierId: "",
   unitPrice: String(product.unitPrice),
   costPrice: String(product.costPrice),
+  initialStockQuantity: String(product.initialStockQuantity ?? product.stockQuantity),
   reorderLevel: String(product.reorderLevel),
   safetyStock: String(product.safetyStock ?? 0),
   targetStockLevel: String(product.targetStockLevel ?? 0),
@@ -99,6 +101,7 @@ const emptyFormState = (): ProductFormState => ({
   preferredSupplierId: "",
   unitPrice: "0",
   costPrice: "0",
+  initialStockQuantity: "0",
   reorderLevel: "5",
   safetyStock: "0",
   targetStockLevel: "0",
@@ -258,6 +261,7 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabe
     const name = form.name.trim();
     const unitPrice = Number(form.unitPrice);
     const costPrice = Number(form.costPrice);
+    const initialStockQuantity = Number(form.initialStockQuantity);
     const reorderLevel = Number(form.reorderLevel);
     const safetyStock = Number(form.safetyStock);
     const targetStockLevel = Number(form.targetStockLevel);
@@ -274,6 +278,18 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabe
 
     if (!Number.isFinite(costPrice) || costPrice < 0) {
       toast.error("Enter a valid cost price.");
+      return;
+    }
+
+    if (!Number.isFinite(initialStockQuantity) || initialStockQuantity < 0) {
+      toast.error("Enter a valid initial stock quantity.");
+      return;
+    }
+
+    const previousInitialStock = product.initialStockQuantity ?? product.stockQuantity;
+    const projectedCurrentStock = product.stockQuantity + (initialStockQuantity - previousInitialStock);
+    if (!form.allowNegativeStock && projectedCurrentStock < 0) {
+      toast.error("Initial stock correction would make current stock negative.");
       return;
     }
 
@@ -301,6 +317,7 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabe
       brand_id: form.brandId || null,
       unit_price: unitPrice,
       cost_price: costPrice,
+      initial_stock_quantity: initialStockQuantity,
       reorder_level: reorderLevel,
       safety_stock: safetyStock,
       target_stock_level: targetStockLevel,
@@ -466,6 +483,13 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabe
     ? suppliers.find((supplier) => supplier.id === form.preferredSupplierId)?.name || "Selected supplier"
     : "";
   const imagePreviewUrl = form.imageUrl.trim() || product?.image || "";
+  const initialStockBaseline = product?.initialStockQuantity ?? product?.stockQuantity ?? 0;
+  const parsedInitialStockQuantity = Number(form.initialStockQuantity);
+  const projectedCurrentStock = Number.isFinite(parsedInitialStockQuantity)
+    ? product?.stockQuantity !== undefined
+      ? product.stockQuantity + (parsedInitialStockQuantity - initialStockBaseline)
+      : parsedInitialStockQuantity
+    : product?.stockQuantity ?? 0;
   const printableProduct: CatalogProduct | null = product
     ? {
         ...product,
@@ -686,6 +710,24 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabe
                   </div>
 
                   <div className="space-y-2">
+                    <Label htmlFor="manage-initial-stock" className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+                      Initial stock
+                    </Label>
+                    <Input
+                      id="manage-initial-stock"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={form.initialStockQuantity}
+                      onChange={(event) => updateField("initialStockQuantity", event.target.value)}
+                      className="h-10 rounded-xl border-slate-300 bg-white"
+                    />
+                    <p className="text-[11px] text-slate-500">
+                      Updating this value will adjust current stock by the same difference.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
                     <Label htmlFor="manage-reorder" className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
                       Reorder level
                     </Label>
@@ -771,8 +813,12 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabe
                         <span className="font-semibold text-slate-800">Rs. {Number(form.costPrice || 0).toLocaleString()}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-slate-500">Stock</span>
-                        <span className="font-semibold text-slate-800">{product?.stockQuantity.toLocaleString() ?? "0"}</span>
+                        <span className="text-slate-500">Initial stock</span>
+                        <span className="font-semibold text-slate-800">{Number(form.initialStockQuantity || 0).toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Current stock</span>
+                        <span className="font-semibold text-slate-800">{projectedCurrentStock.toLocaleString()}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-slate-500">Reorder level</span>

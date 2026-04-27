@@ -58,6 +58,7 @@ const baseProduct: Omit<CatalogProduct, "barcode"> = {
   unitPrice: 450,
   costPrice: 300,
   stockQuantity: 20,
+  initialStockQuantity: 20,
   reorderLevel: 5,
   alertLevel: 5,
   allowNegativeStock: true,
@@ -136,7 +137,6 @@ describe("ProductManagementDialog barcode flow", () => {
 
   it("regenerates barcode and shows duplicate validation message", async () => {
     const productWithBarcode: CatalogProduct = { ...baseProduct, barcode: "4006381333931" };
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
 
     vi.mocked(fetchProductCatalogItems).mockResolvedValue([productWithBarcode]);
     vi.mocked(generateAndAssignProductBarcode).mockResolvedValue({
@@ -156,6 +156,7 @@ describe("ProductManagementDialog barcode flow", () => {
     await openEditorForFirstProduct();
 
     fireEvent.click(screen.getByRole("button", { name: "Reg" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Replace" }));
 
     await waitFor(() => {
       expect(generateAndAssignProductBarcode).toHaveBeenCalledWith("prod-1", {
@@ -163,7 +164,6 @@ describe("ProductManagementDialog barcode flow", () => {
         seed: "MILK-1L",
       });
     });
-    expect(confirmSpy).toHaveBeenCalled();
     expect(toast.success).toHaveBeenCalledWith("Barcode regenerated.");
 
     const barcodeInput = screen.getByLabelText("Barcode");
@@ -176,7 +176,6 @@ describe("ProductManagementDialog barcode flow", () => {
       exclude_product_id: "prod-1",
       check_existing: true,
     });
-    confirmSpy.mockRestore();
   });
 
   it("bulk deletes selected products from the catalog", async () => {
@@ -211,6 +210,8 @@ describe("ProductManagementDialog barcode flow", () => {
       ...product,
       unitPrice: 475,
       costPrice: 310,
+      initialStockQuantity: 24,
+      stockQuantity: 24,
       reorderLevel: 8,
       safetyStock: 2,
       targetStockLevel: 15,
@@ -221,6 +222,7 @@ describe("ProductManagementDialog barcode flow", () => {
 
     fireEvent.change(screen.getByLabelText("Unit price"), { target: { value: "475" } });
     fireEvent.change(screen.getByLabelText("Cost price"), { target: { value: "310" } });
+    fireEvent.change(screen.getByLabelText("Initial stock"), { target: { value: "24" } });
     fireEvent.change(screen.getByLabelText("Reorder level"), { target: { value: "8" } });
     fireEvent.change(screen.getByLabelText("Safety stock"), { target: { value: "2" } });
     fireEvent.change(screen.getByLabelText("Target stock"), { target: { value: "15" } });
@@ -232,6 +234,7 @@ describe("ProductManagementDialog barcode flow", () => {
         expect.objectContaining({
           unit_price: 475,
           cost_price: 310,
+          initial_stock_quantity: 24,
           reorder_level: 8,
           safety_stock: 2,
           target_stock_level: 15,

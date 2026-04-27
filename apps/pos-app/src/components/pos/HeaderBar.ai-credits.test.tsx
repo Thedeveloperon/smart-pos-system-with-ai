@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import HeaderBar from "./HeaderBar";
@@ -46,5 +46,26 @@ describe("HeaderBar AI credit badge", () => {
     expect(screen.queryByText("!")).not.toBeInTheDocument();
     expect(screen.queryByText("Low")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Top Up" })).not.toBeInTheDocument();
+  });
+
+  it("requires confirmation before signing out", async () => {
+    const onSignOut = vi.fn();
+
+    renderHeaderBar({
+      onSignOut,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+    expect(onSignOut).not.toHaveBeenCalled();
+    expect(await screen.findByText("Are you sure you want to sign out of this session?")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onSignOut).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sign Out" }));
+
+    expect(onSignOut).toHaveBeenCalledTimes(1);
   });
 });

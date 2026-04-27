@@ -99,6 +99,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
         modelBuilder.Entity<InventoryRecord>(entity =>
         {
             entity.ToTable("inventory");
+            entity.Property(x => x.InitialStockQuantity).HasPrecision(18, 3);
             entity.Property(x => x.QuantityOnHand).HasPrecision(18, 3);
             entity.Property(x => x.ReorderLevel).HasPrecision(18, 3);
             entity.Property(x => x.SafetyStock).HasPrecision(18, 3);

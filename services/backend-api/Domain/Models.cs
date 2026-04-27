@@ -185,6 +185,7 @@ public sealed class InventoryRecord
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid? StoreId { get; set; }
     public Guid ProductId { get; set; }
+    public decimal InitialStockQuantity { get; set; }
     public decimal QuantityOnHand { get; set; }
     public decimal ReorderLevel { get; set; }
     public decimal SafetyStock { get; set; }

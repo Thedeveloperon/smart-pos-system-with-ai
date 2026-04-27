@@ -103,6 +103,7 @@ const HeaderBar = ({
   const isCashier = !isAdmin;
   const allowCashier = (visible?: boolean) => !isCashier || visible !== false;
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
+  const openSignOutConfirm = () => setShowSignOutConfirm(true);
 
   return (
     <header className="mx-2 mt-2 flex h-14 shrink-0 items-center justify-between gap-3 border border-border/60 bg-pos-header/95 px-4 text-pos-header-foreground backdrop-blur-sm">
@@ -320,7 +321,8 @@ const HeaderBar = ({
         <Button
           variant="ghost"
           size="icon-sm"
-          onClick={onSignOut}
+          onClick={openSignOutConfirm}
+          aria-label="Sign out"
           className="text-pos-header-foreground hover:bg-destructive/20 hover:text-destructive"
         >
           <LogOut className="h-4 w-4" />
@@ -460,10 +462,13 @@ const HeaderBar = ({
 
             <DropdownMenuSeparator />
 
-            <DropdownMenuItem onSelect={(event) => {
-              event.preventDefault();
-              setShowSignOutConfirm(true);
-            }} className="min-h-11 px-3 py-2 text-base">
+            <DropdownMenuItem
+              onSelect={(event) => {
+                event.preventDefault();
+                openSignOutConfirm();
+              }}
+              className="min-h-11 px-3 py-2 text-base"
+            >
               <LogOut className="mr-3 h-5 w-5" />
               Sign Out
             </DropdownMenuItem>

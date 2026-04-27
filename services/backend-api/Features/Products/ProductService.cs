@@ -444,6 +444,7 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
         {
             Product = product,
             StoreId = product.StoreId,
+            InitialStockQuantity = RoundQuantity(request.InitialStockQuantity),
             QuantityOnHand = RoundQuantity(request.InitialStockQuantity),
             ReorderLevel = RoundQuantity(request.ReorderLevel),
             SafetyStock = RoundQuantity(request.SafetyStock),
@@ -467,6 +468,7 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
                 product.BrandId,
                 product.UnitPrice,
                 product.CostPrice,
+                inventory.InitialStockQuantity,
                 inventory.QuantityOnHand,
                 inventory.ReorderLevel,
                 inventory.SafetyStock,
@@ -496,6 +498,7 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
 
         ValidateMoneyValue(request.UnitPrice, "Unit price cannot be negative.");
         ValidateMoneyValue(request.CostPrice, "Cost price cannot be negative.");
+        ValidateQuantityValue(request.InitialStockQuantity, "Initial stock cannot be negative.");
         ValidateQuantityValue(request.ReorderLevel, "Reorder level cannot be negative.");
         ValidateQuantityValue(request.SafetyStock, "Safety stock cannot be negative.");
         ValidateQuantityValue(request.TargetStockLevel, "Target stock level cannot be negative.");
@@ -523,6 +526,8 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
             product.BrandId,
             product.UnitPrice,
             product.CostPrice,
+            InitialStockQuantity = product.Inventory?.InitialStockQuantity ?? 0m,
+            CurrentStockQuantity = product.Inventory?.QuantityOnHand ?? 0m,
             ReorderLevel = product.Inventory?.ReorderLevel ?? 0m,
             SafetyStock = product.Inventory?.SafetyStock ?? 0m,
             TargetStockLevel = product.Inventory?.TargetStockLevel ?? 0m,
@@ -546,6 +551,7 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
             {
                 ProductId = product.Id,
                 StoreId = product.StoreId,
+                InitialStockQuantity = 0m,
                 QuantityOnHand = 0m,
                 ReorderLevel = 0m,
                 SafetyStock = 0m,
@@ -560,6 +566,20 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
             product.Inventory.StoreId = product.StoreId;
         }
 
+        var previousInitialStock = RoundQuantity(product.Inventory.InitialStockQuantity);
+        var previousCurrentStock = RoundQuantity(product.Inventory.QuantityOnHand);
+        var requestedInitialStock = request.InitialStockQuantity ?? previousInitialStock;
+        var nextInitialStock = RoundQuantity(requestedInitialStock);
+        var initialStockDelta = RoundQuantity(nextInitialStock - previousInitialStock);
+        var nextCurrentStock = RoundQuantity(previousCurrentStock + initialStockDelta);
+
+        if (!request.AllowNegativeStock && nextCurrentStock < 0m)
+        {
+            throw new InvalidOperationException("Initial stock correction would make current stock negative.");
+        }
+
+        product.Inventory.InitialStockQuantity = nextInitialStock;
+        product.Inventory.QuantityOnHand = nextCurrentStock;
         product.Inventory.ReorderLevel = RoundQuantity(request.ReorderLevel);
         product.Inventory.SafetyStock = RoundQuantity(request.SafetyStock);
         product.Inventory.TargetStockLevel = RoundQuantity(normalizedTargetStockLevel);
@@ -580,6 +600,8 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
                 product.BrandId,
                 product.UnitPrice,
                 product.CostPrice,
+                InitialStockQuantity = product.Inventory.InitialStockQuantity,
+                CurrentStockQuantity = product.Inventory.QuantityOnHand,
                 ReorderLevel = product.Inventory.ReorderLevel,
                 product.Inventory.SafetyStock,
                 product.Inventory.TargetStockLevel,
@@ -702,6 +724,7 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
                 Product = product,
                 ProductId = product.Id,
                 StoreId = product.StoreId,
+                InitialStockQuantity = 0m,
                 QuantityOnHand = 0m,
                 ReorderLevel = 0m,
                 SafetyStock = 0m,
@@ -1579,6 +1602,7 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
             UnitPrice = RoundMoney(product.UnitPrice),
             CostPrice = RoundMoney(product.CostPrice),
             StockQuantity = stockQuantity,
+            InitialStockQuantity = RoundQuantity(product.Inventory?.InitialStockQuantity ?? stockQuantity),
             ReorderLevel = reorderLevel,
             AlertLevel = alertLevel,
             SafetyStock = RoundQuantity(product.Inventory?.SafetyStock ?? 0m),
@@ -1718,9 +1742,9 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
         }
     }
 
-    private static void ValidateQuantityValue(decimal value, string errorMessage)
+    private static void ValidateQuantityValue(decimal? value, string errorMessage)
     {
-        if (value < 0m)
+        if (value.HasValue && value.Value < 0m)
         {
             throw new InvalidOperationException(errorMessage);
         }
