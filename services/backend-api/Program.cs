@@ -690,6 +690,9 @@ builder.Services.AddDbContext<SmartPosDbContext>(options =>
     options.UseNpgsql(NormalizePostgresConnectionString(postgresConnectionString));
 });
 
+var seedSampleCatalog = builder.Configuration.GetValue<bool?>("BootstrapData:SeedSampleCatalog")
+    ?? builder.Environment.IsDevelopment();
+
 var app = builder.Build();
 var webRootPath = Path.Combine(app.Environment.ContentRootPath, "wwwroot");
 var staticFilesAvailable = Directory.Exists(webRootPath);
@@ -718,7 +721,7 @@ using (var scope = app.Services.CreateScope())
     await DbSchemaUpdater.EnsureAiInsightsSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureCloudApiReliabilitySchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureCloudAccountLinkSchemaAsync(dbContext);
-    await DbSeeder.SeedAsync(dbContext);
+    await DbSeeder.SeedAsync(dbContext, seedSampleCatalog);
 }
 
 if (staticFilesAvailable)

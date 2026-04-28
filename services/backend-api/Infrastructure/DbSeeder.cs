@@ -6,9 +6,12 @@ namespace SmartPos.Backend.Infrastructure;
 
 public static class DbSeeder
 {
-    public static async Task SeedAsync(SmartPosDbContext dbContext, CancellationToken cancellationToken = default)
+    public static async Task SeedAsync(
+        SmartPosDbContext dbContext,
+        bool seedSampleCatalog = true,
+        CancellationToken cancellationToken = default)
     {
-        if (!dbContext.Products.Any())
+        if (seedSampleCatalog && !dbContext.Products.Any())
         {
             var categories = new Dictionary<string, Category>(StringComparer.OrdinalIgnoreCase)
             {
