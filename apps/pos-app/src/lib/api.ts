@@ -3450,13 +3450,14 @@ export async function closeCashSession(
   return mapCashSessionResponse(response);
 }
 
-export async function updateCurrentCashDrawer(counts: DenominationCount[], total: number) {
+export async function updateCurrentCashDrawer(counts: DenominationCount[], total: number, reason: string) {
   const payload = {
     counts: counts.map((item) => ({
       denomination: item.denomination,
       quantity: item.quantity,
     })),
     total,
+    reason,
   };
 
   const response = await request<BackendCashSessionResponse>("/api/cash-sessions/current/drawer", {
@@ -3930,7 +3931,7 @@ export async function exportAdminLicenseAuditLogs({
   });
   const content = await parseResponse<string | object>(response);
   const contentDisposition = response.headers.get("content-disposition") || "";
-  const filenameMatch = /filename=\"?([^\";]+)\"?/i.exec(contentDisposition);
+  const filenameMatch = /filename="?([^";]+)"?/i.exec(contentDisposition);
   const fallbackFileName = `license-audit-logs.${format}`;
   return {
     filename: filenameMatch?.[1] || fallbackFileName,

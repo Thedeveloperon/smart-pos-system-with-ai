@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
 
@@ -52,13 +53,15 @@ public sealed class CashSessionFlowTests(CustomWebApplicationFactory factory)
                     new { denomination = 500m, quantity = 1m },
                     new { denomination = 100m, quantity = 5m }
                 },
-                total = 1000m
+                total = 1000m,
+                reason = "Adjusted to match counted cash float."
             }));
 
         Assert.Equal(1000m, TestJson.GetDecimal(updatedDrawer["drawer"]!, "total"));
         Assert.Contains(
             updatedDrawer["audit_log"]!.AsArray().OfType<JsonObject>(),
-            entry => TestJson.GetString(entry, "action") == "cash_drawer_updated");
+            entry => TestJson.GetString(entry, "action") == "cash_drawer_updated" &&
+                     TestJson.GetString(entry, "details").Contains("Adjusted to match counted cash float.", StringComparison.Ordinal));
 
         var saleResponse = await TestJson.ReadObjectAsync(
             await client.PostAsJsonAsync("/api/checkout/complete", new
@@ -208,7 +211,8 @@ public sealed class CashSessionFlowTests(CustomWebApplicationFactory factory)
                     new { denomination = 500m, quantity = 1m },
                     new { denomination = 100m, quantity = 6m }
                 },
-                total = 1100m
+                total = 1100m,
+                reason = "Added petty cash for the shift."
             }));
 
         var saleResponse = await TestJson.ReadObjectAsync(
@@ -251,6 +255,38 @@ public sealed class CashSessionFlowTests(CustomWebApplicationFactory factory)
             TestJson.GetString(item, "transaction_type") == "cash_drawer_adjustment" &&
             TestJson.GetDecimal(item, "cash_movement_amount") == 100m &&
             TestJson.GetString(item, "status") == "cash_added");
+    }
+
+    [Fact]
+    public async Task DrawerUpdate_WithoutReason_ShouldReturnBadRequest()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+        await CloseActiveSessionIfPresentAsync();
+
+        await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/cash-sessions/open", new
+            {
+                counts = new[]
+                {
+                    new { denomination = 1000m, quantity = 1m }
+                },
+                total = 1000m,
+                cashier_name = "Drawer Cashier"
+            }));
+
+        var response = await client.PutAsJsonAsync("/api/cash-sessions/current/drawer", new
+        {
+            counts = new[]
+            {
+                new { denomination = 500m, quantity = 1m },
+                new { denomination = 100m, quantity = 6m }
+            },
+            total = 1100m
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonObject>();
+        Assert.Equal("A reason is required when adjusting the drawer.", TestJson.GetString(payload!, "message"));
     }
 
     [Fact]
