@@ -53,7 +53,7 @@ describe("BarcodeLabelPrintDialog runtime print output", () => {
     const html = buildPrintDocumentHtml([sampleProduct], 1, false, "a4", "chromium");
 
     expect(html).toContain("size: A4");
-    expect(html).toContain("grid-template-columns: repeat(3, minmax(0, 1fr));");
+    expect(html).toContain("grid-template-columns: repeat(6, minmax(0, 1fr));");
     expect(html).toContain("Use browser print options to select the connected label printer.");
     expect(html).toContain("window.onload = function () { window.print(); };");
   });

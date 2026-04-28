@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import { Camera, CheckCircle2, FileText, Loader2, PackagePlus, ReceiptText, Search, Sparkles, UploadCloud } from "lucide-react";
 import { toast } from "sonner";
 import type { Product } from "@/components/pos/types";
@@ -222,7 +222,8 @@ function formatBlockedReason(reason: string) {
 
 export default function ImportSupplierBillDialog({ open, onOpenChange, onImported }: ImportSupplierBillDialogProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
 
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
   const [isCatalogLoading, setIsCatalogLoading] = useState(false);
@@ -250,8 +251,26 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
   const [isUploading, setIsUploading] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraStarting, setCameraStarting] = useState(false);
+  const [cameraFeedback, setCameraFeedback] = useState<string | null>(null);
 
-  const isBusy = isUploading || isConfirming || isCreatingProduct;
+  const isBusy = isUploading || isConfirming || isCreatingProduct || cameraStarting;
+
+  const stopCameraStream = useCallback(() => {
+    cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+    cameraStreamRef.current = null;
+
+    if (cameraVideoRef.current) {
+      cameraVideoRef.current.srcObject = null;
+    }
+  }, []);
+
+  const closeCamera = useCallback(() => {
+    stopCameraStream();
+    setCameraOpen(false);
+    setCameraStarting(false);
+  }, [stopCameraStream]);
 
   useEffect(() => {
     if (!selectedFile) {
@@ -289,6 +308,13 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
 
   useEffect(() => {
     if (!open) {
+      closeCamera();
+      setCameraFeedback(null);
+    }
+  }, [closeCamera, open]);
+
+  useEffect(() => {
+    if (!open) {
       return;
     }
 
@@ -323,6 +349,18 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
       isActive = false;
     };
   }, [open]);
+
+  useEffect(() => {
+    if (!cameraOpen || !cameraStreamRef.current || !cameraVideoRef.current) {
+      return;
+    }
+
+    const video = cameraVideoRef.current;
+    video.srcObject = cameraStreamRef.current;
+    void video.play().catch(() => {
+      setCameraFeedback("Unable to start camera preview.");
+    });
+  }, [cameraOpen]);
 
   const productById = useMemo(
     () => new Map(catalogProducts.map((product) => [product.id, product])),
@@ -595,9 +633,99 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
     fileInputRef.current?.click();
   };
 
-  const openCameraPicker = () => {
-    cameraInputRef.current?.click();
-  };
+  const openCameraPicker = useCallback(async () => {
+    if (isBusy || cameraStarting) {
+      return;
+    }
+
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      setCameraFeedback("Camera preview is unavailable in this browser.");
+      return;
+    }
+
+    setCameraFeedback(null);
+    setCameraOpen(true);
+    setCameraStarting(true);
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+      });
+
+      cameraStreamRef.current = stream;
+
+      if (cameraVideoRef.current) {
+        cameraVideoRef.current.srcObject = stream;
+        await cameraVideoRef.current.play();
+      }
+
+      setCameraFeedback("Camera is active. Capture the bill when ready.");
+    } catch (error) {
+      console.error(error);
+      const errorName = error instanceof DOMException ? error.name : "";
+
+      if (errorName === "NotAllowedError") {
+        setCameraFeedback("Camera permission was denied. Allow access and try again.");
+      } else if (errorName === "NotFoundError") {
+        setCameraFeedback("No camera device was found on this system.");
+      } else if (errorName === "NotReadableError") {
+        setCameraFeedback("Camera is currently in use by another app.");
+      } else if (errorName === "SecurityError") {
+        setCameraFeedback("Camera access requires a secure context (HTTPS).");
+      } else {
+        setCameraFeedback("Unable to open the camera right now.");
+      }
+
+      closeCamera();
+    } finally {
+      setCameraStarting(false);
+    }
+  }, [cameraStarting, closeCamera, isBusy]);
+
+  const captureCameraImage = useCallback(async () => {
+    const video = cameraVideoRef.current;
+    if (!video) {
+      toast.error("Camera preview is not ready.");
+      return;
+    }
+
+    const { videoWidth, videoHeight } = video;
+    if (!videoWidth || !videoHeight) {
+      toast.error("Camera frame is not ready yet.");
+      return;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = videoWidth;
+    canvas.height = videoHeight;
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      toast.error("Unable to capture the camera image.");
+      return;
+    }
+
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob((result) => resolve(result), "image/png");
+    });
+
+    if (!blob) {
+      toast.error("Unable to capture the camera image.");
+      return;
+    }
+
+    const file = new File([blob], `supplier-bill-${Date.now()}.png`, { type: "image/png" });
+    setSelectedFile(file);
+    setCameraFeedback("Bill captured from camera.");
+    closeCamera();
+  }, [closeCamera]);
 
   const handleOpenCreateProduct = (line: EditableLine) => {
     const mappedUnitCost = toDecimalOrNull(line.unitCost);
@@ -891,7 +1019,7 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                           onClick={openFilePicker}
                           disabled={isBusy}
                           className="min-h-11 px-5"
-                          >
+                        >
                           <UploadCloud className="h-4 w-4" />
                           Browse files
                         </Button>
@@ -899,8 +1027,8 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                           type="button"
                           variant="outline"
                           size="lg"
-                          onClick={openCameraPicker}
-                          disabled={isBusy}
+                          onClick={() => void openCameraPicker()}
+                          disabled={isBusy || cameraStarting}
                           className="min-h-11 px-5"
                         >
                           <Camera className="h-4 w-4" />
@@ -940,19 +1068,77 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                     <Label htmlFor="supplier-bill-file" className="sr-only">
                       Upload your supplier bill
                     </Label>
-                    <input
-                      ref={cameraInputRef}
-                      id="supplier-bill-camera"
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      disabled={isBusy}
-                      onChange={handleFileInputChange}
-                      className="sr-only"
-                    />
-                    <Label htmlFor="supplier-bill-camera" className="sr-only">
-                      Capture supplier bill from camera
-                    </Label>
+
+                    {cameraOpen && (
+                      <div className="mt-4 overflow-hidden rounded-3xl border border-slate-200 bg-slate-950 shadow-sm">
+                        <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3 text-white">
+                          <div>
+                            <p className="text-sm font-semibold">Camera capture</p>
+                            <p className="text-xs text-white/70">
+                              Point the camera at the supplier bill and capture a clear image.
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {cameraStarting && (
+                              <span className="text-[11px] text-white/70">Opening camera...</span>
+                            )}
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                closeCamera();
+                                setCameraFeedback("Camera closed.");
+                              }}
+                              className="h-8 rounded-lg border-white/20 bg-white/10 px-3 text-white hover:bg-white/20 hover:text-white"
+                            >
+                              Close
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="bg-black">
+                          <video
+                            ref={cameraVideoRef}
+                            className="h-[320px] w-full object-cover sm:h-[380px]"
+                            muted
+                            autoPlay
+                            playsInline
+                          />
+                        </div>
+
+                        <div className="flex flex-col gap-3 border-t border-white/10 bg-slate-950 px-4 py-3 text-white sm:flex-row sm:items-center sm:justify-between">
+                          <p className="text-xs text-white/70" role="status" aria-live="polite">
+                            {cameraFeedback || "Camera ready."}
+                          </p>
+                          <div className="flex gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                closeCamera();
+                                void openCameraPicker();
+                              }}
+                              disabled={cameraStarting || isBusy}
+                              className="h-9 rounded-lg border-white/20 bg-white/10 px-3 text-white hover:bg-white/20 hover:text-white"
+                            >
+                              Retake
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={() => void captureCameraImage()}
+                              disabled={cameraStarting}
+                              className="h-9 rounded-lg px-3"
+                            >
+                              <Camera className="h-4 w-4" />
+                              Capture Photo
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.75fr)]">
                       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
