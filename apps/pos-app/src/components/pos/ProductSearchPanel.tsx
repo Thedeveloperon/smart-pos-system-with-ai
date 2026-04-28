@@ -344,15 +344,31 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
           return;
         }
 
-        const nextProduct = filtered[0];
+        const exactMatch = filtered.find((product) => {
+          const name = product.name.toLowerCase();
+          const sku = product.sku.toLowerCase();
+          const barcode = product.barcode?.toLowerCase();
+          return name === normalizedQuery || sku === normalizedQuery || barcode === normalizedQuery;
+        });
+
+        const nextProduct = exactMatch ?? filtered[0];
         if (!nextProduct) {
           return;
+        }
+
+        if (exactMatch) {
+          const autoAddKey = `${exactMatch.id}:${normalizedQuery}`;
+          if (lastAutoAddKeyRef.current === autoAddKey) {
+            return;
+          }
+
+          lastAutoAddKeyRef.current = autoAddKey;
         }
 
         event.preventDefault();
         handleAddProduct(nextProduct);
       },
-      [expertMode, filtered, handleAddProduct, handleBarcodeInputKeyDown, normalizedQuery.length, searchMode],
+      [expertMode, filtered, handleAddProduct, handleBarcodeInputKeyDown, normalizedQuery, searchMode],
     );
 
     const toggleSearchMode = useCallback(() => {

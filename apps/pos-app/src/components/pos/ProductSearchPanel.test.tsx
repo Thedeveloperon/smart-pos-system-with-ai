@@ -107,4 +107,34 @@ describe("ProductSearchPanel", () => {
       expect(screen.getByText("1 products")).toBeInTheDocument();
     });
   });
+
+  it("adds an exact match only once for a single scan in expert mode", async () => {
+    const onAddToCart = vi.fn();
+    const exactMatchProducts: Product[] = [
+      {
+        id: "scan-1",
+        name: "Scanner Item",
+        sku: "SCAN-001",
+        barcode: "1234567890128",
+        price: 120,
+        stock: 4,
+        category: "Stationery",
+        categoryName: "Stationery",
+        brandName: "Atlas",
+        isLowStock: false,
+      },
+    ];
+
+    render(<ProductSearchPanel products={exactMatchProducts} onAddToCart={onAddToCart} expertMode />);
+
+    const input = screen.getByPlaceholderText("Search products by name, SKU...");
+    fireEvent.change(input, { target: { value: "1234567890128" } });
+
+    await waitFor(() => expect(onAddToCart).toHaveBeenCalledTimes(1));
+
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    expect(onAddToCart).toHaveBeenCalledTimes(1);
+    expect(input).toHaveValue("");
+  });
 });
