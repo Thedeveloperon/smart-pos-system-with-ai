@@ -82,6 +82,13 @@ Invoke-External -Label "Publishing backend" -Command "dotnet" -Arguments $publis
 New-Item -ItemType Directory -Path $wwwrootDir -Force | Out-Null
 Copy-Item -Path (Join-Path $frontendDistDir "*") -Destination $wwwrootDir -Recurse -Force
 
+$publishedPaymentProofsDir = Join-Path $wwwrootDir "payment-proofs"
+if (Test-Path -LiteralPath $publishedPaymentProofsDir) {
+    Get-ChildItem -LiteralPath $publishedPaymentProofsDir -Force |
+        Where-Object { $_.Name -ne ".gitkeep" } |
+        Remove-Item -Recurse -Force
+}
+
 $shortcutIconOutput = Join-Path $outputRoot "lanka-pos.ico"
 $shortcutIconPngSource = Join-Path $frontendDir "public/favicon.png"
 $shortcutIconIcoFallback = Join-Path $frontendDir "public/favicon.ico"
