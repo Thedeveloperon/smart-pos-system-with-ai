@@ -309,19 +309,25 @@ describe("ImportSupplierBillDialog", () => {
     });
   });
 
-  it("renders an open camera action for supplier bill capture", () => {
-    renderDialog();
-
-    expect(screen.getByRole("button", { name: /open camera/i })).toBeInTheDocument();
-  });
-
-  it("opens the hidden camera input when the camera button is clicked", () => {
-    const clickSpy = vi.spyOn(HTMLInputElement.prototype, "click");
+  it("opens the in-app camera preview when the camera button is clicked", async () => {
+    const stop = vi.fn();
+    const stream = {
+      getTracks: () => [{ stop }],
+    } as unknown as MediaStream;
+    const getUserMedia = vi.fn().mockResolvedValue(stream);
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia },
+    });
+    const playSpy = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
 
     renderDialog();
     fireEvent.click(screen.getByRole("button", { name: /open camera/i }));
 
-    expect(clickSpy).toHaveBeenCalled();
-    clickSpy.mockRestore();
+    expect(await screen.findByText(/camera is active/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /capture photo/i })).toBeInTheDocument();
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+
+    playSpy.mockRestore();
   });
 });

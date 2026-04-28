@@ -84,7 +84,7 @@ const ManageDrawerDialog = ({ open, session, onClose, onSave }: ManageDrawerDial
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-6 py-3">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-6 py-3 pr-4">
           <div className="grid gap-2.5 md:grid-cols-2">
             <div className="rounded-2xl border border-slate-300 bg-white px-3 py-2">
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
