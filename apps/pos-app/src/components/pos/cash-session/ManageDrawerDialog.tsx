@@ -8,6 +8,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Banknote, Coins, Save } from "lucide-react";
 import DenominationCounter from "./DenominationCounter";
 import type { CashSession, DenominationCount } from "./types";
@@ -16,12 +17,13 @@ interface ManageDrawerDialogProps {
   open: boolean;
   session: CashSession | null;
   onClose: () => void;
-  onSave: (counts: DenominationCount[], total: number) => Promise<void>;
+  onSave: (counts: DenominationCount[], total: number, reason: string) => Promise<void>;
 }
 
 const ManageDrawerDialog = ({ open, session, onClose, onSave }: ManageDrawerDialogProps) => {
   const [counts, setCounts] = useState<DenominationCount[]>([]);
   const [total, setTotal] = useState(0);
+  const [reason, setReason] = useState("");
   const [resetKey, setResetKey] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -34,13 +36,14 @@ const ManageDrawerDialog = ({ open, session, onClose, onSave }: ManageDrawerDial
     const currentTotal = session?.drawer.total ?? session?.opening.total ?? 0;
     setCounts(currentCounts);
     setTotal(currentTotal);
+    setReason("");
     setResetKey((value) => value + 1);
   }, [open, session]);
 
   const handleSave = async () => {
     try {
       setIsSaving(true);
-      await onSave(counts, total);
+      await onSave(counts, total, reason.trim());
     } finally {
       setIsSaving(false);
     }
@@ -76,19 +79,19 @@ const ManageDrawerDialog = ({ open, session, onClose, onSave }: ManageDrawerDial
             Check Drawer
           </DialogTitle>
           <DialogDescription className="text-sm text-slate-600">
-            Notes: {noteCount} items · Coins: {coinCount} items · Variance vs expected: Rs.{" "}
+            Notes: {noteCount} items - Coins: {coinCount} items - Variance vs expected: Rs.{" "}
             {cashBalance.toLocaleString()}
           </DialogDescription>
         </DialogHeader>
 
-          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-6 py-3">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-6 py-3">
           <div className="grid gap-2.5 md:grid-cols-2">
             <div className="rounded-2xl border border-slate-300 bg-white px-3 py-2">
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                 Cash balance
               </p>
               <p className="mt-0.5 text-[1.55rem] font-bold tabular-nums leading-none text-primary">
-              Rs. {total.toLocaleString()}
+                Rs. {total.toLocaleString()}
               </p>
             </div>
             <div className="rounded-2xl border border-slate-300 bg-white px-3 py-2">
@@ -111,7 +114,27 @@ const ManageDrawerDialog = ({ open, session, onClose, onSave }: ManageDrawerDial
             </p>
           </div>
 
-          <div className="rounded-2xl border border-slate-300 bg-white p-3">
+          <div className="rounded-2xl border border-slate-300 bg-white px-3 py-3">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <label
+                htmlFor="drawer-adjustment-reason"
+                className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground"
+              >
+                Adjustment reason
+              </label>
+              <span className="text-xs text-muted-foreground">Required for audit trail</span>
+            </div>
+            <Input
+              id="drawer-adjustment-reason"
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              placeholder="E.g. change float, cash count correction, end-of-day adjustment"
+              className="h-10 rounded-xl border-slate-300 bg-white"
+              maxLength={250}
+            />
+          </div>
+
+          <div className="flex min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-300 bg-white p-3">
             <DenominationCounter
               key={resetKey}
               initialCounts={counts.length > 0 ? counts : openingCounts}
@@ -124,7 +147,7 @@ const ManageDrawerDialog = ({ open, session, onClose, onSave }: ManageDrawerDial
           </div>
         </div>
 
-        <DialogFooter className="border-t border-slate-300 bg-slate-100 px-6 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
+        <DialogFooter className="shrink-0 border-t border-slate-300 bg-slate-100 px-6 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
           <div className="flex w-full flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Coins className="h-4 w-4" />
@@ -145,7 +168,7 @@ const ManageDrawerDialog = ({ open, session, onClose, onSave }: ManageDrawerDial
                   void handleSave();
                 }}
                 className="h-10 rounded-xl border border-primary bg-primary px-4 text-[0.95rem] font-bold text-white"
-                disabled={isSaving}
+                disabled={isSaving || !reason.trim()}
               >
                 <Save className="h-4 w-4" />
                 {isSaving ? "Saving..." : "Save drawer"}

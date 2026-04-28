@@ -56,36 +56,36 @@ const DenominationCounter = ({
     const qty = quantities[d.value] || 0;
     const isWarning = warningSet.has(d.value);
     const controlButtonClass = compact
-      ? "h-10 w-10 rounded-lg border border-slate-300 bg-slate-50 text-slate-500 shadow-none hover:bg-slate-100 hover:text-slate-700 disabled:opacity-60"
+      ? "h-9 w-9 rounded-lg border border-slate-300 bg-slate-50 text-slate-500 shadow-none hover:bg-slate-100 hover:text-slate-700 disabled:opacity-60"
       : "h-9 w-9 rounded-lg border border-slate-300 bg-slate-50 text-slate-500 shadow-none hover:bg-slate-100 hover:text-slate-700 disabled:opacity-60";
     const incrementButtonClass = compact
-      ? "h-10 w-10 rounded-lg border border-primary bg-primary text-primary-foreground shadow-none hover:bg-primary/90"
+      ? "h-9 w-9 rounded-lg border border-primary bg-primary text-primary-foreground shadow-none hover:bg-primary/90"
       : "h-9 w-9 rounded-lg border border-primary bg-primary text-primary-foreground shadow-none hover:bg-primary/90";
     const quantityInputClass = compact
-      ? "h-8 w-[3.25rem] rounded-md border border-slate-300 bg-white px-2 text-center text-[0.9rem] font-medium tabular-nums text-slate-700 outline-none transition-colors focus:border-primary/60 focus:ring-2 focus:ring-primary/20"
+      ? "h-8 w-[3rem] rounded-md border border-slate-300 bg-white px-1.5 text-center text-[0.85rem] font-medium tabular-nums text-slate-700 outline-none transition-colors focus:border-primary/60 focus:ring-2 focus:ring-primary/20"
       : "h-9 w-[3.5rem] rounded-md border border-slate-300 bg-white px-2 text-center text-sm font-medium tabular-nums text-slate-700 outline-none transition-colors focus:border-primary/60 focus:ring-2 focus:ring-primary/20";
 
     return (
       <div
         key={d.value}
-        className={`grid grid-cols-[minmax(0,1fr),auto] items-center ${compact ? "gap-1.5 px-0 py-0.5" : "gap-2 rounded-xl px-0.5 py-1"}`}
+        className={`grid grid-cols-[minmax(0,1fr),auto] items-center ${compact ? "gap-1 px-0 py-[1px]" : "gap-2 rounded-xl px-0.5 py-1"}`}
       >
-        <div className={`flex min-w-0 items-center justify-between ${compact ? "gap-1.5" : "gap-2"}`}>
-          <div className="flex min-w-0 items-center gap-2">
+        <div className={`flex min-w-0 items-center justify-between ${compact ? "gap-1" : "gap-2"}`}>
+          <div className="flex min-w-0 items-center gap-1.5">
             <span
-              className={`flex shrink-0 items-center justify-center text-slate-500 ${compact ? "h-3.5 w-3.5" : "h-4 w-4"}`}
+              className={`flex shrink-0 items-center justify-center text-slate-500 ${compact ? "h-3 w-3" : "h-4 w-4"}`}
               aria-hidden="true"
             >
               {icon === "note" ? <Banknote className={compact ? "h-2.5 w-2.5" : "h-3 w-3"} /> : <Coins className={compact ? "h-2.5 w-2.5" : "h-3 w-3"} />}
             </span>
             <span
-              className={`truncate font-semibold leading-none tracking-tight text-slate-700 ${compact ? "text-[0.86rem]" : "text-[1rem]"}`}
+              className={`truncate font-semibold leading-none tracking-tight text-slate-700 ${compact ? "text-[0.8rem]" : "text-[1rem]"}`}
             >
               Rs.{d.label}
             </span>
           </div>
 
-          <div className={`flex items-center ${compact ? "gap-1" : "gap-1.5"}`}>
+          <div className={`flex items-center ${compact ? "gap-0.5" : "gap-1.5"}`}>
             <Button
               type="button"
               variant="outline"
@@ -138,10 +138,10 @@ const DenominationCounter = ({
   };
 
   return (
-    <div className={compact ? "flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-300 bg-[#f7f8fa]" : "flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-300 bg-[#f7f8fa]"}>
+    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-300 bg-[#f7f8fa]">
       <div className={compact ? "grid min-h-0 flex-1 grid-cols-1 divide-y divide-slate-300 md:grid-cols-2 md:divide-x md:divide-y-0" : "grid min-h-0 flex-1 grid-cols-1 divide-y divide-slate-300 md:grid-cols-2 md:divide-x md:divide-y-0"}>
-        <section className={`flex min-h-0 h-full flex-col ${compact ? "p-2" : "p-3"}`}>
-          <div className={`flex items-center justify-between ${compact ? "mb-1.5" : "mb-2.5"}`}>
+        <section className={`flex min-h-0 h-full flex-col ${compact ? "p-1.5" : "p-3"}`}>
+          <div className={`flex items-center justify-between ${compact ? "mb-1" : "mb-2.5"}`}>
             <div className="flex items-center gap-2">
               <Banknote className={compact ? "h-3.5 w-3.5 text-slate-500" : "h-4 w-4 text-slate-500"} />
               <h3 className={`font-medium uppercase tracking-[0.18em] text-slate-600 ${compact ? "text-[11px]" : "text-xs"}`}>Notes</h3>
@@ -156,8 +156,8 @@ const DenominationCounter = ({
           </div>
         </section>
 
-        <section className={`flex min-h-0 h-full flex-col ${compact ? "p-2" : "p-3"}`}>
-          <div className={`flex items-center justify-between ${compact ? "mb-1.5" : "mb-2.5"}`}>
+        <section className={`flex min-h-0 h-full flex-col ${compact ? "p-1.5" : "p-3"}`}>
+          <div className={`flex items-center justify-between ${compact ? "mb-1" : "mb-2.5"}`}>
             <div className="flex items-center gap-2">
               <Coins className={compact ? "h-3.5 w-3.5 text-slate-500" : "h-4 w-4 text-slate-500"} />
               <h3 className={`font-medium uppercase tracking-[0.18em] text-slate-600 ${compact ? "text-[11px]" : "text-xs"}`}>Coins</h3>

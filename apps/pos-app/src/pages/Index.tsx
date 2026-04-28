@@ -1241,8 +1241,8 @@ const IndexInner = () => {
         open={showManageDrawer}
         session={session}
         onClose={() => setShowManageDrawer(false)}
-        onSave={async (counts, total) => {
-          await updateCurrentCashDrawer(counts, total);
+        onSave={async (counts, total, reason) => {
+          await updateCurrentCashDrawer(counts, total, reason);
           await refreshSession();
           setShowManageDrawer(false);
         }}

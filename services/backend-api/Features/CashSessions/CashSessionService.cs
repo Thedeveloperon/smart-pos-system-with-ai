@@ -112,6 +112,12 @@ public sealed class CashSessionService(
     {
         var actor = RequireActor();
         ValidateCounts(request.Counts, request.Total);
+        var reason = string.IsNullOrWhiteSpace(request.Reason) ? null : request.Reason.Trim();
+
+        if (reason is null)
+        {
+            throw new InvalidOperationException("A reason is required when adjusting the drawer.");
+        }
 
         var session = await GetLatestActiveSessionAsync(cancellationToken)
             ?? throw new InvalidOperationException("No active cash session found.");
@@ -140,11 +146,12 @@ public sealed class CashSessionService(
             },
             after: new
             {
-                details = $"Drawer updated: Rs. {request.Total:N0}",
+                details = $"Drawer updated: Rs. {request.Total:N0}. Reason: {reason}",
                 amount = request.Total,
                 drawer_total = request.Total,
                 drawer_delta = request.Total - previousDrawerTotal,
-                cashier_name = actor.CashierName
+                cashier_name = actor.CashierName,
+                reason
             });
 
         await dbContext.SaveChangesAsync(cancellationToken);

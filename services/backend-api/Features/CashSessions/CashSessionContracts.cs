@@ -42,6 +42,9 @@ public sealed class UpdateCashDrawerRequest
 
     [JsonPropertyName("total")]
     public decimal Total { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
 }
 
 public sealed class CashSessionAuditEntryResponse

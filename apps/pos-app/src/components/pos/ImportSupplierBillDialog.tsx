@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
-import { CheckCircle2, FileText, Loader2, PackagePlus, ReceiptText, Search, Sparkles, UploadCloud } from "lucide-react";
+import { Camera, CheckCircle2, FileText, Loader2, PackagePlus, ReceiptText, Search, Sparkles, UploadCloud } from "lucide-react";
 import { toast } from "sonner";
 import type { Product } from "@/components/pos/types";
 import {
@@ -222,6 +222,7 @@ function formatBlockedReason(reason: string) {
 
 export default function ImportSupplierBillDialog({ open, onOpenChange, onImported }: ImportSupplierBillDialogProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
 
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
   const [isCatalogLoading, setIsCatalogLoading] = useState(false);
@@ -594,6 +595,10 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
     fileInputRef.current?.click();
   };
 
+  const openCameraPicker = () => {
+    cameraInputRef.current?.click();
+  };
+
   const handleOpenCreateProduct = (line: EditableLine) => {
     const mappedUnitCost = toDecimalOrNull(line.unitCost);
     const defaultCost = mappedUnitCost != null && mappedUnitCost >= 0 ? mappedUnitCost.toFixed(2) : "0";
@@ -860,7 +865,7 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                               Upload your supplier bill
                             </p>
                             <p className="text-sm text-muted-foreground sm:text-base">
-                              Drag and drop your bill here, or tap to browse
+                              Drag and drop your bill here, tap to browse, or open camera to capture
                             </p>
                           </div>
                           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -886,9 +891,20 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                           onClick={openFilePicker}
                           disabled={isBusy}
                           className="min-h-11 px-5"
-                        >
+                          >
                           <UploadCloud className="h-4 w-4" />
                           Browse files
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="lg"
+                          onClick={openCameraPicker}
+                          disabled={isBusy}
+                          className="min-h-11 px-5"
+                        >
+                          <Camera className="h-4 w-4" />
+                          Open Camera
                         </Button>
                         <Button
                           type="button"
@@ -923,6 +939,19 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                     />
                     <Label htmlFor="supplier-bill-file" className="sr-only">
                       Upload your supplier bill
+                    </Label>
+                    <input
+                      ref={cameraInputRef}
+                      id="supplier-bill-camera"
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      disabled={isBusy}
+                      onChange={handleFileInputChange}
+                      className="sr-only"
+                    />
+                    <Label htmlFor="supplier-bill-camera" className="sr-only">
+                      Capture supplier bill from camera
                     </Label>
 
                     <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.75fr)]">

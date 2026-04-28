@@ -308,4 +308,20 @@ describe("ImportSupplierBillDialog", () => {
       expect(confirmButton).toBeEnabled();
     });
   });
+
+  it("renders an open camera action for supplier bill capture", () => {
+    renderDialog();
+
+    expect(screen.getByRole("button", { name: /open camera/i })).toBeInTheDocument();
+  });
+
+  it("opens the hidden camera input when the camera button is clicked", () => {
+    const clickSpy = vi.spyOn(HTMLInputElement.prototype, "click");
+
+    renderDialog();
+    fireEvent.click(screen.getByRole("button", { name: /open camera/i }));
+
+    expect(clickSpy).toHaveBeenCalled();
+    clickSpy.mockRestore();
+  });
 });
