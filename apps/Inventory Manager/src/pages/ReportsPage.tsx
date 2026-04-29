@@ -56,7 +56,9 @@ export default function ReportsPage({ onBack }: Props) {
                 <div key={r.id} className="flex items-center justify-between py-2 text-sm">
                   <div>
                     <div className="font-medium">{r.id}</div>
-                    <div className="text-xs text-muted-foreground">{r.time} · {r.items} items</div>
+                    <div className="text-xs text-muted-foreground">
+                      {r.time} · {r.items} items
+                    </div>
                   </div>
                   <div className="font-semibold">${r.total.toFixed(2)}</div>
                 </div>

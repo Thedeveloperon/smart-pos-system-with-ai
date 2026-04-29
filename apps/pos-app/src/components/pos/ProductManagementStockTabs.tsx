@@ -711,9 +711,11 @@ export function ProductSuppliersTab() {
         ...form,
         isActive: form.isActive ?? true,
       };
-      editingSupplier
-        ? await updateSupplier(editingSupplier.id, payload)
-        : await createSupplier(payload);
+      if (editingSupplier) {
+        await updateSupplier(editingSupplier.id, payload);
+      } else {
+        await createSupplier(payload);
+      }
 
       setDialogOpen(false);
       const preserveSelectedSupplierId = editingSupplier && selectedSupplier?.id === editingSupplier.id ? editingSupplier.id : null;

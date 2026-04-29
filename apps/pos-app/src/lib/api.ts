@@ -204,6 +204,10 @@ type BackendProductCatalogItem = {
   target_stock_level?: number;
   alert_level: number;
   allow_negative_stock: boolean;
+  is_serial_tracked?: boolean;
+  warranty_months?: number | null;
+  is_batch_tracked?: boolean;
+  expiry_alert_days?: number | null;
   is_active: boolean;
   is_low_stock: boolean;
   created_at: string;
@@ -495,7 +499,16 @@ export type CreateProductRequest = {
   safety_stock: number;
   target_stock_level: number;
   allow_negative_stock: boolean;
+  is_serial_tracked?: boolean;
+  warranty_months?: number | null;
+  is_batch_tracked?: boolean;
+  expiry_alert_days?: number | null;
   is_active: boolean;
+};
+
+export type InventoryDashboardSummary = {
+  expiry_alert_count: number;
+  open_warranty_claims: number;
 };
 
 export type GenerateProductBarcodeRequest = {
@@ -687,6 +700,10 @@ export type CatalogProduct = {
   reorderLevel: number;
   alertLevel: number;
   allowNegativeStock: boolean;
+  isSerialTracked?: boolean;
+  warrantyMonths?: number | null;
+  isBatchTracked?: boolean;
+  expiryAlertDays?: number | null;
   safetyStock?: number;
   targetStockLevel?: number;
   isActive: boolean;
@@ -2278,6 +2295,10 @@ function mapCatalogProductItem(item: BackendProductCatalogItem): CatalogProduct 
     targetStockLevel: Number(item.target_stock_level ?? 0),
     alertLevel: Number(item.alert_level),
     allowNegativeStock: item.allow_negative_stock,
+    isSerialTracked: item.is_serial_tracked ?? false,
+    warrantyMonths: item.warranty_months ?? null,
+    isBatchTracked: item.is_batch_tracked ?? false,
+    expiryAlertDays: item.expiry_alert_days ?? null,
     isActive: item.is_active,
     isLowStock: item.is_low_stock,
     createdAt: item.created_at,
@@ -2775,6 +2796,13 @@ export async function validateProductBarcode(requestBody: ValidateProductBarcode
       check_existing: requestBody.check_existing ?? true,
     }),
   });
+}
+
+// Inventory dashboard alert count (mock until backend is ready)
+export async function fetchInventoryDashboardSummary(): Promise<InventoryDashboardSummary> {
+  // TODO: replace with real fetch once backend is ready:
+  // return request<InventoryDashboardSummary>("/api/inventory/dashboard/summary");
+  return { expiry_alert_count: 3, open_warranty_claims: 1 };
 }
 
 export async function generateAndAssignProductBarcode(
@@ -3342,6 +3370,10 @@ export type UpdateProductRequest = {
   safety_stock: number;
   target_stock_level: number;
   allow_negative_stock: boolean;
+  is_serial_tracked?: boolean;
+  warranty_months?: number | null;
+  is_batch_tracked?: boolean;
+  expiry_alert_days?: number | null;
   is_active: boolean;
 };
 

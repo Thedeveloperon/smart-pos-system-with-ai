@@ -200,9 +200,7 @@ export default function BatchesTab() {
                       min={0}
                       step="0.01"
                       value={form.cost_price}
-                      onChange={(e) =>
-                        setForm({ ...form, cost_price: Number(e.target.value) })
-                      }
+                      onChange={(e) => setForm({ ...form, cost_price: Number(e.target.value) })}
                     />
                   </div>
                 </div>
@@ -210,9 +208,7 @@ export default function BatchesTab() {
                   <Label>Supplier</Label>
                   <Select
                     value={form.supplier_id || "none"}
-                    onValueChange={(v) =>
-                      setForm({ ...form, supplier_id: v === "none" ? "" : v })
-                    }
+                    onValueChange={(v) => setForm({ ...form, supplier_id: v === "none" ? "" : v })}
                   >
                     <SelectTrigger>
                       <SelectValue />
@@ -230,10 +226,7 @@ export default function BatchesTab() {
                 <Button variant="ghost" onClick={() => setOpen(false)}>
                   Cancel
                 </Button>
-                <Button
-                  onClick={save}
-                  disabled={saving || !form.batch_number}
-                >
+                <Button onClick={save} disabled={saving || !form.batch_number}>
                   {saving ? "Saving…" : editingId ? "Save changes" : "Create batch"}
                 </Button>
               </DialogFooter>
@@ -274,9 +267,7 @@ export default function BatchesTab() {
                   <TableCell className="font-medium">{b.batch_number}</TableCell>
                   <TableCell>{new Date(b.received_at).toLocaleDateString()}</TableCell>
                   <TableCell>
-                    {b.manufacture_date
-                      ? new Date(b.manufacture_date).toLocaleDateString()
-                      : "—"}
+                    {b.manufacture_date ? new Date(b.manufacture_date).toLocaleDateString() : "—"}
                   </TableCell>
                   <TableCell>
                     {b.expiry_date ? new Date(b.expiry_date).toLocaleDateString() : "—"}

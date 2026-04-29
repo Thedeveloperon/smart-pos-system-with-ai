@@ -188,12 +188,8 @@ export default function WarrantyClaimsTab() {
                         Validate
                       </Button>
                     </div>
-                    {serialError && (
-                      <p className="text-xs text-destructive">{serialError}</p>
-                    )}
-                    {serialId && (
-                      <p className="text-xs text-green-600">Serial validated ✓</p>
-                    )}
+                    {serialError && <p className="text-xs text-destructive">{serialError}</p>}
+                    {serialId && <p className="text-xs text-green-600">Serial validated ✓</p>}
                   </div>
                   <div className="grid gap-1">
                     <Label>Claim date</Label>
@@ -205,11 +201,7 @@ export default function WarrantyClaimsTab() {
                   </div>
                   <div className="grid gap-1">
                     <Label>Notes (optional)</Label>
-                    <Textarea
-                      value={notes}
-                      onChange={(e) => setNotes(e.target.value)}
-                      rows={3}
-                    />
+                    <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
                   </div>
                 </div>
                 <DialogFooter>
@@ -263,10 +255,18 @@ export default function WarrantyClaimsTab() {
                     <TableCell className="text-right space-x-1">
                       {c.status === "Open" && (
                         <>
-                          <Button size="sm" variant="outline" onClick={() => transition(c, "InRepair")}>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => transition(c, "InRepair")}
+                          >
                             In repair
                           </Button>
-                          <Button size="sm" variant="ghost" onClick={() => transition(c, "Rejected")}>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => transition(c, "Rejected")}
+                          >
                             Reject
                           </Button>
                         </>

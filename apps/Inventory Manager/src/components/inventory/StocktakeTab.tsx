@@ -21,12 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -200,7 +195,7 @@ export default function StocktakeTab() {
                       <TableCell className="text-right">{it.system_quantity}</TableCell>
                       <TableCell className="text-right w-32">
                         {readonlyMode ? (
-                          it.counted_quantity ?? "—"
+                          (it.counted_quantity ?? "—")
                         ) : (
                           <Input
                             type="number"

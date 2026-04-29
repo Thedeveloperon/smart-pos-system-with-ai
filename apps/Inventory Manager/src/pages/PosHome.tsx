@@ -31,9 +31,7 @@ export default function PosHome({ onOpenInventory, onOpenReports, onOpenManager 
     setCart((prev) => {
       const found = prev.find((c) => c.product.id === p.id);
       if (found) {
-        return prev.map((c) =>
-          c.product.id === p.id ? { ...c, qty: c.qty + 1 } : c,
-        );
+        return prev.map((c) => (c.product.id === p.id ? { ...c, qty: c.qty + 1 } : c));
       }
       return [...prev, { product: p, qty: 1 }];
     });
@@ -93,10 +91,14 @@ export default function PosHome({ onOpenInventory, onOpenReports, onOpenManager 
                       </div>
                       <div className="flex gap-1 mt-2">
                         {p.is_serial_tracked && (
-                          <Badge variant="outline" className="text-[10px]">Serial</Badge>
+                          <Badge variant="outline" className="text-[10px]">
+                            Serial
+                          </Badge>
                         )}
                         {p.is_batch_tracked && (
-                          <Badge variant="outline" className="text-[10px]">Batch</Badge>
+                          <Badge variant="outline" className="text-[10px]">
+                            Batch
+                          </Badge>
                         )}
                       </div>
                     </div>
@@ -122,12 +124,9 @@ export default function PosHome({ onOpenInventory, onOpenReports, onOpenManager 
                 {cart.map((c) => (
                   <div key={c.product.id} className="flex justify-between text-sm">
                     <span>
-                      {c.product.name}{" "}
-                      <span className="text-muted-foreground">× {c.qty}</span>
+                      {c.product.name} <span className="text-muted-foreground">× {c.qty}</span>
                     </span>
-                    <span className="font-medium">
-                      ${(c.product.price * c.qty).toFixed(2)}
-                    </span>
+                    <span className="font-medium">${(c.product.price * c.qty).toFixed(2)}</span>
                   </div>
                 ))}
                 <div className="border-t pt-2 mt-2 flex justify-between font-semibold">
@@ -135,12 +134,7 @@ export default function PosHome({ onOpenInventory, onOpenReports, onOpenManager 
                   <span>${total.toFixed(2)}</span>
                 </div>
                 <Button className="w-full mt-2">Charge ${total.toFixed(2)}</Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="w-full"
-                  onClick={() => setCart([])}
-                >
+                <Button variant="ghost" size="sm" className="w-full" onClick={() => setCart([])}>
                   Clear
                 </Button>
               </div>

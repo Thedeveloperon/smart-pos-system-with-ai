@@ -9,7 +9,12 @@ type Props = {
   inventoryAlertCount?: number;
 };
 
-export default function HeaderBar({ onInventory, onReports, onManager, inventoryAlertCount = 0 }: Props) {
+export default function HeaderBar({
+  onInventory,
+  onReports,
+  onManager,
+  inventoryAlertCount = 0,
+}: Props) {
   return (
     <header className="border-b bg-slate-900 text-slate-50">
       <div className="mx-auto max-w-7xl px-4 h-14 flex items-center justify-between">
