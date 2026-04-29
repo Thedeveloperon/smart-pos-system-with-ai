@@ -2,13 +2,13 @@ import { Badge } from "@/components/ui/badge";
 import type { StockMovement } from "@/lib/api";
 
 const styles: Record<StockMovement["movement_type"], string> = {
-  Sale: "bg-blue-100 text-blue-800 hover:bg-blue-100",
-  Purchase: "bg-green-100 text-green-800 hover:bg-green-100",
-  Refund: "bg-amber-100 text-amber-800 hover:bg-amber-100",
-  Adjustment: "bg-gray-100 text-gray-800 hover:bg-gray-100",
-  ExpiryWriteOff: "bg-red-100 text-red-800 hover:bg-red-100",
-  StocktakeReconciliation: "bg-purple-100 text-purple-800 hover:bg-purple-100",
-  Transfer: "bg-slate-100 text-slate-800 hover:bg-slate-100",
+  Sale: "bg-info/15 text-info hover:bg-info/15",
+  Purchase: "bg-success/15 text-success hover:bg-success/15",
+  Refund: "bg-warning/15 text-warning-foreground hover:bg-warning/15",
+  Adjustment: "bg-muted text-muted-foreground hover:bg-muted",
+  ExpiryWriteOff: "bg-destructive/15 text-destructive hover:bg-destructive/15",
+  StocktakeReconciliation: "bg-primary/15 text-primary hover:bg-primary/15",
+  Transfer: "bg-secondary text-secondary-foreground hover:bg-secondary",
 };
 
 const labels: Record<StockMovement["movement_type"], string> = {

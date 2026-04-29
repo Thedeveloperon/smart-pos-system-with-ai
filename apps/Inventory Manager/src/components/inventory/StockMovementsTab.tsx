@@ -158,7 +158,7 @@ export default function StockMovementsTab() {
                       <TableCell className="text-right">{m.quantity_before}</TableCell>
                       <TableCell
                         className={`text-right font-medium ${
-                          m.quantity_change > 0 ? "text-green-600" : "text-red-600"
+                          m.quantity_change > 0 ? "text-success" : "text-destructive"
                         }`}
                       >
                         {m.quantity_change > 0 ? "+" : ""}

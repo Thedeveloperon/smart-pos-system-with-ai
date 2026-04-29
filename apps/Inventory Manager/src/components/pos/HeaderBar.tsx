@@ -16,7 +16,7 @@ export default function HeaderBar({
   inventoryAlertCount = 0,
 }: Props) {
   return (
-    <header className="border-b bg-slate-900 text-slate-50">
+    <header className="border-b border-white/10 bg-pos-header text-pos-header-foreground shadow-md">
       <div className="mx-auto max-w-7xl px-4 h-14 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Receipt className="h-5 w-5" />
@@ -27,7 +27,7 @@ export default function HeaderBar({
             variant="ghost"
             size="sm"
             onClick={onReports}
-            className="text-slate-50 hover:bg-white/10"
+            className="text-pos-header-foreground/80 hover:bg-white/10 hover:text-pos-header-foreground"
           >
             <Receipt className="h-4 w-4" />
             <span className="hidden md:inline ml-1">Reports</span>
@@ -37,12 +37,12 @@ export default function HeaderBar({
               variant="ghost"
               size="sm"
               onClick={onInventory}
-              className="text-slate-50 hover:bg-white/10 relative"
+              className="relative text-pos-header-foreground/80 hover:bg-white/10 hover:text-pos-header-foreground"
             >
               <Package className="h-4 w-4" />
               <span className="hidden md:inline ml-1">Inventory</span>
               {inventoryAlertCount > 0 && (
-                <Badge className="absolute -top-1 -right-1 h-4 min-w-4 px-1 text-[10px] flex items-center justify-center bg-red-500 text-white border-0">
+                <Badge className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center border-0 bg-destructive px-1 text-[10px] text-destructive-foreground">
                   {inventoryAlertCount}
                 </Badge>
               )}
@@ -52,7 +52,7 @@ export default function HeaderBar({
             variant="ghost"
             size="sm"
             onClick={onManager}
-            className="text-slate-50 hover:bg-white/10"
+            className="text-pos-header-foreground/80 hover:bg-white/10 hover:text-pos-header-foreground"
           >
             <Settings className="h-4 w-4" />
             <span className="hidden md:inline ml-1">Manager</span>

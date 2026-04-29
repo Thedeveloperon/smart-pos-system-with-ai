@@ -20,16 +20,21 @@ const recent = [
 
 export default function ReportsPage({ onBack }: Props) {
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="border-b bg-white">
-        <div className="mx-auto max-w-7xl px-4 h-14 flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={onBack}>
-            <ArrowLeft className="h-4 w-4 mr-1" /> Back
+    <div className="min-h-screen pos-shell">
+      <header className="sticky top-0 z-50 border-b border-white/10 bg-pos-header text-pos-header-foreground shadow-md">
+        <div className="mx-auto flex h-14 max-w-7xl items-center gap-3 px-4">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onBack}
+            className="text-pos-header-foreground/80 hover:text-pos-header-foreground hover:bg-white/10"
+          >
+            <ArrowLeft className="mr-1 h-4 w-4" /> Back
           </Button>
           <h1 className="font-semibold">Reports</h1>
         </div>
-      </div>
-      <div className="mx-auto max-w-7xl px-4 py-6 space-y-4">
+      </header>
+      <div className="mx-auto space-y-4 px-4 py-6 max-w-7xl">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {stats.map((s) => (
             <Card key={s.label}>

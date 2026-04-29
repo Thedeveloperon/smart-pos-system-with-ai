@@ -69,33 +69,33 @@ export default function InventoryDashboardTab() {
     <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatCard
-          title="Low stock"
-          value={data.low_stock_count}
-          hint="items below threshold"
-          icon={PackageX}
-          tone="text-red-500"
-        />
+        title="Low stock"
+        value={data.low_stock_count}
+        hint="items below threshold"
+        icon={PackageX}
+        tone="text-destructive"
+      />
         <StatCard
-          title="Expiring soon"
-          value={data.expiry_alert_count}
-          hint="batches in next 30 days"
-          icon={AlertTriangle}
-          tone="text-amber-500"
-        />
+        title="Expiring soon"
+        value={data.expiry_alert_count}
+        hint="batches in next 30 days"
+        icon={AlertTriangle}
+        tone="text-warning"
+      />
         <StatCard
-          title="Open stocktake"
-          value={data.open_stocktake_sessions}
-          hint="sessions in progress"
-          icon={ClipboardList}
-          tone="text-blue-500"
-        />
+        title="Open stocktake"
+        value={data.open_stocktake_sessions}
+        hint="sessions in progress"
+        icon={ClipboardList}
+        tone="text-info"
+      />
         <StatCard
-          title="Open claims"
-          value={data.open_warranty_claims}
-          hint="warranty claims pending"
-          icon={ShieldAlert}
-          tone="text-purple-500"
-        />
+        title="Open claims"
+        value={data.open_warranty_claims}
+        hint="warranty claims pending"
+        icon={ShieldAlert}
+        tone="text-primary"
+      />
       </div>
 
       <Card>
