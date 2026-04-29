@@ -441,6 +441,7 @@ public sealed class PurchaseOcrUnitTests
             options,
             httpContextAccessor,
             new AuditLogService(dbContext, httpContextAccessor),
+            new SmartPos.Backend.Features.Inventory.StockMovementHelper(dbContext),
             NullLogger<PurchaseService>.Instance);
     }
 

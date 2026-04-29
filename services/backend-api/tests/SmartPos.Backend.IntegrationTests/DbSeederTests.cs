@@ -19,7 +19,7 @@ public sealed class DbSeederTests
             await using var dbContext = new SmartPosDbContext(options);
             await dbContext.Database.EnsureCreatedAsync();
 
-            await DbSeeder.SeedAsync(dbContext, seedSampleCatalog: false);
+            await DbSeeder.SeedAsync(dbContext);
 
             Assert.Equal(0, await dbContext.Products.CountAsync());
             Assert.Equal(0, await dbContext.Inventory.CountAsync());

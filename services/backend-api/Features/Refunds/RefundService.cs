@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Features.CashSessions;
+using SmartPos.Backend.Features.Inventory;
 using SmartPos.Backend.Infrastructure;
 using SmartPos.Backend.Security;
 
@@ -9,7 +10,8 @@ namespace SmartPos.Backend.Features.Refunds;
 public sealed class RefundService(
     SmartPosDbContext dbContext,
     AuditLogService auditLogService,
-    CashSessionService cashSessionService)
+    CashSessionService cashSessionService,
+    StockMovementHelper stockMovementHelper)
 {
     public async Task<RefundResponse> CreateRefundAsync(
         CreateRefundRequest request,
@@ -208,8 +210,13 @@ public sealed class RefundService(
 
         foreach (var refundItem in refundItems)
         {
-            var inventoryRecord = await dbContext.Inventory
-                .FirstOrDefaultAsync(x => x.ProductId == refundItem.ProductId, cancellationToken);
+            var product = await dbContext.Products
+                .Include(x => x.Inventory)
+                .Include(x => x.SerialNumbers)
+                .FirstOrDefaultAsync(x => x.Id == refundItem.ProductId, cancellationToken)
+                ?? throw new InvalidOperationException("Product not found for refund item.");
+
+            var inventoryRecord = product.Inventory;
 
             if (inventoryRecord is null)
             {
@@ -226,11 +233,45 @@ public sealed class RefundService(
                     Product = null!
                 };
                 dbContext.Inventory.Add(inventoryRecord);
+                product.Inventory = inventoryRecord;
             }
             inventoryRecord.StoreId = productStoreIds[refundItem.ProductId];
-
-            inventoryRecord.QuantityOnHand += refundItem.Quantity;
             inventoryRecord.UpdatedAtUtc = now;
+
+            await stockMovementHelper.RecordMovementAsync(
+                storeId: productStoreIds[refundItem.ProductId],
+                productId: refundItem.ProductId,
+                type: StockMovementType.Refund,
+                quantityChange: refundItem.Quantity,
+                refType: StockMovementRef.Refund,
+                refId: refund.Id,
+                batchId: null,
+                serialNumber: null,
+                reason: reason,
+                userId: null,
+                cancellationToken);
+
+            if (product.IsSerialTracked)
+            {
+                if (refundItem.Quantity <= 0m || refundItem.Quantity != decimal.Truncate(refundItem.Quantity))
+                {
+                    throw new InvalidOperationException("Serial-tracked refund quantities must be whole numbers.");
+                }
+
+                var serialsToReturn = product.SerialNumbers
+                    .Where(x => x.SaleId == sale.Id &&
+                                x.Status == SerialNumberStatus.Sold)
+                    .OrderBy(x => x.CreatedAtUtc)
+                    .Take((int)refundItem.Quantity)
+                    .ToList();
+
+                foreach (var serial in serialsToReturn)
+                {
+                    serial.Status = SerialNumberStatus.Returned;
+                    serial.RefundId = refund.Id;
+                    serial.UpdatedAtUtc = now;
+                }
+            }
         }
 
         dbContext.Ledger.Add(new LedgerEntry

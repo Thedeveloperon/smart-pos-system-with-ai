@@ -1,11 +1,15 @@
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
+using SmartPos.Backend.Features.Inventory;
 using SmartPos.Backend.Infrastructure;
 using SmartPos.Backend.Security;
 
 namespace SmartPos.Backend.Features.Products;
 
-public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService auditLogService)
+public sealed class ProductService(
+    SmartPosDbContext dbContext,
+    AuditLogService auditLogService,
+    StockMovementHelper stockMovementHelper)
 {
     private const decimal DefaultLowStockThreshold = 5m;
     private const int MaxBarcodeGenerationAttempts = 40;
@@ -435,6 +439,10 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
             BrandId = request.BrandId,
             UnitPrice = RoundMoney(request.UnitPrice),
             CostPrice = RoundMoney(request.CostPrice),
+            IsSerialTracked = request.IsSerialTracked,
+            WarrantyMonths = Math.Max(0, request.WarrantyMonths),
+            IsBatchTracked = request.IsBatchTracked,
+            ExpiryAlertDays = Math.Max(0, request.ExpiryAlertDays),
             IsActive = request.IsActive,
             CreatedAtUtc = now,
             UpdatedAtUtc = now
@@ -445,7 +453,7 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
             Product = product,
             StoreId = product.StoreId,
             InitialStockQuantity = RoundQuantity(request.InitialStockQuantity),
-            QuantityOnHand = RoundQuantity(request.InitialStockQuantity),
+            QuantityOnHand = 0m,
             ReorderLevel = RoundQuantity(request.ReorderLevel),
             SafetyStock = RoundQuantity(request.SafetyStock),
             TargetStockLevel = RoundQuantity(normalizedTargetStockLevel),
@@ -474,8 +482,30 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
                 inventory.SafetyStock,
                 inventory.TargetStockLevel,
                 inventory.AllowNegativeStock,
+                product.IsSerialTracked,
+                product.WarrantyMonths,
+                product.IsBatchTracked,
+                product.ExpiryAlertDays,
                 product.IsActive
             });
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (inventory.InitialStockQuantity > 0m)
+        {
+            await stockMovementHelper.RecordMovementAsync(
+                storeId: product.StoreId,
+                productId: product.Id,
+                type: StockMovementType.Adjustment,
+                quantityChange: inventory.InitialStockQuantity,
+                refType: StockMovementRef.Adjustment,
+                refId: product.Id,
+                batchId: null,
+                serialNumber: null,
+                reason: "initial_stock",
+                userId: null,
+                cancellationToken);
+        }
+
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return await GetSingleCatalogItemAsync(product.Id, DefaultLowStockThreshold, cancellationToken);
@@ -526,6 +556,10 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
             product.BrandId,
             product.UnitPrice,
             product.CostPrice,
+            product.IsSerialTracked,
+            product.WarrantyMonths,
+            product.IsBatchTracked,
+            product.ExpiryAlertDays,
             InitialStockQuantity = product.Inventory?.InitialStockQuantity ?? 0m,
             CurrentStockQuantity = product.Inventory?.QuantityOnHand ?? 0m,
             ReorderLevel = product.Inventory?.ReorderLevel ?? 0m,
@@ -542,6 +576,10 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
         product.BrandId = request.BrandId;
         product.UnitPrice = RoundMoney(request.UnitPrice);
         product.CostPrice = RoundMoney(request.CostPrice);
+        product.IsSerialTracked = request.IsSerialTracked;
+        product.WarrantyMonths = Math.Max(0, request.WarrantyMonths);
+        product.IsBatchTracked = request.IsBatchTracked;
+        product.ExpiryAlertDays = Math.Max(0, request.ExpiryAlertDays);
         product.IsActive = request.IsActive;
         product.UpdatedAtUtc = now;
 
@@ -579,12 +617,27 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
         }
 
         product.Inventory.InitialStockQuantity = nextInitialStock;
-        product.Inventory.QuantityOnHand = nextCurrentStock;
         product.Inventory.ReorderLevel = RoundQuantity(request.ReorderLevel);
         product.Inventory.SafetyStock = RoundQuantity(request.SafetyStock);
         product.Inventory.TargetStockLevel = RoundQuantity(normalizedTargetStockLevel);
         product.Inventory.AllowNegativeStock = request.AllowNegativeStock;
         product.Inventory.UpdatedAtUtc = now;
+
+        if (initialStockDelta != 0m)
+        {
+            await stockMovementHelper.RecordMovementAsync(
+                storeId: product.StoreId,
+                productId: product.Id,
+                type: StockMovementType.Adjustment,
+                quantityChange: initialStockDelta,
+                refType: StockMovementRef.Adjustment,
+                refId: product.Id,
+                batchId: null,
+                serialNumber: null,
+                reason: "stock_recount",
+                userId: null,
+                cancellationToken);
+        }
 
         auditLogService.Queue(
             action: "product_updated",
@@ -606,6 +659,10 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
                 product.Inventory.SafetyStock,
                 product.Inventory.TargetStockLevel,
                 product.Inventory.AllowNegativeStock,
+                product.IsSerialTracked,
+                product.WarrantyMonths,
+                product.IsBatchTracked,
+                product.ExpiryAlertDays,
                 product.IsActive
             });
 
@@ -712,6 +769,7 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
         var reason = NormalizeRequired(request.Reason, "Stock adjustment reason is required.");
         var product = await dbContext.Products
             .Include(x => x.Inventory)
+            .Include(x => x.ProductBatches)
             .FirstOrDefaultAsync(x => x.Id == productId, cancellationToken)
             ?? throw new KeyNotFoundException("Product not found.");
 
@@ -748,7 +806,46 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
             throw new InvalidOperationException("Negative stock is not allowed for this product.");
         }
 
-        inventory.QuantityOnHand = next;
+        if (request.BatchId.HasValue && product.IsBatchTracked)
+        {
+            var batchExists = product.ProductBatches.Any(x => x.Id == request.BatchId.Value);
+            if (!batchExists)
+            {
+                throw new InvalidOperationException("Selected batch does not exist for this product.");
+            }
+        }
+
+        await stockMovementHelper.RecordMovementAsync(
+            storeId: product.StoreId,
+            productId: product.Id,
+            type: StockMovementType.Adjustment,
+            quantityChange: roundedDelta,
+            refType: StockMovementRef.Adjustment,
+            refId: product.Id,
+            batchId: request.BatchId,
+            serialNumber: null,
+            reason,
+            userId: null,
+            cancellationToken);
+
+        if (request.BatchId.HasValue && product.IsBatchTracked)
+        {
+            var batch = product.ProductBatches.FirstOrDefault(x => x.Id == request.BatchId.Value);
+            if (batch is null)
+            {
+                throw new InvalidOperationException("Selected batch does not exist for this product.");
+            }
+
+            var nextBatchQty = RoundQuantity(batch.RemainingQuantity + roundedDelta);
+            if (!inventory.AllowNegativeStock && nextBatchQty < 0m)
+            {
+                throw new InvalidOperationException("Negative batch stock is not allowed for this product.");
+            }
+
+            batch.RemainingQuantity = nextBatchQty;
+            batch.UpdatedAtUtc = now;
+        }
+
         inventory.UpdatedAtUtc = now;
         product.UpdatedAtUtc = now;
 
@@ -1610,6 +1707,10 @@ public sealed class ProductService(SmartPosDbContext dbContext, AuditLogService 
             AllowNegativeStock = product.Inventory?.AllowNegativeStock ?? true,
             IsActive = product.IsActive,
             IsLowStock = stockQuantity <= alertLevel,
+            IsSerialTracked = product.IsSerialTracked,
+            WarrantyMonths = product.WarrantyMonths,
+            IsBatchTracked = product.IsBatchTracked,
+            ExpiryAlertDays = product.ExpiryAlertDays,
             ProductSuppliers = product.ProductSuppliers
                 .Select(ToProductSupplierItemResponse)
                 .OrderByDescending(x => x.IsPreferred)

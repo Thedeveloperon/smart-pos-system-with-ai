@@ -1,6 +1,9 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using SmartPos.Backend.Infrastructure;
 
 namespace SmartPos.Backend.IntegrationTests;
 
@@ -306,9 +309,28 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
         });
     }
 
+    protected override IHost CreateHost(IHostBuilder builder)
+    {
+        var host = base.CreateHost(builder);
+        if (ShouldSeedDeterministicData)
+        {
+            SeedDeterministicIntegrationDataAsync(host).GetAwaiter().GetResult();
+        }
+        return host;
+    }
+
     protected virtual IReadOnlyDictionary<string, string?> GetAdditionalConfigurationOverrides()
     {
         return new Dictionary<string, string?>();
+    }
+
+    protected virtual bool ShouldSeedDeterministicData => true;
+
+    private static async Task SeedDeterministicIntegrationDataAsync(IHost host)
+    {
+        using var scope = host.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+        await DeterministicIntegrationDataSeeder.SeedAsync(dbContext);
     }
 
     protected override void Dispose(bool disposing)

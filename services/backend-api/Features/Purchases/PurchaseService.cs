@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SmartPos.Backend.Domain;
+using SmartPos.Backend.Features.Inventory;
 using SmartPos.Backend.Infrastructure;
 using SmartPos.Backend.Security;
 
@@ -22,6 +23,7 @@ public sealed class PurchaseService(
     IOptions<PurchasingOptions> options,
     IHttpContextAccessor httpContextAccessor,
     AuditLogService auditLogService,
+    StockMovementHelper stockMovementHelper,
     ILogger<PurchaseService> logger)
 {
     private static readonly string[] AllowedExtensions = [".pdf", ".png", ".jpg", ".jpeg"];
@@ -540,8 +542,61 @@ public sealed class PurchaseService(
                 var deltaQty = RoundQuantity(line.Quantity);
                 var newQty = RoundQuantity(previousQty + deltaQty);
 
-                inventory.QuantityOnHand = newQty;
                 inventory.UpdatedAtUtc = now;
+
+                await stockMovementHelper.RecordMovementAsync(
+                    storeId: purchaseBill.StoreId,
+                    productId: product.Id,
+                    type: StockMovementType.Purchase,
+                    quantityChange: deltaQty,
+                    refType: StockMovementRef.Purchase,
+                    refId: purchaseBill.Id,
+                    batchId: null,
+                    serialNumber: null,
+                    reason: "purchase_import",
+                    userId: createdByUserId,
+                    cancellationToken);
+
+                if (product.IsBatchTracked)
+                {
+                    var batchNumber = NormalizeOptional(line.SupplierItemName) ??
+                                      $"{purchaseBill.InvoiceNumber}-{purchaseBillItems.Count + 1:000}";
+                    var existingBatch = await dbContext.ProductBatches.FirstOrDefaultAsync(
+                        x => x.ProductId == product.Id &&
+                             x.BatchNumber == batchNumber &&
+                             x.StoreId == purchaseBill.StoreId,
+                        cancellationToken);
+
+                    if (existingBatch is null)
+                    {
+                        existingBatch = new ProductBatch
+                        {
+                            StoreId = purchaseBill.StoreId,
+                            ProductId = product.Id,
+                            SupplierId = supplier.Id,
+                            PurchaseBill = purchaseBill,
+                            PurchaseBillId = purchaseBill.Id,
+                            BatchNumber = batchNumber,
+                            ManufactureDate = null,
+                            ExpiryDate = null,
+                            InitialQuantity = deltaQty,
+                            RemainingQuantity = deltaQty,
+                            CostPrice = line.UnitCost,
+                            ReceivedAtUtc = now,
+                            CreatedAtUtc = now,
+                            UpdatedAtUtc = now,
+                            Product = product
+                        };
+                        dbContext.ProductBatches.Add(existingBatch);
+                    }
+                    else
+                    {
+                        existingBatch.RemainingQuantity = RoundQuantity(existingBatch.RemainingQuantity + deltaQty);
+                        existingBatch.InitialQuantity = RoundQuantity(existingBatch.InitialQuantity + deltaQty);
+                        existingBatch.CostPrice = line.UnitCost;
+                        existingBatch.UpdatedAtUtc = now;
+                    }
+                }
 
                 if (shouldUpdateCost)
                 {
