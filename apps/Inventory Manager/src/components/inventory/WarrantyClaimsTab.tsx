@@ -39,10 +39,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ShieldAlert } from "lucide-react";
 
 const STATUS_TONES: Record<string, string> = {
-  Open: "bg-amber-100 text-amber-800",
-  InRepair: "bg-blue-100 text-blue-800",
-  Resolved: "bg-green-100 text-green-800",
-  Rejected: "bg-red-100 text-red-800",
+  Open: "bg-warning/15 text-warning-foreground",
+  InRepair: "bg-info/15 text-info",
+  Resolved: "bg-success/15 text-success",
+  Rejected: "bg-destructive/15 text-destructive",
 };
 
 export default function WarrantyClaimsTab() {
@@ -189,7 +189,7 @@ export default function WarrantyClaimsTab() {
                       </Button>
                     </div>
                     {serialError && <p className="text-xs text-destructive">{serialError}</p>}
-                    {serialId && <p className="text-xs text-green-600">Serial validated ✓</p>}
+                    {serialId && <p className="text-xs text-success">Serial validated ✓</p>}
                   </div>
                   <div className="grid gap-1">
                     <Label>Claim date</Label>

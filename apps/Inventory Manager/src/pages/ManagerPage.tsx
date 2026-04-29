@@ -16,16 +16,21 @@ const staff = [
 
 export default function ManagerPage({ onBack }: Props) {
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="border-b bg-white">
-        <div className="mx-auto max-w-7xl px-4 h-14 flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={onBack}>
-            <ArrowLeft className="h-4 w-4 mr-1" /> Back
+    <div className="min-h-screen pos-shell">
+      <header className="sticky top-0 z-50 border-b border-white/10 bg-pos-header text-pos-header-foreground shadow-md">
+        <div className="mx-auto flex h-14 max-w-7xl items-center gap-3 px-4">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onBack}
+            className="text-pos-header-foreground/80 hover:text-pos-header-foreground hover:bg-white/10"
+          >
+            <ArrowLeft className="mr-1 h-4 w-4" /> Back
           </Button>
           <h1 className="font-semibold">Manager</h1>
         </div>
-      </div>
-      <div className="mx-auto max-w-7xl px-4 py-6 grid gap-4 lg:grid-cols-2">
+      </header>
+      <div className="mx-auto grid max-w-7xl gap-4 px-4 py-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">

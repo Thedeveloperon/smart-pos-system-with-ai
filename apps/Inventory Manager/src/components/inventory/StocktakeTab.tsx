@@ -36,9 +36,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ClipboardList } from "lucide-react";
 
 const STATUS_TONES: Record<string, string> = {
-  Draft: "bg-gray-100 text-gray-800",
-  InProgress: "bg-blue-100 text-blue-800",
-  Completed: "bg-green-100 text-green-800",
+  Draft: "bg-muted text-muted-foreground",
+  InProgress: "bg-info/15 text-info",
+  Completed: "bg-success/15 text-success",
 };
 
 export default function StocktakeTab() {
@@ -207,7 +207,7 @@ export default function StocktakeTab() {
                       </TableCell>
                       <TableCell
                         className={`text-right font-medium ${
-                          variance > 0 ? "text-green-600" : variance < 0 ? "text-red-600" : ""
+                          variance > 0 ? "text-success" : variance < 0 ? "text-destructive" : ""
                         }`}
                       >
                         {it.counted_quantity == null

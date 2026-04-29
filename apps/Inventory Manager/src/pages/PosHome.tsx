@@ -40,7 +40,7 @@ export default function PosHome({ onOpenInventory, onOpenReports, onOpenManager 
   const total = cart.reduce((sum, c) => sum + c.product.price * c.qty, 0);
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen pos-shell">
       <HeaderBar
         onInventory={onOpenInventory}
         onReports={onOpenReports}
@@ -48,7 +48,7 @@ export default function PosHome({ onOpenInventory, onOpenReports, onOpenManager 
         inventoryAlertCount={alertCount}
       />
 
-      <div className="mx-auto max-w-7xl px-4 py-6 grid gap-4 lg:grid-cols-3">
+      <div className="mx-auto grid max-w-7xl gap-4 px-4 py-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <Card>
             <CardHeader>

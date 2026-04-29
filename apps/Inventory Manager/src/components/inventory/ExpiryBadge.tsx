@@ -11,10 +11,10 @@ export default function ExpiryBadge({ expiryDate }: Props) {
     return <Badge variant="destructive">{days <= 0 ? "Expired" : `${days}d left`}</Badge>;
   }
   if (days <= 30) {
-    return <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">{days}d left</Badge>;
+    return <Badge className="bg-warning/15 text-warning-foreground hover:bg-warning/15">{days}d left</Badge>;
   }
   return (
-    <Badge variant="outline" className="text-green-700 border-green-300">
+    <Badge variant="outline" className="text-success border-success/30">
       {days}d left
     </Badge>
   );
