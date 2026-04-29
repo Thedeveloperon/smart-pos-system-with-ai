@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Infrastructure;
@@ -17,14 +18,21 @@ public static class WarrantyClaimEndpoints
             string? status,
             DateTimeOffset? from_date,
             DateTimeOffset? to_date,
+            ClaimsPrincipal user,
             SmartPosDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var query = dbContext.WarrantyClaims
                 .AsNoTracking()
                 .Include(x => x.SerialNumber)
                 .ThenInclude(x => x.Product)
                 .AsQueryable();
+
+            if (currentStoreId.HasValue)
+            {
+                query = query.Where(x => x.StoreId == currentStoreId.Value);
+            }
 
             if (!string.IsNullOrWhiteSpace(status) &&
                 Enum.TryParse<WarrantyClaimStatus>(status, true, out var parsedStatus))
@@ -67,19 +75,27 @@ public static class WarrantyClaimEndpoints
 
         group.MapPost("/", async (
             CreateWarrantyClaimRequest request,
+            ClaimsPrincipal user,
             SmartPosDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var serial = await dbContext.SerialNumbers
-                .FirstOrDefaultAsync(x => x.Id == request.SerialNumberId, cancellationToken);
+                .FirstOrDefaultAsync(x => x.Id == request.SerialNumberId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
             if (serial is null)
             {
                 return Results.NotFound(new { message = "Serial number not found." });
             }
 
+            if (serial.Status is not (SerialNumberStatus.Sold or SerialNumberStatus.UnderWarranty))
+            {
+                return Results.BadRequest(new { message = "Warranty claims can only be created for sold or under-warranty serials." });
+            }
+
             var now = DateTimeOffset.UtcNow;
             var claim = new WarrantyClaim
             {
+                StoreId = serial.StoreId,
                 SerialNumberId = serial.Id,
                 ClaimDate = request.ClaimDate ?? now,
                 Status = WarrantyClaimStatus.Open,
@@ -108,14 +124,16 @@ public static class WarrantyClaimEndpoints
 
         group.MapGet("/{claimId:guid}", async (
             Guid claimId,
+            ClaimsPrincipal user,
             SmartPosDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var claim = await dbContext.WarrantyClaims
                 .AsNoTracking()
                 .Include(x => x.SerialNumber)
                 .ThenInclude(x => x.Product)
-                .FirstOrDefaultAsync(x => x.Id == claimId, cancellationToken);
+                .FirstOrDefaultAsync(x => x.Id == claimId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
             if (claim is null)
             {
                 return Results.NotFound(new { message = "Warranty claim not found." });
@@ -142,15 +160,22 @@ public static class WarrantyClaimEndpoints
         group.MapPut("/{claimId:guid}", async (
             Guid claimId,
             UpdateWarrantyClaimRequest request,
+            ClaimsPrincipal user,
             SmartPosDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var claim = await dbContext.WarrantyClaims
                 .Include(x => x.SerialNumber)
-                .FirstOrDefaultAsync(x => x.Id == claimId, cancellationToken);
+                .FirstOrDefaultAsync(x => x.Id == claimId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
             if (claim is null)
             {
                 return Results.NotFound(new { message = "Warranty claim not found." });
+            }
+
+            if (!IsValidStatusTransition(claim.Status, request.Status))
+            {
+                return Results.BadRequest(new { message = "Invalid warranty claim status transition." });
             }
 
             claim.Status = request.Status;
@@ -178,6 +203,23 @@ public static class WarrantyClaimEndpoints
         .WithOpenApi();
 
         return app;
+    }
+
+    private static bool IsValidStatusTransition(WarrantyClaimStatus currentStatus, WarrantyClaimStatus nextStatus)
+    {
+        if (currentStatus == nextStatus)
+        {
+            return true;
+        }
+
+        return currentStatus switch
+        {
+            WarrantyClaimStatus.Open => nextStatus is WarrantyClaimStatus.InRepair or WarrantyClaimStatus.Resolved or WarrantyClaimStatus.Rejected,
+            WarrantyClaimStatus.InRepair => nextStatus is WarrantyClaimStatus.Resolved or WarrantyClaimStatus.Rejected,
+            WarrantyClaimStatus.Resolved => false,
+            WarrantyClaimStatus.Rejected => false,
+            _ => false
+        };
     }
 }
 

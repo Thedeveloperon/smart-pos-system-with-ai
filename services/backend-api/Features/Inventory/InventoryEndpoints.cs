@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Infrastructure;
@@ -14,11 +15,14 @@ public static class InventoryEndpoints
             .RequireAuthorization(SmartPosPolicies.ManagerOrOwner);
 
         group.MapGet("/dashboard", async (
+            ClaimsPrincipal user,
             SmartPosDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var defaultThreshold = await dbContext.ShopStockSettings
                 .AsNoTracking()
+                .Where(x => !currentStoreId.HasValue || x.StoreId == currentStoreId.Value)
                 .Select(x => x.DefaultLowStockThreshold)
                 .FirstOrDefaultAsync(cancellationToken);
             if (defaultThreshold <= 0m)
@@ -29,6 +33,7 @@ public static class InventoryEndpoints
             var products = await dbContext.Products
                 .AsNoTracking()
                 .Include(x => x.Inventory)
+                .Where(x => !currentStoreId.HasValue || x.StoreId == currentStoreId.Value)
                 .ToListAsync(cancellationToken);
 
             var lowStockCount = products.Count(product =>
@@ -41,18 +46,21 @@ public static class InventoryEndpoints
 
             var openStocktakeSessions = await dbContext.StocktakeSessions
                 .AsNoTracking()
-                .CountAsync(x => x.Status != StocktakeStatus.Completed, cancellationToken);
+                .Where(x => !currentStoreId.HasValue || x.StoreId == currentStoreId.Value)
+                .Where(x => x.Status != StocktakeStatus.Completed)
+                .CountAsync(cancellationToken);
 
             var openWarrantyClaims = await dbContext.WarrantyClaims
                 .AsNoTracking()
-                .CountAsync(
-                    x => x.Status == WarrantyClaimStatus.Open ||
-                         x.Status == WarrantyClaimStatus.InRepair,
-                    cancellationToken);
+                .Where(x => !currentStoreId.HasValue || x.StoreId == currentStoreId.Value)
+                .Where(x => x.Status == WarrantyClaimStatus.Open ||
+                            x.Status == WarrantyClaimStatus.InRepair)
+                .CountAsync(cancellationToken);
 
             var expiringBatches = await dbContext.ProductBatches
                 .AsNoTracking()
                 .Include(x => x.Product)
+                .Where(x => !currentStoreId.HasValue || x.StoreId == currentStoreId.Value)
                 .Where(x => x.ExpiryDate.HasValue)
                 .ToListAsync(cancellationToken);
 
@@ -95,9 +103,11 @@ public static class InventoryEndpoints
             DateTimeOffset? to_date,
             int? page,
             int? take,
+            ClaimsPrincipal user,
             SmartPosDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var normalizedPage = Math.Max(1, page ?? 1);
             var normalizedTake = Math.Clamp(take ?? 20, 1, 100);
 
@@ -105,6 +115,11 @@ public static class InventoryEndpoints
                 .AsNoTracking()
                 .Include(x => x.Product)
                 .AsQueryable();
+
+            if (currentStoreId.HasValue)
+            {
+                query = query.Where(x => x.StoreId == currentStoreId.Value);
+            }
 
             if (product_id.HasValue)
             {

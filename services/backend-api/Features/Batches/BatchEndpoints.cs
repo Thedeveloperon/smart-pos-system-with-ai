@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Infrastructure;
@@ -15,12 +16,21 @@ public static class BatchEndpoints
 
         productGroup.MapGet("/", async (
             Guid productId,
+            ClaimsPrincipal user,
             SmartPosDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
+            var product = await dbContext.Products.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == productId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
+            if (product is null)
+            {
+                return Results.NotFound(new { message = "Product not found." });
+            }
+
             var batches = await dbContext.ProductBatches
                 .AsNoTracking()
-                .Where(x => x.ProductId == productId)
+                .Where(x => x.ProductId == productId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value))
                 .OrderByDescending(x => x.CreatedAtUtc)
                 .Select(x => new
                 {
@@ -48,11 +58,13 @@ public static class BatchEndpoints
         productGroup.MapPost("/", async (
             Guid productId,
             CreateBatchRequest request,
+            ClaimsPrincipal user,
             SmartPosDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var product = await dbContext.Products
-                .FirstOrDefaultAsync(x => x.Id == productId, cancellationToken);
+                .FirstOrDefaultAsync(x => x.Id == productId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
             if (product is null)
             {
                 return Results.NotFound(new { message = "Product not found." });
@@ -116,14 +128,30 @@ public static class BatchEndpoints
             Guid productId,
             Guid batchId,
             UpdateBatchRequest request,
+            ClaimsPrincipal user,
             SmartPosDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var batch = await dbContext.ProductBatches
-                .FirstOrDefaultAsync(x => x.Id == batchId && x.ProductId == productId, cancellationToken);
+                .FirstOrDefaultAsync(x => x.Id == batchId && x.ProductId == productId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
             if (batch is null)
             {
                 return Results.NotFound(new { message = "Batch not found." });
+            }
+
+            if (batch.BatchNumber != Normalize(request.BatchNumber) && !string.IsNullOrWhiteSpace(Normalize(request.BatchNumber)))
+            {
+                var duplicate = await dbContext.ProductBatches.AnyAsync(
+                    x => x.ProductId == productId &&
+                         x.StoreId == batch.StoreId &&
+                         x.BatchNumber == Normalize(request.BatchNumber) &&
+                         x.Id != batchId,
+                    cancellationToken);
+                if (duplicate)
+                {
+                    return Results.BadRequest(new { message = "Batch number already exists for this product." });
+                }
             }
 
             batch.SupplierId = request.SupplierId;
@@ -150,15 +178,18 @@ public static class BatchEndpoints
 
         app.MapGet("/api/batches/expiring", async (
             int? days,
+            ClaimsPrincipal user,
             SmartPosDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var thresholdDays = Math.Clamp(days ?? 30, 1, 3650);
             var limitDate = DateTimeOffset.UtcNow.AddDays(thresholdDays);
 
             var batches = await dbContext.ProductBatches
                 .AsNoTracking()
                 .Include(x => x.Product)
+                .Where(x => !currentStoreId.HasValue || x.StoreId == currentStoreId.Value)
                 .Where(x => x.ExpiryDate.HasValue && x.ExpiryDate <= limitDate)
                 .OrderBy(x => x.ExpiryDate)
                 .ToListAsync(cancellationToken);

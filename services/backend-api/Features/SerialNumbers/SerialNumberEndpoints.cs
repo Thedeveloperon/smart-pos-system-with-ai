@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Infrastructure;
@@ -15,12 +16,14 @@ public static class SerialNumberEndpoints
 
         productGroup.MapGet("/", async (
             Guid productId,
+            ClaimsPrincipal user,
             SmartPosDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var product = await dbContext.Products
                 .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.Id == productId, cancellationToken);
+                .FirstOrDefaultAsync(x => x.Id == productId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
             if (product is null)
             {
                 return Results.NotFound(new { message = "Product not found." });
@@ -57,11 +60,13 @@ public static class SerialNumberEndpoints
         productGroup.MapPost("/", async (
             Guid productId,
             AddSerialNumbersRequest request,
+            ClaimsPrincipal user,
             SmartPosDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var product = await dbContext.Products
-                .FirstOrDefaultAsync(x => x.Id == productId, cancellationToken);
+                .FirstOrDefaultAsync(x => x.Id == productId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
             if (product is null)
             {
                 return Results.NotFound(new { message = "Product not found." });
@@ -136,14 +141,21 @@ public static class SerialNumberEndpoints
             Guid productId,
             Guid serialId,
             UpdateSerialNumberRequest request,
+            ClaimsPrincipal user,
             SmartPosDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var serial = await dbContext.SerialNumbers
-                .FirstOrDefaultAsync(x => x.Id == serialId && x.ProductId == productId, cancellationToken);
+                .FirstOrDefaultAsync(x => x.Id == serialId && x.ProductId == productId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
             if (serial is null)
             {
                 return Results.NotFound(new { message = "Serial number not found." });
+            }
+
+            if (!IsValidStatusTransition(serial.Status, request.Status))
+            {
+                return Results.BadRequest(new { message = "Invalid serial status transition." });
             }
 
             serial.Status = request.Status;
@@ -169,9 +181,11 @@ public static class SerialNumberEndpoints
 
         app.MapGet("/api/serials/lookup", async (
             string? serial,
+            ClaimsPrincipal user,
             SmartPosDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var normalized = NormalizeSerial(serial);
             if (string.IsNullOrWhiteSpace(normalized))
             {
@@ -184,7 +198,7 @@ public static class SerialNumberEndpoints
                 .Include(x => x.Sale)
                 .Include(x => x.SaleItem)
                 .Include(x => x.Refund)
-                .FirstOrDefaultAsync(x => x.SerialValue == normalized, cancellationToken);
+                .FirstOrDefaultAsync(x => x.SerialValue == normalized && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
 
             if (record is null)
             {
@@ -251,6 +265,24 @@ public static class SerialNumberEndpoints
         }
 
         return value.Trim();
+    }
+
+    private static bool IsValidStatusTransition(SerialNumberStatus currentStatus, SerialNumberStatus nextStatus)
+    {
+        if (currentStatus == nextStatus)
+        {
+            return true;
+        }
+
+        return currentStatus switch
+        {
+            SerialNumberStatus.Available => nextStatus is SerialNumberStatus.Sold or SerialNumberStatus.Defective,
+            SerialNumberStatus.Sold => nextStatus is SerialNumberStatus.Returned or SerialNumberStatus.UnderWarranty or SerialNumberStatus.Defective,
+            SerialNumberStatus.Returned => nextStatus is SerialNumberStatus.Available or SerialNumberStatus.Defective,
+            SerialNumberStatus.UnderWarranty => nextStatus is SerialNumberStatus.Sold or SerialNumberStatus.Defective,
+            SerialNumberStatus.Defective => nextStatus is SerialNumberStatus.Available,
+            _ => false
+        };
     }
 }
 

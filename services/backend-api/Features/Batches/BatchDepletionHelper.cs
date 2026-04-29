@@ -34,7 +34,9 @@ public sealed class BatchDepletionHelper(
         }
 
         var batches = await dbContext.ProductBatches
-            .Where(x => x.ProductId == productId && x.RemainingQuantity > 0m)
+            .Where(x => x.ProductId == productId &&
+                        x.RemainingQuantity > 0m &&
+                        (!storeId.HasValue || x.StoreId == storeId.Value))
             .OrderBy(x => x.ExpiryDate == null)
             .ThenBy(x => x.ExpiryDate)
             .ThenBy(x => x.ReceivedAtUtc)

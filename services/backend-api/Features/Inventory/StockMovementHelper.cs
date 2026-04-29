@@ -17,7 +17,9 @@ public sealed class StockMovementHelper(SmartPosDbContext dbContext)
         string? serialNumber,
         string? reason,
         Guid? userId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        decimal? quantityBeforeOverride = null,
+        bool updateInventory = true)
     {
         var now = DateTimeOffset.UtcNow;
         var product = await dbContext.Products
@@ -45,7 +47,7 @@ public sealed class StockMovementHelper(SmartPosDbContext dbContext)
         }
 
         ArgumentNullException.ThrowIfNull(inventory);
-        var quantityBefore = RoundQuantity(inventory.QuantityOnHand);
+        var quantityBefore = RoundQuantity(quantityBeforeOverride ?? inventory.QuantityOnHand);
         var quantityAfter = RoundQuantity(quantityBefore + quantityChange);
 
         if (!inventory.AllowNegativeStock && quantityAfter < 0m)
@@ -53,7 +55,7 @@ public sealed class StockMovementHelper(SmartPosDbContext dbContext)
             throw new InvalidOperationException("Negative stock is not allowed for this product.");
         }
 
-        if (inventory is not null)
+        if (updateInventory)
         {
             inventory.StoreId = storeId;
             inventory.QuantityOnHand = quantityAfter;

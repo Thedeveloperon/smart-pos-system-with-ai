@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Features.Inventory;
@@ -16,10 +17,16 @@ public static class StocktakeEndpoints
 
         group.MapGet("/sessions", async (
             string? status,
+            ClaimsPrincipal user,
             SmartPosDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var query = dbContext.StocktakeSessions.AsNoTracking().AsQueryable();
+            if (currentStoreId.HasValue)
+            {
+                query = query.Where(x => x.StoreId == currentStoreId.Value);
+            }
             if (!string.IsNullOrWhiteSpace(status) &&
                 Enum.TryParse<StocktakeStatus>(status, true, out var parsedStatus))
             {
@@ -46,19 +53,22 @@ public static class StocktakeEndpoints
 
         group.MapPost("/sessions", async (
             CreateStocktakeSessionRequest request,
+            ClaimsPrincipal user,
             SmartPosDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var now = DateTimeOffset.UtcNow;
             var products = await dbContext.Products
                 .AsNoTracking()
                 .Include(x => x.Inventory)
                 .Where(x => x.IsActive)
+                .Where(x => !currentStoreId.HasValue || x.StoreId == currentStoreId.Value)
                 .ToListAsync(cancellationToken);
 
             var session = new StocktakeSession
             {
-                StoreId = request.StoreId,
+                StoreId = currentStoreId ?? request.StoreId,
                 Status = StocktakeStatus.Draft,
                 StartedAtUtc = now,
                 CreatedAtUtc = now,
@@ -88,14 +98,16 @@ public static class StocktakeEndpoints
 
         group.MapGet("/sessions/{sessionId:guid}", async (
             Guid sessionId,
+            ClaimsPrincipal user,
             SmartPosDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var session = await dbContext.StocktakeSessions
                 .AsNoTracking()
                 .Include(x => x.Items)
                 .ThenInclude(x => x.Product)
-                .FirstOrDefaultAsync(x => x.Id == sessionId, cancellationToken);
+                .FirstOrDefaultAsync(x => x.Id == sessionId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
             if (session is null)
             {
                 return Results.NotFound(new { message = "Stocktake session not found." });
@@ -108,11 +120,13 @@ public static class StocktakeEndpoints
 
         group.MapPut("/sessions/{sessionId:guid}/start", async (
             Guid sessionId,
+            ClaimsPrincipal user,
             SmartPosDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var session = await dbContext.StocktakeSessions
-                .FirstOrDefaultAsync(x => x.Id == sessionId, cancellationToken);
+                .FirstOrDefaultAsync(x => x.Id == sessionId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
             if (session is null)
             {
                 return Results.NotFound(new { message = "Stocktake session not found." });
@@ -136,14 +150,22 @@ public static class StocktakeEndpoints
             Guid sessionId,
             Guid itemId,
             UpdateStocktakeItemRequest request,
+            ClaimsPrincipal user,
             SmartPosDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var item = await dbContext.StocktakeItems
-                .FirstOrDefaultAsync(x => x.SessionId == sessionId && x.Id == itemId, cancellationToken);
+                .Include(x => x.Session)
+                .FirstOrDefaultAsync(x => x.SessionId == sessionId && x.Id == itemId && (!currentStoreId.HasValue || x.Session.StoreId == currentStoreId.Value), cancellationToken);
             if (item is null)
             {
                 return Results.NotFound(new { message = "Stocktake item not found." });
+            }
+
+            if (item.Session.Status != StocktakeStatus.InProgress)
+            {
+                return Results.BadRequest(new { message = "Only in-progress sessions can be updated." });
             }
 
             item.CountedQuantity = request.CountedQuantity;
@@ -164,22 +186,24 @@ public static class StocktakeEndpoints
 
         group.MapPost("/sessions/{sessionId:guid}/complete", async (
             Guid sessionId,
+            ClaimsPrincipal user,
             SmartPosDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var session = await dbContext.StocktakeSessions
                 .Include(x => x.Items)
                 .ThenInclude(x => x.Product)
                 .ThenInclude(x => x.Inventory)
-                .FirstOrDefaultAsync(x => x.Id == sessionId, cancellationToken);
+                .FirstOrDefaultAsync(x => x.Id == sessionId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
             if (session is null)
             {
                 return Results.NotFound(new { message = "Stocktake session not found." });
             }
 
-            if (session.Status == StocktakeStatus.Completed)
+            if (session.Status != StocktakeStatus.InProgress)
             {
-                return Results.BadRequest(new { message = "Session is already completed." });
+                return Results.BadRequest(new { message = "Only in-progress sessions can be completed." });
             }
 
             var now = DateTimeOffset.UtcNow;
@@ -246,12 +270,14 @@ public static class StocktakeEndpoints
 
         group.MapDelete("/sessions/{sessionId:guid}", async (
             Guid sessionId,
+            ClaimsPrincipal user,
             SmartPosDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var session = await dbContext.StocktakeSessions
                 .Include(x => x.Items)
-                .FirstOrDefaultAsync(x => x.Id == sessionId, cancellationToken);
+                .FirstOrDefaultAsync(x => x.Id == sessionId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
             if (session is null)
             {
                 return Results.NotFound(new { message = "Stocktake session not found." });
