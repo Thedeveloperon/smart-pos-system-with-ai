@@ -10,7 +10,6 @@ import RemindersDialog from "@/components/pos/RemindersDialog";
 import LicenseAccountDialog from "@/components/pos/LicenseAccountDialog";
 import NewItemDialog from "@/components/pos/NewItemDialog";
 import ImportSupplierBillDialog from "@/components/pos/ImportSupplierBillDialog";
-import ProductManagementDialog from "@/components/pos/ProductManagementDialog";
 import ManagerReportsDrawer from "@/components/pos/ManagerReportsDrawer";
 import ProductSearchPanel, { type ProductSearchPanelHandle } from "@/components/pos/ProductSearchPanel";
 import CartPanel from "@/components/pos/CartPanel";
@@ -99,7 +98,6 @@ const IndexInner = () => {
   const [activeHeldSaleId, setActiveHeldSaleId] = useState<string | null>(null);
   const [showHeldBills, setShowHeldBills] = useState(false);
   const [showNewItem, setShowNewItem] = useState(false);
-  const [showProductManagement, setShowProductManagement] = useState(false);
   const [showReports, setShowReports] = useState(false);
   const [showTodaySales, setShowTodaySales] = useState(false);
   const [showClosing, setShowClosing] = useState(false);
@@ -810,7 +808,6 @@ const IndexInner = () => {
   const isShortcutActionBlocked =
     showHeldBills ||
     showNewItem ||
-    showProductManagement ||
     showReports ||
     showTodaySales ||
     showClosing ||
@@ -977,7 +974,6 @@ const IndexInner = () => {
         onHeldBills={() => setShowHeldBills(true)}
         onTodaySales={() => setShowTodaySales(true)}
         onNewItem={() => setShowNewItem(true)}
-        onManageProducts={() => setShowProductManagement(true)}
         onInventoryManager={openInventoryManager}
         inventoryAlertCount={inventoryAlertCount}
         onReports={() => setShowReports(true)}
@@ -1285,12 +1281,6 @@ const IndexInner = () => {
         open={showNewItem}
         onOpenChange={setShowNewItem}
         onCreated={() => void loadProducts()}
-      />
-
-      <ProductManagementDialog
-        open={showProductManagement}
-        onOpenChange={setShowProductManagement}
-        onChanged={() => void loadProducts()}
       />
 
       <ManagerReportsDrawer

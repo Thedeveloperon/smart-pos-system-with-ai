@@ -1,18 +1,11 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ArrowLeft, Settings, Store } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Users, Settings as SettingsIcon, Store } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import ProductsTab from "@/components/manager/ProductsTab";
+import CatalogueTab from "@/components/manager/CatalogueTab";
+import SuppliersTab from "@/components/manager/SuppliersTab";
 
 type Props = { onBack: () => void };
-
-const staff = [
-  { name: "Alex Morgan", role: "Manager", active: true },
-  { name: "Jamie Lee", role: "Cashier", active: true },
-  { name: "Sam Patel", role: "Cashier", active: false },
-];
 
 export default function ManagerPage({ onBack }: Props) {
   return (
@@ -23,80 +16,45 @@ export default function ManagerPage({ onBack }: Props) {
             variant="ghost"
             size="sm"
             onClick={onBack}
-            className="text-pos-header-foreground/80 hover:text-pos-header-foreground hover:bg-white/10"
+            className="text-pos-header-foreground/80 hover:bg-white/10 hover:text-pos-header-foreground"
           >
-            <ArrowLeft className="mr-1 h-4 w-4" /> Back
+            <ArrowLeft className="mr-1 h-4 w-4" />
+            Back
           </Button>
-          <h1 className="font-semibold">Manager</h1>
+          <div className="h-4 w-px bg-white/15" />
+          <Store className="h-5 w-5 text-primary" />
+          <div>
+            <div className="text-sm font-semibold leading-none">Manager</div>
+            <div className="text-xs text-pos-header-foreground/70">Products and catalogue administration</div>
+          </div>
+          <div className="ml-auto flex items-center gap-2 text-pos-header-foreground/70">
+            <Settings className="h-4 w-4" />
+            <span className="text-xs uppercase tracking-[0.2em]">Inventory Manager</span>
+          </div>
         </div>
       </header>
-      <div className="mx-auto grid max-w-7xl gap-4 px-4 py-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Store className="h-4 w-4" /> Store
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="space-y-1.5">
-              <Label>Store name</Label>
-              <Input defaultValue="Inventory Manager Demo" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Currency</Label>
-              <Input defaultValue="USD" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Tax rate (%)</Label>
-              <Input defaultValue="8.25" type="number" />
-            </div>
-          </CardContent>
-        </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <SettingsIcon className="h-4 w-4" /> Preferences
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {[
-              { label: "Require manager PIN for refunds", on: true },
-              { label: "Print receipt automatically", on: false },
-              { label: "Low stock notifications", on: true },
-              { label: "Show product images on POS", on: true },
-            ].map((p) => (
-              <div key={p.label} className="flex items-center justify-between">
-                <span className="text-sm">{p.label}</span>
-                <Switch defaultChecked={p.on} />
-              </div>
-            ))}
-          </CardContent>
-        </Card>
+      <main className="mx-auto max-w-7xl px-4 py-6">
+        <Tabs defaultValue="products" className="space-y-4">
+          <TabsList className="grid w-full grid-cols-3 border border-border/60 bg-secondary/60 md:w-fit">
+            <TabsTrigger value="products">Products</TabsTrigger>
+            <TabsTrigger value="catalogue">Categories & Brands</TabsTrigger>
+            <TabsTrigger value="suppliers">Suppliers</TabsTrigger>
+          </TabsList>
 
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Users className="h-4 w-4" /> Staff
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="divide-y">
-              {staff.map((s) => (
-                <div key={s.name} className="flex items-center justify-between py-2 text-sm">
-                  <div>
-                    <div className="font-medium">{s.name}</div>
-                    <div className="text-xs text-muted-foreground">{s.role}</div>
-                  </div>
-                  <Badge variant={s.active ? "secondary" : "outline"}>
-                    {s.active ? "Active" : "Inactive"}
-                  </Badge>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+          <TabsContent value="products" className="mt-0">
+            <ProductsTab />
+          </TabsContent>
+
+          <TabsContent value="catalogue" className="mt-0">
+            <CatalogueTab />
+          </TabsContent>
+
+          <TabsContent value="suppliers" className="mt-0">
+            <SuppliersTab />
+          </TabsContent>
+        </Tabs>
+      </main>
     </div>
   );
 }

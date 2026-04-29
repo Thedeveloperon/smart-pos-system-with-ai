@@ -5,22 +5,133 @@
 // in-memory mock store or seeded sample data.
 // ============================================================================
 
+export type Category = {
+  category_id: string;
+  name: string;
+  description?: string | null;
+  is_active: boolean;
+  product_count: number;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+export type Brand = {
+  brand_id: string;
+  name: string;
+  code?: string | null;
+  description?: string | null;
+  is_active: boolean;
+  product_count: number;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+export type Supplier = {
+  supplier_id: string;
+  name: string;
+  code?: string | null;
+  contact_name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  is_active: boolean;
+  linked_product_count: number;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+export type ProductSupplier = {
+  product_supplier_id: string;
+  supplier_id: string;
+  supplier_name: string;
+  supplier_sku?: string | null;
+  supplier_item_name?: string | null;
+  is_preferred: boolean;
+  lead_time_days?: number | null;
+  min_order_qty?: number | null;
+  pack_size?: number | null;
+  last_purchase_price?: number | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+export type GenerateBarcodeResponse = {
+  barcode: string;
+  format: string;
+  generated_at: string;
+};
+
+export type ValidateBarcodeResponse = {
+  barcode: string;
+  normalized_barcode: string;
+  is_valid: boolean;
+  format: string;
+  message?: string | null;
+  exists: boolean;
+};
+
+export type BulkGenerateMissingProductBarcodesResponse = {
+  dry_run: boolean;
+  scanned: number;
+  generated: number;
+  would_generate: number;
+  skipped_existing: number;
+  failed: number;
+  processed_at: string;
+  items?: Array<{
+    product_id: string;
+    name: string;
+    status: string;
+    barcode?: string | null;
+    message?: string | null;
+  }>;
+};
+
+export type StockAdjustmentResponse = {
+  product_id: string;
+  delta_quantity: number;
+  previous_quantity: number;
+  new_quantity: number;
+  reason: string;
+  is_low_stock: boolean;
+  alert_level: number;
+  safety_stock: number;
+  target_stock_level: number;
+  updated_at: string;
+};
+
 export type Product = {
   id: string;
   name: string;
   sku: string;
-  price: number;
-  stock: number;
   barcode?: string;
-  image_url?: string;
+  image_url?: string | null;
+  image?: string;
   category_id?: string | null;
+  category_name?: string | null;
   brand_id?: string | null;
+  brand_name?: string | null;
+  price: number;
+  unit_price?: number;
+  cost_price?: number;
+  stock: number;
+  stock_quantity?: number;
+  initial_stock_quantity?: number;
+  reorder_level?: number;
+  safety_stock?: number;
+  target_stock_level?: number;
+  alert_level?: number;
   allow_negative_stock?: boolean;
+  is_low_stock?: boolean;
   is_serial_tracked?: boolean;
   warranty_months?: number;
   is_batch_tracked?: boolean;
   expiry_alert_days?: number;
+  product_suppliers?: ProductSupplier[];
   is_active?: boolean;
+  created_at?: string;
+  updated_at?: string | null;
 };
 
 export type StockMovement = {
@@ -147,16 +258,98 @@ type BackendProductCatalogItem = {
   barcode?: string | null;
   image_url?: string | null;
   category_id?: string | null;
+  category_name?: string | null;
   brand_id?: string | null;
+  brand_name?: string | null;
   unit_price: number;
+  cost_price?: number;
   stock_quantity: number;
+  initial_stock_quantity?: number;
+  reorder_level?: number;
+  safety_stock?: number;
+  target_stock_level?: number;
+  alert_level?: number;
   allow_negative_stock?: boolean;
+  is_low_stock?: boolean;
   is_serial_tracked?: boolean;
   warranty_months?: number;
   is_batch_tracked?: boolean;
   expiry_alert_days?: number;
+  product_suppliers?: Array<{
+    product_supplier_id: string;
+    supplier_id: string;
+    supplier_name: string;
+    supplier_sku?: string | null;
+    supplier_item_name?: string | null;
+    is_preferred: boolean;
+    lead_time_days?: number | null;
+    min_order_qty?: number | null;
+    pack_size?: number | null;
+    last_purchase_price?: number | null;
+    is_active: boolean;
+    created_at: string;
+    updated_at?: string | null;
+  }>;
   is_active?: boolean;
+  created_at?: string;
+  updated_at?: string | null;
 };
+
+type BackendCategoryItem = {
+  category_id: string;
+  name: string;
+  description?: string | null;
+  is_active: boolean;
+  product_count: number;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+type BackendBrandItem = {
+  brand_id: string;
+  name: string;
+  code?: string | null;
+  description?: string | null;
+  is_active: boolean;
+  product_count: number;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+type BackendSupplierItem = {
+  supplier_id: string;
+  name: string;
+  code?: string | null;
+  contact_name?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  is_active: boolean;
+  linked_product_count: number;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+type BackendProductSupplierItem = {
+  product_supplier_id: string;
+  supplier_id: string;
+  supplier_name: string;
+  supplier_sku?: string | null;
+  supplier_item_name?: string | null;
+  is_preferred: boolean;
+  lead_time_days?: number | null;
+  min_order_qty?: number | null;
+  pack_size?: number | null;
+  last_purchase_price?: number | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+type BackendCategoryListResponse = { items: BackendCategoryItem[] };
+type BackendBrandListResponse = { items: BackendBrandItem[] };
+type BackendSupplierListResponse = { items: BackendSupplierItem[] };
+type BackendProductSupplierListResponse = { items: BackendProductSupplierItem[] };
 
 type BackendStockMovementPage = {
   items: Array<{
@@ -346,16 +539,90 @@ function mapProduct(item: BackendProductCatalogItem): Product {
     sku: item.sku ?? "",
     barcode: item.barcode ?? undefined,
     image_url: item.image_url ?? undefined,
+    image: item.image_url ?? undefined,
     category_id: item.category_id ?? undefined,
+    category_name: item.category_name ?? undefined,
     brand_id: item.brand_id ?? undefined,
+    brand_name: item.brand_name ?? undefined,
     price: item.unit_price,
+    unit_price: item.unit_price,
+    cost_price: item.cost_price ?? item.unit_price,
     stock: item.stock_quantity,
+    stock_quantity: item.stock_quantity,
+    initial_stock_quantity: item.initial_stock_quantity,
+    reorder_level: item.reorder_level,
+    safety_stock: item.safety_stock,
+    target_stock_level: item.target_stock_level,
+    alert_level: item.alert_level,
     allow_negative_stock: item.allow_negative_stock,
+    is_low_stock: item.is_low_stock,
     is_serial_tracked: item.is_serial_tracked,
     warranty_months: item.warranty_months,
     is_batch_tracked: item.is_batch_tracked,
     expiry_alert_days: item.expiry_alert_days,
+    product_suppliers: item.product_suppliers?.map(mapProductSupplier) ?? [],
     is_active: item.is_active,
+    created_at: item.created_at,
+    updated_at: item.updated_at,
+  };
+}
+
+function mapCategory(item: BackendCategoryItem): Category {
+  return {
+    category_id: item.category_id,
+    name: item.name,
+    description: item.description ?? undefined,
+    is_active: item.is_active,
+    product_count: item.product_count,
+    created_at: item.created_at,
+    updated_at: item.updated_at,
+  };
+}
+
+function mapBrand(item: BackendBrandItem): Brand {
+  return {
+    brand_id: item.brand_id,
+    name: item.name,
+    code: item.code ?? undefined,
+    description: item.description ?? undefined,
+    is_active: item.is_active,
+    product_count: item.product_count,
+    created_at: item.created_at,
+    updated_at: item.updated_at,
+  };
+}
+
+function mapSupplier(item: BackendSupplierItem): Supplier {
+  return {
+    supplier_id: item.supplier_id,
+    name: item.name,
+    code: item.code ?? undefined,
+    contact_name: item.contact_name ?? undefined,
+    phone: item.phone ?? undefined,
+    email: item.email ?? undefined,
+    address: item.address ?? undefined,
+    is_active: item.is_active,
+    linked_product_count: item.linked_product_count,
+    created_at: item.created_at,
+    updated_at: item.updated_at,
+  };
+}
+
+function mapProductSupplier(item: BackendProductSupplierItem): ProductSupplier {
+  return {
+    product_supplier_id: item.product_supplier_id,
+    supplier_id: item.supplier_id,
+    supplier_name: item.supplier_name,
+    supplier_sku: item.supplier_sku ?? undefined,
+    supplier_item_name: item.supplier_item_name ?? undefined,
+    is_preferred: item.is_preferred,
+    lead_time_days: item.lead_time_days ?? undefined,
+    min_order_qty: item.min_order_qty ?? undefined,
+    pack_size: item.pack_size ?? undefined,
+    last_purchase_price: item.last_purchase_price ?? undefined,
+    is_active: item.is_active,
+    created_at: item.created_at,
+    updated_at: item.updated_at,
   };
 }
 
@@ -453,58 +720,360 @@ export async function fetchProducts(): Promise<Product[]> {
   return response.items.map(mapProduct);
 }
 
-export async function updateProduct(id: string, data: Partial<Product>): Promise<Product> {
-  const payload = {
-    name: data.name ?? "",
-    sku: data.sku || null,
-    barcode: data.barcode || null,
-    image_url: data.image_url || null,
-    unit_price: data.price ?? 0,
-    cost_price: data.price ?? 0,
-    initial_stock_quantity: data.stock ?? 0,
-    reorder_level: 0,
-    safety_stock: 0,
-    target_stock_level: 0,
+function normalizeProductPayload(data: Partial<Product> & { name: string }, includeInitialStock: boolean) {
+  const unitPrice = data.unit_price ?? data.price ?? 0;
+  const costPrice = data.cost_price ?? data.price ?? unitPrice;
+  const stockQuantity = data.stock_quantity ?? data.stock ?? data.initial_stock_quantity ?? 0;
+  const categoryId = data.category_id ?? null;
+  const brandId = data.brand_id ?? null;
+  const productSuppliers = data.product_suppliers ?? [];
+  const preferredSupplier = productSuppliers.find((supplier) => supplier.is_preferred);
+
+  return {
+    name: data.name,
+    sku: data.sku?.trim() || null,
+    barcode: data.barcode?.trim() || null,
+    image_url: data.image_url ?? data.image ?? null,
+    category_id: categoryId,
+    brand_id: brandId,
+    unit_price: unitPrice,
+    cost_price: costPrice,
+    initial_stock_quantity: includeInitialStock ? (data.initial_stock_quantity ?? stockQuantity) : undefined,
+    reorder_level: data.reorder_level ?? 0,
+    safety_stock: data.safety_stock ?? 0,
+    target_stock_level: data.target_stock_level ?? 0,
     allow_negative_stock: data.allow_negative_stock ?? false,
     is_serial_tracked: data.is_serial_tracked ?? false,
     warranty_months: data.is_serial_tracked ? (data.warranty_months ?? 0) : 0,
     is_batch_tracked: data.is_batch_tracked ?? false,
     expiry_alert_days: data.is_batch_tracked ? (data.expiry_alert_days ?? 30) : 30,
     is_active: data.is_active ?? true,
+    preferred_supplier_id: preferredSupplier?.supplier_id ?? null,
   };
+}
 
+export async function fetchProductCatalogItems(take = 200, includeInactive = true): Promise<Product[]> {
+  const query = buildQuery({
+    take,
+    include_inactive: includeInactive,
+  });
+  const response = await safeRequestJson<{ items: BackendProductCatalogItem[] }>(
+    `/api/products/catalog${query}`,
+    { items: [] },
+  );
+  return response.items.map(mapProduct);
+}
+
+export async function updateProduct(id: string, data: Partial<Product> & { name: string }): Promise<Product> {
+  const payload = normalizeProductPayload(data, false);
   const response = await requestJson<BackendProductCatalogItem>(`/api/products/${id}`, {
     method: "PUT",
     body: JSON.stringify(payload),
   });
+  const updated = mapProduct(response);
 
+  if (payload.preferred_supplier_id) {
+    try {
+      await setPreferredProductSupplier(updated.id, payload.preferred_supplier_id);
+    } catch {
+      // Ignore supplier preference errors so the core product save still succeeds.
+    }
+  }
+
+  return updated;
+}
+
+export async function createProduct(data: Partial<Product> & { name: string }): Promise<Product> {
+  const payload = normalizeProductPayload(data, true);
+  const response = await requestJson<BackendProductCatalogItem>("/api/products", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  const created = mapProduct(response);
+
+  if (payload.preferred_supplier_id) {
+    try {
+      await setPreferredProductSupplier(created.id, payload.preferred_supplier_id);
+    } catch {
+      // Ignore supplier preference errors so the core product save still succeeds.
+    }
+  }
+
+  return created;
+}
+
+export async function deleteProduct(productId: string): Promise<void> {
+  await requestJson<void>(`/api/products/${productId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function hardDeleteProduct(productId: string): Promise<void> {
+  await requestJson<void>(`/api/products/${productId}/hard-delete`, {
+    method: "DELETE",
+  });
+}
+
+export async function adjustStock(
+  productId: string,
+  deltaQuantity: number,
+  reason = "manual_adjustment",
+  batchId?: string | null,
+): Promise<StockAdjustmentResponse> {
+  return requestJson<StockAdjustmentResponse>(`/api/products/${productId}/stock-adjustments`, {
+    method: "POST",
+    body: JSON.stringify({
+      delta_quantity: deltaQuantity,
+      reason,
+      batch_id: batchId ?? null,
+    }),
+  });
+}
+
+export async function fetchCategories(includeInactive = false): Promise<Category[]> {
+  const response = await safeRequestJson<BackendCategoryListResponse>(
+    `/api/categories${buildQuery({ include_inactive: includeInactive })}`,
+    { items: [] },
+  );
+  return response.items.map(mapCategory);
+}
+
+export async function createCategory(
+  name: string,
+  description?: string,
+  isActive = true,
+): Promise<Category> {
+  const response = await requestJson<BackendCategoryItem>("/api/categories", {
+    method: "POST",
+    body: JSON.stringify({
+      name,
+      description: description ?? null,
+      is_active: isActive,
+    }),
+  });
+  return mapCategory(response);
+}
+
+export async function updateCategory(
+  categoryId: string,
+  payload: Partial<{ name: string; description: string; is_active: boolean }>,
+): Promise<Category> {
+  const response = await requestJson<BackendCategoryItem>(`/api/categories/${categoryId}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      name: payload.name,
+      description: payload.description ?? null,
+      is_active: payload.is_active ?? true,
+    }),
+  });
+  return mapCategory(response);
+}
+
+export async function fetchBrands(includeInactive = false): Promise<Brand[]> {
+  const response = await safeRequestJson<BackendBrandListResponse>(
+    `/api/brands${buildQuery({ include_inactive: includeInactive })}`,
+    { items: [] },
+  );
+  return response.items.map(mapBrand);
+}
+
+export async function createBrand(payload: {
+  name: string;
+  code?: string;
+  description?: string;
+  is_active?: boolean;
+}): Promise<Brand> {
+  const response = await requestJson<BackendBrandItem>("/api/brands", {
+    method: "POST",
+    body: JSON.stringify({
+      name: payload.name,
+      code: payload.code?.trim() || null,
+      description: payload.description?.trim() || null,
+      is_active: payload.is_active ?? true,
+    }),
+  });
+  return mapBrand(response);
+}
+
+export async function updateBrand(
+  brandId: string,
+  payload: Partial<{ name: string; code: string; description: string; is_active: boolean }>,
+): Promise<Brand> {
+  const response = await requestJson<BackendBrandItem>(`/api/brands/${brandId}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      name: payload.name,
+      code: payload.code?.trim() || null,
+      description: payload.description?.trim() || null,
+      is_active: payload.is_active ?? true,
+    }),
+  });
+  return mapBrand(response);
+}
+
+export async function fetchSuppliers(includeInactive = false): Promise<Supplier[]> {
+  const response = await safeRequestJson<BackendSupplierListResponse>(
+    `/api/suppliers${buildQuery({ include_inactive: includeInactive })}`,
+    { items: [] },
+  );
+  return response.items.map(mapSupplier);
+}
+
+export async function createSupplier(payload: {
+  name: string;
+  code?: string;
+  contact_name?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  is_active?: boolean;
+}): Promise<Supplier> {
+  const response = await requestJson<BackendSupplierItem>("/api/suppliers", {
+    method: "POST",
+    body: JSON.stringify({
+      name: payload.name,
+      code: payload.code?.trim() || null,
+      contact_name: payload.contact_name?.trim() || null,
+      phone: payload.phone?.trim() || null,
+      email: payload.email?.trim() || null,
+      address: payload.address?.trim() || null,
+      is_active: payload.is_active ?? true,
+    }),
+  });
+  return mapSupplier(response);
+}
+
+export async function updateSupplier(
+  supplierId: string,
+  payload: Partial<{
+    name: string;
+    code: string;
+    contact_name: string;
+    phone: string;
+    email: string;
+    address: string;
+    is_active: boolean;
+  }>,
+): Promise<Supplier> {
+  const response = await requestJson<BackendSupplierItem>(`/api/suppliers/${supplierId}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      name: payload.name,
+      code: payload.code?.trim() || null,
+      contact_name: payload.contact_name?.trim() || null,
+      phone: payload.phone?.trim() || null,
+      email: payload.email?.trim() || null,
+      address: payload.address?.trim() || null,
+      is_active: payload.is_active ?? true,
+    }),
+  });
+  return mapSupplier(response);
+}
+
+export async function fetchProductSuppliers(productId: string): Promise<ProductSupplier[]> {
+  const response = await safeRequestJson<BackendProductSupplierListResponse>(
+    `/api/products/${productId}/suppliers`,
+    { items: [] },
+  );
+  return response.items.map(mapProductSupplier);
+}
+
+export async function upsertProductSupplier(
+  productId: string,
+  payload: {
+    supplier_id: string;
+    supplier_sku?: string | null;
+    supplier_item_name?: string | null;
+    is_preferred: boolean;
+    lead_time_days?: number | null;
+    min_order_qty?: number | null;
+    pack_size?: number | null;
+    last_purchase_price?: number | null;
+    is_active?: boolean;
+  },
+): Promise<ProductSupplier> {
+  const response = await requestJson<BackendProductSupplierItem>(`/api/products/${productId}/suppliers`, {
+    method: "PUT",
+    body: JSON.stringify({
+      supplier_id: payload.supplier_id,
+      supplier_sku: payload.supplier_sku ?? null,
+      supplier_item_name: payload.supplier_item_name ?? null,
+      is_preferred: payload.is_preferred,
+      lead_time_days: payload.lead_time_days ?? null,
+      min_order_qty: payload.min_order_qty ?? null,
+      pack_size: payload.pack_size ?? null,
+      last_purchase_price: payload.last_purchase_price ?? null,
+      is_active: payload.is_active ?? true,
+    }),
+  });
+  return mapProductSupplier(response);
+}
+
+export async function setPreferredProductSupplier(productId: string, supplierId: string): Promise<ProductSupplier> {
+  const response = await requestJson<BackendProductSupplierItem>(`/api/products/${productId}/preferred-supplier`, {
+    method: "PUT",
+    body: JSON.stringify({
+      supplier_id: supplierId,
+    }),
+  });
+  return mapProductSupplier(response);
+}
+
+export async function generateProductBarcode(payload: {
+  name?: string;
+  sku?: string;
+  seed?: string;
+} = {}): Promise<GenerateBarcodeResponse> {
+  return requestJson<GenerateBarcodeResponse>("/api/products/barcodes/generate", {
+    method: "POST",
+    body: JSON.stringify({
+      name: payload.name ?? null,
+      sku: payload.sku ?? null,
+      seed: payload.seed ?? null,
+    }),
+  });
+}
+
+export async function validateProductBarcode(payload: {
+  barcode: string;
+  exclude_product_id?: string | null;
+  check_existing?: boolean;
+}): Promise<ValidateBarcodeResponse> {
+  return requestJson<ValidateBarcodeResponse>("/api/products/barcodes/validate", {
+    method: "POST",
+    body: JSON.stringify({
+      barcode: payload.barcode,
+      exclude_product_id: payload.exclude_product_id ?? null,
+      check_existing: payload.check_existing ?? true,
+    }),
+  });
+}
+
+export async function generateAndAssignProductBarcode(
+  productId: string,
+  payload: { force_replace?: boolean; seed?: string } = {},
+): Promise<Product> {
+  const response = await requestJson<BackendProductCatalogItem>(`/api/products/${productId}/barcode/generate`, {
+    method: "POST",
+    body: JSON.stringify({
+      force_replace: payload.force_replace ?? false,
+      seed: payload.seed ?? null,
+    }),
+  });
   return mapProduct(response);
 }
 
-export async function createProduct(data: Omit<Product, "id">): Promise<Product> {
-  const response = await requestJson<BackendProductCatalogItem>("/api/products", {
+export async function bulkGenerateMissingProductBarcodes(
+  payload: { dry_run?: boolean; take?: number; include_inactive?: boolean } = {},
+): Promise<BulkGenerateMissingProductBarcodesResponse> {
+  return requestJson<BulkGenerateMissingProductBarcodesResponse>("/api/products/barcodes/bulk-generate-missing", {
     method: "POST",
     body: JSON.stringify({
-      name: data.name,
-      sku: data.sku || null,
-      barcode: data.barcode || null,
-      image_url: data.image_url || null,
-      unit_price: data.price,
-      cost_price: data.price,
-      initial_stock_quantity: data.stock,
-      reorder_level: 0,
-      safety_stock: 0,
-      target_stock_level: 0,
-      allow_negative_stock: data.allow_negative_stock ?? false,
-      is_serial_tracked: data.is_serial_tracked ?? false,
-      warranty_months: data.is_serial_tracked ? (data.warranty_months ?? 0) : 0,
-      is_batch_tracked: data.is_batch_tracked ?? false,
-      expiry_alert_days: data.is_batch_tracked ? (data.expiry_alert_days ?? 30) : 30,
-      is_active: data.is_active ?? true,
+      dry_run: payload.dry_run ?? false,
+      take: payload.take ?? 200,
+      include_inactive: payload.include_inactive ?? false,
     }),
   });
-
-  return mapProduct(response);
 }
 
 // ---------- Dashboard ----------
