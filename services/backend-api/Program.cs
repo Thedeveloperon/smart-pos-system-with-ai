@@ -701,6 +701,8 @@ var app = builder.Build();
 var webRootPath = Path.Combine(app.Environment.ContentRootPath, "wwwroot");
 var staticFilesAvailable = Directory.Exists(webRootPath);
 var staticIndexFileAvailable = File.Exists(Path.Combine(webRootPath, "index.html"));
+var inventoryManagerIndexFileAvailable = File.Exists(
+    Path.Combine(webRootPath, "inventory-manager", "index.html"));
 
 if (app.Environment.IsDevelopment())
 {
@@ -805,6 +807,11 @@ app.MapReportEndpoints();
 
 if (staticIndexFileAvailable)
 {
+    if (inventoryManagerIndexFileAvailable)
+    {
+        app.MapFallbackToFile("/inventory-manager/{*path:nonfile}", "inventory-manager/index.html");
+    }
+
     app.MapFallbackToFile("index.html");
 }
 

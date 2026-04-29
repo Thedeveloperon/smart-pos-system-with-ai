@@ -1,6 +1,4 @@
-import { Outlet, Link, createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
-
-import appCss from "../styles.css?url";
+import { Outlet, Link, createRootRoute } from "@tanstack/react-router";
 
 function NotFoundComponent() {
   return (
@@ -25,69 +23,6 @@ function NotFoundComponent() {
 }
 
 export const Route = createRootRoute({
-  head: () => ({
-    meta: [
-      { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Inventory Manager" },
-      {
-        name: "description",
-        content:
-          "Inventory Manager is a dedicated frontend for stock operations and inventory workflows.",
-      },
-      { name: "author", content: "SmartPOS" },
-      { property: "og:title", content: "Inventory Manager" },
-      {
-        property: "og:description",
-        content:
-          "Inventory Manager is a dedicated frontend for stock operations and inventory workflows.",
-      },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary" },
-      { name: "twitter:site", content: "@SmartPOS" },
-      { name: "twitter:title", content: "Inventory Manager" },
-      {
-        name: "twitter:description",
-        content:
-          "Inventory Manager is a dedicated frontend for stock operations and inventory workflows.",
-      },
-      {
-        property: "og:image",
-        content:
-          "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/047078f0-34a3-44c7-9ca8-ea4882212fe8/id-preview-1aaad21a--fffad6af-401b-4cb6-8aa7-0cf8fb0f1c02.lovable.app-1777397576676.png",
-      },
-      {
-        name: "twitter:image",
-        content:
-          "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/047078f0-34a3-44c7-9ca8-ea4882212fe8/id-preview-1aaad21a--fffad6af-401b-4cb6-8aa7-0cf8fb0f1c02.lovable.app-1777397576676.png",
-      },
-    ],
-    links: [
-      {
-        rel: "stylesheet",
-        href: appCss,
-      },
-    ],
-  }),
-  shellComponent: RootShell,
-  component: RootComponent,
+  component: () => <Outlet />,
   notFoundComponent: NotFoundComponent,
 });
-
-function RootShell({ children }: { children: React.ReactNode }) {
-  return (
-    <html lang="en">
-      <head>
-        <HeadContent />
-      </head>
-      <body>
-        {children}
-        <Scripts />
-      </body>
-    </html>
-  );
-}
-
-function RootComponent() {
-  return <Outlet />;
-}

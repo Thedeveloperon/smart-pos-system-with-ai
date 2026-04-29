@@ -40,11 +40,14 @@ function Invoke-External {
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $frontendDir = Join-Path $repoRoot "apps/pos-app"
+$inventoryFrontendDir = Join-Path $repoRoot "apps/Inventory Manager"
 $backendProject = Join-Path $repoRoot "services/backend-api/backend.csproj"
 $frontendDistDir = Join-Path $frontendDir "dist"
+$inventoryFrontendDistDir = Join-Path $inventoryFrontendDir "dist"
 $outputRoot = Join-Path $repoRoot $OutputDir
 $appDir = Join-Path $outputRoot "app"
 $wwwrootDir = Join-Path $appDir "wwwroot"
+$inventoryWwwrootDir = Join-Path $wwwrootDir "inventory-manager"
 $clientTemplatesDir = Join-Path $repoRoot "scripts/client"
 
 if (Test-Path $outputRoot) {
@@ -56,9 +59,11 @@ New-Item -ItemType Directory -Path $outputRoot | Out-Null
 
 if (-not $SkipNpmCi) {
     Invoke-External -Label "Installing frontend dependencies" -Command "npm" -Arguments @("ci") -WorkingDirectory $frontendDir
+    Invoke-External -Label "Installing Inventory Manager dependencies" -Command "npm" -Arguments @("ci") -WorkingDirectory $inventoryFrontendDir
 }
 
 Invoke-External -Label "Building frontend" -Command "npm" -Arguments @("run", "build") -WorkingDirectory $frontendDir
+Invoke-External -Label "Building Inventory Manager frontend" -Command "npm" -Arguments @("run", "build") -WorkingDirectory $inventoryFrontendDir
 
 $publishArgs = @(
     "publish",
@@ -81,6 +86,8 @@ Invoke-External -Label "Publishing backend" -Command "dotnet" -Arguments $publis
 
 New-Item -ItemType Directory -Path $wwwrootDir -Force | Out-Null
 Copy-Item -Path (Join-Path $frontendDistDir "*") -Destination $wwwrootDir -Recurse -Force
+New-Item -ItemType Directory -Path $inventoryWwwrootDir -Force | Out-Null
+Copy-Item -Path (Join-Path $inventoryFrontendDistDir "*") -Destination $inventoryWwwrootDir -Recurse -Force
 
 $publishedPaymentProofsDir = Join-Path $wwwrootDir "payment-proofs"
 if (Test-Path -LiteralPath $publishedPaymentProofsDir) {
@@ -109,9 +116,18 @@ img = Image.open(source).convert('RGBA')
 sizes = [(256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (16, 16)]
 img.save(target, format='ICO', sizes=sizes)
 "@
-    & $pythonCommand.Source -c $pythonScript $shortcutIconPngSource $shortcutIconOutput
-    if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $shortcutIconOutput)) {
-        $shortcutIconWritten = $true
+    $previousLastExitCode = $global:LASTEXITCODE
+    try {
+        & $pythonCommand.Source -c $pythonScript $shortcutIconPngSource $shortcutIconOutput
+        if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $shortcutIconOutput)) {
+            $shortcutIconWritten = $true
+        }
+        else {
+            Write-Host "Icon generation via Python failed; using fallback icon if available." -ForegroundColor Yellow
+        }
+    }
+    finally {
+        $global:LASTEXITCODE = $previousLastExitCode
     }
 }
 
