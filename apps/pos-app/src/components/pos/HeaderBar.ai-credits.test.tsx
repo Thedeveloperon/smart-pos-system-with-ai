@@ -12,6 +12,7 @@ function renderHeaderBar(overrides: Partial<ComponentProps<typeof HeaderBar>> = 
       onTodaySales={vi.fn()}
       onNewItem={vi.fn()}
       onImportSupplierBill={vi.fn()}
+      onInventoryManager={vi.fn()}
       onAiInsights={vi.fn()}
       onSignOut={vi.fn()}
       aiCredits={120}
@@ -67,5 +68,17 @@ describe("HeaderBar AI credit badge", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sign Out" }));
 
     expect(onSignOut).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the inventory manager action", () => {
+    const onInventoryManager = vi.fn();
+
+    renderHeaderBar({
+      onInventoryManager,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Inventory Manager" }));
+
+    expect(onInventoryManager).toHaveBeenCalledTimes(1);
   });
 });
