@@ -36,6 +36,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -70,6 +71,10 @@ type ProductFormState = {
   safetyStock: string;
   targetStockLevel: string;
   allowNegativeStock: boolean;
+  serialTracked: boolean;
+  warrantyMonths: string;
+  batchTracked: boolean;
+  expiryAlertDays: string;
   isActive: boolean;
 };
 
@@ -88,6 +93,10 @@ const buildFormState = (product: CatalogProduct): ProductFormState => ({
   safetyStock: String(product.safetyStock ?? 0),
   targetStockLevel: String(product.targetStockLevel ?? 0),
   allowNegativeStock: product.allowNegativeStock,
+  serialTracked: product.isSerialTracked ?? false,
+  warrantyMonths: String(product.warrantyMonths ?? 12),
+  batchTracked: product.isBatchTracked ?? false,
+  expiryAlertDays: String(product.expiryAlertDays ?? 30),
   isActive: product.isActive,
 });
 
@@ -106,6 +115,10 @@ const emptyFormState = (): ProductFormState => ({
   safetyStock: "0",
   targetStockLevel: "0",
   allowNegativeStock: true,
+  serialTracked: false,
+  warrantyMonths: "12",
+  batchTracked: false,
+  expiryAlertDays: "30",
   isActive: true,
 });
 const isBarcodeFeatureEnabled = import.meta.env.VITE_BARCODE_FEATURE_ENABLED !== "false";
@@ -265,6 +278,8 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabe
     const reorderLevel = Number(form.reorderLevel);
     const safetyStock = Number(form.safetyStock);
     const targetStockLevel = Number(form.targetStockLevel);
+    const warrantyMonths = Number(form.warrantyMonths);
+    const expiryAlertDays = Number(form.expiryAlertDays);
 
     if (!name) {
       toast.error("Product name is required.");
@@ -308,6 +323,16 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabe
       return;
     }
 
+    if (form.serialTracked && (!Number.isFinite(warrantyMonths) || warrantyMonths < 0)) {
+      toast.error("Enter a valid warranty period.");
+      return;
+    }
+
+    if (form.batchTracked && (!Number.isFinite(expiryAlertDays) || expiryAlertDays < 0)) {
+      toast.error("Enter a valid expiry alert window.");
+      return;
+    }
+
     const payload: UpdateProductRequest = {
       name,
       sku: form.sku.trim() || null,
@@ -322,6 +347,10 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabe
       safety_stock: safetyStock,
       target_stock_level: targetStockLevel,
       allow_negative_stock: form.allowNegativeStock,
+      is_serial_tracked: form.serialTracked,
+      warranty_months: form.serialTracked ? warrantyMonths : null,
+      is_batch_tracked: form.batchTracked,
+      expiry_alert_days: form.batchTracked ? expiryAlertDays : null,
       is_active: form.isActive,
     };
 
@@ -868,6 +897,69 @@ function ProductEditorDialog({ open, product, onOpenChange, onSaved, onPrintLabe
                       onCheckedChange={(checked) => updateField("allowNegativeStock", checked)}
                     />
                   </label>
+
+                  <div className="space-y-3">
+                    <Separator />
+                    <div className="text-sm font-medium text-slate-600">Tracking</div>
+
+                    <div className="space-y-3 rounded-xl border border-slate-300 bg-[#f9fafb] p-4">
+                      <label className="flex items-center justify-between gap-4">
+                        <div>
+                          <p className="text-sm font-medium leading-none">Serial tracking</p>
+                          <p className="mt-1 text-xs text-slate-500">Each unit has a unique serial number.</p>
+                        </div>
+                        <Switch
+                          checked={form.serialTracked}
+                          onCheckedChange={(checked) => updateField("serialTracked", checked)}
+                        />
+                      </label>
+
+                      {form.serialTracked && (
+                        <div className="grid gap-2 pl-1">
+                          <Label htmlFor="warranty-months" className="text-xs font-medium text-slate-600">
+                            Warranty period (months)
+                          </Label>
+                          <Input
+                            id="warranty-months"
+                            type="number"
+                            min={0}
+                            value={form.warrantyMonths}
+                            onChange={(event) => updateField("warrantyMonths", event.target.value)}
+                            className="h-10 rounded-xl border-slate-300 bg-white"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-3 rounded-xl border border-slate-300 bg-[#f9fafb] p-4">
+                      <label className="flex items-center justify-between gap-4">
+                        <div>
+                          <p className="text-sm font-medium leading-none">Batch tracking</p>
+                          <p className="mt-1 text-xs text-slate-500">Track lots with manufacture and expiry dates.</p>
+                        </div>
+                        <Switch
+                          checked={form.batchTracked}
+                          onCheckedChange={(checked) => updateField("batchTracked", checked)}
+                        />
+                      </label>
+
+                      {form.batchTracked && (
+                        <div className="grid gap-2 pl-1">
+                          <Label htmlFor="expiry-alert-days" className="text-xs font-medium text-slate-600">
+                            Expiry alert days
+                          </Label>
+                          <Input
+                            id="expiry-alert-days"
+                            type="number"
+                            min={0}
+                            value={form.expiryAlertDays}
+                            onChange={(event) => updateField("expiryAlertDays", event.target.value)}
+                            className="h-10 rounded-xl border-slate-300 bg-white"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
 
                   <label className="flex items-center justify-between gap-4 rounded-xl border border-slate-300 bg-[#f9fafb] px-4 py-2.5">
                     <div>

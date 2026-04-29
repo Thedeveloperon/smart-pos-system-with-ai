@@ -38,6 +38,7 @@ interface HeaderBarProps {
   onNewItem: () => void;
   onManageProducts?: () => void;
   onInventoryManager?: () => void;
+  inventoryAlertCount?: number;
   onReports?: () => void;
   onImportSupplierBill: () => void;
   onAiInsights?: () => void;
@@ -83,6 +84,7 @@ const HeaderBar = ({
   onNewItem,
   onManageProducts,
   onInventoryManager,
+  inventoryAlertCount = 0,
   onReports,
   onImportSupplierBill,
   onAiInsights,
@@ -162,10 +164,15 @@ const HeaderBar = ({
             variant="ghost"
             size="sm"
             onClick={onInventoryManager}
-            className="text-pos-header-foreground hover:bg-pos-header-foreground/10"
+            className="relative text-pos-header-foreground hover:bg-pos-header-foreground/10"
           >
             <Boxes className="h-4 w-4" />
             <span className="hidden md:inline ml-1">Inventory Manager</span>
+            {inventoryAlertCount > 0 && (
+              <Badge className="absolute -top-1 -right-1 h-5 min-w-5 px-1.5 flex items-center justify-center text-[10px] bg-red-500 text-white rounded-full">
+                {inventoryAlertCount}
+              </Badge>
+            )}
           </Button>
         )}
 
@@ -391,6 +398,11 @@ const HeaderBar = ({
               <DropdownMenuItem onSelect={() => onInventoryManager()} className="min-h-11 px-3 py-2 text-base">
                 <Boxes className="mr-3 h-5 w-5" />
                 Inventory Manager
+                {inventoryAlertCount > 0 && (
+                  <Badge className="ml-auto h-5 min-w-5 rounded-full bg-red-500 px-1.5 text-[10px] text-white">
+                    {inventoryAlertCount}
+                  </Badge>
+                )}
               </DropdownMenuItem>
             )}
 

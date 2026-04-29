@@ -127,9 +127,7 @@ export default function SerialNumbersTab() {
             />
             <Button onClick={handleLookup}>Look up</Button>
           </div>
-          {lookupError && (
-            <p className="text-sm text-destructive">{lookupError}</p>
-          )}
+          {lookupError && <p className="text-sm text-destructive">{lookupError}</p>}
           {lookupResult && (
             <div className="rounded-md border p-3 grid gap-1 text-sm">
               <div>
@@ -137,8 +135,7 @@ export default function SerialNumbersTab() {
                 <span className="font-mono">{lookupResult.serial_value}</span>
               </div>
               <div>
-                <span className="text-muted-foreground">Product:</span>{" "}
-                {lookupResult.product_name}
+                <span className="text-muted-foreground">Product:</span> {lookupResult.product_name}
               </div>
               <div>
                 <span className="text-muted-foreground">Status:</span>{" "}

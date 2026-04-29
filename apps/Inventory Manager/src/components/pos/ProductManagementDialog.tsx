@@ -20,12 +20,7 @@ type Props = {
   onSaved?: (product: Product) => void;
 };
 
-export default function ProductManagementDialog({
-  open,
-  product,
-  onOpenChange,
-  onSaved,
-}: Props) {
+export default function ProductManagementDialog({ open, product, onOpenChange, onSaved }: Props) {
   const [name, setName] = useState("");
   const [sku, setSku] = useState("");
   const [price, setPrice] = useState(0);
@@ -101,19 +96,13 @@ export default function ProductManagementDialog({
           </div>
           <div className="grid gap-1">
             <Label>Stock</Label>
-            <Input
-              type="number"
-              value={stock}
-              onChange={(e) => setStock(Number(e.target.value))}
-            />
+            <Input type="number" value={stock} onChange={(e) => setStock(Number(e.target.value))} />
           </div>
 
           <div className="flex items-center justify-between rounded-md border p-3">
             <div>
               <Label className="text-sm">Allow negative stock</Label>
-              <p className="text-xs text-muted-foreground">
-                Sell below zero (back-orders).
-              </p>
+              <p className="text-xs text-muted-foreground">Sell below zero (back-orders).</p>
             </div>
             <Switch checked={allowNegative} onCheckedChange={setAllowNegative} />
           </div>

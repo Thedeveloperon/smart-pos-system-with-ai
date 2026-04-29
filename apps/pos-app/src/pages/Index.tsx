@@ -33,6 +33,7 @@ import {
   acknowledgeReminder,
   completeSale,
   fetchAiWallet,
+  fetchInventoryDashboardSummary,
   fetchShopProfile,
   fetchReminders,
   fetchHeldBill,
@@ -111,6 +112,7 @@ const IndexInner = () => {
   const [showLicenseAccount, setShowLicenseAccount] = useState(false);
   const [expertModeEnabled, setExpertModeEnabledState] = useState(() => isExpertModeEnabled());
   const [aiCreditsBalance, setAiCreditsBalance] = useState<number | null>(null);
+  const [inventoryAlertCount, setInventoryAlertCount] = useState(0);
   const [shopProfile, setShopProfile] = useState<ShopProfile | null>(null);
   const [reminders, setReminders] = useState<ReminderItem[]>([]);
   const [openReminderCount, setOpenReminderCount] = useState(0);
@@ -274,6 +276,16 @@ const IndexInner = () => {
     }
   }, []);
 
+  const loadInventoryAlertCount = useCallback(async () => {
+    try {
+      const summary = await fetchInventoryDashboardSummary();
+      setInventoryAlertCount(summary.expiry_alert_count + summary.open_warranty_claims);
+    } catch (error) {
+      console.error(error);
+      setInventoryAlertCount(0);
+    }
+  }, []);
+
   const loadShopProfile = useCallback(async () => {
     try {
       const profile = await fetchShopProfile();
@@ -309,6 +321,10 @@ const IndexInner = () => {
   useEffect(() => {
     void loadTodayIssueCount();
   }, [loadTodayIssueCount, salesRefreshToken]);
+
+  useEffect(() => {
+    void loadInventoryAlertCount();
+  }, [loadInventoryAlertCount]);
 
   const loadReminders = useCallback(async (options?: { includeAcknowledged?: boolean; announceNew?: boolean; quiet?: boolean }) => {
     const includeAcknowledged = options?.includeAcknowledged ?? true;
@@ -963,6 +979,7 @@ const IndexInner = () => {
         onNewItem={() => setShowNewItem(true)}
         onManageProducts={() => setShowProductManagement(true)}
         onInventoryManager={openInventoryManager}
+        inventoryAlertCount={inventoryAlertCount}
         onReports={() => setShowReports(true)}
         onAiInsights={() => setShowAiInsights(true)}
         aiCredits={aiCreditsBalance}

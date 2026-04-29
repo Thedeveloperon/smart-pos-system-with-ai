@@ -32,6 +32,7 @@ import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 
 type NewItemDialogProps = {
@@ -69,6 +70,10 @@ const defaultForm = {
   safetyStock: "0",
   targetStockLevel: "0",
   allowNegativeStock: true,
+  serialTracked: false,
+  warrantyMonths: "12",
+  batchTracked: false,
+  expiryAlertDays: "30",
   isActive: true,
 };
 const isBarcodeFeatureEnabled = import.meta.env.VITE_BARCODE_FEATURE_ENABLED !== "false";
@@ -939,6 +944,8 @@ const NewItemDialog = ({ open, onOpenChange, onCreated }: NewItemDialogProps) =>
     const reorderLevel = Number(form.reorderLevel);
     const safetyStock = Number(form.safetyStock);
     const targetStockLevel = Number(form.targetStockLevel);
+    const warrantyMonths = Number(form.warrantyMonths);
+    const expiryAlertDays = Number(form.expiryAlertDays);
 
     if (!name) {
       toast.error("Item name is required.");
@@ -975,6 +982,16 @@ const NewItemDialog = ({ open, onOpenChange, onCreated }: NewItemDialogProps) =>
       return;
     }
 
+    if (form.serialTracked && (!Number.isFinite(warrantyMonths) || warrantyMonths < 0)) {
+      toast.error("Enter a valid warranty period.");
+      return;
+    }
+
+    if (form.batchTracked && (!Number.isFinite(expiryAlertDays) || expiryAlertDays < 0)) {
+      toast.error("Enter a valid expiry alert window.");
+      return;
+    }
+
     setSubmitting(true);
     try {
       const imageSource = uploadedImageDataUrl || form.imageUrl.trim();
@@ -992,6 +1009,10 @@ const NewItemDialog = ({ open, onOpenChange, onCreated }: NewItemDialogProps) =>
         safety_stock: safetyStock,
         target_stock_level: targetStockLevel,
         allow_negative_stock: form.allowNegativeStock,
+        is_serial_tracked: form.serialTracked,
+        warranty_months: form.serialTracked ? warrantyMonths : null,
+        is_batch_tracked: form.batchTracked,
+        expiry_alert_days: form.batchTracked ? expiryAlertDays : null,
         is_active: form.isActive,
       });
 
@@ -1624,13 +1645,84 @@ const NewItemDialog = ({ open, onOpenChange, onCreated }: NewItemDialogProps) =>
                   />
                 </label>
 
-                <label className="flex items-center justify-between gap-4 rounded-xl border border-slate-300 bg-[#f9fafb] px-4 py-2.5">
-                  <p className="text-sm font-medium leading-none">Active item</p>
-                  <Switch
-                    checked={form.isActive}
-                    onCheckedChange={(checked) => setForm((prev) => ({ ...prev, isActive: checked }))}
-                  />
-                </label>
+                <div className="space-y-3">
+                  <Separator />
+                  <div className="text-sm font-medium text-slate-600">Tracking</div>
+
+                  <div className="space-y-3 rounded-xl border border-slate-300 bg-[#f9fafb] p-4">
+                    <label className="flex items-center justify-between gap-4">
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium leading-none">Serial tracking</p>
+                        <p className="text-xs text-slate-500">Each unit has a unique serial number.</p>
+                      </div>
+                      <Switch
+                        checked={form.serialTracked}
+                        onCheckedChange={(checked) =>
+                          setForm((prev) => ({ ...prev, serialTracked: checked }))
+                        }
+                      />
+                    </label>
+
+                    {form.serialTracked && (
+                      <div className="grid gap-2 pl-1">
+                        <Label htmlFor="new-item-warranty-months" className="text-xs font-medium text-slate-600">
+                          Warranty period (months)
+                        </Label>
+                        <Input
+                          id="new-item-warranty-months"
+                          type="number"
+                          min={0}
+                          value={form.warrantyMonths}
+                          onChange={(event) =>
+                            setForm((prev) => ({ ...prev, warrantyMonths: event.target.value }))
+                          }
+                          className="h-10 rounded-xl border-slate-300 bg-white"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-3 rounded-xl border border-slate-300 bg-[#f9fafb] p-4">
+                    <label className="flex items-center justify-between gap-4">
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium leading-none">Batch tracking</p>
+                        <p className="text-xs text-slate-500">Track lots with manufacture and expiry dates.</p>
+                      </div>
+                      <Switch
+                        checked={form.batchTracked}
+                        onCheckedChange={(checked) =>
+                          setForm((prev) => ({ ...prev, batchTracked: checked }))
+                        }
+                      />
+                    </label>
+
+                    {form.batchTracked && (
+                      <div className="grid gap-2 pl-1">
+                        <Label htmlFor="new-item-expiry-alert-days" className="text-xs font-medium text-slate-600">
+                          Expiry alert days
+                        </Label>
+                        <Input
+                          id="new-item-expiry-alert-days"
+                          type="number"
+                          min={0}
+                          value={form.expiryAlertDays}
+                          onChange={(event) =>
+                            setForm((prev) => ({ ...prev, expiryAlertDays: event.target.value }))
+                          }
+                          className="h-10 rounded-xl border-slate-300 bg-white"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <label className="flex items-center justify-between gap-4 rounded-xl border border-slate-300 bg-[#f9fafb] px-4 py-2.5">
+                    <p className="text-sm font-medium leading-none">Active item</p>
+                    <Switch
+                      checked={form.isActive}
+                      onCheckedChange={(checked) => setForm((prev) => ({ ...prev, isActive: checked }))}
+                    />
+                  </label>
+                </div>
               </div>
             </div>
             </div>

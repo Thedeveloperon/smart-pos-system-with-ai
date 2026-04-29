@@ -142,47 +142,289 @@ export type InventoryDashboard = {
 
 const delay = (ms = 250) => new Promise((r) => setTimeout(r, ms));
 const uid = () => Math.random().toString(36).slice(2, 10);
-const daysFromNow = (n: number) =>
-  new Date(Date.now() + n * 86400000).toISOString();
+const daysFromNow = (n: number) => new Date(Date.now() + n * 86400000).toISOString();
 
 const products: Product[] = [
-  { id: "p1", name: "Panadol 500mg", sku: "PAN-500", price: 4.5, stock: 120, is_batch_tracked: true, expiry_alert_days: 30 },
-  { id: "p2", name: "Sony WH-1000XM5", sku: "SNY-XM5", price: 399, stock: 8, is_serial_tracked: true, warranty_months: 24 },
-  { id: "p3", name: "Amoxicillin 250mg", sku: "AMX-250", price: 12, stock: 60, is_batch_tracked: true, expiry_alert_days: 60 },
-  { id: "p4", name: "iPhone 15 Pro", sku: "IPH-15P", price: 1199, stock: 4, is_serial_tracked: true, warranty_months: 12 },
-  { id: "p5", name: "Vitamin C 1000mg", sku: "VITC-1K", price: 18, stock: 200, is_batch_tracked: true, expiry_alert_days: 45 },
+  {
+    id: "p1",
+    name: "Panadol 500mg",
+    sku: "PAN-500",
+    price: 4.5,
+    stock: 120,
+    is_batch_tracked: true,
+    expiry_alert_days: 30,
+  },
+  {
+    id: "p2",
+    name: "Sony WH-1000XM5",
+    sku: "SNY-XM5",
+    price: 399,
+    stock: 8,
+    is_serial_tracked: true,
+    warranty_months: 24,
+  },
+  {
+    id: "p3",
+    name: "Amoxicillin 250mg",
+    sku: "AMX-250",
+    price: 12,
+    stock: 60,
+    is_batch_tracked: true,
+    expiry_alert_days: 60,
+  },
+  {
+    id: "p4",
+    name: "iPhone 15 Pro",
+    sku: "IPH-15P",
+    price: 1199,
+    stock: 4,
+    is_serial_tracked: true,
+    warranty_months: 12,
+  },
+  {
+    id: "p5",
+    name: "Vitamin C 1000mg",
+    sku: "VITC-1K",
+    price: 18,
+    stock: 200,
+    is_batch_tracked: true,
+    expiry_alert_days: 45,
+  },
 ];
 
 const movements: StockMovement[] = [
-  { id: uid(), product_id: "p1", product_name: "Panadol 500mg", movement_type: "Sale", quantity_before: 124, quantity_change: -4, quantity_after: 120, reference_type: "Sale", reference_id: "SALE-1029", reason: "POS sale", created_by_user_id: "u_clerk1", created_at: daysFromNow(-1) },
-  { id: uid(), product_id: "p2", product_name: "Sony WH-1000XM5", movement_type: "Purchase", quantity_before: 0, quantity_change: 10, quantity_after: 10, reference_type: "PurchaseBill", reference_id: "PB-2031", reason: "Restock", created_by_user_id: "u_mgr", created_at: daysFromNow(-3) },
-  { id: uid(), product_id: "p2", product_name: "Sony WH-1000XM5", movement_type: "Sale", quantity_before: 10, quantity_change: -2, quantity_after: 8, reference_type: "Sale", reference_id: "SALE-1031", serial_number: "SN-XM5-001", created_by_user_id: "u_clerk1", created_at: daysFromNow(-2) },
-  { id: uid(), product_id: "p3", product_name: "Amoxicillin 250mg", movement_type: "ExpiryWriteOff", quantity_before: 75, quantity_change: -15, quantity_after: 60, reference_type: "Batch", batch_id: "b1", reason: "Expired stock removed", created_by_user_id: "u_mgr", created_at: daysFromNow(-5) },
-  { id: uid(), product_id: "p1", product_name: "Panadol 500mg", movement_type: "StocktakeReconciliation", quantity_before: 130, quantity_change: -6, quantity_after: 124, reference_type: "Stocktake", reference_id: "ST-009", reason: "Variance adj.", created_by_user_id: "u_mgr", created_at: daysFromNow(-7) },
-  { id: uid(), product_id: "p5", product_name: "Vitamin C 1000mg", movement_type: "Adjustment", quantity_before: 195, quantity_change: 5, quantity_after: 200, reference_type: "Manual", reason: "Found stock", created_by_user_id: "u_mgr", created_at: daysFromNow(-4) },
-  { id: uid(), product_id: "p4", product_name: "iPhone 15 Pro", movement_type: "Refund", quantity_before: 3, quantity_change: 1, quantity_after: 4, reference_type: "Refund", reference_id: "RF-118", serial_number: "SN-IPH-014", created_by_user_id: "u_clerk2", created_at: daysFromNow(-6) },
-  { id: uid(), product_id: "p2", product_name: "Sony WH-1000XM5", movement_type: "Transfer", quantity_before: 12, quantity_change: -2, quantity_after: 10, reference_type: "Transfer", reference_id: "TR-22", reason: "To Store B", created_by_user_id: "u_mgr", created_at: daysFromNow(-8) },
+  {
+    id: uid(),
+    product_id: "p1",
+    product_name: "Panadol 500mg",
+    movement_type: "Sale",
+    quantity_before: 124,
+    quantity_change: -4,
+    quantity_after: 120,
+    reference_type: "Sale",
+    reference_id: "SALE-1029",
+    reason: "POS sale",
+    created_by_user_id: "u_clerk1",
+    created_at: daysFromNow(-1),
+  },
+  {
+    id: uid(),
+    product_id: "p2",
+    product_name: "Sony WH-1000XM5",
+    movement_type: "Purchase",
+    quantity_before: 0,
+    quantity_change: 10,
+    quantity_after: 10,
+    reference_type: "PurchaseBill",
+    reference_id: "PB-2031",
+    reason: "Restock",
+    created_by_user_id: "u_mgr",
+    created_at: daysFromNow(-3),
+  },
+  {
+    id: uid(),
+    product_id: "p2",
+    product_name: "Sony WH-1000XM5",
+    movement_type: "Sale",
+    quantity_before: 10,
+    quantity_change: -2,
+    quantity_after: 8,
+    reference_type: "Sale",
+    reference_id: "SALE-1031",
+    serial_number: "SN-XM5-001",
+    created_by_user_id: "u_clerk1",
+    created_at: daysFromNow(-2),
+  },
+  {
+    id: uid(),
+    product_id: "p3",
+    product_name: "Amoxicillin 250mg",
+    movement_type: "ExpiryWriteOff",
+    quantity_before: 75,
+    quantity_change: -15,
+    quantity_after: 60,
+    reference_type: "Batch",
+    batch_id: "b1",
+    reason: "Expired stock removed",
+    created_by_user_id: "u_mgr",
+    created_at: daysFromNow(-5),
+  },
+  {
+    id: uid(),
+    product_id: "p1",
+    product_name: "Panadol 500mg",
+    movement_type: "StocktakeReconciliation",
+    quantity_before: 130,
+    quantity_change: -6,
+    quantity_after: 124,
+    reference_type: "Stocktake",
+    reference_id: "ST-009",
+    reason: "Variance adj.",
+    created_by_user_id: "u_mgr",
+    created_at: daysFromNow(-7),
+  },
+  {
+    id: uid(),
+    product_id: "p5",
+    product_name: "Vitamin C 1000mg",
+    movement_type: "Adjustment",
+    quantity_before: 195,
+    quantity_change: 5,
+    quantity_after: 200,
+    reference_type: "Manual",
+    reason: "Found stock",
+    created_by_user_id: "u_mgr",
+    created_at: daysFromNow(-4),
+  },
+  {
+    id: uid(),
+    product_id: "p4",
+    product_name: "iPhone 15 Pro",
+    movement_type: "Refund",
+    quantity_before: 3,
+    quantity_change: 1,
+    quantity_after: 4,
+    reference_type: "Refund",
+    reference_id: "RF-118",
+    serial_number: "SN-IPH-014",
+    created_by_user_id: "u_clerk2",
+    created_at: daysFromNow(-6),
+  },
+  {
+    id: uid(),
+    product_id: "p2",
+    product_name: "Sony WH-1000XM5",
+    movement_type: "Transfer",
+    quantity_before: 12,
+    quantity_change: -2,
+    quantity_after: 10,
+    reference_type: "Transfer",
+    reference_id: "TR-22",
+    reason: "To Store B",
+    created_by_user_id: "u_mgr",
+    created_at: daysFromNow(-8),
+  },
 ];
 
 const serials: SerialNumberRecord[] = [
-  { id: "s1", product_id: "p2", serial_value: "SN-XM5-001", status: "Sold", sale_id: "SALE-1031", warranty_expiry_date: daysFromNow(720), created_at: daysFromNow(-30) },
-  { id: "s2", product_id: "p2", serial_value: "SN-XM5-002", status: "Available", created_at: daysFromNow(-30) },
-  { id: "s3", product_id: "p2", serial_value: "SN-XM5-003", status: "Defective", created_at: daysFromNow(-30) },
-  { id: "s4", product_id: "p4", serial_value: "SN-IPH-014", status: "Returned", refund_id: "RF-118", warranty_expiry_date: daysFromNow(360), created_at: daysFromNow(-60) },
-  { id: "s5", product_id: "p4", serial_value: "SN-IPH-015", status: "Sold", sale_id: "SALE-1019", warranty_expiry_date: daysFromNow(340), created_at: daysFromNow(-60) },
-  { id: "s6", product_id: "p4", serial_value: "SN-IPH-016", status: "UnderWarranty", warranty_expiry_date: daysFromNow(300), created_at: daysFromNow(-60) },
+  {
+    id: "s1",
+    product_id: "p2",
+    serial_value: "SN-XM5-001",
+    status: "Sold",
+    sale_id: "SALE-1031",
+    warranty_expiry_date: daysFromNow(720),
+    created_at: daysFromNow(-30),
+  },
+  {
+    id: "s2",
+    product_id: "p2",
+    serial_value: "SN-XM5-002",
+    status: "Available",
+    created_at: daysFromNow(-30),
+  },
+  {
+    id: "s3",
+    product_id: "p2",
+    serial_value: "SN-XM5-003",
+    status: "Defective",
+    created_at: daysFromNow(-30),
+  },
+  {
+    id: "s4",
+    product_id: "p4",
+    serial_value: "SN-IPH-014",
+    status: "Returned",
+    refund_id: "RF-118",
+    warranty_expiry_date: daysFromNow(360),
+    created_at: daysFromNow(-60),
+  },
+  {
+    id: "s5",
+    product_id: "p4",
+    serial_value: "SN-IPH-015",
+    status: "Sold",
+    sale_id: "SALE-1019",
+    warranty_expiry_date: daysFromNow(340),
+    created_at: daysFromNow(-60),
+  },
+  {
+    id: "s6",
+    product_id: "p4",
+    serial_value: "SN-IPH-016",
+    status: "UnderWarranty",
+    warranty_expiry_date: daysFromNow(300),
+    created_at: daysFromNow(-60),
+  },
 ];
 
 const batches: ProductBatch[] = [
-  { id: "b1", product_id: "p3", batch_number: "AMX-2024-A", manufacture_date: daysFromNow(-200), expiry_date: daysFromNow(5), initial_quantity: 100, remaining_quantity: 30, cost_price: 6, received_at: daysFromNow(-180) },
-  { id: "b2", product_id: "p3", batch_number: "AMX-2024-B", manufacture_date: daysFromNow(-90), expiry_date: daysFromNow(40), initial_quantity: 80, remaining_quantity: 30, cost_price: 6.2, received_at: daysFromNow(-60) },
-  { id: "b3", product_id: "p1", batch_number: "PAN-2025-A", manufacture_date: daysFromNow(-30), expiry_date: daysFromNow(180), initial_quantity: 150, remaining_quantity: 120, cost_price: 1.8, received_at: daysFromNow(-25) },
-  { id: "b4", product_id: "p5", batch_number: "VITC-25-Q1", manufacture_date: daysFromNow(-60), expiry_date: daysFromNow(20), initial_quantity: 250, remaining_quantity: 200, cost_price: 9, received_at: daysFromNow(-40) },
+  {
+    id: "b1",
+    product_id: "p3",
+    batch_number: "AMX-2024-A",
+    manufacture_date: daysFromNow(-200),
+    expiry_date: daysFromNow(5),
+    initial_quantity: 100,
+    remaining_quantity: 30,
+    cost_price: 6,
+    received_at: daysFromNow(-180),
+  },
+  {
+    id: "b2",
+    product_id: "p3",
+    batch_number: "AMX-2024-B",
+    manufacture_date: daysFromNow(-90),
+    expiry_date: daysFromNow(40),
+    initial_quantity: 80,
+    remaining_quantity: 30,
+    cost_price: 6.2,
+    received_at: daysFromNow(-60),
+  },
+  {
+    id: "b3",
+    product_id: "p1",
+    batch_number: "PAN-2025-A",
+    manufacture_date: daysFromNow(-30),
+    expiry_date: daysFromNow(180),
+    initial_quantity: 150,
+    remaining_quantity: 120,
+    cost_price: 1.8,
+    received_at: daysFromNow(-25),
+  },
+  {
+    id: "b4",
+    product_id: "p5",
+    batch_number: "VITC-25-Q1",
+    manufacture_date: daysFromNow(-60),
+    expiry_date: daysFromNow(20),
+    initial_quantity: 250,
+    remaining_quantity: 200,
+    cost_price: 9,
+    received_at: daysFromNow(-40),
+  },
 ];
 
 const stocktakeSessions: StocktakeSession[] = [
-  { id: "st1", store_id: "store-1", status: "Completed", started_at: daysFromNow(-20), completed_at: daysFromNow(-19), item_count: 5, variance_count: 2, created_by_user_id: "u_mgr" },
-  { id: "st2", store_id: "store-1", status: "InProgress", started_at: daysFromNow(-1), item_count: 5, variance_count: 0, created_by_user_id: "u_mgr" },
+  {
+    id: "st1",
+    store_id: "store-1",
+    status: "Completed",
+    started_at: daysFromNow(-20),
+    completed_at: daysFromNow(-19),
+    item_count: 5,
+    variance_count: 2,
+    created_by_user_id: "u_mgr",
+  },
+  {
+    id: "st2",
+    store_id: "store-1",
+    status: "InProgress",
+    started_at: daysFromNow(-1),
+    item_count: 5,
+    variance_count: 0,
+    created_by_user_id: "u_mgr",
+  },
 ];
 
 const stocktakeItemsBySession: Record<string, StocktakeItem[]> = {
@@ -205,9 +447,34 @@ const stocktakeItemsBySession: Record<string, StocktakeItem[]> = {
 };
 
 const claims: WarrantyClaim[] = [
-  { id: "c1", serial_number_id: "s4", serial_value: "SN-IPH-014", product_name: "iPhone 15 Pro", claim_date: daysFromNow(-3), status: "Open", created_at: daysFromNow(-3) },
-  { id: "c2", serial_number_id: "s3", serial_value: "SN-XM5-003", product_name: "Sony WH-1000XM5", claim_date: daysFromNow(-10), status: "InRepair", created_at: daysFromNow(-10) },
-  { id: "c3", serial_number_id: "s6", serial_value: "SN-IPH-016", product_name: "iPhone 15 Pro", claim_date: daysFromNow(-30), status: "Resolved", resolution_notes: "Replaced battery under warranty.", created_at: daysFromNow(-30) },
+  {
+    id: "c1",
+    serial_number_id: "s4",
+    serial_value: "SN-IPH-014",
+    product_name: "iPhone 15 Pro",
+    claim_date: daysFromNow(-3),
+    status: "Open",
+    created_at: daysFromNow(-3),
+  },
+  {
+    id: "c2",
+    serial_number_id: "s3",
+    serial_value: "SN-XM5-003",
+    product_name: "Sony WH-1000XM5",
+    claim_date: daysFromNow(-10),
+    status: "InRepair",
+    created_at: daysFromNow(-10),
+  },
+  {
+    id: "c3",
+    serial_number_id: "s6",
+    serial_value: "SN-IPH-016",
+    product_name: "iPhone 15 Pro",
+    claim_date: daysFromNow(-30),
+    status: "Resolved",
+    resolution_notes: "Replaced battery under warranty.",
+    created_at: daysFromNow(-30),
+  },
 ];
 
 // ---------- Helpers ----------
@@ -263,21 +530,24 @@ export async function fetchInventoryDashboard(): Promise<InventoryDashboard> {
     low_stock_count: products.filter((p) => p.stock < 10).length,
     expiry_alert_count: expiry_alerts.length,
     open_stocktake_sessions: stocktakeSessions.filter((s) => s.status !== "Completed").length,
-    open_warranty_claims: claims.filter((c) => c.status === "Open" || c.status === "InRepair").length,
+    open_warranty_claims: claims.filter((c) => c.status === "Open" || c.status === "InRepair")
+      .length,
     expiry_alerts,
   };
 }
 
 // ---------- Stock Movements ----------
 
-export async function fetchStockMovements(params: {
-  product_id?: string;
-  movement_type?: string;
-  from_date?: string;
-  to_date?: string;
-  page?: number;
-  take?: number;
-} = {}): Promise<StockMovementPage> {
+export async function fetchStockMovements(
+  params: {
+    product_id?: string;
+    movement_type?: string;
+    from_date?: string;
+    to_date?: string;
+    page?: number;
+    take?: number;
+  } = {},
+): Promise<StockMovementPage> {
   await delay();
   const page = params.page ?? 1;
   const take = params.take ?? 20;
@@ -404,11 +674,13 @@ export async function fetchExpiringBatches(days = 30): Promise<ExpiringBatch[]> 
 
 // ---------- Stocktake ----------
 
-export async function fetchStocktakeSessions(params: {
-  status?: string;
-  page?: number;
-  take?: number;
-} = {}): Promise<StocktakeSession[]> {
+export async function fetchStocktakeSessions(
+  params: {
+    status?: string;
+    page?: number;
+    take?: number;
+  } = {},
+): Promise<StocktakeSession[]> {
   await delay();
   let items = [...stocktakeSessions].sort(
     (a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime(),
@@ -490,12 +762,14 @@ export async function completeStocktakeSession(sessionId: string): Promise<Stock
 
 // ---------- Warranty Claims ----------
 
-export async function fetchWarrantyClaims(params: {
-  status?: string;
-  from_date?: string;
-  to_date?: string;
-  page?: number;
-} = {}): Promise<WarrantyClaim[]> {
+export async function fetchWarrantyClaims(
+  params: {
+    status?: string;
+    from_date?: string;
+    to_date?: string;
+    page?: number;
+  } = {},
+): Promise<WarrantyClaim[]> {
   await delay();
   let items = [...claims].sort(
     (a, b) => new Date(b.claim_date).getTime() - new Date(a.claim_date).getTime(),
