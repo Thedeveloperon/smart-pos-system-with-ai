@@ -16,6 +16,12 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
     public DbSet<PurchaseBill> PurchaseBills => Set<PurchaseBill>();
     public DbSet<PurchaseBillItem> PurchaseBillItems => Set<PurchaseBillItem>();
     public DbSet<BillDocument> BillDocuments => Set<BillDocument>();
+    public DbSet<SerialNumber> SerialNumbers => Set<SerialNumber>();
+    public DbSet<WarrantyClaim> WarrantyClaims => Set<WarrantyClaim>();
+    public DbSet<ProductBatch> ProductBatches => Set<ProductBatch>();
+    public DbSet<StockMovement> StockMovements => Set<StockMovement>();
+    public DbSet<StocktakeSession> StocktakeSessions => Set<StocktakeSession>();
+    public DbSet<StocktakeItem> StocktakeItems => Set<StocktakeItem>();
     public DbSet<Sale> Sales => Set<Sale>();
     public DbSet<SaleItem> SaleItems => Set<SaleItem>();
     public DbSet<Refund> Refunds => Set<Refund>();
@@ -85,6 +91,10 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.ImageUrl).HasMaxLength(500);
             entity.Property(x => x.UnitPrice).HasPrecision(18, 2);
             entity.Property(x => x.CostPrice).HasPrecision(18, 2);
+            entity.Property(x => x.IsSerialTracked).HasDefaultValue(false);
+            entity.Property(x => x.WarrantyMonths).HasDefaultValue(0);
+            entity.Property(x => x.IsBatchTracked).HasDefaultValue(false);
+            entity.Property(x => x.ExpiryAlertDays).HasDefaultValue(30);
             entity.HasIndex(x => new { x.StoreId, x.Barcode }).IsUnique();
             entity.HasOne(x => x.Category)
                 .WithMany(x => x.Products)
@@ -110,6 +120,130 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
                 .WithOne(x => x.Inventory)
                 .HasForeignKey<InventoryRecord>(x => x.ProductId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<SerialNumber>(entity =>
+        {
+            entity.ToTable("serial_numbers");
+            entity.Property(x => x.SerialValue).HasMaxLength(120);
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(32);
+            entity.HasIndex(x => new { x.StoreId, x.SerialValue }).IsUnique();
+            entity.HasIndex(x => x.ProductId);
+            entity.HasIndex(x => x.SaleId);
+            entity.HasIndex(x => x.SaleItemId);
+            entity.HasIndex(x => x.RefundId);
+            entity.HasOne(x => x.Product)
+                .WithMany(x => x.SerialNumbers)
+                .HasForeignKey(x => x.ProductId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Sale)
+                .WithMany()
+                .HasForeignKey(x => x.SaleId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(x => x.SaleItem)
+                .WithMany(x => x.SerialNumbers)
+                .HasForeignKey(x => x.SaleItemId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(x => x.Refund)
+                .WithMany(x => x.ReturnedSerialNumbers)
+                .HasForeignKey(x => x.RefundId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<WarrantyClaim>(entity =>
+        {
+            entity.ToTable("warranty_claims");
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.ResolutionNotes).HasMaxLength(1000);
+            entity.HasIndex(x => new { x.StoreId, x.Status });
+            entity.HasIndex(x => x.SerialNumberId);
+            entity.HasOne(x => x.SerialNumber)
+                .WithMany(x => x.WarrantyClaims)
+                .HasForeignKey(x => x.SerialNumberId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.CreatedByUser)
+                .WithMany(x => x.WarrantyClaims)
+                .HasForeignKey(x => x.CreatedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<ProductBatch>(entity =>
+        {
+            entity.ToTable("product_batches");
+            entity.Property(x => x.BatchNumber).HasMaxLength(80);
+            entity.Property(x => x.InitialQuantity).HasPrecision(18, 3);
+            entity.Property(x => x.RemainingQuantity).HasPrecision(18, 3);
+            entity.Property(x => x.CostPrice).HasPrecision(18, 2);
+            entity.HasIndex(x => new { x.StoreId, x.ProductId, x.BatchNumber }).IsUnique();
+            entity.HasIndex(x => new { x.ProductId, x.ExpiryDate });
+            entity.HasIndex(x => x.PurchaseBillId);
+            entity.HasOne(x => x.Product)
+                .WithMany(x => x.ProductBatches)
+                .HasForeignKey(x => x.ProductId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.Supplier)
+                .WithMany()
+                .HasForeignKey(x => x.SupplierId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(x => x.PurchaseBill)
+                .WithMany()
+                .HasForeignKey(x => x.PurchaseBillId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<StockMovement>(entity =>
+        {
+            entity.ToTable("stock_movements");
+            entity.Property(x => x.MovementType).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.QuantityBefore).HasPrecision(18, 3);
+            entity.Property(x => x.QuantityChange).HasPrecision(18, 3);
+            entity.Property(x => x.QuantityAfter).HasPrecision(18, 3);
+            entity.Property(x => x.ReferenceType).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.SerialNumber).HasMaxLength(120);
+            entity.Property(x => x.Reason).HasMaxLength(500);
+            entity.HasIndex(x => new { x.StoreId, x.ProductId, x.CreatedAtUtc });
+            entity.HasIndex(x => new { x.StoreId, x.MovementType, x.CreatedAtUtc });
+            entity.HasOne(x => x.Product)
+                .WithMany(x => x.StockMovements)
+                .HasForeignKey(x => x.ProductId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.Batch)
+                .WithMany()
+                .HasForeignKey(x => x.BatchId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(x => x.CreatedByUser)
+                .WithMany(x => x.StockMovements)
+                .HasForeignKey(x => x.CreatedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<StocktakeSession>(entity =>
+        {
+            entity.ToTable("stocktake_sessions");
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(32);
+            entity.HasIndex(x => new { x.StoreId, x.Status, x.StartedAtUtc });
+            entity.HasOne(x => x.CreatedByUser)
+                .WithMany(x => x.StocktakeSessions)
+                .HasForeignKey(x => x.CreatedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<StocktakeItem>(entity =>
+        {
+            entity.ToTable("stocktake_items");
+            entity.Property(x => x.SystemQuantity).HasPrecision(18, 3);
+            entity.Property(x => x.CountedQuantity).HasPrecision(18, 3);
+            entity.Property(x => x.VarianceQuantity).HasPrecision(18, 3);
+            entity.Property(x => x.Notes).HasMaxLength(500);
+            entity.HasIndex(x => new { x.SessionId, x.ProductId }).IsUnique();
+            entity.HasOne(x => x.Session)
+                .WithMany(x => x.Items)
+                .HasForeignKey(x => x.SessionId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Product)
+                .WithMany(x => x.StocktakeItems)
+                .HasForeignKey(x => x.ProductId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Supplier>(entity =>

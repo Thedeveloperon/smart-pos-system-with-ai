@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Features.CashSessions;
+using SmartPos.Backend.Features.Inventory;
+using SmartPos.Backend.Features.Batches;
 using SmartPos.Backend.Infrastructure;
 using SmartPos.Backend.Security;
 
@@ -9,7 +11,9 @@ namespace SmartPos.Backend.Features.Checkout;
 public sealed class CheckoutService(
     SmartPosDbContext dbContext,
     AuditLogService auditLogService,
-    CashSessionService cashSessionService)
+    CashSessionService cashSessionService,
+    StockMovementHelper stockMovementHelper,
+    BatchDepletionHelper batchDepletionHelper)
 {
     public async Task<SaleResponse> HoldAsync(
         HoldSaleRequest request,
@@ -123,33 +127,78 @@ public sealed class CheckoutService(
         }
 
         var change = decimal.Round(paidTotal - sale.GrandTotal, 2, MidpointRounding.AwayFromZero);
+        var now = DateTimeOffset.UtcNow;
+        var productIds = sale.Items.Select(x => x.ProductId).Distinct().ToArray();
+        var loadedProducts = await dbContext.Products
+            .Include(x => x.SerialNumbers)
+            .Include(x => x.Inventory)
+            .Where(x => productIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
 
         foreach (var saleItem in sale.Items)
         {
-            var inventoryRecord = await dbContext.Inventory.FirstOrDefaultAsync(
-                x => x.ProductId == saleItem.ProductId,
-                cancellationToken);
-
-            if (inventoryRecord is null)
+            if (!loadedProducts.TryGetValue(saleItem.ProductId, out var product))
             {
-                var productStoreId = productStoreIds[saleItem.ProductId];
-                inventoryRecord = new InventoryRecord
-                {
-                    ProductId = saleItem.ProductId,
-                    StoreId = productStoreId,
-                    QuantityOnHand = 0m,
-                    ReorderLevel = 0m,
-                    SafetyStock = 0m,
-                    TargetStockLevel = 0m,
-                    AllowNegativeStock = true,
-                    Product = null!
-                };
-                dbContext.Inventory.Add(inventoryRecord);
+                throw new InvalidOperationException("Product not found for sale item.");
             }
-            inventoryRecord.StoreId = productStoreIds[saleItem.ProductId];
 
-            inventoryRecord.QuantityOnHand -= saleItem.Quantity;
-            inventoryRecord.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            if (!product.IsBatchTracked)
+            {
+                await stockMovementHelper.RecordMovementAsync(
+                    storeId: productStoreIds[saleItem.ProductId],
+                    productId: saleItem.ProductId,
+                    type: StockMovementType.Sale,
+                    quantityChange: -saleItem.Quantity,
+                    refType: StockMovementRef.Sale,
+                    refId: sale.Id,
+                    batchId: null,
+                    serialNumber: null,
+                    reason: "sale",
+                    userId: createdByUserId,
+                    cancellationToken);
+            }
+
+            if (product.IsSerialTracked)
+            {
+                if (saleItem.Quantity <= 0m || saleItem.Quantity != decimal.Truncate(saleItem.Quantity))
+                {
+                    throw new InvalidOperationException("Serial-tracked items must use whole-number quantities.");
+                }
+
+                var serialsNeeded = (int)saleItem.Quantity;
+                var availableSerials = product.SerialNumbers
+                    .Where(x => x.Status == SerialNumberStatus.Available)
+                    .OrderBy(x => x.CreatedAtUtc)
+                    .Take(serialsNeeded)
+                    .ToList();
+
+                if (availableSerials.Count != serialsNeeded)
+                {
+                    throw new InvalidOperationException($"Not enough serial numbers available for '{saleItem.ProductNameSnapshot}'.");
+                }
+
+                foreach (var serial in availableSerials)
+                {
+                    serial.Status = SerialNumberStatus.Sold;
+                    serial.SaleId = sale.Id;
+                    serial.SaleItemId = saleItem.Id;
+                    serial.WarrantyExpiryDate = product.WarrantyMonths > 0
+                        ? now.AddMonths(product.WarrantyMonths)
+                        : null;
+                    serial.UpdatedAtUtc = now;
+                }
+            }
+
+            if (product.IsBatchTracked)
+            {
+                await batchDepletionHelper.DepleteAsync(
+                    productStoreIds[saleItem.ProductId],
+                    saleItem.ProductId,
+                    saleItem.Quantity,
+                    sale.Id,
+                    createdByUserId,
+                    cancellationToken);
+            }
         }
 
         dbContext.Payments.AddRange(paymentRecords);
@@ -175,7 +224,7 @@ public sealed class CheckoutService(
         });
 
         sale.Status = SaleStatus.Completed;
-        sale.CompletedAtUtc = DateTimeOffset.UtcNow;
+        sale.CompletedAtUtc = now;
         sale.CustomPayoutUsed = request.CustomPayoutUsed;
         sale.CashShortAmount = request.CustomPayoutUsed
             ? DetermineCashShortAmount(sale.GrandTotal, paidTotal, request.CashChangeCounts, request.CashShortAmount)

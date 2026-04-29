@@ -60,10 +60,13 @@ public sealed class AiInsightsCreditFlowTests(CustomWebApplicationFactory factor
     [Fact]
     public async Task GenerateInsights_WithInsufficientPosData_ShouldReturnStructuredFallback()
     {
-        await TestAuth.SignInAsBillingAdminAsync(client);
+        using var sparseFactory = new AiInsightsSparsePosDataWebApplicationFactory();
+        using var sparseClient = sparseFactory.CreateClient();
+
+        await TestAuth.SignInAsBillingAdminAsync(sparseClient);
 
         await TestJson.ReadObjectAsync(
-            await client.PostAsJsonAsync("/api/ai/wallet/top-up", new
+            await sparseClient.PostAsJsonAsync("/api/ai/wallet/top-up", new
             {
                 credits = 10m,
                 purchase_reference = $"it-insufficient-pos-topup-{Guid.NewGuid():N}",
@@ -71,7 +74,7 @@ public sealed class AiInsightsCreditFlowTests(CustomWebApplicationFactory factor
             }));
 
         var payload = await TestJson.ReadObjectAsync(
-            await client.PostAsJsonAsync("/api/ai/insights", new
+            await sparseClient.PostAsJsonAsync("/api/ai/insights", new
             {
                 prompt = "What should I do tomorrow to improve sales?",
                 idempotency_key = $"it-insufficient-pos-{Guid.NewGuid():N}"
@@ -1042,4 +1045,9 @@ public sealed class AiInsightsCreditFlowTests(CustomWebApplicationFactory factor
         var signature = Convert.ToHexString(digest).ToLowerInvariant();
         return $"t={timestamp},v1={signature}";
     }
+}
+
+public sealed class AiInsightsSparsePosDataWebApplicationFactory : CustomWebApplicationFactory
+{
+    protected override bool ShouldSeedDeterministicData => false;
 }

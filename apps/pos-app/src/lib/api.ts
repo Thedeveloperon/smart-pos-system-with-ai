@@ -2798,11 +2798,8 @@ export async function validateProductBarcode(requestBody: ValidateProductBarcode
   });
 }
 
-// Inventory dashboard alert count (mock until backend is ready)
 export async function fetchInventoryDashboardSummary(): Promise<InventoryDashboardSummary> {
-  // TODO: replace with real fetch once backend is ready:
-  // return request<InventoryDashboardSummary>("/api/inventory/dashboard/summary");
-  return { expiry_alert_count: 3, open_warranty_claims: 1 };
+  return request<InventoryDashboardSummary>("/api/inventory/dashboard");
 }
 
 export async function generateAndAssignProductBarcode(

@@ -95,6 +95,24 @@ public static class DbSchemaUpdater
         }
     }
 
+    public static async Task EnsureInventoryManagementSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken = default)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+
+        if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            await EnsureSqliteInventoryManagementSchemaAsync(dbContext, cancellationToken);
+            return;
+        }
+
+        if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            await EnsurePostgresInventoryManagementSchemaAsync(dbContext, cancellationToken);
+        }
+    }
+
     public static async Task EnsureShopProfileSchemaAsync(
         SmartPosDbContext dbContext,
         CancellationToken cancellationToken = default)
@@ -306,6 +324,253 @@ public static class DbSchemaUpdater
                 """,
                 cancellationToken);
         }
+    }
+
+    private static async Task EnsureSqliteInventoryManagementSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        await EnsureSqliteColumnAsync(dbContext, "products", "IsSerialTracked", """ALTER TABLE "products" ADD COLUMN "IsSerialTracked" INTEGER NOT NULL DEFAULT 0;""", cancellationToken);
+        await EnsureSqliteColumnAsync(dbContext, "products", "WarrantyMonths", """ALTER TABLE "products" ADD COLUMN "WarrantyMonths" INTEGER NOT NULL DEFAULT 0;""", cancellationToken);
+        await EnsureSqliteColumnAsync(dbContext, "products", "IsBatchTracked", """ALTER TABLE "products" ADD COLUMN "IsBatchTracked" INTEGER NOT NULL DEFAULT 0;""", cancellationToken);
+        await EnsureSqliteColumnAsync(dbContext, "products", "ExpiryAlertDays", """ALTER TABLE "products" ADD COLUMN "ExpiryAlertDays" INTEGER NOT NULL DEFAULT 30;""", cancellationToken);
+
+        var sql = """
+            CREATE TABLE IF NOT EXISTS "serial_numbers" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_serial_numbers" PRIMARY KEY,
+              "StoreId" TEXT NULL,
+              "ProductId" TEXT NOT NULL,
+              "SerialValue" TEXT NOT NULL,
+              "Status" TEXT NOT NULL DEFAULT 'Available',
+              "SaleId" TEXT NULL,
+              "SaleItemId" TEXT NULL,
+              "RefundId" TEXT NULL,
+              "WarrantyExpiryDate" TEXT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "UpdatedAtUtc" TEXT NULL,
+              CONSTRAINT "FK_serial_numbers_products_ProductId" FOREIGN KEY ("ProductId") REFERENCES "products" ("Id") ON DELETE CASCADE,
+              CONSTRAINT "FK_serial_numbers_sales_SaleId" FOREIGN KEY ("SaleId") REFERENCES "sales" ("Id") ON DELETE SET NULL,
+              CONSTRAINT "FK_serial_numbers_sale_items_SaleItemId" FOREIGN KEY ("SaleItemId") REFERENCES "sale_items" ("Id") ON DELETE SET NULL,
+              CONSTRAINT "FK_serial_numbers_refunds_RefundId" FOREIGN KEY ("RefundId") REFERENCES "refunds" ("Id") ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS "warranty_claims" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_warranty_claims" PRIMARY KEY,
+              "StoreId" TEXT NULL,
+              "SerialNumberId" TEXT NOT NULL,
+              "ClaimDate" TEXT NOT NULL,
+              "Status" TEXT NOT NULL DEFAULT 'Open',
+              "ResolutionNotes" TEXT NULL,
+              "CreatedByUserId" TEXT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "UpdatedAtUtc" TEXT NULL,
+              CONSTRAINT "FK_warranty_claims_serial_numbers_SerialNumberId" FOREIGN KEY ("SerialNumberId") REFERENCES "serial_numbers" ("Id") ON DELETE CASCADE,
+              CONSTRAINT "FK_warranty_claims_users_CreatedByUserId" FOREIGN KEY ("CreatedByUserId") REFERENCES "users" ("Id") ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS "product_batches" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_product_batches" PRIMARY KEY,
+              "StoreId" TEXT NULL,
+              "ProductId" TEXT NOT NULL,
+              "SupplierId" TEXT NULL,
+              "PurchaseBillId" TEXT NULL,
+              "BatchNumber" TEXT NOT NULL,
+              "ManufactureDate" TEXT NULL,
+              "ExpiryDate" TEXT NULL,
+              "InitialQuantity" TEXT NOT NULL,
+              "RemainingQuantity" TEXT NOT NULL,
+              "CostPrice" TEXT NOT NULL,
+              "ReceivedAtUtc" TEXT NOT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "UpdatedAtUtc" TEXT NULL,
+              CONSTRAINT "FK_product_batches_products_ProductId" FOREIGN KEY ("ProductId") REFERENCES "products" ("Id") ON DELETE RESTRICT,
+              CONSTRAINT "FK_product_batches_suppliers_SupplierId" FOREIGN KEY ("SupplierId") REFERENCES "suppliers" ("Id") ON DELETE SET NULL,
+              CONSTRAINT "FK_product_batches_purchase_bills_PurchaseBillId" FOREIGN KEY ("PurchaseBillId") REFERENCES "purchase_bills" ("Id") ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS "stock_movements" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_stock_movements" PRIMARY KEY,
+              "StoreId" TEXT NULL,
+              "ProductId" TEXT NOT NULL,
+              "MovementType" TEXT NOT NULL,
+              "QuantityBefore" TEXT NOT NULL,
+              "QuantityChange" TEXT NOT NULL,
+              "QuantityAfter" TEXT NOT NULL,
+              "ReferenceType" TEXT NOT NULL,
+              "ReferenceId" TEXT NULL,
+              "BatchId" TEXT NULL,
+              "SerialNumber" TEXT NULL,
+              "Reason" TEXT NULL,
+              "CreatedByUserId" TEXT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              CONSTRAINT "FK_stock_movements_products_ProductId" FOREIGN KEY ("ProductId") REFERENCES "products" ("Id") ON DELETE RESTRICT,
+              CONSTRAINT "FK_stock_movements_product_batches_BatchId" FOREIGN KEY ("BatchId") REFERENCES "product_batches" ("Id") ON DELETE SET NULL,
+              CONSTRAINT "FK_stock_movements_users_CreatedByUserId" FOREIGN KEY ("CreatedByUserId") REFERENCES "users" ("Id") ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS "stocktake_sessions" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_stocktake_sessions" PRIMARY KEY,
+              "StoreId" TEXT NULL,
+              "Status" TEXT NOT NULL DEFAULT 'Draft',
+              "StartedAtUtc" TEXT NOT NULL,
+              "CompletedAtUtc" TEXT NULL,
+              "CreatedByUserId" TEXT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "UpdatedAtUtc" TEXT NULL,
+              CONSTRAINT "FK_stocktake_sessions_users_CreatedByUserId" FOREIGN KEY ("CreatedByUserId") REFERENCES "users" ("Id") ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS "stocktake_items" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_stocktake_items" PRIMARY KEY,
+              "SessionId" TEXT NOT NULL,
+              "ProductId" TEXT NOT NULL,
+              "SystemQuantity" TEXT NOT NULL,
+              "CountedQuantity" TEXT NULL,
+              "VarianceQuantity" TEXT NULL,
+              "Notes" TEXT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "UpdatedAtUtc" TEXT NULL,
+              CONSTRAINT "FK_stocktake_items_stocktake_sessions_SessionId" FOREIGN KEY ("SessionId") REFERENCES "stocktake_sessions" ("Id") ON DELETE CASCADE,
+              CONSTRAINT "FK_stocktake_items_products_ProductId" FOREIGN KEY ("ProductId") REFERENCES "products" ("Id") ON DELETE RESTRICT
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_serial_numbers_StoreId_SerialValue" ON "serial_numbers" ("StoreId", "SerialValue");
+            CREATE INDEX IF NOT EXISTS "IX_serial_numbers_ProductId" ON "serial_numbers" ("ProductId");
+            CREATE INDEX IF NOT EXISTS "IX_serial_numbers_SaleId" ON "serial_numbers" ("SaleId");
+            CREATE INDEX IF NOT EXISTS "IX_serial_numbers_SaleItemId" ON "serial_numbers" ("SaleItemId");
+            CREATE INDEX IF NOT EXISTS "IX_serial_numbers_RefundId" ON "serial_numbers" ("RefundId");
+            CREATE INDEX IF NOT EXISTS "IX_warranty_claims_StoreId_Status" ON "warranty_claims" ("StoreId", "Status");
+            CREATE INDEX IF NOT EXISTS "IX_warranty_claims_SerialNumberId" ON "warranty_claims" ("SerialNumberId");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_product_batches_StoreId_ProductId_BatchNumber" ON "product_batches" ("StoreId", "ProductId", "BatchNumber");
+            CREATE INDEX IF NOT EXISTS "IX_product_batches_ProductId_ExpiryDate" ON "product_batches" ("ProductId", "ExpiryDate");
+            CREATE INDEX IF NOT EXISTS "IX_product_batches_PurchaseBillId" ON "product_batches" ("PurchaseBillId");
+            CREATE INDEX IF NOT EXISTS "IX_stock_movements_StoreId_ProductId_CreatedAtUtc" ON "stock_movements" ("StoreId", "ProductId", "CreatedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_stock_movements_StoreId_MovementType_CreatedAtUtc" ON "stock_movements" ("StoreId", "MovementType", "CreatedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_stocktake_sessions_StoreId_Status_StartedAtUtc" ON "stocktake_sessions" ("StoreId", "Status", "StartedAtUtc");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_stocktake_items_SessionId_ProductId" ON "stocktake_items" ("SessionId", "ProductId");
+            """;
+
+        await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+    }
+
+    private static async Task EnsurePostgresInventoryManagementSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE products ADD COLUMN IF NOT EXISTS "IsSerialTracked" boolean NOT NULL DEFAULT false;""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE products ADD COLUMN IF NOT EXISTS "WarrantyMonths" integer NOT NULL DEFAULT 0;""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE products ADD COLUMN IF NOT EXISTS "IsBatchTracked" boolean NOT NULL DEFAULT false;""",
+            cancellationToken);
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE products ADD COLUMN IF NOT EXISTS "ExpiryAlertDays" integer NOT NULL DEFAULT 30;""",
+            cancellationToken);
+
+        var sql = """
+            CREATE TABLE IF NOT EXISTS serial_numbers (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "StoreId" uuid NULL,
+              "ProductId" uuid NOT NULL REFERENCES products("Id") ON DELETE CASCADE,
+              "SerialValue" varchar(120) NOT NULL,
+              "Status" varchar(32) NOT NULL DEFAULT 'Available',
+              "SaleId" uuid NULL REFERENCES sales("Id") ON DELETE SET NULL,
+              "SaleItemId" uuid NULL REFERENCES sale_items("Id") ON DELETE SET NULL,
+              "RefundId" uuid NULL REFERENCES refunds("Id") ON DELETE SET NULL,
+              "WarrantyExpiryDate" timestamptz NULL,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "UpdatedAtUtc" timestamptz NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS warranty_claims (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "StoreId" uuid NULL,
+              "SerialNumberId" uuid NOT NULL REFERENCES serial_numbers("Id") ON DELETE CASCADE,
+              "ClaimDate" timestamptz NOT NULL,
+              "Status" varchar(32) NOT NULL DEFAULT 'Open',
+              "ResolutionNotes" varchar(1000) NULL,
+              "CreatedByUserId" uuid NULL REFERENCES users("Id") ON DELETE SET NULL,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "UpdatedAtUtc" timestamptz NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS product_batches (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "StoreId" uuid NULL,
+              "ProductId" uuid NOT NULL REFERENCES products("Id") ON DELETE RESTRICT,
+              "SupplierId" uuid NULL REFERENCES suppliers("Id") ON DELETE SET NULL,
+              "PurchaseBillId" uuid NULL REFERENCES purchase_bills("Id") ON DELETE SET NULL,
+              "BatchNumber" varchar(80) NOT NULL,
+              "ManufactureDate" timestamptz NULL,
+              "ExpiryDate" timestamptz NULL,
+              "InitialQuantity" numeric(18,3) NOT NULL,
+              "RemainingQuantity" numeric(18,3) NOT NULL,
+              "CostPrice" numeric(18,2) NOT NULL,
+              "ReceivedAtUtc" timestamptz NOT NULL,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "UpdatedAtUtc" timestamptz NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS stock_movements (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "StoreId" uuid NULL,
+              "ProductId" uuid NOT NULL REFERENCES products("Id") ON DELETE RESTRICT,
+              "MovementType" varchar(32) NOT NULL,
+              "QuantityBefore" numeric(18,3) NOT NULL,
+              "QuantityChange" numeric(18,3) NOT NULL,
+              "QuantityAfter" numeric(18,3) NOT NULL,
+              "ReferenceType" varchar(32) NOT NULL,
+              "ReferenceId" uuid NULL,
+              "BatchId" uuid NULL REFERENCES product_batches("Id") ON DELETE SET NULL,
+              "SerialNumber" varchar(120) NULL,
+              "Reason" varchar(500) NULL,
+              "CreatedByUserId" uuid NULL REFERENCES users("Id") ON DELETE SET NULL,
+              "CreatedAtUtc" timestamptz NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS stocktake_sessions (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "StoreId" uuid NULL,
+              "Status" varchar(32) NOT NULL DEFAULT 'Draft',
+              "StartedAtUtc" timestamptz NOT NULL,
+              "CompletedAtUtc" timestamptz NULL,
+              "CreatedByUserId" uuid NULL REFERENCES users("Id") ON DELETE SET NULL,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "UpdatedAtUtc" timestamptz NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS stocktake_items (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "SessionId" uuid NOT NULL REFERENCES stocktake_sessions("Id") ON DELETE CASCADE,
+              "ProductId" uuid NOT NULL REFERENCES products("Id") ON DELETE RESTRICT,
+              "SystemQuantity" numeric(18,3) NOT NULL,
+              "CountedQuantity" numeric(18,3) NULL,
+              "VarianceQuantity" numeric(18,3) NULL,
+              "Notes" varchar(500) NULL,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "UpdatedAtUtc" timestamptz NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_serial_numbers_StoreId_SerialValue" ON serial_numbers ("StoreId", "SerialValue");
+            CREATE INDEX IF NOT EXISTS "IX_serial_numbers_ProductId" ON serial_numbers ("ProductId");
+            CREATE INDEX IF NOT EXISTS "IX_serial_numbers_SaleId" ON serial_numbers ("SaleId");
+            CREATE INDEX IF NOT EXISTS "IX_serial_numbers_SaleItemId" ON serial_numbers ("SaleItemId");
+            CREATE INDEX IF NOT EXISTS "IX_serial_numbers_RefundId" ON serial_numbers ("RefundId");
+            CREATE INDEX IF NOT EXISTS "IX_warranty_claims_StoreId_Status" ON warranty_claims ("StoreId", "Status");
+            CREATE INDEX IF NOT EXISTS "IX_warranty_claims_SerialNumberId" ON warranty_claims ("SerialNumberId");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_product_batches_StoreId_ProductId_BatchNumber" ON product_batches ("StoreId", "ProductId", "BatchNumber");
+            CREATE INDEX IF NOT EXISTS "IX_product_batches_ProductId_ExpiryDate" ON product_batches ("ProductId", "ExpiryDate");
+            CREATE INDEX IF NOT EXISTS "IX_product_batches_PurchaseBillId" ON product_batches ("PurchaseBillId");
+            CREATE INDEX IF NOT EXISTS "IX_stock_movements_StoreId_ProductId_CreatedAtUtc" ON stock_movements ("StoreId", "ProductId", "CreatedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_stock_movements_StoreId_MovementType_CreatedAtUtc" ON stock_movements ("StoreId", "MovementType", "CreatedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_stocktake_sessions_StoreId_Status_StartedAtUtc" ON stocktake_sessions ("StoreId", "Status", "StartedAtUtc");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_stocktake_items_SessionId_ProductId" ON stocktake_items ("SessionId", "ProductId");
+            """;
+
+        await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
     }
 
     private static async Task EnsurePostgresStockPlanningSchemaAsync(

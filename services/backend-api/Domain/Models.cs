@@ -46,9 +46,17 @@ public sealed class Product
     public Category? Category { get; set; }
     public Brand? Brand { get; set; }
     public InventoryRecord? Inventory { get; set; }
+    public bool IsSerialTracked { get; set; }
+    public int WarrantyMonths { get; set; }
+    public bool IsBatchTracked { get; set; }
+    public int ExpiryAlertDays { get; set; } = 30;
     public ICollection<SaleItem> SaleItems { get; set; } = [];
     public ICollection<PurchaseBillItem> PurchaseBillItems { get; set; } = [];
     public ICollection<ProductSupplier> ProductSuppliers { get; set; } = [];
+    public ICollection<SerialNumber> SerialNumbers { get; set; } = [];
+    public ICollection<ProductBatch> ProductBatches { get; set; } = [];
+    public ICollection<StockMovement> StockMovements { get; set; } = [];
+    public ICollection<StocktakeItem> StocktakeItems { get; set; } = [];
 }
 
 public sealed class Supplier
@@ -196,6 +204,118 @@ public sealed class InventoryRecord
     public required Product Product { get; set; }
 }
 
+public sealed class SerialNumber
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? StoreId { get; set; }
+    public Guid ProductId { get; set; }
+    public required string SerialValue { get; set; }
+    public SerialNumberStatus Status { get; set; } = SerialNumberStatus.Available;
+    public Guid? SaleId { get; set; }
+    public Guid? SaleItemId { get; set; }
+    public Guid? RefundId { get; set; }
+    public DateTimeOffset? WarrantyExpiryDate { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public required Product Product { get; set; }
+    public Sale? Sale { get; set; }
+    public SaleItem? SaleItem { get; set; }
+    public Refund? Refund { get; set; }
+    public ICollection<WarrantyClaim> WarrantyClaims { get; set; } = [];
+}
+
+public sealed class WarrantyClaim
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? StoreId { get; set; }
+    public Guid SerialNumberId { get; set; }
+    public DateTimeOffset ClaimDate { get; set; } = DateTimeOffset.UtcNow;
+    public WarrantyClaimStatus Status { get; set; } = WarrantyClaimStatus.Open;
+    public string? ResolutionNotes { get; set; }
+    public Guid? CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public required SerialNumber SerialNumber { get; set; }
+    public AppUser? CreatedByUser { get; set; }
+}
+
+public sealed class ProductBatch
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? StoreId { get; set; }
+    public Guid ProductId { get; set; }
+    public Guid? SupplierId { get; set; }
+    public Guid? PurchaseBillId { get; set; }
+    public required string BatchNumber { get; set; }
+    public DateTimeOffset? ManufactureDate { get; set; }
+    public DateTimeOffset? ExpiryDate { get; set; }
+    public decimal InitialQuantity { get; set; }
+    public decimal RemainingQuantity { get; set; }
+    public decimal CostPrice { get; set; }
+    public DateTimeOffset ReceivedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public required Product Product { get; set; }
+    public Supplier? Supplier { get; set; }
+    public PurchaseBill? PurchaseBill { get; set; }
+}
+
+public sealed class StockMovement
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? StoreId { get; set; }
+    public Guid ProductId { get; set; }
+    public StockMovementType MovementType { get; set; }
+    public decimal QuantityBefore { get; set; }
+    public decimal QuantityChange { get; set; }
+    public decimal QuantityAfter { get; set; }
+    public StockMovementRef ReferenceType { get; set; }
+    public Guid? ReferenceId { get; set; }
+    public Guid? BatchId { get; set; }
+    public string? SerialNumber { get; set; }
+    public string? Reason { get; set; }
+    public Guid? CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+
+    public required Product Product { get; set; }
+    public ProductBatch? Batch { get; set; }
+    public AppUser? CreatedByUser { get; set; }
+}
+
+public sealed class StocktakeSession
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? StoreId { get; set; }
+    public StocktakeStatus Status { get; set; } = StocktakeStatus.Draft;
+    public DateTimeOffset StartedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? CompletedAtUtc { get; set; }
+    public Guid? CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public AppUser? CreatedByUser { get; set; }
+    public ICollection<StocktakeItem> Items { get; set; } = [];
+}
+
+public sealed class StocktakeItem
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid SessionId { get; set; }
+    public Guid ProductId { get; set; }
+    public decimal SystemQuantity { get; set; }
+    public decimal? CountedQuantity { get; set; }
+    public decimal? VarianceQuantity { get; set; }
+    public string? Notes { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public required StocktakeSession Session { get; set; }
+    public required Product Product { get; set; }
+}
+
 public sealed class ShopStockSettings
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -245,6 +365,7 @@ public sealed class SaleItem
     public required Sale Sale { get; set; }
     public required Product Product { get; set; }
     public ICollection<RefundItem> RefundItems { get; set; } = [];
+    public ICollection<SerialNumber> SerialNumbers { get; set; } = [];
 }
 
 public sealed class Payment
@@ -289,6 +410,7 @@ public sealed class Refund
 
     public required Sale Sale { get; set; }
     public ICollection<RefundItem> Items { get; set; } = [];
+    public ICollection<SerialNumber> ReturnedSerialNumbers { get; set; } = [];
 }
 
 public sealed class RefundItem
@@ -333,6 +455,9 @@ public sealed class AppUser
     public ICollection<AiSmartReportJob> AiSmartReportJobs { get; set; } = [];
     public ICollection<ReminderRule> ReminderRules { get; set; } = [];
     public ICollection<ReminderEvent> ReminderEvents { get; set; } = [];
+    public ICollection<WarrantyClaim> WarrantyClaims { get; set; } = [];
+    public ICollection<StockMovement> StockMovements { get; set; } = [];
+    public ICollection<StocktakeSession> StocktakeSessions { get; set; } = [];
 }
 
 public sealed class AppRole
@@ -970,6 +1095,50 @@ public enum LedgerEntryType
     Refund = 3,
     Reversal = 4,
     StockAdjustment = 5
+}
+
+public enum SerialNumberStatus
+{
+    Available = 1,
+    Sold = 2,
+    Returned = 3,
+    Defective = 4,
+    UnderWarranty = 5
+}
+
+public enum StockMovementType
+{
+    Sale = 1,
+    Purchase = 2,
+    Adjustment = 3,
+    Refund = 4,
+    ExpiryWriteOff = 5,
+    StocktakeReconciliation = 6,
+    Transfer = 7
+}
+
+public enum StockMovementRef
+{
+    Sale = 1,
+    Purchase = 2,
+    Adjustment = 3,
+    Refund = 4,
+    Stocktake = 5
+}
+
+public enum StocktakeStatus
+{
+    Draft = 1,
+    InProgress = 2,
+    Completed = 3
+}
+
+public enum WarrantyClaimStatus
+{
+    Open = 1,
+    InRepair = 2,
+    Resolved = 3,
+    Rejected = 4
 }
 
 public enum OfflineEventType

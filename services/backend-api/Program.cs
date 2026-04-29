@@ -6,9 +6,11 @@ using SmartPos.Backend.Features.Ai;
 using SmartPos.Backend.Features.AiChat;
 using SmartPos.Backend.Features.AiChat.IntentPipeline;
 using SmartPos.Backend.Features.Auth;
+using SmartPos.Backend.Features.Batches;
 using SmartPos.Backend.Features.CloudAccount;
 using SmartPos.Backend.Features.CashSessions;
 using SmartPos.Backend.Features.Checkout;
+using SmartPos.Backend.Features.Inventory;
 using SmartPos.Backend.Features.Licensing;
 using SmartPos.Backend.Features.Products;
 using SmartPos.Backend.Features.Purchases;
@@ -17,7 +19,10 @@ using SmartPos.Backend.Features.Recovery;
 using SmartPos.Backend.Features.Reminders;
 using SmartPos.Backend.Features.Receipts;
 using SmartPos.Backend.Features.Refunds;
+using SmartPos.Backend.Features.SerialNumbers;
+using SmartPos.Backend.Features.Stocktake;
 using SmartPos.Backend.Features.Settings;
+using SmartPos.Backend.Features.WarrantyClaims;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Features.Sync;
 using SmartPos.Backend.Infrastructure;
@@ -429,6 +434,8 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddScoped<CheckoutService>();
 builder.Services.AddScoped<CashSessionService>();
 builder.Services.AddScoped<ProductService>();
+builder.Services.AddScoped<StockMovementHelper>();
+builder.Services.AddScoped<BatchDepletionHelper>();
 builder.Services.AddScoped<PurchaseService>();
 builder.Services.AddScoped<ReceiptService>();
 builder.Services.AddScoped<RefundService>();
@@ -690,9 +697,6 @@ builder.Services.AddDbContext<SmartPosDbContext>(options =>
     options.UseNpgsql(NormalizePostgresConnectionString(postgresConnectionString));
 });
 
-var seedSampleCatalog = builder.Configuration.GetValue<bool?>("BootstrapData:SeedSampleCatalog")
-    ?? builder.Environment.IsDevelopment();
-
 var app = builder.Build();
 var webRootPath = Path.Combine(app.Environment.ContentRootPath, "wwwroot");
 var staticFilesAvailable = Directory.Exists(webRootPath);
@@ -711,6 +715,7 @@ using (var scope = app.Services.CreateScope())
     await DbSchemaUpdater.EnsureProductImageSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureProductBarcodeSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureStockPlanningSchemaAsync(dbContext);
+    await DbSchemaUpdater.EnsureInventoryManagementSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureShopProfileSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureRefundSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureSaleSchemaAsync(dbContext);
@@ -721,7 +726,7 @@ using (var scope = app.Services.CreateScope())
     await DbSchemaUpdater.EnsureAiInsightsSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureCloudApiReliabilitySchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureCloudAccountLinkSchemaAsync(dbContext);
-    await DbSeeder.SeedAsync(dbContext, seedSampleCatalog);
+    await DbSeeder.SeedAsync(dbContext);
 }
 
 if (staticFilesAvailable)
@@ -785,6 +790,11 @@ app.MapReminderEndpoints();
 app.MapCashSessionEndpoints();
 app.MapSyncEndpoints();
 app.MapProductEndpoints();
+app.MapSerialNumberEndpoints();
+app.MapBatchEndpoints();
+app.MapStocktakeEndpoints();
+app.MapWarrantyClaimEndpoints();
+app.MapInventoryEndpoints();
 app.MapPurchaseEndpoints();
 app.MapCheckoutEndpoints();
 app.MapReceiptEndpoints();

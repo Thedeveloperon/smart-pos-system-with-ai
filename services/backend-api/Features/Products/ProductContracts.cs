@@ -340,6 +340,18 @@ public sealed class ProductCatalogItemResponse
     [JsonPropertyName("is_low_stock")]
     public bool IsLowStock { get; set; }
 
+    [JsonPropertyName("is_serial_tracked")]
+    public bool IsSerialTracked { get; set; }
+
+    [JsonPropertyName("warranty_months")]
+    public int WarrantyMonths { get; set; }
+
+    [JsonPropertyName("is_batch_tracked")]
+    public bool IsBatchTracked { get; set; }
+
+    [JsonPropertyName("expiry_alert_days")]
+    public int ExpiryAlertDays { get; set; }
+
     [JsonPropertyName("product_suppliers")]
     public List<ProductSupplierItemResponse> ProductSuppliers { get; set; } = [];
 
@@ -391,6 +403,18 @@ public sealed class CreateProductRequest
     [JsonPropertyName("allow_negative_stock")]
     public bool AllowNegativeStock { get; set; } = true;
 
+    [JsonPropertyName("is_serial_tracked")]
+    public bool IsSerialTracked { get; set; }
+
+    [JsonPropertyName("warranty_months")]
+    public int WarrantyMonths { get; set; }
+
+    [JsonPropertyName("is_batch_tracked")]
+    public bool IsBatchTracked { get; set; }
+
+    [JsonPropertyName("expiry_alert_days")]
+    public int ExpiryAlertDays { get; set; } = 30;
+
     [JsonPropertyName("is_active")]
     public bool IsActive { get; set; } = true;
 }
@@ -435,6 +459,18 @@ public sealed class UpdateProductRequest
 
     [JsonPropertyName("allow_negative_stock")]
     public bool AllowNegativeStock { get; set; } = true;
+
+    [JsonPropertyName("is_serial_tracked")]
+    public bool IsSerialTracked { get; set; }
+
+    [JsonPropertyName("warranty_months")]
+    public int WarrantyMonths { get; set; }
+
+    [JsonPropertyName("is_batch_tracked")]
+    public bool IsBatchTracked { get; set; }
+
+    [JsonPropertyName("expiry_alert_days")]
+    public int ExpiryAlertDays { get; set; } = 30;
 
     [JsonPropertyName("is_active")]
     public bool IsActive { get; set; } = true;
@@ -570,6 +606,9 @@ public sealed class StockAdjustmentRequest
 
     [JsonPropertyName("reason")]
     public string Reason { get; set; } = "manual_adjustment";
+
+    [JsonPropertyName("batch_id")]
+    public Guid? BatchId { get; set; }
 }
 
 public sealed class StockAdjustmentResponse
