@@ -213,6 +213,7 @@ public sealed class RefundService(
             var product = await dbContext.Products
                 .Include(x => x.Inventory)
                 .Include(x => x.SerialNumbers)
+                .Include(x => x.ProductBatches)
                 .FirstOrDefaultAsync(x => x.Id == refundItem.ProductId, cancellationToken)
                 ?? throw new InvalidOperationException("Product not found for refund item.");
 
@@ -251,6 +252,18 @@ public sealed class RefundService(
                 userId: null,
                 cancellationToken);
 
+            if (product.IsBatchTracked)
+            {
+                await RestoreBatchQuantitiesAsync(
+                    product,
+                    sale.Id,
+                    refundItem.Quantity,
+                    productStoreIds[refundItem.ProductId],
+                    now,
+                    reason,
+                    cancellationToken);
+            }
+
             if (product.IsSerialTracked)
             {
                 if (refundItem.Quantity <= 0m || refundItem.Quantity != decimal.Truncate(refundItem.Quantity))
@@ -264,6 +277,12 @@ public sealed class RefundService(
                     .OrderBy(x => x.CreatedAtUtc)
                     .Take((int)refundItem.Quantity)
                     .ToList();
+
+                if (serialsToReturn.Count != (int)refundItem.Quantity)
+                {
+                    throw new InvalidOperationException(
+                        $"Not enough sold serial numbers exist to refund '{refundItem.ProductNameSnapshot}'.");
+                }
 
                 foreach (var serial in serialsToReturn)
                 {
@@ -545,6 +564,77 @@ public sealed class RefundService(
         return distinctStoreIds.Length == 0
             ? null
             : distinctStoreIds[0];
+    }
+
+    private async Task RestoreBatchQuantitiesAsync(
+        Product product,
+        Guid saleId,
+        decimal refundQuantity,
+        Guid? storeId,
+        DateTimeOffset now,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        var batchMovements = await dbContext.StockMovements
+            .AsNoTracking()
+            .Where(x => x.ReferenceType == StockMovementRef.Sale &&
+                        x.ReferenceId == saleId &&
+                        x.ProductId == product.Id &&
+                        x.BatchId.HasValue &&
+                        (!storeId.HasValue || x.StoreId == storeId.Value))
+            .OrderBy(x => x.CreatedAtUtc)
+            .ToListAsync(cancellationToken);
+
+        var remainingToRestore = decimal.Round(refundQuantity, 3, MidpointRounding.AwayFromZero);
+        if (remainingToRestore <= 0m)
+        {
+            return;
+        }
+
+        foreach (var movement in batchMovements)
+        {
+            if (remainingToRestore <= 0m)
+            {
+                break;
+            }
+
+            var batch = await dbContext.ProductBatches
+                .FirstOrDefaultAsync(x => x.Id == movement.BatchId && (!storeId.HasValue || x.StoreId == storeId.Value), cancellationToken);
+            if (batch is null)
+            {
+                throw new InvalidOperationException("Batch not found for refund restoration.");
+            }
+
+            var restored = Math.Min(decimal.Round(Math.Abs(movement.QuantityChange), 3, MidpointRounding.AwayFromZero), remainingToRestore);
+            if (restored <= 0m)
+            {
+                continue;
+            }
+
+            batch.RemainingQuantity = decimal.Round(batch.RemainingQuantity + restored, 3, MidpointRounding.AwayFromZero);
+            batch.UpdatedAtUtc = now;
+
+            await stockMovementHelper.RecordMovementAsync(
+                storeId: storeId,
+                productId: product.Id,
+                type: StockMovementType.Refund,
+                quantityChange: restored,
+                refType: StockMovementRef.Refund,
+                refId: saleId,
+                batchId: batch.Id,
+                serialNumber: null,
+                reason: reason,
+                userId: null,
+                cancellationToken: cancellationToken,
+                updateInventory: false);
+
+            remainingToRestore = decimal.Round(remainingToRestore - restored, 3, MidpointRounding.AwayFromZero);
+        }
+
+        if (remainingToRestore > 0m)
+        {
+            throw new InvalidOperationException("Insufficient batch quantity available to restore refund.");
+        }
     }
 
     private static decimal RoundMoney(decimal amount)

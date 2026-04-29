@@ -142,6 +142,17 @@ public sealed class CheckoutService(
                 throw new InvalidOperationException("Product not found for sale item.");
             }
 
+            if (product.IsBatchTracked)
+            {
+                await batchDepletionHelper.DepleteAsync(
+                    productStoreIds[saleItem.ProductId],
+                    saleItem.ProductId,
+                    saleItem.Quantity,
+                    sale.Id,
+                    createdByUserId,
+                    cancellationToken);
+            }
+
             if (!product.IsBatchTracked)
             {
                 await stockMovementHelper.RecordMovementAsync(
@@ -187,17 +198,6 @@ public sealed class CheckoutService(
                         : null;
                     serial.UpdatedAtUtc = now;
                 }
-            }
-
-            if (product.IsBatchTracked)
-            {
-                await batchDepletionHelper.DepleteAsync(
-                    productStoreIds[saleItem.ProductId],
-                    saleItem.ProductId,
-                    saleItem.Quantity,
-                    sale.Id,
-                    createdByUserId,
-                    cancellationToken);
             }
         }
 

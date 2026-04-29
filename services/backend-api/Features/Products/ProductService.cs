@@ -1,3 +1,5 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Features.Inventory;
@@ -9,7 +11,8 @@ namespace SmartPos.Backend.Features.Products;
 public sealed class ProductService(
     SmartPosDbContext dbContext,
     AuditLogService auditLogService,
-    StockMovementHelper stockMovementHelper)
+    StockMovementHelper stockMovementHelper,
+    IHttpContextAccessor httpContextAccessor)
 {
     private const decimal DefaultLowStockThreshold = 5m;
     private const int MaxBarcodeGenerationAttempts = 40;
@@ -21,12 +24,18 @@ public sealed class ProductService(
         CancellationToken cancellationToken)
     {
         var normalizedTake = Math.Clamp(take, 1, 200);
+        var storeId = await GetCurrentStoreIdAsync(cancellationToken);
         var productQuery = dbContext.Products
             .AsNoTracking()
             .Include(x => x.Category)
             .Include(x => x.Brand)
             .Include(x => x.Inventory)
             .Where(x => x.IsActive);
+
+        if (storeId.HasValue)
+        {
+            productQuery = productQuery.Where(x => x.StoreId == storeId.Value);
+        }
 
         if (!string.IsNullOrWhiteSpace(query))
         {
@@ -91,6 +100,7 @@ public sealed class ProductService(
     {
         var normalizedTake = Math.Clamp(take, 1, 200);
         var threshold = Math.Max(0m, lowStockThreshold ?? DefaultLowStockThreshold);
+        var storeId = await GetCurrentStoreIdAsync(cancellationToken);
 
         var productQuery = dbContext.Products
             .AsNoTracking()
@@ -100,6 +110,11 @@ public sealed class ProductService(
             .Include(x => x.ProductSuppliers)
                 .ThenInclude(x => x.Supplier)
             .AsQueryable();
+
+        if (storeId.HasValue)
+        {
+            productQuery = productQuery.Where(x => x.StoreId == storeId.Value);
+        }
 
         if (!includeInactive)
         {
@@ -163,6 +178,7 @@ public sealed class ProductService(
             exists = await BarcodeExistsAsync(
                 validation.Normalized,
                 request.ExcludeProductId,
+                await GetCurrentStoreIdAsync(cancellationToken),
                 cancellationToken);
         }
 
@@ -183,10 +199,16 @@ public sealed class ProductService(
         string? idempotencyKey,
         CancellationToken cancellationToken)
     {
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
         var product = await dbContext.Products
             .Include(x => x.Inventory)
             .FirstOrDefaultAsync(x => x.Id == productId, cancellationToken)
             ?? throw new KeyNotFoundException("Product not found.");
+
+        if (currentStoreId.HasValue && product.StoreId != currentStoreId.Value)
+        {
+            throw new KeyNotFoundException("Product not found.");
+        }
 
         if (!request.ForceReplace && !string.IsNullOrWhiteSpace(product.Barcode))
         {
@@ -254,10 +276,16 @@ public sealed class ProductService(
         var normalizedTake = Math.Clamp(request.Take, 1, 1000);
         var now = DateTimeOffset.UtcNow;
         var normalizedIdempotencyKey = NormalizeIdempotencyKey(idempotencyKey);
+        var storeId = await GetCurrentStoreIdAsync(cancellationToken);
 
         var productQuery = dbContext.Products
             .Include(x => x.Inventory)
             .AsQueryable();
+
+        if (storeId.HasValue)
+        {
+            productQuery = productQuery.Where(x => x.StoreId == storeId.Value);
+        }
 
         if (!request.IncludeInactive)
         {
@@ -403,6 +431,7 @@ public sealed class ProductService(
         CreateProductRequest request,
         CancellationToken cancellationToken)
     {
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
         var normalizedName = NormalizeRequired(request.Name, "Product name is required.");
         var normalizedSku = NormalizeOptional(request.Sku);
         var normalizedBarcode = NormalizeOptionalBarcode(request.Barcode);
@@ -423,14 +452,15 @@ public sealed class ProductService(
             throw new InvalidOperationException("Target stock level must be greater than or equal to reorder level.");
         }
 
-        await EnsureUniqueBarcodeAsync(normalizedBarcode, null, cancellationToken);
-        await EnsureUniqueSkuAsync(normalizedSku, null, cancellationToken);
-        await EnsureCategoryExistsIfProvidedAsync(request.CategoryId, null, cancellationToken);
-        await EnsureBrandExistsIfProvidedAsync(request.BrandId, null, cancellationToken);
+        await EnsureUniqueBarcodeAsync(normalizedBarcode, null, currentStoreId, cancellationToken);
+        await EnsureUniqueSkuAsync(normalizedSku, null, currentStoreId, cancellationToken);
+        await EnsureCategoryExistsIfProvidedAsync(request.CategoryId, null, currentStoreId, cancellationToken);
+        await EnsureBrandExistsIfProvidedAsync(request.BrandId, null, currentStoreId, cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
         var product = new Product
         {
+            StoreId = currentStoreId,
             Name = normalizedName,
             Sku = normalizedSku,
             Barcode = normalizedBarcode,
@@ -453,7 +483,7 @@ public sealed class ProductService(
             Product = product,
             StoreId = product.StoreId,
             InitialStockQuantity = RoundQuantity(request.InitialStockQuantity),
-            QuantityOnHand = 0m,
+            QuantityOnHand = RoundQuantity(request.InitialStockQuantity),
             ReorderLevel = RoundQuantity(request.ReorderLevel),
             SafetyStock = RoundQuantity(request.SafetyStock),
             TargetStockLevel = RoundQuantity(normalizedTargetStockLevel),
@@ -503,7 +533,9 @@ public sealed class ProductService(
                 serialNumber: null,
                 reason: "initial_stock",
                 userId: null,
-                cancellationToken);
+                cancellationToken: cancellationToken,
+                quantityBeforeOverride: 0m,
+                updateInventory: false);
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -516,10 +548,16 @@ public sealed class ProductService(
         UpdateProductRequest request,
         CancellationToken cancellationToken)
     {
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
         var product = await dbContext.Products
             .Include(x => x.Inventory)
             .FirstOrDefaultAsync(x => x.Id == productId, cancellationToken)
             ?? throw new KeyNotFoundException("Product not found.");
+
+        if (currentStoreId.HasValue && product.StoreId != currentStoreId.Value)
+        {
+            throw new KeyNotFoundException("Product not found.");
+        }
 
         var normalizedName = NormalizeRequired(request.Name, "Product name is required.");
         var normalizedSku = NormalizeOptional(request.Sku);
@@ -541,10 +579,10 @@ public sealed class ProductService(
             throw new InvalidOperationException("Target stock level must be greater than or equal to reorder level.");
         }
 
-        await EnsureUniqueBarcodeAsync(normalizedBarcode, productId, cancellationToken);
-        await EnsureUniqueSkuAsync(normalizedSku, productId, cancellationToken);
-        await EnsureCategoryExistsIfProvidedAsync(request.CategoryId, product.CategoryId, cancellationToken);
-        await EnsureBrandExistsIfProvidedAsync(request.BrandId, product.BrandId, cancellationToken);
+        await EnsureUniqueBarcodeAsync(normalizedBarcode, productId, currentStoreId, cancellationToken);
+        await EnsureUniqueSkuAsync(normalizedSku, productId, currentStoreId, cancellationToken);
+        await EnsureCategoryExistsIfProvidedAsync(request.CategoryId, product.CategoryId, currentStoreId, cancellationToken);
+        await EnsureBrandExistsIfProvidedAsync(request.BrandId, product.BrandId, currentStoreId, cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
         var before = new
@@ -672,10 +710,16 @@ public sealed class ProductService(
 
     public async Task DeleteProductAsync(Guid productId, CancellationToken cancellationToken)
     {
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
         var product = await dbContext.Products
             .Include(x => x.Inventory)
             .FirstOrDefaultAsync(x => x.Id == productId, cancellationToken)
             ?? throw new KeyNotFoundException("Product not found.");
+
+        if (currentStoreId.HasValue && product.StoreId != currentStoreId.Value)
+        {
+            throw new KeyNotFoundException("Product not found.");
+        }
 
         if (!product.IsActive)
         {
@@ -715,10 +759,16 @@ public sealed class ProductService(
 
     public async Task HardDeleteInactiveProductAsync(Guid productId, CancellationToken cancellationToken)
     {
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
         var product = await dbContext.Products
             .Include(x => x.Inventory)
             .FirstOrDefaultAsync(x => x.Id == productId, cancellationToken)
             ?? throw new KeyNotFoundException("Product not found.");
+
+        if (currentStoreId.HasValue && product.StoreId != currentStoreId.Value)
+        {
+            throw new KeyNotFoundException("Product not found.");
+        }
 
         if (product.IsActive)
         {
@@ -761,6 +811,7 @@ public sealed class ProductService(
         StockAdjustmentRequest request,
         CancellationToken cancellationToken)
     {
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
         if (request.DeltaQuantity == 0m)
         {
             throw new InvalidOperationException("Delta quantity cannot be zero.");
@@ -772,6 +823,11 @@ public sealed class ProductService(
             .Include(x => x.ProductBatches)
             .FirstOrDefaultAsync(x => x.Id == productId, cancellationToken)
             ?? throw new KeyNotFoundException("Product not found.");
+
+        if (currentStoreId.HasValue && product.StoreId != currentStoreId.Value)
+        {
+            throw new KeyNotFoundException("Product not found.");
+        }
 
         var now = DateTimeOffset.UtcNow;
         var inventory = product.Inventory;
@@ -804,6 +860,16 @@ public sealed class ProductService(
         if (!inventory.AllowNegativeStock && next < 0m)
         {
             throw new InvalidOperationException("Negative stock is not allowed for this product.");
+        }
+
+        if (product.IsBatchTracked && !request.BatchId.HasValue)
+        {
+            throw new InvalidOperationException("batch_id is required for batch-tracked products.");
+        }
+
+        if (!product.IsBatchTracked && request.BatchId.HasValue)
+        {
+            throw new InvalidOperationException("This product is not batch-tracked. Remove batch_id from the request.");
         }
 
         if (request.BatchId.HasValue && product.IsBatchTracked)
@@ -899,9 +965,10 @@ public sealed class ProductService(
         bool includeInactive,
         CancellationToken cancellationToken)
     {
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
         var categories = await dbContext.Categories
             .AsNoTracking()
-            .Where(x => includeInactive || x.IsActive)
+            .Where(x => (includeInactive || x.IsActive) && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value))
             .OrderBy(x => x.Name)
             .Select(x => new CategoryItemResponse
             {
@@ -922,12 +989,14 @@ public sealed class ProductService(
         UpsertCategoryRequest request,
         CancellationToken cancellationToken)
     {
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
         var normalizedName = NormalizeRequired(request.Name, "Category name is required.");
-        await EnsureUniqueCategoryNameAsync(normalizedName, null, cancellationToken);
+        await EnsureUniqueCategoryNameAsync(normalizedName, null, currentStoreId, cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
         var category = new Category
         {
+            StoreId = currentStoreId,
             Name = normalizedName,
             Description = NormalizeOptional(request.Description),
             IsActive = request.IsActive,
@@ -955,12 +1024,13 @@ public sealed class ProductService(
         UpsertCategoryRequest request,
         CancellationToken cancellationToken)
     {
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
         var category = await dbContext.Categories
-            .FirstOrDefaultAsync(x => x.Id == categoryId, cancellationToken)
+            .FirstOrDefaultAsync(x => x.Id == categoryId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken)
             ?? throw new KeyNotFoundException("Category not found.");
 
         var normalizedName = NormalizeRequired(request.Name, "Category name is required.");
-        await EnsureUniqueCategoryNameAsync(normalizedName, categoryId, cancellationToken);
+        await EnsureUniqueCategoryNameAsync(normalizedName, categoryId, currentStoreId, cancellationToken);
 
         var before = new
         {
@@ -989,7 +1059,7 @@ public sealed class ProductService(
 
         var productCount = await dbContext.Products
             .AsNoTracking()
-            .CountAsync(x => x.CategoryId == categoryId && x.IsActive, cancellationToken);
+            .CountAsync(x => x.CategoryId == categoryId && x.IsActive && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
 
         return ToCategoryItemResponse(category, productCount);
     }
@@ -998,9 +1068,10 @@ public sealed class ProductService(
         bool includeInactive,
         CancellationToken cancellationToken)
     {
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
         var brands = await dbContext.Brands
             .AsNoTracking()
-            .Where(x => includeInactive || x.IsActive)
+            .Where(x => (includeInactive || x.IsActive) && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value))
             .OrderBy(x => x.Name)
             .Select(x => new BrandItemResponse
             {
@@ -1022,14 +1093,16 @@ public sealed class ProductService(
         UpsertBrandRequest request,
         CancellationToken cancellationToken)
     {
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
         var normalizedName = NormalizeRequired(request.Name, "Brand name is required.");
         var normalizedCode = NormalizeOptional(request.Code);
-        await EnsureUniqueBrandNameAsync(normalizedName, null, cancellationToken);
-        await EnsureUniqueBrandCodeAsync(normalizedCode, null, cancellationToken);
+        await EnsureUniqueBrandNameAsync(normalizedName, null, currentStoreId, cancellationToken);
+        await EnsureUniqueBrandCodeAsync(normalizedCode, null, currentStoreId, cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
         var brand = new Brand
         {
+            StoreId = currentStoreId,
             Name = normalizedName,
             Code = normalizedCode,
             Description = NormalizeOptional(request.Description),
@@ -1048,13 +1121,18 @@ public sealed class ProductService(
         UpsertBrandRequest request,
         CancellationToken cancellationToken)
     {
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
         var brand = await dbContext.Brands.FirstOrDefaultAsync(x => x.Id == brandId, cancellationToken)
             ?? throw new KeyNotFoundException("Brand not found.");
+        if (currentStoreId.HasValue && brand.StoreId != currentStoreId.Value)
+        {
+            throw new KeyNotFoundException("Brand not found.");
+        }
 
         var normalizedName = NormalizeRequired(request.Name, "Brand name is required.");
         var normalizedCode = NormalizeOptional(request.Code);
-        await EnsureUniqueBrandNameAsync(normalizedName, brandId, cancellationToken);
-        await EnsureUniqueBrandCodeAsync(normalizedCode, brandId, cancellationToken);
+        await EnsureUniqueBrandNameAsync(normalizedName, brandId, currentStoreId, cancellationToken);
+        await EnsureUniqueBrandCodeAsync(normalizedCode, brandId, currentStoreId, cancellationToken);
 
         brand.Name = normalizedName;
         brand.Code = normalizedCode;
@@ -1066,7 +1144,7 @@ public sealed class ProductService(
 
         var productCount = await dbContext.Products
             .AsNoTracking()
-            .CountAsync(x => x.BrandId == brandId && x.IsActive, cancellationToken);
+            .CountAsync(x => x.BrandId == brandId && x.IsActive && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
 
         return ToBrandItemResponse(brand, productCount);
     }
@@ -1075,9 +1153,10 @@ public sealed class ProductService(
         bool includeInactive,
         CancellationToken cancellationToken)
     {
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
         var suppliers = await dbContext.Suppliers
             .AsNoTracking()
-            .Where(x => includeInactive || x.IsActive)
+            .Where(x => (includeInactive || x.IsActive) && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value))
             .OrderBy(x => x.Name)
             .Select(x => new SupplierItemResponse
             {
@@ -1102,14 +1181,16 @@ public sealed class ProductService(
         UpsertSupplierRequest request,
         CancellationToken cancellationToken)
     {
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
         var normalizedName = NormalizeRequired(request.Name, "Supplier name is required.");
         var normalizedCode = NormalizeOptional(request.Code);
-        await EnsureUniqueSupplierNameAsync(normalizedName, null, cancellationToken);
-        await EnsureUniqueSupplierCodeAsync(normalizedCode, null, cancellationToken);
+        await EnsureUniqueSupplierNameAsync(normalizedName, null, currentStoreId, cancellationToken);
+        await EnsureUniqueSupplierCodeAsync(normalizedCode, null, currentStoreId, cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
         var supplier = new Supplier
         {
+            StoreId = currentStoreId,
             Name = normalizedName,
             Code = normalizedCode,
             ContactName = NormalizeOptional(request.ContactName),
@@ -1131,13 +1212,14 @@ public sealed class ProductService(
         UpsertSupplierRequest request,
         CancellationToken cancellationToken)
     {
-        var supplier = await dbContext.Suppliers.FirstOrDefaultAsync(x => x.Id == supplierId, cancellationToken)
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
+        var supplier = await dbContext.Suppliers.FirstOrDefaultAsync(x => x.Id == supplierId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken)
             ?? throw new KeyNotFoundException("Supplier not found.");
 
         var normalizedName = NormalizeRequired(request.Name, "Supplier name is required.");
         var normalizedCode = NormalizeOptional(request.Code);
-        await EnsureUniqueSupplierNameAsync(normalizedName, supplierId, cancellationToken);
-        await EnsureUniqueSupplierCodeAsync(normalizedCode, supplierId, cancellationToken);
+        await EnsureUniqueSupplierNameAsync(normalizedName, supplierId, currentStoreId, cancellationToken);
+        await EnsureUniqueSupplierCodeAsync(normalizedCode, supplierId, currentStoreId, cancellationToken);
 
         supplier.Name = normalizedName;
         supplier.Code = normalizedCode;
@@ -1152,7 +1234,7 @@ public sealed class ProductService(
 
         var linkedProductCount = await dbContext.ProductSuppliers
             .AsNoTracking()
-            .CountAsync(x => x.SupplierId == supplierId && x.IsActive, cancellationToken);
+            .CountAsync(x => x.SupplierId == supplierId && x.IsActive && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
 
         return ToSupplierItemResponse(supplier, linkedProductCount);
     }
@@ -1195,10 +1277,21 @@ public sealed class ProductService(
         UpsertProductSupplierRequest request,
         CancellationToken cancellationToken)
     {
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
         var product = await dbContext.Products.FirstOrDefaultAsync(x => x.Id == productId, cancellationToken)
             ?? throw new KeyNotFoundException("Product not found.");
         var supplier = await dbContext.Suppliers.FirstOrDefaultAsync(x => x.Id == request.SupplierId, cancellationToken)
             ?? throw new KeyNotFoundException("Supplier not found.");
+
+        if (currentStoreId.HasValue && product.StoreId != currentStoreId.Value)
+        {
+            throw new KeyNotFoundException("Product not found.");
+        }
+
+        if (currentStoreId.HasValue && supplier.StoreId != currentStoreId.Value)
+        {
+            throw new KeyNotFoundException("Supplier not found.");
+        }
 
         ValidateOptionalQuantityValue(request.MinOrderQty, "Minimum order quantity cannot be negative.");
         ValidateOptionalQuantityValue(request.PackSize, "Pack size cannot be negative.");
@@ -1252,10 +1345,16 @@ public sealed class ProductService(
         SetPreferredProductSupplierRequest request,
         CancellationToken cancellationToken)
     {
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
         var mapping = await dbContext.ProductSuppliers
             .Include(x => x.Supplier)
             .FirstOrDefaultAsync(x => x.ProductId == productId && x.SupplierId == request.SupplierId, cancellationToken)
             ?? throw new KeyNotFoundException("Product supplier mapping not found.");
+
+        if (currentStoreId.HasValue && mapping.StoreId != currentStoreId.Value)
+        {
+            throw new KeyNotFoundException("Product supplier mapping not found.");
+        }
 
         mapping.IsPreferred = true;
         mapping.IsActive = true;
@@ -1271,6 +1370,7 @@ public sealed class ProductService(
         decimal threshold,
         CancellationToken cancellationToken)
     {
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
         var product = await dbContext.Products
             .AsNoTracking()
             .Include(x => x.Category)
@@ -1281,12 +1381,18 @@ public sealed class ProductService(
             .FirstOrDefaultAsync(x => x.Id == productId, cancellationToken)
             ?? throw new KeyNotFoundException("Product not found.");
 
+        if (currentStoreId.HasValue && product.StoreId != currentStoreId.Value)
+        {
+            throw new KeyNotFoundException("Product not found.");
+        }
+
         return ToCatalogItemResponse(product, threshold);
     }
 
     private async Task EnsureCategoryExistsIfProvidedAsync(
         Guid? categoryId,
         Guid? currentCategoryId,
+        Guid? storeId,
         CancellationToken cancellationToken)
     {
         if (!categoryId.HasValue)
@@ -1298,7 +1404,7 @@ public sealed class ProductService(
         {
             var currentExists = await dbContext.Categories
                 .AsNoTracking()
-                .AnyAsync(x => x.Id == categoryId.Value, cancellationToken);
+                .AnyAsync(x => x.Id == categoryId.Value && (!storeId.HasValue || x.StoreId == storeId.Value), cancellationToken);
 
             if (!currentExists)
             {
@@ -1310,7 +1416,7 @@ public sealed class ProductService(
 
         var exists = await dbContext.Categories
             .AsNoTracking()
-            .AnyAsync(x => x.Id == categoryId.Value && x.IsActive, cancellationToken);
+            .AnyAsync(x => x.Id == categoryId.Value && x.IsActive && (!storeId.HasValue || x.StoreId == storeId.Value), cancellationToken);
 
         if (!exists)
         {
@@ -1321,6 +1427,7 @@ public sealed class ProductService(
     private async Task EnsureBrandExistsIfProvidedAsync(
         Guid? brandId,
         Guid? currentBrandId,
+        Guid? storeId,
         CancellationToken cancellationToken)
     {
         if (!brandId.HasValue)
@@ -1332,7 +1439,7 @@ public sealed class ProductService(
         {
             var currentExists = await dbContext.Brands
                 .AsNoTracking()
-                .AnyAsync(x => x.Id == brandId.Value, cancellationToken);
+                .AnyAsync(x => x.Id == brandId.Value && (!storeId.HasValue || x.StoreId == storeId.Value), cancellationToken);
 
             if (!currentExists)
             {
@@ -1344,7 +1451,7 @@ public sealed class ProductService(
 
         var exists = await dbContext.Brands
             .AsNoTracking()
-            .AnyAsync(x => x.Id == brandId.Value && x.IsActive, cancellationToken);
+            .AnyAsync(x => x.Id == brandId.Value && x.IsActive && (!storeId.HasValue || x.StoreId == storeId.Value), cancellationToken);
 
         if (!exists)
         {
@@ -1356,9 +1463,10 @@ public sealed class ProductService(
         Guid productId,
         CancellationToken cancellationToken)
     {
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
         var exists = await dbContext.Products
             .AsNoTracking()
-            .AnyAsync(x => x.Id == productId, cancellationToken);
+            .AnyAsync(x => x.Id == productId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
 
         if (!exists)
         {
@@ -1366,13 +1474,35 @@ public sealed class ProductService(
         }
     }
 
+    private async Task<Guid?> GetCurrentStoreIdAsync(CancellationToken cancellationToken)
+    {
+        var user = httpContextAccessor.HttpContext?.User;
+        if (user is null)
+        {
+            return null;
+        }
+
+        var userIdValue = user.FindFirstValue(ClaimTypes.NameIdentifier) ?? user.FindFirstValue("sub");
+        if (!Guid.TryParse(userIdValue, out var userId))
+        {
+            return null;
+        }
+
+        return await dbContext.Users
+            .AsNoTracking()
+            .Where(x => x.Id == userId)
+            .Select(x => x.StoreId)
+            .SingleOrDefaultAsync(cancellationToken);
+    }
+
     private async Task ClearOtherPreferredSuppliersAsync(
         Guid productId,
         Guid preferredMappingId,
         CancellationToken cancellationToken)
     {
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
         var others = await dbContext.ProductSuppliers
-            .Where(x => x.ProductId == productId && x.Id != preferredMappingId && x.IsPreferred)
+            .Where(x => x.ProductId == productId && x.Id != preferredMappingId && x.IsPreferred && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value))
             .ToListAsync(cancellationToken);
 
         foreach (var other in others)
@@ -1398,7 +1528,7 @@ public sealed class ProductService(
                 continue;
             }
 
-            if (await BarcodeExistsAsync(candidate, productId, cancellationToken))
+            if (await BarcodeExistsAsync(candidate, productId, storeId, cancellationToken))
             {
                 continue;
             }
@@ -1452,6 +1582,7 @@ public sealed class ProductService(
     private async Task<bool> BarcodeExistsAsync(
         string barcode,
         Guid? productId,
+        Guid? storeId,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(barcode))
@@ -1465,6 +1596,7 @@ public sealed class ProductService(
             .AnyAsync(
                 x => x.Barcode != null &&
                      x.Barcode.ToLower() == normalized &&
+                     (!storeId.HasValue || x.StoreId == storeId.Value) &&
                      (!productId.HasValue || x.Id != productId.Value),
                 cancellationToken);
     }
@@ -1472,6 +1604,7 @@ public sealed class ProductService(
     private async Task EnsureUniqueBarcodeAsync(
         string? barcode,
         Guid? productId,
+        Guid? storeId,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(barcode))
@@ -1479,7 +1612,7 @@ public sealed class ProductService(
             return;
         }
 
-        var exists = await BarcodeExistsAsync(barcode, productId, cancellationToken);
+        var exists = await BarcodeExistsAsync(barcode, productId, storeId, cancellationToken);
 
         if (exists)
         {
@@ -1526,6 +1659,7 @@ public sealed class ProductService(
     private async Task EnsureUniqueSkuAsync(
         string? sku,
         Guid? productId,
+        Guid? storeId,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(sku))
@@ -1539,6 +1673,7 @@ public sealed class ProductService(
             .AnyAsync(
                 x => x.Sku != null &&
                      x.Sku.ToLower() == normalized &&
+                     (!storeId.HasValue || x.StoreId == storeId.Value) &&
                      (!productId.HasValue || x.Id != productId.Value),
                 cancellationToken);
 
@@ -1551,6 +1686,7 @@ public sealed class ProductService(
     private async Task EnsureUniqueCategoryNameAsync(
         string name,
         Guid? categoryId,
+        Guid? storeId,
         CancellationToken cancellationToken)
     {
         var normalized = name.Trim().ToLowerInvariant();
@@ -1558,6 +1694,7 @@ public sealed class ProductService(
             .AsNoTracking()
             .AnyAsync(
                 x => x.Name.ToLower() == normalized &&
+                     (!storeId.HasValue || x.StoreId == storeId.Value) &&
                      (!categoryId.HasValue || x.Id != categoryId.Value),
                 cancellationToken);
 
@@ -1570,6 +1707,7 @@ public sealed class ProductService(
     private async Task EnsureUniqueBrandNameAsync(
         string name,
         Guid? brandId,
+        Guid? storeId,
         CancellationToken cancellationToken)
     {
         var normalized = name.Trim().ToLowerInvariant();
@@ -1577,6 +1715,7 @@ public sealed class ProductService(
             .AsNoTracking()
             .AnyAsync(
                 x => x.Name.ToLower() == normalized &&
+                     (!storeId.HasValue || x.StoreId == storeId.Value) &&
                      (!brandId.HasValue || x.Id != brandId.Value),
                 cancellationToken);
 
@@ -1589,6 +1728,7 @@ public sealed class ProductService(
     private async Task EnsureUniqueBrandCodeAsync(
         string? code,
         Guid? brandId,
+        Guid? storeId,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(code))
@@ -1602,6 +1742,7 @@ public sealed class ProductService(
             .AnyAsync(
                 x => x.Code != null &&
                      x.Code.ToLower() == normalized &&
+                     (!storeId.HasValue || x.StoreId == storeId.Value) &&
                      (!brandId.HasValue || x.Id != brandId.Value),
                 cancellationToken);
 
@@ -1614,6 +1755,7 @@ public sealed class ProductService(
     private async Task EnsureUniqueSupplierNameAsync(
         string name,
         Guid? supplierId,
+        Guid? storeId,
         CancellationToken cancellationToken)
     {
         var normalized = name.Trim().ToLowerInvariant();
@@ -1621,6 +1763,7 @@ public sealed class ProductService(
             .AsNoTracking()
             .AnyAsync(
                 x => x.Name.ToLower() == normalized &&
+                     (!storeId.HasValue || x.StoreId == storeId.Value) &&
                      (!supplierId.HasValue || x.Id != supplierId.Value),
                 cancellationToken);
 
@@ -1633,6 +1776,7 @@ public sealed class ProductService(
     private async Task EnsureUniqueSupplierCodeAsync(
         string? code,
         Guid? supplierId,
+        Guid? storeId,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(code))
@@ -1646,6 +1790,7 @@ public sealed class ProductService(
             .AnyAsync(
                 x => x.Code != null &&
                      x.Code.ToLower() == normalized &&
+                     (!storeId.HasValue || x.StoreId == storeId.Value) &&
                      (!supplierId.HasValue || x.Id != supplierId.Value),
                 cancellationToken);
 
