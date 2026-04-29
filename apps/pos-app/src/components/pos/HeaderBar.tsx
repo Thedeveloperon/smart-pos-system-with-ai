@@ -27,6 +27,7 @@ import {
   Menu,
   Sparkles,
   Bell,
+  Boxes,
 } from "lucide-react";
 
 interface HeaderBarProps {
@@ -36,6 +37,7 @@ interface HeaderBarProps {
   onTodaySales: () => void;
   onNewItem: () => void;
   onManageProducts?: () => void;
+  onInventoryManager?: () => void;
   onReports?: () => void;
   onImportSupplierBill: () => void;
   onAiInsights?: () => void;
@@ -58,6 +60,7 @@ interface HeaderBarProps {
   cashierToolbarVisibility?: {
     newItem?: boolean;
     manage?: boolean;
+    inventoryManager?: boolean;
     reports?: boolean;
     aiInsights?: boolean;
     heldBills?: boolean;
@@ -79,6 +82,7 @@ const HeaderBar = ({
   onTodaySales,
   onNewItem,
   onManageProducts,
+  onInventoryManager,
   onReports,
   onImportSupplierBill,
   onAiInsights,
@@ -150,6 +154,18 @@ const HeaderBar = ({
           >
             <PencilLine className="h-4 w-4" />
             <span className="hidden md:inline ml-1">POS Manager</span>
+          </Button>
+        )}
+
+        {onInventoryManager && allowCashier(cashierToolbarVisibility?.inventoryManager) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onInventoryManager}
+            className="text-pos-header-foreground hover:bg-pos-header-foreground/10"
+          >
+            <Boxes className="h-4 w-4" />
+            <span className="hidden md:inline ml-1">Inventory Manager</span>
           </Button>
         )}
 
@@ -368,6 +384,13 @@ const HeaderBar = ({
               <DropdownMenuItem onSelect={() => onManageProducts()} className="min-h-11 px-3 py-2 text-base">
                 <PencilLine className="mr-3 h-5 w-5" />
                 POS Manager
+              </DropdownMenuItem>
+            )}
+
+            {onInventoryManager && allowCashier(cashierToolbarVisibility?.inventoryManager) && (
+              <DropdownMenuItem onSelect={() => onInventoryManager()} className="min-h-11 px-3 py-2 text-base">
+                <Boxes className="mr-3 h-5 w-5" />
+                Inventory Manager
               </DropdownMenuItem>
             )}
 

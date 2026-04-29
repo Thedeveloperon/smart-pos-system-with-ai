@@ -72,6 +72,9 @@ const REMINDER_BANNER_DISMISSAL_STORAGE_KEY_PREFIX = "smartpos.reminders.banner.
 const OFFLINE_BANNER_DISMISSAL_STORAGE_KEY_PREFIX = "smartpos.license.offline.banner.dismissed.v1";
 const AI_LOW_CREDIT_THRESHOLD = 10;
 const CLOUD_PORTAL_URL = (import.meta.env.VITE_CLOUD_PORTAL_URL || "").trim().replace(/\/$/, "");
+const INVENTORY_MANAGER_URL = (import.meta.env.VITE_INVENTORY_MANAGER_URL || "/inventory-manager")
+  .trim()
+  .replace(/\/$/, "");
 const isPosShortcutsFeatureEnabled = import.meta.env.VITE_POS_SHORTCUTS_ENABLED !== "false";
 
 const IndexInner = () => {
@@ -194,6 +197,9 @@ const IndexInner = () => {
   const isAiCreditLow =
     isAdmin && typeof aiCreditsBalance === "number" && aiCreditsBalance <= AI_LOW_CREDIT_THRESHOLD;
   const aiTopUpUrl = CLOUD_PORTAL_URL ? `${CLOUD_PORTAL_URL}/en/account` : "";
+  const openInventoryManager = useCallback(() => {
+    window.location.assign(`${INVENTORY_MANAGER_URL}/`);
+  }, []);
 
   const dismissReminderBanner = useCallback(() => {
     if (!firstOpenReminder?.reminder_id) {
@@ -956,6 +962,7 @@ const IndexInner = () => {
         onTodaySales={() => setShowTodaySales(true)}
         onNewItem={() => setShowNewItem(true)}
         onManageProducts={() => setShowProductManagement(true)}
+        onInventoryManager={openInventoryManager}
         onReports={() => setShowReports(true)}
         onAiInsights={() => setShowAiInsights(true)}
         aiCredits={aiCreditsBalance}
