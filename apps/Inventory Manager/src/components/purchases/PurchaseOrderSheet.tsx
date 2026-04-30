@@ -1,13 +1,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetFooter,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,15 +22,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  createPurchaseOrder,
-  fetchProducts,
-  fetchSuppliers,
-  updatePurchaseOrder,
-  type Product,
-  type PurchaseOrder,
-  type Supplier,
-} from "@/lib/purchases";
+import { fetchProducts, fetchSuppliers, type Product, type Supplier } from "@/lib/api";
+import { createPurchaseOrder, updatePurchaseOrder, type PurchaseOrder } from "@/lib/purchases";
 import { fmtCurrency, todayIso } from "./utils";
 
 type LineItem = {
@@ -103,7 +90,10 @@ export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }:
   const subtotal = lines.reduce((s, l) => s + l.quantity_ordered * l.unit_cost_estimate, 0);
 
   const addLine = () => {
-    setLines((prev) => [...prev, { product_id: "", product_name: "", quantity_ordered: 1, unit_cost_estimate: 0 }]);
+    setLines((prev) => [
+      ...prev,
+      { product_id: "", product_name: "", quantity_ordered: 1, unit_cost_estimate: 0 },
+    ]);
   };
 
   const updateLine = (idx: number, patch: Partial<LineItem>) => {
@@ -115,7 +105,8 @@ export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }:
     updateLine(idx, {
       product_id: productId,
       product_name: p?.name ?? "",
-      unit_cost_estimate: lines[idx].unit_cost_estimate || (p ? Math.round(p.price * 0.6 * 100) / 100 : 0),
+      unit_cost_estimate:
+        lines[idx].unit_cost_estimate || (p ? Math.round(p.price * 0.6 * 100) / 100 : 0),
     });
   };
 
@@ -168,7 +159,11 @@ export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }:
   };
 
   const title =
-    mode === "create" ? "New Purchase Order" : mode === "edit" ? `Edit ${poNumber}` : `PO ${poNumber}`;
+    mode === "create"
+      ? "New Purchase Order"
+      : mode === "edit"
+        ? `Edit ${poNumber}`
+        : `PO ${poNumber}`;
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
@@ -182,31 +177,54 @@ export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }:
             <div>
               <Label>Supplier</Label>
               <Select value={supplierId} onValueChange={setSupplierId} disabled={readOnly}>
-                <SelectTrigger><SelectValue placeholder="Select supplier" /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select supplier" />
+                </SelectTrigger>
                 <SelectContent>
                   {suppliers.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                    <SelectItem key={s.supplier_id} value={s.supplier_id}>
+                      {s.name}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div>
               <Label>PO Number</Label>
-              <Input value={poNumber} onChange={(e) => setPoNumber(e.target.value)} disabled={readOnly} />
+              <Input
+                value={poNumber}
+                onChange={(e) => setPoNumber(e.target.value)}
+                disabled={readOnly}
+              />
             </div>
             <div>
               <Label>PO Date</Label>
-              <Input type="date" value={poDate} onChange={(e) => setPoDate(e.target.value)} disabled={readOnly} />
+              <Input
+                type="date"
+                value={poDate}
+                onChange={(e) => setPoDate(e.target.value)}
+                disabled={readOnly}
+              />
             </div>
             <div>
               <Label>Expected Delivery</Label>
-              <Input type="date" value={expectedDelivery} onChange={(e) => setExpectedDelivery(e.target.value)} disabled={readOnly} />
+              <Input
+                type="date"
+                value={expectedDelivery}
+                onChange={(e) => setExpectedDelivery(e.target.value)}
+                disabled={readOnly}
+              />
             </div>
           </div>
 
           <div>
             <Label>Notes</Label>
-            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} disabled={readOnly} rows={2} />
+            <Textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              disabled={readOnly}
+              rows={2}
+            />
           </div>
 
           <Separator />
@@ -233,7 +251,10 @@ export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }:
             <TableBody>
               {lines.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={readOnly ? 4 : 5} className="text-center text-muted-foreground py-4">
+                  <TableCell
+                    colSpan={readOnly ? 4 : 5}
+                    className="text-center text-muted-foreground py-4"
+                  >
                     No line items.
                   </TableCell>
                 </TableRow>
@@ -245,7 +266,9 @@ export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }:
                         l.product_name
                       ) : (
                         <Select value={l.product_id} onValueChange={(v) => setLineProduct(idx, v)}>
-                          <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select product" />
+                          </SelectTrigger>
                           <SelectContent>
                             {products.map((p) => (
                               <SelectItem key={p.id} value={p.id}>
@@ -261,7 +284,9 @@ export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }:
                         type="number"
                         min={1}
                         value={l.quantity_ordered}
-                        onChange={(e) => updateLine(idx, { quantity_ordered: Number(e.target.value) || 0 })}
+                        onChange={(e) =>
+                          updateLine(idx, { quantity_ordered: Number(e.target.value) || 0 })
+                        }
                         disabled={readOnly}
                       />
                     </TableCell>
@@ -271,7 +296,9 @@ export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }:
                         step="0.01"
                         min={0}
                         value={l.unit_cost_estimate}
-                        onChange={(e) => updateLine(idx, { unit_cost_estimate: Number(e.target.value) || 0 })}
+                        onChange={(e) =>
+                          updateLine(idx, { unit_cost_estimate: Number(e.target.value) || 0 })
+                        }
                         disabled={readOnly}
                       />
                     </TableCell>
@@ -280,7 +307,11 @@ export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }:
                     </TableCell>
                     {!readOnly && (
                       <TableCell>
-                        <Button variant="ghost" size="icon" onClick={() => setLines(lines.filter((_, i) => i !== idx))}>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setLines(lines.filter((_, i) => i !== idx))}
+                        >
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </TableCell>
@@ -299,7 +330,10 @@ export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }:
                 <ul className="space-y-1 text-sm">
                   {po.bills.map((b) => (
                     <li key={b.id} className="flex justify-between border rounded p-2">
-                      <span>{b.invoice_number} <span className="text-muted-foreground">· {b.source_type}</span></span>
+                      <span>
+                        {b.invoice_number}{" "}
+                        <span className="text-muted-foreground">· {b.source_type}</span>
+                      </span>
                       <span className="font-medium">{fmtCurrency(b.grand_total)}</span>
                     </li>
                   ))}
@@ -316,7 +350,9 @@ export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }:
               <span className="font-semibold text-base">{fmtCurrency(subtotal)}</span>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" onClick={onClose}>{readOnly ? "Close" : "Cancel"}</Button>
+              <Button variant="outline" onClick={onClose}>
+                {readOnly ? "Close" : "Cancel"}
+              </Button>
               {!readOnly && (
                 <Button onClick={handleSave} disabled={saving}>
                   {saving ? "Saving..." : "Save Draft"}
