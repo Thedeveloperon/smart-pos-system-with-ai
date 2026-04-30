@@ -8,6 +8,7 @@ interface DenominationCounterProps {
   initialCounts?: DenominationCount[];
   compact?: boolean;
   warningDenominations?: number[];
+  flashDenominations?: number[];
 }
 
 const DenominationCounter = ({
@@ -15,6 +16,7 @@ const DenominationCounter = ({
   initialCounts,
   compact = false,
   warningDenominations = [],
+  flashDenominations = [],
 }: DenominationCounterProps) => {
   const [quantities, setQuantities] = useState<Record<number, number>>(() => {
     const map: Record<number, number> = {};
@@ -51,10 +53,12 @@ const DenominationCounter = ({
     0,
   );
   const warningSet = new Set(warningDenominations);
+  const flashSet = new Set(flashDenominations);
 
   const renderItem = (d: (typeof SRI_LANKAN_DENOMINATIONS)[number], icon: "note" | "coin") => {
     const qty = quantities[d.value] || 0;
     const isWarning = warningSet.has(d.value);
+    const isFlash = flashSet.has(d.value);
     const controlButtonClass = compact
       ? "h-9 w-9 rounded-lg border border-slate-300 bg-slate-50 text-slate-500 shadow-none hover:bg-slate-100 hover:text-slate-700 disabled:opacity-60"
       : "h-9 w-9 rounded-lg border border-slate-300 bg-slate-50 text-slate-500 shadow-none hover:bg-slate-100 hover:text-slate-700 disabled:opacity-60";
@@ -122,9 +126,11 @@ const DenominationCounter = ({
 
             <span
               className={`inline-flex items-center justify-center rounded-full text-[10px] font-bold tabular-nums text-white transition-all ${
-                isWarning
-                  ? `animate-pulse bg-red-600 ring-2 ring-red-300 ${compact ? "h-[18px] min-w-[18px] px-1" : "h-5 min-w-5 px-1"}`
-                  : `bg-red-500 ${compact ? "h-[18px] min-w-[18px] px-1" : "h-5 min-w-5 px-1"}`
+                isFlash
+                  ? `animate-pulse bg-amber-500 ring-2 ring-amber-200 ${compact ? "h-[18px] min-w-[18px] px-1" : "h-5 min-w-5 px-1"}`
+                  : isWarning
+                    ? `animate-pulse bg-red-600 ring-2 ring-red-300 ${compact ? "h-[18px] min-w-[18px] px-1" : "h-5 min-w-5 px-1"}`
+                    : `bg-red-500 ${compact ? "h-[18px] min-w-[18px] px-1" : "h-5 min-w-5 px-1"}`
               }`}
               aria-live="polite"
               aria-atomic="true"

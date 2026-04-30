@@ -38,8 +38,10 @@ const CashReceivedDialog = ({
   const [total, setTotal] = useState(0);
   const [resetKey, setResetKey] = useState(0);
   const [suggestionMessage, setSuggestionMessage] = useState<string | null>(null);
+  const [flashDenominations, setFlashDenominations] = useState<number[]>([]);
   const onTotalChangeRef = useRef(onTotalChange);
   const hasAppliedSuggestionRef = useRef(false);
+  const flashTimerRef = useRef<number | null>(null);
   const changeDue = Math.max(0, Math.round(total - expectedCash));
   const exactChangeBreakdown = useMemo(
     () => (changeDue > 0 ? getExactChangeBreakdown(changeDue, availableCounts) : null),
@@ -61,7 +63,12 @@ const CashReceivedDialog = ({
       onTotalChangeRef.current?.(0);
       setResetKey((value) => value + 1);
       setSuggestionMessage(null);
+      setFlashDenominations([]);
       hasAppliedSuggestionRef.current = false;
+      if (flashTimerRef.current !== null) {
+        window.clearTimeout(flashTimerRef.current);
+        flashTimerRef.current = null;
+      }
     }
   }, [open]);
 
@@ -73,13 +80,26 @@ const CashReceivedDialog = ({
     const topUpCounts = buildTopUpCounts(drawerNotice.suggestion.requestAmount);
     const nextCounts = mergeDenominationCounts(counts, topUpCounts);
     const nextTotal = total + drawerNotice.suggestion.requestAmount;
+    const flashedDenominations = topUpCounts
+      .filter((count) => count.quantity > 0)
+      .map((count) => count.denomination);
 
     setCounts(nextCounts);
     setTotal(nextTotal);
     onTotalChangeRef.current?.(nextTotal);
     setResetKey((value) => value + 1);
     setSuggestionMessage(drawerNotice.message);
+    setFlashDenominations(flashedDenominations);
     hasAppliedSuggestionRef.current = true;
+
+    if (flashTimerRef.current !== null) {
+      window.clearTimeout(flashTimerRef.current);
+    }
+
+    flashTimerRef.current = window.setTimeout(() => {
+      setFlashDenominations([]);
+      flashTimerRef.current = null;
+    }, 850);
   }, [changeDue, counts, drawerNotice, open, total]);
 
   const handleCountChange = (newCounts: DenominationCount[], newTotal: number) => {
@@ -164,6 +184,7 @@ const CashReceivedDialog = ({
                 key={resetKey}
                 initialCounts={counts}
                 onChange={handleCountChange}
+                flashDenominations={flashDenominations}
               />
             </div>
 
