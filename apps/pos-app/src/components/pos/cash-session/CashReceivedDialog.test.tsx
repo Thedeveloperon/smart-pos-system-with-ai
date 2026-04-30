@@ -45,4 +45,32 @@ describe("CashReceivedDialog", () => {
       expect(onTotalChange).toHaveBeenLastCalledWith(110);
     });
   });
+
+  it("keeps the auto-added denomination badge flashing until the counts change", async () => {
+    render(
+      <CashReceivedDialog
+        open
+        expectedCash={60}
+        availableCounts={[
+          { denomination: 50, quantity: 1 },
+          { denomination: 20, quantity: 0 },
+          { denomination: 10, quantity: 1 },
+          { denomination: 5, quantity: 0 },
+          { denomination: 2, quantity: 0 },
+          { denomination: 1, quantity: 0 },
+        ]}
+        onClose={vi.fn()}
+        onConfirm={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("100 quantity"), { target: { value: "1" } });
+
+    const coinRow = screen.getByLabelText("10 quantity").closest("div.grid");
+    const coinBadge = coinRow?.querySelector("span[aria-live='polite']") as HTMLElement | null;
+    expect(coinBadge?.className).toContain("animate-pulse");
+
+    fireEvent.click(screen.getByLabelText("Increase 10"));
+    expect(coinBadge?.className).not.toContain("animate-pulse");
+  });
 });
