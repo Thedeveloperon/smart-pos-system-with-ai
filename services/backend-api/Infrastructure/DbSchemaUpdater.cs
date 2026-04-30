@@ -1707,10 +1707,42 @@ public static class DbSchemaUpdater
               "UpdatedAtUtc" TEXT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS "purchase_orders" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_purchase_orders" PRIMARY KEY,
+              "StoreId" TEXT NULL,
+              "SupplierId" TEXT NOT NULL,
+              "PoNumber" TEXT NOT NULL,
+              "PoDate" TEXT NOT NULL,
+              "ExpectedDeliveryDate" TEXT NULL,
+              "Status" TEXT NOT NULL,
+              "Currency" TEXT NOT NULL,
+              "SubtotalEstimate" TEXT NOT NULL,
+              "Notes" TEXT NULL,
+              "CreatedByUserId" TEXT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "UpdatedAtUtc" TEXT NULL,
+              CONSTRAINT "FK_purchase_orders_suppliers_SupplierId" FOREIGN KEY ("SupplierId") REFERENCES "suppliers" ("Id") ON DELETE RESTRICT,
+              CONSTRAINT "FK_purchase_orders_users_CreatedByUserId" FOREIGN KEY ("CreatedByUserId") REFERENCES "users" ("Id") ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS "purchase_order_lines" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_purchase_order_lines" PRIMARY KEY,
+              "PurchaseOrderId" TEXT NOT NULL,
+              "ProductId" TEXT NOT NULL,
+              "ProductNameSnapshot" TEXT NOT NULL,
+              "QuantityOrdered" TEXT NOT NULL,
+              "QuantityReceived" TEXT NOT NULL,
+              "UnitCostEstimate" TEXT NOT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              CONSTRAINT "FK_purchase_order_lines_purchase_orders_PurchaseOrderId" FOREIGN KEY ("PurchaseOrderId") REFERENCES "purchase_orders" ("Id") ON DELETE CASCADE,
+              CONSTRAINT "FK_purchase_order_lines_products_ProductId" FOREIGN KEY ("ProductId") REFERENCES "products" ("Id") ON DELETE RESTRICT
+            );
+
             CREATE TABLE IF NOT EXISTS "purchase_bills" (
               "Id" TEXT NOT NULL CONSTRAINT "PK_purchase_bills" PRIMARY KEY,
               "StoreId" TEXT NULL,
               "ImportRequestId" TEXT NULL,
+              "PurchaseOrderId" TEXT NULL,
               "SupplierId" TEXT NOT NULL,
               "InvoiceNumber" TEXT NOT NULL,
               "InvoiceDateUtc" TEXT NOT NULL,
@@ -1726,6 +1758,7 @@ public static class DbSchemaUpdater
               "CreatedAtUtc" TEXT NOT NULL,
               "UpdatedAtUtc" TEXT NULL,
               CONSTRAINT "FK_purchase_bills_suppliers_SupplierId" FOREIGN KEY ("SupplierId") REFERENCES "suppliers" ("Id") ON DELETE RESTRICT,
+              CONSTRAINT "FK_purchase_bills_purchase_orders_PurchaseOrderId" FOREIGN KEY ("PurchaseOrderId") REFERENCES "purchase_orders" ("Id") ON DELETE SET NULL,
               CONSTRAINT "FK_purchase_bills_users_CreatedByUserId" FOREIGN KEY ("CreatedByUserId") REFERENCES "users" ("Id") ON DELETE SET NULL
             );
 
@@ -1762,10 +1795,16 @@ public static class DbSchemaUpdater
 
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_suppliers_StoreId_Name" ON "suppliers" ("StoreId", "Name");
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_suppliers_StoreId_Code" ON "suppliers" ("StoreId", "Code");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_orders_StoreId_PoNumber" ON "purchase_orders" ("StoreId", "PoNumber");
+            CREATE INDEX IF NOT EXISTS "IX_purchase_orders_SupplierId" ON "purchase_orders" ("SupplierId");
+            CREATE INDEX IF NOT EXISTS "IX_purchase_orders_Status" ON "purchase_orders" ("Status");
+            CREATE INDEX IF NOT EXISTS "IX_purchase_order_lines_PurchaseOrderId" ON "purchase_order_lines" ("PurchaseOrderId");
+            CREATE INDEX IF NOT EXISTS "IX_purchase_order_lines_ProductId" ON "purchase_order_lines" ("ProductId");
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_StoreId_SupplierId_InvoiceNumber" ON "purchase_bills" ("StoreId", "SupplierId", "InvoiceNumber");
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_StoreId_ImportRequestId" ON "purchase_bills" ("StoreId", "ImportRequestId");
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_ImportRequestId" ON "purchase_bills" ("ImportRequestId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_bills_SupplierId" ON "purchase_bills" ("SupplierId");
+            CREATE INDEX IF NOT EXISTS "IX_purchase_bills_PurchaseOrderId" ON "purchase_bills" ("PurchaseOrderId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_bills_CreatedByUserId" ON "purchase_bills" ("CreatedByUserId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_bill_items_PurchaseBillId" ON "purchase_bill_items" ("PurchaseBillId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_bill_items_ProductId" ON "purchase_bill_items" ("ProductId");
@@ -1775,6 +1814,13 @@ public static class DbSchemaUpdater
 
         await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
 
+        if (!await ColumnExistsAsync(dbContext, "purchase_bills", "PurchaseOrderId", cancellationToken))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "purchase_bills" ADD COLUMN "PurchaseOrderId" TEXT NULL;""",
+                cancellationToken);
+        }
+
         if (!await ColumnExistsAsync(dbContext, "purchase_bills", "ImportRequestId", cancellationToken))
         {
             await dbContext.Database.ExecuteSqlRawAsync(
@@ -1782,6 +1828,9 @@ public static class DbSchemaUpdater
                 cancellationToken);
         }
 
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE INDEX IF NOT EXISTS "IX_purchase_bills_PurchaseOrderId" ON "purchase_bills" ("PurchaseOrderId");""",
+            cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(
             """CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_StoreId_ImportRequestId" ON "purchase_bills" ("StoreId", "ImportRequestId");""",
             cancellationToken);
@@ -2254,10 +2303,38 @@ public static class DbSchemaUpdater
               "UpdatedAtUtc" timestamptz NULL
             );
 
+            CREATE TABLE IF NOT EXISTS purchase_orders (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "StoreId" uuid NULL,
+              "SupplierId" uuid NOT NULL REFERENCES suppliers("Id") ON DELETE RESTRICT,
+              "PoNumber" varchar(80) NOT NULL,
+              "PoDate" timestamptz NOT NULL,
+              "ExpectedDeliveryDate" timestamptz NULL,
+              "Status" varchar(32) NOT NULL,
+              "Currency" varchar(8) NOT NULL,
+              "SubtotalEstimate" numeric(18,2) NOT NULL,
+              "Notes" varchar(500) NULL,
+              "CreatedByUserId" uuid NULL REFERENCES users("Id") ON DELETE SET NULL,
+              "CreatedAtUtc" timestamptz NOT NULL,
+              "UpdatedAtUtc" timestamptz NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS purchase_order_lines (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "PurchaseOrderId" uuid NOT NULL REFERENCES purchase_orders("Id") ON DELETE CASCADE,
+              "ProductId" uuid NOT NULL REFERENCES products("Id") ON DELETE RESTRICT,
+              "ProductNameSnapshot" varchar(200) NOT NULL,
+              "QuantityOrdered" numeric(18,3) NOT NULL,
+              "QuantityReceived" numeric(18,3) NOT NULL,
+              "UnitCostEstimate" numeric(18,2) NOT NULL,
+              "CreatedAtUtc" timestamptz NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS purchase_bills (
               "Id" uuid NOT NULL PRIMARY KEY,
               "StoreId" uuid NULL,
               "ImportRequestId" varchar(80) NULL,
+              "PurchaseOrderId" uuid NULL REFERENCES purchase_orders("Id") ON DELETE SET NULL,
               "SupplierId" uuid NOT NULL REFERENCES suppliers("Id") ON DELETE RESTRICT,
               "InvoiceNumber" varchar(80) NOT NULL,
               "InvoiceDateUtc" timestamptz NOT NULL,
@@ -2304,10 +2381,16 @@ public static class DbSchemaUpdater
 
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_suppliers_StoreId_Name" ON suppliers("StoreId", "Name");
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_suppliers_StoreId_Code" ON suppliers("StoreId", "Code");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_orders_StoreId_PoNumber" ON purchase_orders("StoreId", "PoNumber");
+            CREATE INDEX IF NOT EXISTS "IX_purchase_orders_SupplierId" ON purchase_orders("SupplierId");
+            CREATE INDEX IF NOT EXISTS "IX_purchase_orders_Status" ON purchase_orders("Status");
+            CREATE INDEX IF NOT EXISTS "IX_purchase_order_lines_PurchaseOrderId" ON purchase_order_lines("PurchaseOrderId");
+            CREATE INDEX IF NOT EXISTS "IX_purchase_order_lines_ProductId" ON purchase_order_lines("ProductId");
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_StoreId_SupplierId_InvoiceNumber" ON purchase_bills("StoreId", "SupplierId", "InvoiceNumber");
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_StoreId_ImportRequestId" ON purchase_bills("StoreId", "ImportRequestId");
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_ImportRequestId" ON purchase_bills("ImportRequestId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_bills_SupplierId" ON purchase_bills("SupplierId");
+            CREATE INDEX IF NOT EXISTS "IX_purchase_bills_PurchaseOrderId" ON purchase_bills("PurchaseOrderId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_bills_CreatedByUserId" ON purchase_bills("CreatedByUserId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_bill_items_PurchaseBillId" ON purchase_bill_items("PurchaseBillId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_bill_items_ProductId" ON purchase_bill_items("ProductId");
@@ -2317,6 +2400,13 @@ public static class DbSchemaUpdater
 
         await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
 
+        if (!await ColumnExistsAsync(dbContext, "purchase_bills", "PurchaseOrderId", cancellationToken))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE purchase_bills ADD COLUMN IF NOT EXISTS "PurchaseOrderId" uuid NULL REFERENCES purchase_orders("Id") ON DELETE SET NULL;""",
+                cancellationToken);
+        }
+
         if (!await ColumnExistsAsync(dbContext, "purchase_bills", "ImportRequestId", cancellationToken))
         {
             await dbContext.Database.ExecuteSqlRawAsync(
@@ -2324,6 +2414,9 @@ public static class DbSchemaUpdater
                 cancellationToken);
         }
 
+        await dbContext.Database.ExecuteSqlRawAsync(
+            """CREATE INDEX IF NOT EXISTS "IX_purchase_bills_PurchaseOrderId" ON purchase_bills("PurchaseOrderId");""",
+            cancellationToken);
         await dbContext.Database.ExecuteSqlRawAsync(
             """CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_StoreId_ImportRequestId" ON purchase_bills("StoreId", "ImportRequestId");""",
             cancellationToken);
