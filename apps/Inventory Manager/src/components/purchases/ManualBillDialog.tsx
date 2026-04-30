@@ -29,15 +29,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  createManualBill,
-  fetchProducts,
-  fetchPurchaseOrders,
-  fetchSuppliers,
-  type Product,
-  type PurchaseOrder,
-  type Supplier,
-} from "@/lib/purchases";
+import { fetchProducts, fetchSuppliers, type Product, type Supplier } from "@/lib/api";
+import { createManualBill, fetchPurchaseOrders, type PurchaseOrder } from "@/lib/purchases";
 import { fmtCurrency, todayIso } from "./utils";
 
 type ManualBillLine = {
@@ -86,7 +79,10 @@ export default function ManualBillDialog({ open, onClose, onSaved }: Props) {
   }, [open]);
 
   useEffect(() => {
-    if (!supplierId) { setOpenPOs([]); return; }
+    if (!supplierId) {
+      setOpenPOs([]);
+      return;
+    }
     Promise.all([
       fetchPurchaseOrders({ supplier_id: supplierId, status: "Sent" }),
       fetchPurchaseOrders({ supplier_id: supplierId, status: "PartiallyReceived" }),
@@ -95,7 +91,10 @@ export default function ManualBillDialog({ open, onClose, onSaved }: Props) {
 
   const handlePoSelect = (id: string) => {
     setPoId(id);
-    if (id === "none") { setLines([]); return; }
+    if (id === "none") {
+      setLines([]);
+      return;
+    }
     const po = openPOs.find((p) => p.id === id);
     if (!po) return;
     setLines(
@@ -120,7 +119,16 @@ export default function ManualBillDialog({ open, onClose, onSaved }: Props) {
   const addLine = () =>
     setLines((prev) => [
       ...prev,
-      { product_id: "", product_name: "", quantity: 1, unit_cost: 0, is_batch_tracked: false, batch_number: "", expiry_date: "", manufacture_date: "" },
+      {
+        product_id: "",
+        product_name: "",
+        quantity: 1,
+        unit_cost: 0,
+        is_batch_tracked: false,
+        batch_number: "",
+        expiry_date: "",
+        manufacture_date: "",
+      },
     ]);
 
   const update = (idx: number, patch: Partial<ManualBillLine>) =>
@@ -186,9 +194,15 @@ export default function ManualBillDialog({ open, onClose, onSaved }: Props) {
             <div>
               <Label>Supplier</Label>
               <Select value={supplierId} onValueChange={setSupplierId}>
-                <SelectTrigger><SelectValue placeholder="Select supplier" /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select supplier" />
+                </SelectTrigger>
                 <SelectContent>
-                  {suppliers.map((s) => (<SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>))}
+                  {suppliers.map((s) => (
+                    <SelectItem key={s.supplier_id} value={s.supplier_id}>
+                      {s.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -198,17 +212,37 @@ export default function ManualBillDialog({ open, onClose, onSaved }: Props) {
             </div>
             <div>
               <Label>Invoice Date</Label>
-              <Input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} />
+              <Input
+                type="date"
+                value={invoiceDate}
+                onChange={(e) => setInvoiceDate(e.target.value)}
+              />
             </div>
             <div>
               <Label>Link to PO (optional)</Label>
-              <Select value={poId} onValueChange={handlePoSelect} disabled={!supplierId || openPOs.length === 0}>
+              <Select
+                value={poId}
+                onValueChange={handlePoSelect}
+                disabled={!supplierId || openPOs.length === 0}
+              >
                 <SelectTrigger>
-                  <SelectValue placeholder={supplierId ? (openPOs.length ? "Select PO" : "No open POs") : "Select supplier first"} />
+                  <SelectValue
+                    placeholder={
+                      supplierId
+                        ? openPOs.length
+                          ? "Select PO"
+                          : "No open POs"
+                        : "Select supplier first"
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">— None —</SelectItem>
-                  {openPOs.map((p) => (<SelectItem key={p.id} value={p.id}>{p.po_number}</SelectItem>))}
+                  {openPOs.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.po_number}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -256,25 +290,44 @@ export default function ManualBillDialog({ open, onClose, onSaved }: Props) {
                     <TableRow>
                       <TableCell>
                         <Select value={l.product_id} onValueChange={(v) => setLineProduct(idx, v)}>
-                          <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select product" />
+                          </SelectTrigger>
                           <SelectContent>
-                            {products.map((p) => (<SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>))}
+                            {products.map((p) => (
+                              <SelectItem key={p.id} value={p.id}>
+                                {p.name}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </TableCell>
                       <TableCell>
-                        <Input type="number" min={1} value={l.quantity}
-                          onChange={(e) => update(idx, { quantity: Number(e.target.value) || 0 })} />
+                        <Input
+                          type="number"
+                          min={1}
+                          value={l.quantity}
+                          onChange={(e) => update(idx, { quantity: Number(e.target.value) || 0 })}
+                        />
                       </TableCell>
                       <TableCell>
-                        <Input type="number" step="0.01" min={0} value={l.unit_cost}
-                          onChange={(e) => update(idx, { unit_cost: Number(e.target.value) || 0 })} />
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min={0}
+                          value={l.unit_cost}
+                          onChange={(e) => update(idx, { unit_cost: Number(e.target.value) || 0 })}
+                        />
                       </TableCell>
                       <TableCell className="text-right font-medium">
                         {fmtCurrency(l.quantity * l.unit_cost)}
                       </TableCell>
                       <TableCell>
-                        <Button variant="ghost" size="icon" onClick={() => setLines(lines.filter((_, i) => i !== idx))}>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setLines(lines.filter((_, i) => i !== idx))}
+                        >
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </TableCell>
@@ -285,15 +338,26 @@ export default function ManualBillDialog({ open, onClose, onSaved }: Props) {
                           <div className="grid grid-cols-3 gap-2">
                             <div>
                               <Label className="text-xs">Batch #</Label>
-                              <Input value={l.batch_number} onChange={(e) => update(idx, { batch_number: e.target.value })} />
+                              <Input
+                                value={l.batch_number}
+                                onChange={(e) => update(idx, { batch_number: e.target.value })}
+                              />
                             </div>
                             <div>
                               <Label className="text-xs">Manufacture</Label>
-                              <Input type="date" value={l.manufacture_date} onChange={(e) => update(idx, { manufacture_date: e.target.value })} />
+                              <Input
+                                type="date"
+                                value={l.manufacture_date}
+                                onChange={(e) => update(idx, { manufacture_date: e.target.value })}
+                              />
                             </div>
                             <div>
                               <Label className="text-xs">Expiry</Label>
-                              <Input type="date" value={l.expiry_date} onChange={(e) => update(idx, { expiry_date: e.target.value })} />
+                              <Input
+                                type="date"
+                                value={l.expiry_date}
+                                onChange={(e) => update(idx, { expiry_date: e.target.value })}
+                              />
                             </div>
                           </div>
                         </TableCell>
@@ -307,14 +371,22 @@ export default function ManualBillDialog({ open, onClose, onSaved }: Props) {
 
           <div className="border-t pt-3 flex justify-end text-sm">
             <div className="w-64 space-y-1">
-              <div className="flex justify-between"><span>Subtotal</span><span>{fmtCurrency(subtotal)}</span></div>
-              <div className="flex justify-between font-semibold text-base"><span>Grand Total</span><span>{fmtCurrency(subtotal)}</span></div>
+              <div className="flex justify-between">
+                <span>Subtotal</span>
+                <span>{fmtCurrency(subtotal)}</span>
+              </div>
+              <div className="flex justify-between font-semibold text-base">
+                <span>Grand Total</span>
+                <span>{fmtCurrency(subtotal)}</span>
+              </div>
             </div>
           </div>
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
           <Button onClick={handleSave} disabled={saving}>
             {saving ? "Saving..." : "Save & Update Stock"}
           </Button>

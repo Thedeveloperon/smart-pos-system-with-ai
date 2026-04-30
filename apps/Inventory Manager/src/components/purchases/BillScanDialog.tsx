@@ -29,14 +29,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { fetchProducts, fetchSuppliers, type Product, type Supplier } from "@/lib/api";
 import {
   confirmPurchaseImport,
   createPurchaseOcrDraft,
-  fetchProducts,
-  fetchSuppliers,
-  type Product,
   type PurchaseOcrDraftResponse,
-  type Supplier,
 } from "@/lib/purchases";
 import { fmtCurrency } from "./utils";
 import { cn } from "@/lib/utils";
@@ -100,7 +97,10 @@ export default function BillScanDialog({ open, onClose, onSaved }: Props) {
   }, [open]);
 
   const handleScan = async () => {
-    if (!file) { toast.error("Please choose a file."); return; }
+    if (!file) {
+      toast.error("Please choose a file.");
+      return;
+    }
     setScanning(true);
     try {
       const d = await createPurchaseOcrDraft(file, supplierHint || undefined);
@@ -129,7 +129,10 @@ export default function BillScanDialog({ open, onClose, onSaved }: Props) {
   const requiresApproval = mismatch > tolerance;
 
   const handleConfirm = async () => {
-    if (!supplierId || !invoiceNumber) { toast.error("Supplier and invoice number required."); return; }
+    if (!supplierId || !invoiceNumber) {
+      toast.error("Supplier and invoice number required.");
+      return;
+    }
     if (reviewLines.some((l) => !l.matched_product_id)) {
       toast.error("All lines must be matched to a product.");
       return;
@@ -201,9 +204,19 @@ export default function BillScanDialog({ open, onClose, onSaved }: Props) {
               />
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={onClose}>Cancel</Button>
+              <Button variant="outline" onClick={onClose}>
+                Cancel
+              </Button>
               <Button onClick={handleScan} disabled={scanning || !file}>
-                {scanning ? (<><Loader2 className="h-4 w-4 mr-1 animate-spin" /> AI is reading…</>) : (<><Sparkles className="h-4 w-4 mr-1" /> Scan with AI</>)}
+                {scanning ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-1 animate-spin" /> AI is reading…
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4 mr-1" /> Scan with AI
+                  </>
+                )}
               </Button>
             </DialogFooter>
           </div>
@@ -213,9 +226,15 @@ export default function BillScanDialog({ open, onClose, onSaved }: Props) {
               <div>
                 <Label>Supplier</Label>
                 <Select value={supplierId} onValueChange={setSupplierId}>
-                  <SelectTrigger><SelectValue placeholder="Select supplier" /></SelectTrigger>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select supplier" />
+                  </SelectTrigger>
                   <SelectContent>
-                    {suppliers.map((s) => (<SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>))}
+                    {suppliers.map((s) => (
+                      <SelectItem key={s.supplier_id} value={s.supplier_id}>
+                        {s.name}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -225,16 +244,30 @@ export default function BillScanDialog({ open, onClose, onSaved }: Props) {
               </div>
               <div>
                 <Label>Invoice Date</Label>
-                <Input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} />
+                <Input
+                  type="date"
+                  value={invoiceDate}
+                  onChange={(e) => setInvoiceDate(e.target.value)}
+                />
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <Label>Tax Total</Label>
-                  <Input type="number" step="0.01" value={taxTotal} onChange={(e) => setTaxTotal(e.target.value)} />
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={taxTotal}
+                    onChange={(e) => setTaxTotal(e.target.value)}
+                  />
                 </div>
                 <div>
                   <Label>Grand Total</Label>
-                  <Input type="number" step="0.01" value={grandTotal} onChange={(e) => setGrandTotal(e.target.value)} />
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={grandTotal}
+                    onChange={(e) => setGrandTotal(e.target.value)}
+                  />
                 </div>
               </div>
             </div>
@@ -262,13 +295,26 @@ export default function BillScanDialog({ open, onClose, onSaved }: Props) {
                       <TableCell>{l.line_number}</TableCell>
                       <TableCell className="text-sm">{l.raw_name}</TableCell>
                       <TableCell>
-                        <Select value={l.matched_product_id} onValueChange={(v) => {
-                          const p = products.find((x) => x.id === v);
-                          update(idx, { matched_product_id: v, matched_product_name: p?.name ?? "", match_status: "matched" });
-                        }}>
-                          <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                        <Select
+                          value={l.matched_product_id}
+                          onValueChange={(v) => {
+                            const p = products.find((x) => x.id === v);
+                            update(idx, {
+                              matched_product_id: v,
+                              matched_product_name: p?.name ?? "",
+                              match_status: "matched",
+                            });
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select" />
+                          </SelectTrigger>
                           <SelectContent>
-                            {products.map((p) => (<SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>))}
+                            {products.map((p) => (
+                              <SelectItem key={p.id} value={p.id}>
+                                {p.name}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </TableCell>
@@ -279,14 +325,25 @@ export default function BillScanDialog({ open, onClose, onSaved }: Props) {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <Input type="number" min={0} value={l.quantity}
-                          onChange={(e) => update(idx, { quantity: Number(e.target.value) || 0 })} />
+                        <Input
+                          type="number"
+                          min={0}
+                          value={l.quantity}
+                          onChange={(e) => update(idx, { quantity: Number(e.target.value) || 0 })}
+                        />
                       </TableCell>
                       <TableCell>
-                        <Input type="number" step="0.01" min={0} value={l.unit_cost}
-                          onChange={(e) => update(idx, { unit_cost: Number(e.target.value) || 0 })} />
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min={0}
+                          value={l.unit_cost}
+                          onChange={(e) => update(idx, { unit_cost: Number(e.target.value) || 0 })}
+                        />
                       </TableCell>
-                      <TableCell className="text-right font-medium">{fmtCurrency(l.quantity * l.unit_cost)}</TableCell>
+                      <TableCell className="text-right font-medium">
+                        {fmtCurrency(l.quantity * l.unit_cost)}
+                      </TableCell>
                     </TableRow>
                   );
                 })}
@@ -296,7 +353,8 @@ export default function BillScanDialog({ open, onClose, onSaved }: Props) {
             {requiresApproval && (
               <div className="border border-amber-300 bg-amber-50 text-amber-800 rounded p-3 text-sm space-y-2">
                 <div>
-                  Lines + tax total {fmtCurrency(lineSum + (parseFloat(taxTotal) || 0))} differs from invoice grand total {fmtCurrency(grand)}.
+                  Lines + tax total {fmtCurrency(lineSum + (parseFloat(taxTotal) || 0))} differs
+                  from invoice grand total {fmtCurrency(grand)}.
                 </div>
                 <Textarea
                   placeholder="Approval reason (required)"
@@ -308,7 +366,9 @@ export default function BillScanDialog({ open, onClose, onSaved }: Props) {
             )}
 
             <DialogFooter>
-              <Button variant="outline" onClick={() => setStep("upload")}>← Back</Button>
+              <Button variant="outline" onClick={() => setStep("upload")}>
+                ← Back
+              </Button>
               <Button onClick={handleConfirm} disabled={saving}>
                 {saving ? "Saving..." : "Confirm & Update Stock"}
               </Button>

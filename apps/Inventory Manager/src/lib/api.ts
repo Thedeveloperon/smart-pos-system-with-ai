@@ -565,7 +565,7 @@ export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BA
   "",
 );
 
-class ApiError extends Error {
+export class ApiError extends Error {
   status: number;
 
   constructor(message: string, status: number) {
@@ -575,7 +575,7 @@ class ApiError extends Error {
   }
 }
 
-async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+export async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
