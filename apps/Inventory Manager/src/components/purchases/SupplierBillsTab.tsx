@@ -21,20 +21,14 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import {
   fetchPurchaseBills,
-  fetchSuppliers,
   getPurchaseBill,
   type PurchaseBillDetail,
   type PurchaseBillSummary,
-  type Supplier,
 } from "@/lib/purchases";
+import { fetchSuppliers, type Supplier } from "@/lib/api";
 import { fmtCurrency, fmtDate } from "./utils";
 import { cn } from "@/lib/utils";
 import ManualBillDialog from "./ManualBillDialog";
@@ -99,16 +93,30 @@ export default function SupplierBillsTab() {
       <div className="flex flex-wrap items-center gap-2 justify-between">
         <div className="flex flex-wrap items-center gap-2">
           <Select value={supplierFilter} onValueChange={setSupplierFilter}>
-            <SelectTrigger className="w-[220px]"><SelectValue placeholder="Supplier" /></SelectTrigger>
+            <SelectTrigger className="w-[220px]">
+              <SelectValue placeholder="Supplier" />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All suppliers</SelectItem>
               {suppliers.map((s) => (
-                <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                <SelectItem key={s.supplier_id} value={s.supplier_id}>
+                  {s.name}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
-          <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="w-[160px]" />
-          <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="w-[160px]" />
+          <Input
+            type="date"
+            value={fromDate}
+            onChange={(e) => setFromDate(e.target.value)}
+            className="w-[160px]"
+          />
+          <Input
+            type="date"
+            value={toDate}
+            onChange={(e) => setToDate(e.target.value)}
+            className="w-[160px]"
+          />
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => setScanOpen(true)}>
@@ -138,12 +146,16 @@ export default function SupplierBillsTab() {
               {loading ? (
                 Array.from({ length: 3 }).map((_, i) => (
                   <TableRow key={i}>
-                    <TableCell colSpan={7}><Skeleton className="h-6 w-full" /></TableCell>
+                    <TableCell colSpan={7}>
+                      <Skeleton className="h-6 w-full" />
+                    </TableCell>
                   </TableRow>
                 ))
               ) : bills.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">No bills yet.</TableCell>
+                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                    No bills yet.
+                  </TableCell>
                 </TableRow>
               ) : (
                 bills.map((b) => {
@@ -153,11 +165,15 @@ export default function SupplierBillsTab() {
                       <TableCell className="font-semibold">{b.invoice_number}</TableCell>
                       <TableCell>{b.supplier_name ?? "—"}</TableCell>
                       <TableCell>{fmtDate(b.invoice_date)}</TableCell>
-                      <TableCell><Badge className={cn("border-0", cfg.className)}>{cfg.label}</Badge></TableCell>
+                      <TableCell>
+                        <Badge className={cn("border-0", cfg.className)}>{cfg.label}</Badge>
+                      </TableCell>
                       <TableCell className="text-right">{fmtCurrency(b.grand_total)}</TableCell>
                       <TableCell>{b.purchase_order_number ?? "—"}</TableCell>
                       <TableCell className="text-right">
-                        <Button size="sm" variant="ghost" onClick={() => openDetail(b.id)}>View</Button>
+                        <Button size="sm" variant="ghost" onClick={() => openDetail(b.id)}>
+                          View
+                        </Button>
                       </TableCell>
                     </TableRow>
                   );
@@ -168,7 +184,15 @@ export default function SupplierBillsTab() {
         </CardContent>
       </Card>
 
-      <Sheet open={detailOpen} onOpenChange={(o) => { if (!o) { setDetailOpen(false); setDetailBill(null); } }}>
+      <Sheet
+        open={detailOpen}
+        onOpenChange={(o) => {
+          if (!o) {
+            setDetailOpen(false);
+            setDetailBill(null);
+          }
+        }}
+      >
         <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
           <SheetHeader>
             <SheetTitle>{detailBill?.invoice_number}</SheetTitle>
@@ -176,10 +200,22 @@ export default function SupplierBillsTab() {
           {detailBill && (
             <div className="space-y-4 py-4">
               <div className="grid grid-cols-2 gap-3 text-sm">
-                <div><span className="text-muted-foreground">Supplier: </span>{detailBill.supplier_name}</div>
-                <div><span className="text-muted-foreground">Date: </span>{fmtDate(detailBill.invoice_date)}</div>
-                <div><span className="text-muted-foreground">Source: </span>{detailBill.source_type}</div>
-                <div><span className="text-muted-foreground">PO: </span>{detailBill.purchase_order_number ?? "—"}</div>
+                <div>
+                  <span className="text-muted-foreground">Supplier: </span>
+                  {detailBill.supplier_name}
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Date: </span>
+                  {fmtDate(detailBill.invoice_date)}
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Source: </span>
+                  {detailBill.source_type}
+                </div>
+                <div>
+                  <span className="text-muted-foreground">PO: </span>
+                  {detailBill.purchase_order_number ?? "—"}
+                </div>
               </div>
               <Table>
                 <TableHeader>
@@ -202,17 +238,34 @@ export default function SupplierBillsTab() {
                 </TableBody>
               </Table>
               <div className="border-t pt-3 space-y-1 text-sm">
-                <div className="flex justify-between"><span>Subtotal</span><span>{fmtCurrency(detailBill.subtotal)}</span></div>
-                <div className="flex justify-between"><span>Tax</span><span>{fmtCurrency(detailBill.tax_total)}</span></div>
-                <div className="flex justify-between font-semibold text-base"><span>Grand Total</span><span>{fmtCurrency(detailBill.grand_total)}</span></div>
+                <div className="flex justify-between">
+                  <span>Subtotal</span>
+                  <span>{fmtCurrency(detailBill.subtotal)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Tax</span>
+                  <span>{fmtCurrency(detailBill.tax_total)}</span>
+                </div>
+                <div className="flex justify-between font-semibold text-base">
+                  <span>Grand Total</span>
+                  <span>{fmtCurrency(detailBill.grand_total)}</span>
+                </div>
               </div>
             </div>
           )}
         </SheetContent>
       </Sheet>
 
-      <ManualBillDialog open={manualOpen} onClose={() => setManualOpen(false)} onSaved={() => void load()} />
-      <BillScanDialog open={scanOpen} onClose={() => setScanOpen(false)} onSaved={() => void load()} />
+      <ManualBillDialog
+        open={manualOpen}
+        onClose={() => setManualOpen(false)}
+        onSaved={() => void load()}
+      />
+      <BillScanDialog
+        open={scanOpen}
+        onClose={() => setScanOpen(false)}
+        onSaved={() => void load()}
+      />
     </div>
   );
 }

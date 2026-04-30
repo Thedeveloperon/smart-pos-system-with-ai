@@ -32,11 +32,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   cancelPurchaseOrder,
   fetchPurchaseOrders,
-  fetchSuppliers,
   sendPurchaseOrder,
   type PurchaseOrder,
-  type Supplier,
 } from "@/lib/purchases";
+import { fetchSuppliers, type Supplier } from "@/lib/api";
 import PurchaseOrderStatusBadge from "./PurchaseOrderStatusBadge";
 import { fmtCurrency, fmtDate } from "./utils";
 import PurchaseOrderSheet from "./PurchaseOrderSheet";
@@ -103,7 +102,14 @@ export default function PurchaseOrdersTab() {
 
   const renderActions = (po: PurchaseOrder) => {
     const view = (
-      <Button size="sm" variant="ghost" onClick={() => { setSelectedPO(po); setSheetMode("view"); }}>
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={() => {
+          setSelectedPO(po);
+          setSheetMode("view");
+        }}
+      >
         View
       </Button>
     );
@@ -111,26 +117,51 @@ export default function PurchaseOrdersTab() {
       case "Draft":
         return (
           <div className="flex gap-1 justify-end">
-            <Button size="sm" variant="outline" onClick={() => { setSelectedPO(po); setSheetMode("edit"); }}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setSelectedPO(po);
+                setSheetMode("edit");
+              }}
+            >
               Edit
             </Button>
-            <Button size="sm" onClick={() => handleSend(po)}>Send</Button>
-            <Button size="sm" variant="ghost" onClick={() => setConfirmCancel(po)}>Cancel</Button>
+            <Button size="sm" onClick={() => handleSend(po)}>
+              Send
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setConfirmCancel(po)}>
+              Cancel
+            </Button>
           </div>
         );
       case "Sent":
         return (
           <div className="flex gap-1 justify-end">
-            <Button size="sm" onClick={() => { setReceivePO(po); setReceiveOpen(true); }}>
+            <Button
+              size="sm"
+              onClick={() => {
+                setReceivePO(po);
+                setReceiveOpen(true);
+              }}
+            >
               Receive Goods
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => setConfirmCancel(po)}>Cancel</Button>
+            <Button size="sm" variant="ghost" onClick={() => setConfirmCancel(po)}>
+              Cancel
+            </Button>
           </div>
         );
       case "PartiallyReceived":
         return (
           <div className="flex gap-1 justify-end">
-            <Button size="sm" onClick={() => { setReceivePO(po); setReceiveOpen(true); }}>
+            <Button
+              size="sm"
+              onClick={() => {
+                setReceivePO(po);
+                setReceiveOpen(true);
+              }}
+            >
               Receive More
             </Button>
             {view}
@@ -165,12 +196,19 @@ export default function PurchaseOrdersTab() {
             <SelectContent>
               <SelectItem value="all">All suppliers</SelectItem>
               {suppliers.map((s) => (
-                <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                <SelectItem key={s.supplier_id} value={s.supplier_id}>
+                  {s.name}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
-        <Button onClick={() => { setSelectedPO(null); setSheetMode("create"); }}>
+        <Button
+          onClick={() => {
+            setSelectedPO(null);
+            setSheetMode("create");
+          }}
+        >
           <Plus className="h-4 w-4 mr-1" /> New Purchase Order
         </Button>
       </div>
@@ -193,7 +231,9 @@ export default function PurchaseOrdersTab() {
               {loading ? (
                 Array.from({ length: 4 }).map((_, i) => (
                   <TableRow key={i}>
-                    <TableCell colSpan={7}><Skeleton className="h-6 w-full" /></TableCell>
+                    <TableCell colSpan={7}>
+                      <Skeleton className="h-6 w-full" />
+                    </TableCell>
                   </TableRow>
                 ))
               ) : orders.length === 0 ? (
@@ -209,8 +249,12 @@ export default function PurchaseOrdersTab() {
                     <TableCell>{po.supplier_name}</TableCell>
                     <TableCell>{fmtDate(po.po_date)}</TableCell>
                     <TableCell>{fmtDate(po.expected_delivery_date)}</TableCell>
-                    <TableCell><PurchaseOrderStatusBadge status={po.status} /></TableCell>
-                    <TableCell className="text-right">{fmtCurrency(po.subtotal_estimate)}</TableCell>
+                    <TableCell>
+                      <PurchaseOrderStatusBadge status={po.status} />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {fmtCurrency(po.subtotal_estimate)}
+                    </TableCell>
                     <TableCell className="text-right">{renderActions(po)}</TableCell>
                   </TableRow>
                 ))
@@ -225,8 +269,13 @@ export default function PurchaseOrdersTab() {
           open={!!sheetMode}
           mode={sheetMode}
           po={selectedPO ?? undefined}
-          onClose={() => { setSheetMode(null); setSelectedPO(null); }}
-          onSaved={() => { void load(); }}
+          onClose={() => {
+            setSheetMode(null);
+            setSelectedPO(null);
+          }}
+          onSaved={() => {
+            void load();
+          }}
         />
       )}
 
@@ -234,8 +283,13 @@ export default function PurchaseOrdersTab() {
         <ReceiveGoodsSheet
           open={receiveOpen}
           po={receivePO}
-          onClose={() => { setReceiveOpen(false); setReceivePO(null); }}
-          onReceived={() => { void load(); }}
+          onClose={() => {
+            setReceiveOpen(false);
+            setReceivePO(null);
+          }}
+          onReceived={() => {
+            void load();
+          }}
         />
       )}
 

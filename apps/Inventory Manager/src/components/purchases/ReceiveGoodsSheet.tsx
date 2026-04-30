@@ -1,13 +1,7 @@
 import { Fragment as FragmentWithKey, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { CheckCircle2 } from "lucide-react";
-import {
-  Sheet,
-  SheetContent,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,12 +16,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  fetchProducts,
-  receivePurchaseOrder,
-  type Product,
-  type PurchaseOrder,
-} from "@/lib/purchases";
+import { fetchProducts, type Product } from "@/lib/api";
+import { receivePurchaseOrder, type PurchaseOrder } from "@/lib/purchases";
 import { fmtCurrency, todayIso } from "./utils";
 
 type ReceiveLine = {
@@ -142,11 +132,19 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Invoice Number</Label>
-              <Input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} placeholder="INV-..." />
+              <Input
+                value={invoiceNumber}
+                onChange={(e) => setInvoiceNumber(e.target.value)}
+                placeholder="INV-..."
+              />
             </div>
             <div>
               <Label>Invoice Date</Label>
-              <Input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} />
+              <Input
+                type="date"
+                value={invoiceDate}
+                onChange={(e) => setInvoiceDate(e.target.value)}
+              />
             </div>
           </div>
           <div>
@@ -156,7 +154,9 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
           <div className="flex items-center justify-between border rounded p-3">
             <div>
               <div className="font-medium text-sm">Update product cost price</div>
-              <div className="text-xs text-muted-foreground">Use received unit costs to refresh product cost.</div>
+              <div className="text-xs text-muted-foreground">
+                Use received unit costs to refresh product cost.
+              </div>
             </div>
             <Switch checked={updateCostPrice} onCheckedChange={setUpdateCostPrice} />
           </div>
@@ -184,13 +184,17 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
                       <TableCell className="font-medium">{l.product_name}</TableCell>
                       <TableCell className="text-right">{l.quantity_ordered}</TableCell>
                       <TableCell className="text-right">{l.quantity_already_received}</TableCell>
-                      <TableCell className="text-right text-amber-700">{l.quantity_remaining}</TableCell>
+                      <TableCell className="text-right text-amber-700">
+                        {l.quantity_remaining}
+                      </TableCell>
                       <TableCell>
                         <Input
                           type="number"
                           min={0}
                           value={l.quantity_receiving}
-                          onChange={(e) => update(idx, { quantity_receiving: Number(e.target.value) || 0 })}
+                          onChange={(e) =>
+                            update(idx, { quantity_receiving: Number(e.target.value) || 0 })
+                          }
                         />
                       </TableCell>
                       <TableCell>
@@ -220,15 +224,26 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
                           <div className="grid grid-cols-3 gap-2">
                             <div>
                               <Label className="text-xs">Batch #</Label>
-                              <Input value={l.batch_number} onChange={(e) => update(idx, { batch_number: e.target.value })} />
+                              <Input
+                                value={l.batch_number}
+                                onChange={(e) => update(idx, { batch_number: e.target.value })}
+                              />
                             </div>
                             <div>
                               <Label className="text-xs">Manufacture Date</Label>
-                              <Input type="date" value={l.manufacture_date} onChange={(e) => update(idx, { manufacture_date: e.target.value })} />
+                              <Input
+                                type="date"
+                                value={l.manufacture_date}
+                                onChange={(e) => update(idx, { manufacture_date: e.target.value })}
+                              />
                             </div>
                             <div>
                               <Label className="text-xs">Expiry Date</Label>
-                              <Input type="date" value={l.expiry_date} onChange={(e) => update(idx, { expiry_date: e.target.value })} />
+                              <Input
+                                type="date"
+                                value={l.expiry_date}
+                                onChange={(e) => update(idx, { expiry_date: e.target.value })}
+                              />
                             </div>
                           </div>
                         </TableCell>
@@ -245,10 +260,14 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
           <div className="flex w-full items-center justify-between">
             <div className="text-sm">
               <span className="text-muted-foreground">Receipt total: </span>
-              <span className="font-semibold">{fmtCurrency(lines.reduce((s, l) => s + l.quantity_receiving * l.unit_cost, 0))}</span>
+              <span className="font-semibold">
+                {fmtCurrency(lines.reduce((s, l) => s + l.quantity_receiving * l.unit_cost, 0))}
+              </span>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" onClick={onClose}>Cancel</Button>
+              <Button variant="outline" onClick={onClose}>
+                Cancel
+              </Button>
               <Button onClick={handleConfirm} disabled={saving}>
                 {saving ? "Saving..." : "Confirm Receipt & Update Stock"}
               </Button>
