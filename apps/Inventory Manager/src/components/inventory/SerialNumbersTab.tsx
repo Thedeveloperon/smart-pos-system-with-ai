@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import {
   fetchProducts,
   fetchSerialNumbers,
@@ -65,19 +66,47 @@ export default function SerialNumbersTab() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetchProducts().then((p) => {
-      setProducts(p);
-      const firstSerialProduct = p.find((x) => x.is_serial_tracked) ?? p[0];
-      if (firstSerialProduct) setProductId(firstSerialProduct.id);
-    });
+    let alive = true;
+    fetchProducts()
+      .then((p) => {
+        if (!alive) return;
+        setProducts(p);
+        const firstSerialProduct = p.find((x) => x.is_serial_tracked) ?? p[0];
+        if (firstSerialProduct) setProductId(firstSerialProduct.id);
+      })
+      .catch((error) => {
+        if (alive) {
+          toast.error(error instanceof Error ? error.message : "Failed to load products.");
+        }
+      });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   useEffect(() => {
     if (!productId) return;
+    let alive = true;
     setLoading(true);
     fetchSerialNumbers(productId)
-      .then(setSerials)
-      .finally(() => setLoading(false));
+      .then((items) => {
+        if (alive) {
+          setSerials(items);
+        }
+      })
+      .catch((error) => {
+        if (alive) {
+          toast.error(error instanceof Error ? error.message : "Failed to load serial numbers.");
+        }
+      })
+      .finally(() => {
+        if (alive) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      alive = false;
+    };
   }, [productId]);
 
   const handleLookup = async () => {
@@ -93,8 +122,12 @@ export default function SerialNumbersTab() {
   };
 
   const handleMarkDefective = async (sid: string) => {
-    const updated = await updateSerialNumber(productId, sid, { status: "Defective" });
-    setSerials((prev) => prev.map((s) => (s.id === sid ? updated : s)));
+    try {
+      const updated = await updateSerialNumber(productId, sid, { status: "Defective" });
+      setSerials((prev) => prev.map((s) => (s.id === sid ? { ...s, ...updated } : s)));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update serial number.");
+    }
   };
 
   const handleAdd = async () => {
@@ -105,6 +138,8 @@ export default function SerialNumbersTab() {
       setSerials((prev) => [...prev, ...added]);
       setNewSerials([]);
       setAddOpen(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to add serial numbers.");
     } finally {
       setSaving(false);
     }

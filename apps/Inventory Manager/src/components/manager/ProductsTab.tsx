@@ -1,13 +1,35 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { AlertCircle, Loader2, Package, PencilLine, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
+import {
+  AlertCircle,
+  Loader2,
+  Package,
+  PencilLine,
+  Plus,
+  RefreshCw,
+  Search,
+  Trash2,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import ProductManagementDialog from "@/components/pos/ProductManagementDialog";
 import {
   bulkGenerateMissingProductBarcodes,
@@ -137,12 +159,25 @@ export default function ProductsTab() {
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="outline" onClick={() => void loadProducts()} disabled={loading}>
-                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                <Button type="button" variant="outline" onClick={loadProducts} disabled={loading}>
+                  {loading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4" />
+                  )}
                   Refresh
                 </Button>
-                <Button type="button" variant="outline" onClick={() => void handleBulkGenerateBarcodes()} disabled={barcodeBatchRunning}>
-                  {barcodeBatchRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <AlertCircle className="h-4 w-4" />}
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleBulkGenerateBarcodes}
+                  disabled={barcodeBatchRunning}
+                >
+                  {barcodeBatchRunning ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <AlertCircle className="h-4 w-4" />
+                  )}
                   Missing barcodes
                 </Button>
                 <Button
@@ -169,7 +204,10 @@ export default function ProductsTab() {
                 />
               </div>
 
-              <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as typeof statusFilter)}>
+              <Select
+                value={statusFilter}
+                onValueChange={(value) => setStatusFilter(value as typeof statusFilter)}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
@@ -260,7 +298,9 @@ export default function ProductsTab() {
                               </div>
                               <div className="min-w-0">
                                 <div className="truncate font-medium">{product.name}</div>
-                                <div className="truncate text-xs text-muted-foreground">{product.sku || "—"}</div>
+                                <div className="truncate text-xs text-muted-foreground">
+                                  {product.sku || "—"}
+                                </div>
                               </div>
                             </div>
                           </TableCell>
@@ -278,7 +318,9 @@ export default function ProductsTab() {
                           </TableCell>
                           <TableCell className="text-right">
                             <div className="flex items-center justify-end gap-2">
-                              <span>{(product.stock_quantity ?? product.stock ?? 0).toLocaleString()}</span>
+                              <span>
+                                {(product.stock_quantity ?? product.stock ?? 0).toLocaleString()}
+                              </span>
                               {product.is_low_stock ? (
                                 <Badge variant="destructive" className="text-[10px]">
                                   Low
@@ -287,7 +329,9 @@ export default function ProductsTab() {
                             </div>
                           </TableCell>
                           <TableCell>
-                            <Badge variant={isActive ? "default" : "secondary"}>{isActive ? "Active" : "Inactive"}</Badge>
+                            <Badge variant={isActive ? "default" : "secondary"}>
+                              {isActive ? "Active" : "Inactive"}
+                            </Badge>
                           </TableCell>
                           <TableCell className="text-right">
                             <div className="flex justify-end gap-1">

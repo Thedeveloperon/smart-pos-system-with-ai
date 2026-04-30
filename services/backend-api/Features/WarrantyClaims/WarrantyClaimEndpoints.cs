@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Infrastructure;
@@ -81,6 +82,7 @@ public static class WarrantyClaimEndpoints
         {
             var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var serial = await dbContext.SerialNumbers
+                .Include(x => x.Product)
                 .FirstOrDefaultAsync(x => x.Id == request.SerialNumberId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
             if (serial is null)
             {
@@ -109,15 +111,16 @@ public static class WarrantyClaimEndpoints
             dbContext.WarrantyClaims.Add(claim);
             serial.Status = SerialNumberStatus.UnderWarranty;
             serial.UpdatedAtUtc = now;
-            await dbContext.SaveChangesAsync(cancellationToken);
-
-            return Results.Ok(new
+            try
             {
-                id = claim.Id,
-                serial_number_id = claim.SerialNumberId,
-                status = claim.Status,
-                claim_date = claim.ClaimDate
-            });
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                return Results.Conflict(new { message = "Failed to save warranty claim changes. Refresh and try again." });
+            }
+
+            return Results.Ok(ToWarrantyClaimResponse(claim));
         })
         .WithName("CreateWarrantyClaim")
         .WithOpenApi();
@@ -167,6 +170,7 @@ public static class WarrantyClaimEndpoints
             var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var claim = await dbContext.WarrantyClaims
                 .Include(x => x.SerialNumber)
+                .ThenInclude(x => x.Product)
                 .FirstOrDefaultAsync(x => x.Id == claimId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
             if (claim is null)
             {
@@ -190,14 +194,16 @@ public static class WarrantyClaimEndpoints
                 claim.SerialNumber.UpdatedAtUtc = claim.UpdatedAtUtc;
             }
 
-            await dbContext.SaveChangesAsync(cancellationToken);
-
-            return Results.Ok(new
+            try
             {
-                id = claim.Id,
-                status = claim.Status,
-                resolution_notes = claim.ResolutionNotes
-            });
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                return Results.Conflict(new { message = "Failed to save warranty claim changes. Refresh and try again." });
+            }
+
+            return Results.Ok(ToWarrantyClaimResponse(claim));
         })
         .WithName("UpdateWarrantyClaim")
         .WithOpenApi();
@@ -221,18 +227,46 @@ public static class WarrantyClaimEndpoints
             _ => false
         };
     }
+
+    private static object ToWarrantyClaimResponse(WarrantyClaim claim)
+    {
+        return new
+        {
+            id = claim.Id,
+            serial_number_id = claim.SerialNumberId,
+            serial_value = claim.SerialNumber.SerialValue,
+            product_id = claim.SerialNumber.ProductId,
+            product_name = claim.SerialNumber.Product.Name,
+            claim_date = claim.ClaimDate,
+            status = claim.Status,
+            resolution_notes = claim.ResolutionNotes,
+            created_by_user_id = claim.CreatedByUserId,
+            created_at = claim.CreatedAtUtc,
+            updated_at = claim.UpdatedAtUtc
+        };
+    }
 }
 
 public sealed class CreateWarrantyClaimRequest
 {
+    [JsonPropertyName("serial_number_id")]
     public Guid SerialNumberId { get; set; }
+
+    [JsonPropertyName("claim_date")]
     public DateTimeOffset? ClaimDate { get; set; }
+
+    [JsonPropertyName("resolution_notes")]
     public string? ResolutionNotes { get; set; }
+
+    [JsonPropertyName("created_by_user_id")]
     public Guid? CreatedByUserId { get; set; }
 }
 
 public sealed class UpdateWarrantyClaimRequest
 {
+    [JsonPropertyName("status")]
     public WarrantyClaimStatus Status { get; set; } = WarrantyClaimStatus.Open;
+
+    [JsonPropertyName("resolution_notes")]
     public string? ResolutionNotes { get; set; }
 }

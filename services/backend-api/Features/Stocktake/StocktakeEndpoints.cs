@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Features.Inventory;
@@ -38,9 +39,13 @@ public static class StocktakeEndpoints
                 .Select(x => new
                 {
                     id = x.Id,
+                    store_id = x.StoreId,
                     status = x.Status,
                     started_at = x.StartedAtUtc,
                     completed_at = x.CompletedAtUtc,
+                    created_by_user_id = x.CreatedByUserId,
+                    item_count = x.Items.Count(),
+                    variance_count = x.Items.Count(item => item.VarianceQuantity.HasValue && item.VarianceQuantity.Value != 0m),
                     created_at = x.CreatedAtUtc,
                     updated_at = x.UpdatedAtUtc
                 })
@@ -89,7 +94,14 @@ public static class StocktakeEndpoints
             }).ToList();
 
             dbContext.StocktakeSessions.Add(session);
-            await dbContext.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                return Results.Conflict(new { message = "Failed to save stocktake changes. Refresh and try again." });
+            }
 
             return Results.Ok(ToSessionResponse(session));
         })
@@ -139,7 +151,14 @@ public static class StocktakeEndpoints
 
             session.Status = StocktakeStatus.InProgress;
             session.UpdatedAtUtc = DateTimeOffset.UtcNow;
-            await dbContext.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                return Results.Conflict(new { message = "Failed to save stocktake changes. Refresh and try again." });
+            }
 
             return Results.Ok(ToSessionResponse(session));
         })
@@ -157,6 +176,7 @@ public static class StocktakeEndpoints
             var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var item = await dbContext.StocktakeItems
                 .Include(x => x.Session)
+                .Include(x => x.Product)
                 .FirstOrDefaultAsync(x => x.SessionId == sessionId && x.Id == itemId && (!currentStoreId.HasValue || x.Session.StoreId == currentStoreId.Value), cancellationToken);
             if (item is null)
             {
@@ -172,13 +192,25 @@ public static class StocktakeEndpoints
             item.VarianceQuantity = decimal.Round(request.CountedQuantity - item.SystemQuantity, 3, MidpointRounding.AwayFromZero);
             item.Notes = request.Notes;
             item.UpdatedAtUtc = DateTimeOffset.UtcNow;
-            await dbContext.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                return Results.Conflict(new { message = "Failed to save stocktake changes. Refresh and try again." });
+            }
 
             return Results.Ok(new
             {
                 id = item.Id,
+                session_id = item.SessionId,
+                product_id = item.ProductId,
+                product_name = item.Product.Name,
+                system_quantity = item.SystemQuantity,
                 counted_quantity = item.CountedQuantity,
-                variance_quantity = item.VarianceQuantity
+                variance_quantity = item.VarianceQuantity,
+                notes = item.Notes
             });
         })
         .WithName("UpdateStocktakeItem")
@@ -261,7 +293,14 @@ public static class StocktakeEndpoints
             session.Status = StocktakeStatus.Completed;
             session.CompletedAtUtc = now;
             session.UpdatedAtUtc = now;
-            await dbContext.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                return Results.Conflict(new { message = "Failed to save stocktake changes. Refresh and try again." });
+            }
 
             return Results.Ok(ToSessionResponse(session));
         })
@@ -290,7 +329,14 @@ public static class StocktakeEndpoints
 
             dbContext.StocktakeItems.RemoveRange(session.Items);
             dbContext.StocktakeSessions.Remove(session);
-            await dbContext.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                return Results.Conflict(new { message = "Failed to save stocktake changes. Refresh and try again." });
+            }
             return Results.NoContent();
         })
         .WithName("DeleteStocktakeSession")
@@ -310,6 +356,9 @@ public static class StocktakeEndpoints
             completed_at = session.CompletedAtUtc,
             created_at = session.CreatedAtUtc,
             updated_at = session.UpdatedAtUtc,
+            created_by_user_id = session.CreatedByUserId,
+            item_count = session.Items.Count,
+            variance_count = session.Items.Count(item => item.VarianceQuantity.HasValue && item.VarianceQuantity.Value != 0m),
             items = session.Items.Select(item => new
             {
                 id = item.Id,
@@ -328,12 +377,18 @@ public static class StocktakeEndpoints
 
 public sealed class CreateStocktakeSessionRequest
 {
+    [JsonPropertyName("store_id")]
     public Guid? StoreId { get; set; }
+
+    [JsonPropertyName("created_by_user_id")]
     public Guid? CreatedByUserId { get; set; }
 }
 
 public sealed class UpdateStocktakeItemRequest
 {
+    [JsonPropertyName("counted_quantity")]
     public decimal CountedQuantity { get; set; }
+
+    [JsonPropertyName("notes")]
     public string? Notes { get; set; }
 }

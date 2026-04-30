@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Infrastructure;
@@ -111,15 +112,16 @@ public static class BatchEndpoints
             };
 
             dbContext.ProductBatches.Add(batch);
-            await dbContext.SaveChangesAsync(cancellationToken);
-
-            return Results.Ok(new
+            try
             {
-                id = batch.Id,
-                product_id = batch.ProductId,
-                batch_number = batch.BatchNumber,
-                remaining_quantity = batch.RemainingQuantity
-            });
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                return Results.Conflict(new { message = "Failed to save batch changes. Refresh and try again." });
+            }
+
+            return Results.Ok(ToBatchResponse(batch));
         })
         .WithName("CreateProductBatch")
         .WithOpenApi();
@@ -163,15 +165,16 @@ public static class BatchEndpoints
             batch.RemainingQuantity = request.RemainingQuantity;
             batch.UpdatedAtUtc = DateTimeOffset.UtcNow;
 
-            await dbContext.SaveChangesAsync(cancellationToken);
-
-            return Results.Ok(new
+            try
             {
-                id = batch.Id,
-                batch_number = batch.BatchNumber,
-                remaining_quantity = batch.RemainingQuantity,
-                expiry_date = batch.ExpiryDate
-            });
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                return Results.Conflict(new { message = "Failed to save batch changes. Refresh and try again." });
+            }
+
+            return Results.Ok(ToBatchResponse(batch));
         })
         .WithName("UpdateProductBatch")
         .WithOpenApi();
@@ -233,28 +236,78 @@ public static class BatchEndpoints
 
         return value.Trim();
     }
+
+    private static object ToBatchResponse(ProductBatch batch)
+    {
+        return new
+        {
+            id = batch.Id,
+            product_id = batch.ProductId,
+            supplier_id = batch.SupplierId,
+            purchase_bill_id = batch.PurchaseBillId,
+            batch_number = batch.BatchNumber,
+            manufacture_date = batch.ManufactureDate,
+            expiry_date = batch.ExpiryDate,
+            initial_quantity = batch.InitialQuantity,
+            remaining_quantity = batch.RemainingQuantity,
+            cost_price = batch.CostPrice,
+            received_at = batch.ReceivedAtUtc,
+            created_at = batch.CreatedAtUtc,
+            updated_at = batch.UpdatedAtUtc
+        };
+    }
 }
 
 public sealed class CreateBatchRequest
 {
+    [JsonPropertyName("supplier_id")]
     public Guid? SupplierId { get; set; }
+
+    [JsonPropertyName("purchase_bill_id")]
     public Guid? PurchaseBillId { get; set; }
+
+    [JsonPropertyName("batch_number")]
     public string BatchNumber { get; set; } = string.Empty;
+
+    [JsonPropertyName("manufacture_date")]
     public DateTimeOffset? ManufactureDate { get; set; }
+
+    [JsonPropertyName("expiry_date")]
     public DateTimeOffset? ExpiryDate { get; set; }
+
+    [JsonPropertyName("initial_quantity")]
     public decimal InitialQuantity { get; set; }
+
+    [JsonPropertyName("remaining_quantity")]
     public decimal? RemainingQuantity { get; set; }
+
+    [JsonPropertyName("cost_price")]
     public decimal CostPrice { get; set; }
+
+    [JsonPropertyName("received_at")]
     public DateTimeOffset? ReceivedAtUtc { get; set; }
 }
 
 public sealed class UpdateBatchRequest
 {
+    [JsonPropertyName("supplier_id")]
     public Guid? SupplierId { get; set; }
+
+    [JsonPropertyName("purchase_bill_id")]
     public Guid? PurchaseBillId { get; set; }
+
+    [JsonPropertyName("batch_number")]
     public string? BatchNumber { get; set; }
+
+    [JsonPropertyName("manufacture_date")]
     public DateTimeOffset? ManufactureDate { get; set; }
+
+    [JsonPropertyName("expiry_date")]
     public DateTimeOffset? ExpiryDate { get; set; }
+
+    [JsonPropertyName("remaining_quantity")]
     public decimal RemainingQuantity { get; set; }
+
+    [JsonPropertyName("cost_price")]
     public decimal CostPrice { get; set; }
 }

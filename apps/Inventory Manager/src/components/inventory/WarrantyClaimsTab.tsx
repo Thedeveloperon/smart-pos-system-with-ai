@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import {
   createWarrantyClaim,
   fetchWarrantyClaims,
@@ -64,18 +65,26 @@ export default function WarrantyClaimsTab() {
   const [resolveTarget, setResolveTarget] = useState<WarrantyClaim | null>(null);
   const [resolveNotes, setResolveNotes] = useState("");
 
-  const reload = () => {
+  const reload = useCallback(async () => {
     setLoading(true);
-    fetchWarrantyClaims({
-      status,
-      from_date: from || undefined,
-      to_date: to || undefined,
-    })
-      .then(setClaims)
-      .finally(() => setLoading(false));
-  };
+    try {
+      setClaims(
+        await fetchWarrantyClaims({
+          status,
+          from_date: from || undefined,
+          to_date: to || undefined,
+        }),
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load warranty claims.");
+    } finally {
+      setLoading(false);
+    }
+  }, [from, status, to]);
 
-  useEffect(reload, [status, from, to]);
+  useEffect(() => {
+    void reload();
+  }, [reload]);
 
   const validateSerial = async () => {
     setSerialError(null);
@@ -102,21 +111,27 @@ export default function WarrantyClaimsTab() {
       await createWarrantyClaim({
         serial_number_id: serialId,
         claim_date: claimDate,
-        notes: notes || undefined,
+        resolution_notes: notes || undefined,
       });
       setOpen(false);
       setSerialValue("");
       setSerialId(null);
       setNotes("");
-      reload();
+      await reload();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to create warranty claim.");
     } finally {
       setSaving(false);
     }
   };
 
   const transition = async (c: WarrantyClaim, next: WarrantyClaim["status"]) => {
-    await updateWarrantyClaim(c.id, { status: next });
-    reload();
+    try {
+      await updateWarrantyClaim(c.id, { status: next });
+      await reload();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update warranty claim.");
+    }
   };
 
   const openResolve = (c: WarrantyClaim) => {
@@ -127,12 +142,16 @@ export default function WarrantyClaimsTab() {
 
   const submitResolve = async () => {
     if (!resolveTarget) return;
-    await updateWarrantyClaim(resolveTarget.id, {
-      status: "Resolved",
-      resolution_notes: resolveNotes || undefined,
-    });
-    setResolveOpen(false);
-    reload();
+    try {
+      await updateWarrantyClaim(resolveTarget.id, {
+        status: "Resolved",
+        resolution_notes: resolveNotes || undefined,
+      });
+      setResolveOpen(false);
+      await reload();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to resolve warranty claim.");
+    }
   };
 
   return (
