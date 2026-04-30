@@ -72,6 +72,43 @@ function createExactChangeSolver(availableCounts: DenominationCount[] = []) {
   };
 }
 
+function buildIdealChangeBreakdown(changeAmount: number): DenominationCount[] {
+  let remaining = Math.max(0, Math.round(changeAmount));
+
+  return ORDERED_DENOMINATIONS.map((denomination) => {
+    const quantity = Math.floor(remaining / denomination.value);
+    remaining -= quantity * denomination.value;
+
+    return {
+      denomination: denomination.value,
+      quantity,
+    };
+  });
+}
+
+function describeDenomination(denomination: number) {
+  const unit = denomination > 10 ? "notes" : "coins";
+  return `Rs.${denomination.toLocaleString()} ${unit}`;
+}
+
+function isBetterScore(candidate: [number, number, number], current: [number, number, number] | null) {
+  if (!current) {
+    return true;
+  }
+
+  for (let index = 0; index < candidate.length; index += 1) {
+    if (candidate[index] < current[index]) {
+      return true;
+    }
+
+    if (candidate[index] > current[index]) {
+      return false;
+    }
+  }
+
+  return false;
+}
+
 export function buildChangeBreakdown(
   changeAmount: number,
   availableCounts: DenominationCount[] = []
@@ -149,6 +186,12 @@ export type OptionalPayoutSuggestion = {
   payoutAmount: number;
 };
 
+export type DrawerChangeNotice = {
+  message: string;
+  shortageDenominations: number[];
+  suggestion?: OptionalPayoutSuggestion;
+};
+
 export function getOptionalPayoutSuggestion(changeAmount: number): OptionalPayoutSuggestion | null {
   const normalizedChange = Math.max(0, Math.round(changeAmount));
   if (normalizedChange === 0) {
@@ -195,20 +238,68 @@ export function getDrawerChangeSuggestion(
     return null;
   }
 
-  const suggestedPayout = getOptionalPayoutSuggestion(normalizedChange)?.payoutAmount
-    ?? Math.ceil((normalizedChange + 1) / 50) * 50;
-
   const exactSolver = createExactChangeSolver(availableCounts);
-  for (let payoutAmount = suggestedPayout; payoutAmount <= drawerTotal; payoutAmount += 1) {
-    if (exactSolver.findExactBreakdown(payoutAmount)) {
-      return {
-        requestAmount: payoutAmount - normalizedChange,
+  let bestSuggestion: OptionalPayoutSuggestion | null = null;
+  let bestScore: [number, number, number] | null = null;
+
+  for (let payoutAmount = normalizedChange + 1; payoutAmount <= drawerTotal; payoutAmount += 1) {
+    const breakdown = exactSolver.findExactBreakdown(payoutAmount);
+    if (!breakdown) {
+      continue;
+    }
+
+    const nonZeroDenominations = breakdown.filter((count) => count.quantity > 0).length;
+    const requestAmount = payoutAmount - normalizedChange;
+    const score: [number, number, number] = [nonZeroDenominations, requestAmount, payoutAmount];
+
+    if (isBetterScore(score, bestScore)) {
+      bestScore = score;
+      bestSuggestion = {
+        requestAmount,
         payoutAmount,
       };
     }
   }
 
-  return null;
+  return bestSuggestion;
+}
+
+export function getDrawerChangeNotice(
+  changeAmount: number,
+  availableCounts: DenominationCount[] = [],
+): DrawerChangeNotice | null {
+  const normalizedChange = Math.max(0, Math.round(changeAmount));
+  if (normalizedChange === 0) {
+    return null;
+  }
+
+  const idealBreakdown = buildIdealChangeBreakdown(normalizedChange);
+  const availableByDenomination = new Map(
+    normalizeDenominationCounts(availableCounts).map((count) => [count.denomination, count.quantity]),
+  );
+  const shortageDenominations = idealBreakdown
+    .filter((count) => count.quantity > (availableByDenomination.get(count.denomination) ?? 0))
+    .map((count) => count.denomination);
+
+  if (shortageDenominations.length === 0) {
+    return null;
+  }
+
+  const shortageMessage = shortageDenominations.map((denomination) => describeDenomination(denomination)).join(" and ");
+  const suggestion = getDrawerChangeSuggestion(normalizedChange, availableCounts);
+
+  if (!suggestion) {
+    return {
+      message: `Cash drawer has no ${shortageMessage} available.`,
+      shortageDenominations,
+    };
+  }
+
+  return {
+    message: `Cash drawer has no ${shortageMessage} available. Please request an additional Rs.${suggestion.requestAmount.toLocaleString()} from the customer. Then you can return Rs.${suggestion.payoutAmount.toLocaleString()} as the balance.`,
+    shortageDenominations,
+    suggestion,
+  };
 }
 
 export function buildTopUpCounts(amount: number): DenominationCount[] {

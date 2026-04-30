@@ -33,7 +33,12 @@ describe("CashReceivedDialog", () => {
 
     fireEvent.change(screen.getByLabelText("100 quantity"), { target: { value: "1" } });
 
-    expect(await screen.findByText(/Auto-added Rs\. 10/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        "Cash drawer has no Rs.20 notes available. Please request an additional Rs.10 from the customer. Then you can return Rs.50 as the balance.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Auto-added/i)).not.toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Proceed - Rs. 110" })).toBeInTheDocument();
 
     await waitFor(() => {

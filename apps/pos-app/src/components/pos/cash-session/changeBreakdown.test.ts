@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  getDrawerChangeNotice,
   getDrawerChangeSuggestion,
   getExactChangeBreakdown,
   getOptionalPayoutSuggestion,
@@ -61,5 +62,25 @@ describe("getDrawerChangeSuggestion", () => {
         { denomination: 20, quantity: 1 },
       ]),
     ).toBeNull();
+  });
+});
+
+describe("getDrawerChangeNotice", () => {
+  it("describes the missing denomination and the top-up suggestion", () => {
+    expect(
+      getDrawerChangeNotice(40, [
+        { denomination: 50, quantity: 1 },
+        { denomination: 20, quantity: 0 },
+        { denomination: 10, quantity: 1 },
+      ]),
+    ).toEqual({
+      message:
+        "Cash drawer has no Rs.20 notes available. Please request an additional Rs.10 from the customer. Then you can return Rs.50 as the balance.",
+      shortageDenominations: [20],
+      suggestion: {
+        requestAmount: 10,
+        payoutAmount: 50,
+      },
+    });
   });
 });
