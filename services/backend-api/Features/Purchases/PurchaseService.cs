@@ -341,6 +341,403 @@ public sealed class PurchaseService(
         }
     }
 
+    public async Task<List<PurchaseBillSummaryResponse>> ListBillsAsync(
+        Guid? supplierId,
+        Guid? purchaseOrderId,
+        DateTimeOffset? fromDate,
+        DateTimeOffset? toDate,
+        int? page,
+        int? take,
+        CancellationToken cancellationToken)
+    {
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
+        var normalizedPage = Math.Max(1, page ?? 1);
+        var normalizedTake = Math.Clamp(take ?? 20, 1, 100);
+
+        var query = dbContext.PurchaseBills
+            .AsNoTracking()
+            .AsQueryable();
+
+        if (currentStoreId.HasValue)
+        {
+            query = query.Where(x => x.StoreId == currentStoreId.Value);
+        }
+
+        if (supplierId.HasValue)
+        {
+            query = query.Where(x => x.SupplierId == supplierId.Value);
+        }
+
+        if (purchaseOrderId.HasValue)
+        {
+            query = query.Where(x => x.PurchaseOrderId == purchaseOrderId.Value);
+        }
+
+        if (fromDate.HasValue)
+        {
+            query = query.Where(x => x.InvoiceDateUtc >= fromDate.Value);
+        }
+
+        if (toDate.HasValue)
+        {
+            query = query.Where(x => x.InvoiceDateUtc < toDate.Value.AddDays(1));
+        }
+
+        return await query
+            .OrderByDescending(x => x.InvoiceDateUtc)
+            .ThenByDescending(x => x.CreatedAtUtc)
+            .Skip((normalizedPage - 1) * normalizedTake)
+            .Take(normalizedTake)
+            .Select(x => new PurchaseBillSummaryResponse
+            {
+                Id = x.Id,
+                PurchaseOrderId = x.PurchaseOrderId,
+                InvoiceNumber = x.InvoiceNumber,
+                InvoiceDate = x.InvoiceDateUtc,
+                SourceType = x.SourceType,
+                GrandTotal = RoundMoney(x.GrandTotal),
+                CreatedAtUtc = x.CreatedAtUtc
+            })
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<PurchaseBillDetailResponse> GetBillAsync(
+        Guid billId,
+        CancellationToken cancellationToken)
+    {
+        if (billId == Guid.Empty)
+        {
+            throw new InvalidOperationException("bill_id is required.");
+        }
+
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
+        var bill = await dbContext.PurchaseBills
+            .AsNoTracking()
+            .Include(x => x.Supplier)
+            .Include(x => x.PurchaseOrder)
+            .Include(x => x.Items)
+                .ThenInclude(x => x.Product)
+            .FirstOrDefaultAsync(x => x.Id == billId, cancellationToken);
+
+        if (bill is null || (currentStoreId.HasValue && bill.StoreId != currentStoreId.Value))
+        {
+            throw new KeyNotFoundException("Purchase bill not found.");
+        }
+
+        return ToBillDetailResponse(bill);
+    }
+
+    public async Task<PurchaseBillDetailResponse> CreateManualBillAsync(
+        CreateManualBillRequest request,
+        CancellationToken cancellationToken)
+    {
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
+        var createdByUserId = ParseGuid(
+            httpContextAccessor.HttpContext?.User?.FindFirstValue(ClaimTypes.NameIdentifier));
+
+        var supplier = await dbContext.Suppliers
+            .FirstOrDefaultAsync(x => x.Id == request.SupplierId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken)
+            ?? throw new KeyNotFoundException("Supplier not found.");
+
+        var invoiceNumber = NormalizeRequired(request.InvoiceNumber, "invoice_number is required.");
+        if (request.InvoiceDate == default)
+        {
+            throw new InvalidOperationException("invoice_date is required.");
+        }
+        if (request.Items.Count == 0)
+        {
+            throw new InvalidOperationException("At least one bill item is required.");
+        }
+
+        var duplicateInvoice = await dbContext.PurchaseBills
+            .AsNoTracking()
+            .AnyAsync(x =>
+                    x.SupplierId == supplier.Id &&
+                    x.InvoiceNumber.ToLower() == invoiceNumber.ToLower() &&
+                    (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value),
+                cancellationToken);
+        if (duplicateInvoice)
+        {
+            throw new InvalidOperationException("A purchase bill with this supplier and invoice number already exists.");
+        }
+
+        PurchaseOrder? purchaseOrder = null;
+        if (request.PurchaseOrderId.HasValue && request.PurchaseOrderId.Value != Guid.Empty)
+        {
+            purchaseOrder = await dbContext.PurchaseOrders
+                .Include(x => x.Supplier)
+                .FirstOrDefaultAsync(x => x.Id == request.PurchaseOrderId.Value && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken)
+                ?? throw new KeyNotFoundException("Purchase order not found.");
+
+            if (purchaseOrder.SupplierId != supplier.Id)
+            {
+                throw new InvalidOperationException("The purchase order supplier does not match the selected supplier.");
+            }
+        }
+
+        var normalizedLines = request.Items
+            .Select(x => NormalizeBillLine(x.ProductId, x.Quantity, x.UnitCost, x.SupplierItemName, x.BatchNumber, x.ExpiryDate, x.ManufactureDate))
+            .ToList();
+
+        var productIds = normalizedLines.Select(x => x.ProductId).Distinct().ToArray();
+        if (productIds.Any(x => x == Guid.Empty))
+        {
+            throw new InvalidOperationException("All bill items must include a valid product_id.");
+        }
+
+        var products = await dbContext.Products
+            .Include(x => x.Inventory)
+            .Where(x => productIds.Contains(x.Id))
+            .Where(x => !currentStoreId.HasValue || x.StoreId == currentStoreId.Value)
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+        if (products.Count != productIds.Length)
+        {
+            throw new InvalidOperationException("One or more bill products were not found.");
+        }
+
+        var invoiceDate = request.InvoiceDate == default ? DateTimeOffset.UtcNow : request.InvoiceDate;
+        var subtotal = RoundMoney(normalizedLines.Sum(x => x.LineTotal));
+        var grandTotal = subtotal;
+        var now = DateTimeOffset.UtcNow;
+
+        var purchaseBill = new PurchaseBill
+        {
+            StoreId = currentStoreId,
+            Supplier = supplier,
+            SupplierId = supplier.Id,
+            PurchaseOrder = purchaseOrder,
+            PurchaseOrderId = purchaseOrder?.Id,
+            InvoiceNumber = invoiceNumber,
+            InvoiceDateUtc = invoiceDate,
+            Currency = "LKR",
+            Subtotal = subtotal,
+            DiscountTotal = 0m,
+            TaxTotal = 0m,
+            GrandTotal = grandTotal,
+            SourceType = "manual",
+            CreatedByUserId = createdByUserId,
+            Notes = NormalizeOptional(request.Notes),
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+
+        var purchaseBillItems = new List<PurchaseBillItem>();
+        foreach (var line in normalizedLines)
+        {
+            var product = products[line.ProductId];
+            purchaseBillItems.Add(new PurchaseBillItem
+            {
+                PurchaseBill = purchaseBill,
+                Product = product,
+                ProductId = product.Id,
+                ProductNameSnapshot = product.Name,
+                SupplierItemName = line.SupplierItemName,
+                Quantity = line.Quantity,
+                UnitCost = line.UnitCost,
+                TaxAmount = 0m,
+                LineTotal = line.LineTotal,
+                CreatedAtUtc = now
+            });
+        }
+
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            dbContext.PurchaseBills.Add(purchaseBill);
+            dbContext.PurchaseBillItems.AddRange(purchaseBillItems);
+            await ApplyPurchaseBillInventoryAsync(
+                purchaseBill,
+                normalizedLines,
+                request.UpdateCostPrice,
+                cancellationToken);
+
+            purchaseBill.UpdatedAtUtc = now;
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            logger.LogInformation(
+                "Manual purchase bill created. PurchaseBillId={PurchaseBillId}, SupplierId={SupplierId}, ItemCount={ItemCount}.",
+                purchaseBill.Id,
+                purchaseBill.SupplierId,
+                purchaseBillItems.Count);
+
+            return await GetBillAsync(purchaseBill.Id, cancellationToken);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
+
+    internal async Task<IReadOnlyList<PurchaseInventoryUpdateResponse>> ApplyPurchaseBillInventoryAsync(
+        PurchaseBill purchaseBill,
+        IReadOnlyCollection<PurchaseBillInventoryLine> lines,
+        bool updateCostPrice,
+        CancellationToken cancellationToken)
+    {
+        if (purchaseBill.Supplier is null)
+        {
+            throw new InvalidOperationException("Purchase bill supplier is required.");
+        }
+
+        if (lines.Count == 0)
+        {
+            throw new InvalidOperationException("At least one bill item is required.");
+        }
+
+        var currentStoreId = purchaseBill.StoreId;
+        var productIds = lines.Select(x => x.ProductId).Distinct().ToArray();
+        var products = await dbContext.Products
+            .Include(x => x.Inventory)
+            .Where(x => productIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+        if (products.Count != productIds.Length)
+        {
+            throw new InvalidOperationException("One or more bill products were not found.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var createdByUserId = ParseGuid(
+            httpContextAccessor.HttpContext?.User?.FindFirstValue(ClaimTypes.NameIdentifier));
+        var inventoryUpdates = new List<PurchaseInventoryUpdateResponse>();
+
+        var lineIndex = 0;
+        foreach (var line in lines)
+        {
+            lineIndex++;
+            var product = products[line.ProductId];
+            var inventory = product.Inventory;
+            if (inventory is null)
+            {
+                inventory = new InventoryRecord
+                {
+                    Product = product,
+                    ProductId = product.Id,
+                    StoreId = currentStoreId,
+                    QuantityOnHand = 0m,
+                    ReorderLevel = 0m,
+                    SafetyStock = 0m,
+                    TargetStockLevel = 0m,
+                    AllowNegativeStock = true,
+                    UpdatedAtUtc = now
+                };
+                dbContext.Inventory.Add(inventory);
+                product.Inventory = inventory;
+            }
+
+            inventory.StoreId = currentStoreId;
+            var previousQty = RoundQuantity(inventory.QuantityOnHand);
+            var deltaQty = RoundQuantity(line.Quantity);
+            var batchNumber = NormalizeOptional(line.BatchNumber) ??
+                              NormalizeOptional(line.SupplierItemName) ??
+                              $"{purchaseBill.InvoiceNumber}-{lineIndex:000}";
+
+            if (product.IsBatchTracked)
+            {
+                var existingBatch = await dbContext.ProductBatches.FirstOrDefaultAsync(
+                    x => x.ProductId == product.Id &&
+                         x.BatchNumber == batchNumber &&
+                         x.StoreId == currentStoreId,
+                    cancellationToken);
+
+                if (existingBatch is null)
+                {
+                    existingBatch = new ProductBatch
+                    {
+                        StoreId = currentStoreId,
+                        ProductId = product.Id,
+                        SupplierId = purchaseBill.SupplierId,
+                        PurchaseBill = purchaseBill,
+                        PurchaseBillId = purchaseBill.Id,
+                        BatchNumber = batchNumber,
+                        ManufactureDate = line.ManufactureDate,
+                        ExpiryDate = line.ExpiryDate,
+                        InitialQuantity = deltaQty,
+                        RemainingQuantity = deltaQty,
+                        CostPrice = line.UnitCost,
+                        ReceivedAtUtc = now,
+                        CreatedAtUtc = now,
+                        UpdatedAtUtc = now,
+                        Product = product
+                    };
+                    dbContext.ProductBatches.Add(existingBatch);
+                }
+                else
+                {
+                    existingBatch.RemainingQuantity = RoundQuantity(existingBatch.RemainingQuantity + deltaQty);
+                    existingBatch.InitialQuantity = RoundQuantity(existingBatch.InitialQuantity + deltaQty);
+                    existingBatch.CostPrice = line.UnitCost;
+                    if (line.ManufactureDate.HasValue)
+                    {
+                        existingBatch.ManufactureDate = line.ManufactureDate;
+                    }
+
+                    if (line.ExpiryDate.HasValue)
+                    {
+                        existingBatch.ExpiryDate = line.ExpiryDate;
+                    }
+
+                    existingBatch.UpdatedAtUtc = now;
+                }
+            }
+
+            if (updateCostPrice)
+            {
+                product.CostPrice = ComputeWeightedCost(
+                    currentCostPrice: product.CostPrice,
+                    currentStockQty: previousQty,
+                    incomingUnitCost: line.UnitCost,
+                    incomingQty: deltaQty);
+            }
+
+            product.UpdatedAtUtc = now;
+            await UpsertProductSupplierFromPurchaseAsync(
+                product,
+                purchaseBill.Supplier,
+                new ConfirmLine(null, line.ProductId, line.SupplierItemName, line.Quantity, line.UnitCost, line.LineTotal),
+                now,
+                cancellationToken);
+
+            await stockMovementHelper.RecordMovementAsync(
+                storeId: currentStoreId,
+                productId: product.Id,
+                type: StockMovementType.Purchase,
+                quantityChange: deltaQty,
+                refType: StockMovementRef.Purchase,
+                refId: purchaseBill.Id,
+                batchId: null,
+                serialNumber: null,
+                reason: purchaseBill.SourceType,
+                userId: createdByUserId,
+                cancellationToken);
+
+            inventoryUpdates.Add(new PurchaseInventoryUpdateResponse
+            {
+                ProductId = product.Id,
+                ProductName = product.Name,
+                PreviousQuantity = previousQty,
+                DeltaQuantity = deltaQty,
+                NewQuantity = RoundQuantity(previousQty + deltaQty)
+            });
+        }
+
+        dbContext.Ledger.Add(new LedgerEntry
+        {
+            StoreId = currentStoreId,
+            EntryType = LedgerEntryType.StockAdjustment,
+            Description = $"Purchase {purchaseBill.SourceType} {purchaseBill.InvoiceNumber} ({lines.Count} items)",
+            Debit = purchaseBill.GrandTotal,
+            Credit = 0m,
+            OccurredAtUtc = now,
+            CreatedAtUtc = now
+        });
+
+        return inventoryUpdates;
+    }
+
     private async Task<PurchaseImportConfirmResponse> ConfirmImportInternalAsync(
         string importRequestId,
         PurchaseImportConfirmRequest request,
@@ -465,6 +862,7 @@ public sealed class PurchaseService(
         var invoiceDate = request.InvoiceDate ?? metadata.InvoiceDate ?? DateTimeOffset.UtcNow;
         var now = DateTimeOffset.UtcNow;
         var shouldUpdateCost = request.UpdateCostPrice ?? options.Value.UpdateCostPriceOnImport;
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
 
         var normalizedLines = request.Items
             .Select(x => NormalizeConfirmLine(x))
@@ -489,6 +887,7 @@ public sealed class PurchaseService(
 
         var purchaseBill = new PurchaseBill
         {
+            StoreId = currentStoreId,
             Supplier = supplier,
             SupplierId = supplier.Id,
             ImportRequestId = importRequestId,
@@ -1363,6 +1762,79 @@ public sealed class PurchaseService(
         };
     }
 
+    private static PurchaseBillInventoryLine NormalizeBillLine(
+        Guid productId,
+        decimal quantity,
+        decimal unitCost,
+        string? supplierItemName,
+        string? batchNumber,
+        DateTimeOffset? expiryDate,
+        DateTimeOffset? manufactureDate)
+    {
+        if (productId == Guid.Empty)
+        {
+            throw new InvalidOperationException("All bill items must include a valid product_id.");
+        }
+
+        if (quantity <= 0m)
+        {
+            throw new InvalidOperationException("Bill item quantity must be greater than zero.");
+        }
+
+        if (unitCost < 0m)
+        {
+            throw new InvalidOperationException("Bill item unit_cost cannot be negative.");
+        }
+
+        var normalizedQuantity = RoundQuantity(quantity);
+        var normalizedUnitCost = RoundMoney(unitCost);
+        var lineTotal = RoundMoney(normalizedQuantity * normalizedUnitCost);
+
+        return new PurchaseBillInventoryLine(
+            ProductId: productId,
+            Quantity: normalizedQuantity,
+            UnitCost: normalizedUnitCost,
+            LineTotal: lineTotal,
+            SupplierItemName: NormalizeOptional(supplierItemName),
+            BatchNumber: NormalizeOptional(batchNumber),
+            ExpiryDate: expiryDate,
+            ManufactureDate: manufactureDate);
+    }
+
+    private static PurchaseBillDetailResponse ToBillDetailResponse(PurchaseBill purchaseBill)
+    {
+        return new PurchaseBillDetailResponse
+        {
+            Id = purchaseBill.Id,
+            PurchaseOrderId = purchaseBill.PurchaseOrderId,
+            PurchaseOrderNumber = purchaseBill.PurchaseOrder?.PoNumber,
+            SupplierId = purchaseBill.SupplierId,
+            SupplierName = purchaseBill.Supplier?.Name ?? string.Empty,
+            InvoiceNumber = purchaseBill.InvoiceNumber,
+            InvoiceDate = purchaseBill.InvoiceDateUtc,
+            Currency = purchaseBill.Currency,
+            Subtotal = RoundMoney(purchaseBill.Subtotal),
+            TaxTotal = RoundMoney(purchaseBill.TaxTotal),
+            GrandTotal = RoundMoney(purchaseBill.GrandTotal),
+            SourceType = purchaseBill.SourceType,
+            Notes = purchaseBill.Notes,
+            CreatedAtUtc = purchaseBill.CreatedAtUtc,
+            Items = purchaseBill.Items
+                .OrderBy(x => x.CreatedAtUtc)
+                .Select(x => new PurchaseBillItemResponse
+                {
+                    Id = x.Id,
+                    ProductId = x.ProductId,
+                    ProductName = x.ProductNameSnapshot,
+                    SupplierItemName = x.SupplierItemName,
+                    Quantity = RoundQuantity(x.Quantity),
+                    UnitCost = RoundMoney(x.UnitCost),
+                    LineTotal = RoundMoney(x.LineTotal)
+                })
+                .ToList()
+        };
+    }
+
     private static decimal ComputeWeightedCost(
         decimal currentCostPrice,
         decimal currentStockQty,
@@ -1384,6 +1856,17 @@ public sealed class PurchaseService(
 
         var weighted = ((currentCostPrice * safeCurrentQty) + (incomingUnitCost * safeIncomingQty)) / denominator;
         return RoundMoney(weighted);
+    }
+
+    private async Task<Guid?> GetCurrentStoreIdAsync(CancellationToken cancellationToken)
+    {
+        var user = httpContextAccessor.HttpContext?.User;
+        if (user is null)
+        {
+            return null;
+        }
+
+        return await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
     }
 
     private static decimal RoundMoney(decimal value) =>
@@ -1753,7 +2236,7 @@ public sealed class PurchaseService(
         }
     }
 
-    private enum BillFileKind
+    internal enum BillFileKind
     {
         Unknown = 0,
         Pdf = 1,

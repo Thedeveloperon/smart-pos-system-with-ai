@@ -74,8 +74,46 @@ public sealed class Supplier
     public DateTimeOffset? UpdatedAtUtc { get; set; }
 
     public ICollection<PurchaseBill> PurchaseBills { get; set; } = [];
+    public ICollection<PurchaseOrder> PurchaseOrders { get; set; } = [];
     public ICollection<ProductSupplier> ProductSuppliers { get; set; } = [];
     public ICollection<ProductBatch> ProductBatches { get; set; } = [];
+}
+
+public sealed class PurchaseOrder
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? StoreId { get; set; }
+    public Guid SupplierId { get; set; }
+    public required string PoNumber { get; set; }
+    public DateTimeOffset PoDate { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? ExpectedDeliveryDate { get; set; }
+    public PurchaseOrderStatus Status { get; set; } = PurchaseOrderStatus.Draft;
+    public string Currency { get; set; } = "LKR";
+    public decimal SubtotalEstimate { get; set; }
+    public string? Notes { get; set; }
+    public Guid? CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public required Supplier Supplier { get; set; }
+    public AppUser? CreatedByUser { get; set; }
+    public ICollection<PurchaseOrderLine> Lines { get; set; } = [];
+    public ICollection<PurchaseBill> Bills { get; set; } = [];
+}
+
+public sealed class PurchaseOrderLine
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid PurchaseOrderId { get; set; }
+    public Guid ProductId { get; set; }
+    public required string ProductNameSnapshot { get; set; }
+    public decimal QuantityOrdered { get; set; }
+    public decimal QuantityReceived { get; set; }
+    public decimal UnitCostEstimate { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+
+    public required PurchaseOrder PurchaseOrder { get; set; }
+    public required Product Product { get; set; }
 }
 
 public sealed class ProductSupplier
@@ -133,6 +171,7 @@ public sealed class PurchaseBill
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid? StoreId { get; set; }
     public string? ImportRequestId { get; set; }
+    public Guid? PurchaseOrderId { get; set; }
     public Guid SupplierId { get; set; }
     public required string InvoiceNumber { get; set; }
     public DateTimeOffset InvoiceDateUtc { get; set; } = DateTimeOffset.UtcNow;
@@ -149,6 +188,7 @@ public sealed class PurchaseBill
     public DateTimeOffset? UpdatedAtUtc { get; set; }
 
     public required Supplier Supplier { get; set; }
+    public PurchaseOrder? PurchaseOrder { get; set; }
     public AppUser? CreatedByUser { get; set; }
     public ICollection<PurchaseBillItem> Items { get; set; } = [];
     public ICollection<BillDocument> Documents { get; set; } = [];
@@ -1116,6 +1156,15 @@ public enum StockMovementType
     ExpiryWriteOff = 5,
     StocktakeReconciliation = 6,
     Transfer = 7
+}
+
+public enum PurchaseOrderStatus
+{
+    Draft = 1,
+    Sent = 2,
+    PartiallyReceived = 3,
+    Received = 4,
+    Cancelled = 5
 }
 
 public enum StockMovementRef
