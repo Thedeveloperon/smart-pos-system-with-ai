@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import CheckoutPanel, { type CheckoutPanelHandle } from "./CheckoutPanel";
 import type { CartItem } from "./types";
+import type { CashDrawerState } from "./cash-session/types";
 
 vi.mock("@/lib/sound", () => ({
   primeConfirmationSound: vi.fn().mockResolvedValue(undefined),
@@ -27,6 +28,18 @@ const sampleItems: CartItem[] = [
   },
 ];
 
+const sampleCashDrawer: CashDrawerState = {
+  counts: [
+    { denomination: 50, quantity: 1 },
+    { denomination: 20, quantity: 0 },
+    { denomination: 10, quantity: 0 },
+    { denomination: 5, quantity: 0 },
+    { denomination: 2, quantity: 0 },
+    { denomination: 1, quantity: 0 },
+  ],
+  total: 50,
+};
+
 describe("CheckoutPanel shortcut integration", () => {
   it("blocks complete sale when cart is empty", () => {
     const panelRef = createRef<CheckoutPanelHandle>();
@@ -36,6 +49,7 @@ describe("CheckoutPanel shortcut integration", () => {
       <CheckoutPanel
         ref={panelRef}
         items={[]}
+        cashDrawer={sampleCashDrawer}
         onCompleteSale={onCompleteSale}
         onHoldBill={vi.fn()}
         onCancelSale={vi.fn()}
@@ -56,6 +70,7 @@ describe("CheckoutPanel shortcut integration", () => {
       <CheckoutPanel
         ref={panelRef}
         items={sampleItems}
+        cashDrawer={sampleCashDrawer}
         onCompleteSale={onCompleteSale}
         onHoldBill={vi.fn()}
         onCancelSale={vi.fn()}
@@ -81,6 +96,7 @@ describe("CheckoutPanel shortcut integration", () => {
       <CheckoutPanel
         ref={panelRef}
         items={sampleItems}
+        cashDrawer={sampleCashDrawer}
         onCompleteSale={onCompleteSale}
         onHoldBill={vi.fn()}
         onCancelSale={vi.fn()}
@@ -107,6 +123,7 @@ describe("CheckoutPanel shortcut integration", () => {
       <CheckoutPanel
         ref={panelRef}
         items={sampleItems}
+        cashDrawer={sampleCashDrawer}
         onCompleteSale={onCompleteSale}
         onHoldBill={vi.fn()}
         onCancelSale={vi.fn()}
@@ -133,6 +150,7 @@ describe("CheckoutPanel shortcut integration", () => {
       <CheckoutPanel
         ref={panelRef}
         items={sampleItems}
+        cashDrawer={sampleCashDrawer}
         onCompleteSale={onCompleteSale}
         onHoldBill={vi.fn()}
         onCancelSale={vi.fn()}
@@ -175,7 +193,7 @@ describe("CheckoutPanel shortcut integration", () => {
     expect(await screen.findByText(/Selected total: Rs\./)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Proceed - Rs. 50" }));
 
-    expect(onCompleteSale).toHaveBeenCalledWith("cash", 150, "", [], expect.any(Array), true, 0);
+    expect(onCompleteSale).toHaveBeenCalledWith("cash", 150, "", [], expect.any(Array), true, 50);
   });
 
   it("opens cash workflow dialog through imperative shortcut action", async () => {
@@ -185,6 +203,7 @@ describe("CheckoutPanel shortcut integration", () => {
       <CheckoutPanel
         ref={panelRef}
         items={sampleItems}
+        cashDrawer={sampleCashDrawer}
         onCompleteSale={vi.fn()}
         onHoldBill={vi.fn()}
         onCancelSale={vi.fn()}

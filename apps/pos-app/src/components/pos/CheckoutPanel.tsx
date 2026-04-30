@@ -291,6 +291,7 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
         <CashReceivedDialog
           open={showCashCountDialog}
           expectedCash={grandTotal}
+          availableCounts={cashDrawer?.counts ?? []}
           onClose={() => setShowCashCountDialog(false)}
           onTotalChange={(total) => setCashReceived(String(total))}
           onConfirm={(counts, total) => {
