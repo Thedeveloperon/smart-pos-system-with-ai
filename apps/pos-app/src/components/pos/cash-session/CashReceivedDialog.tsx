@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -6,14 +6,22 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Banknote, CheckCircle2 } from "lucide-react";
+import { AlertTriangle, Banknote, CheckCircle2 } from "lucide-react";
 import { playCashCountSound, primeConfirmationSound } from "@/lib/sound";
 import DenominationCounter from "./DenominationCounter";
 import type { DenominationCount } from "./types";
+import {
+  buildTopUpCounts,
+  getDrawerChangeSuggestion,
+  getExactChangeBreakdown,
+  mergeDenominationCounts,
+  type OptionalPayoutSuggestion,
+} from "./changeBreakdown";
 
 interface CashReceivedDialogProps {
   open: boolean;
   expectedCash: number;
+  availableCounts?: DenominationCount[];
   onClose: () => void;
   onConfirm: (counts: DenominationCount[], total: number) => void;
   onTotalChange?: (total: number) => void;
@@ -22,6 +30,7 @@ interface CashReceivedDialogProps {
 const CashReceivedDialog = ({
   open,
   expectedCash,
+  availableCounts = [],
   onClose,
   onConfirm,
   onTotalChange,
@@ -29,6 +38,24 @@ const CashReceivedDialog = ({
   const [counts, setCounts] = useState<DenominationCount[]>([]);
   const [total, setTotal] = useState(0);
   const [resetKey, setResetKey] = useState(0);
+  const [flashTotal, setFlashTotal] = useState(false);
+  const [flashDenominations, setFlashDenominations] = useState<number[]>([]);
+  const [appliedSuggestion, setAppliedSuggestion] = useState<OptionalPayoutSuggestion | null>(null);
+  const appliedSuggestionKeyRef = useRef<string | null>(null);
+  const flashTimerRef = useRef<number | null>(null);
+  const availableCountsKey = useMemo(
+    () => availableCounts.map((count) => `${count.denomination}:${count.quantity}`).join("|"),
+    [availableCounts],
+  );
+  const changeDue = Math.max(0, Math.round(total - expectedCash));
+  const exactChangeBreakdown = useMemo(
+    () => (changeDue > 0 ? getExactChangeBreakdown(changeDue, availableCounts) : null),
+    [availableCounts, changeDue],
+  );
+  const drawerSuggestion = useMemo(
+    () => (changeDue > 0 && !exactChangeBreakdown ? getDrawerChangeSuggestion(changeDue, availableCounts) : null),
+    [availableCounts, changeDue, exactChangeBreakdown],
+  );
 
   useEffect(() => {
     if (open) {
@@ -36,8 +63,51 @@ const CashReceivedDialog = ({
       setTotal(0);
       onTotalChange?.(0);
       setResetKey((value) => value + 1);
+      setFlashTotal(false);
+      setFlashDenominations([]);
+      setAppliedSuggestion(null);
+      appliedSuggestionKeyRef.current = null;
+      if (flashTimerRef.current !== null) {
+        window.clearTimeout(flashTimerRef.current);
+        flashTimerRef.current = null;
+      }
     }
-  }, [open]);
+  }, [onTotalChange, open]);
+
+  useEffect(() => {
+    if (!open || !drawerSuggestion) {
+      return;
+    }
+
+    const suggestionKey = `${availableCountsKey}:${changeDue}:${drawerSuggestion.payoutAmount}`;
+    if (appliedSuggestionKeyRef.current === suggestionKey) {
+      return;
+    }
+
+    appliedSuggestionKeyRef.current = suggestionKey;
+
+    const topUpCounts = buildTopUpCounts(drawerSuggestion.requestAmount);
+    const nextCounts = mergeDenominationCounts(counts, topUpCounts);
+    const nextTotal = total + drawerSuggestion.requestAmount;
+
+    setCounts(nextCounts);
+    setTotal(nextTotal);
+    onTotalChange?.(nextTotal);
+    setResetKey((value) => value + 1);
+    setFlashDenominations(topUpCounts.filter((count) => count.quantity > 0).map((count) => count.denomination));
+    setFlashTotal(true);
+    setAppliedSuggestion(drawerSuggestion);
+
+    if (flashTimerRef.current !== null) {
+      window.clearTimeout(flashTimerRef.current);
+    }
+
+    flashTimerRef.current = window.setTimeout(() => {
+      setFlashTotal(false);
+      setFlashDenominations([]);
+      flashTimerRef.current = null;
+    }, 900);
+  }, [availableCountsKey, changeDue, counts, drawerSuggestion, onTotalChange, open, total]);
 
   const handleCountChange = (newCounts: DenominationCount[], newTotal: number) => {
     setCounts(newCounts);
@@ -77,10 +147,70 @@ const CashReceivedDialog = ({
           </DialogHeader>
 
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-6 py-4">
+            {changeDue > 0 ? (
+              <div
+                className={`rounded-2xl border px-4 py-3 ${
+                  exactChangeBreakdown
+                    ? "border-emerald-200 bg-emerald-50"
+                    : "border-amber-300 bg-amber-50"
+                }`}
+              >
+                <div className="flex items-start gap-2">
+                  <AlertTriangle
+                    className={`mt-0.5 h-4 w-4 shrink-0 ${
+                      exactChangeBreakdown ? "text-emerald-600" : "text-amber-600"
+                    }`}
+                  />
+                  <div className="min-w-0">
+                    <p
+                      className={`text-xs font-semibold uppercase tracking-[0.18em] ${
+                        exactChangeBreakdown ? "text-emerald-700" : "text-amber-800"
+                      }`}
+                    >
+                      {exactChangeBreakdown ? "Change available" : "Insufficient change available"}
+                    </p>
+                    {exactChangeBreakdown ? (
+                      <p className="mt-1 text-sm text-emerald-800">
+                        The drawer can return the current balance with the available denominations.
+                      </p>
+                    ) : drawerSuggestion ? (
+                      <p className="mt-1 text-sm text-amber-900">
+                        Insufficient change available. Please request{" "}
+                        <span className="font-semibold tabular-nums animate-pulse text-amber-700">
+                          Rs. {drawerSuggestion.requestAmount.toLocaleString()}
+                        </span>{" "}
+                        from the customer and return{" "}
+                        <span className="font-semibold tabular-nums animate-pulse text-amber-700">
+                          Rs. {drawerSuggestion.payoutAmount.toLocaleString()}
+                        </span>{" "}
+                        instead.
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-sm text-red-700">
+                        Insufficient change available in the drawer. Please choose another cash amount.
+                      </p>
+                    )}
+                    {!exactChangeBreakdown && drawerSuggestion ? (
+                      <p className="mt-1 text-xs text-amber-700">
+                        The cash total has been updated automatically.
+                      </p>
+                    ) : null}
+                    {appliedSuggestion ? (
+                      <p className="mt-2 inline-flex rounded-full border border-amber-200 bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 animate-pulse">
+                        Auto-added Rs. {appliedSuggestion.requestAmount.toLocaleString()} to match Rs. {appliedSuggestion.payoutAmount.toLocaleString()}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             <div className="min-h-0 flex-1 overflow-hidden">
               <DenominationCounter
                 key={resetKey}
+                initialCounts={counts}
                 onChange={handleCountChange}
+                flashDenominations={flashDenominations}
               />
             </div>
 
@@ -111,7 +241,11 @@ const CashReceivedDialog = ({
                   Proceed - Rs. {total.toLocaleString()}
                 </Button>
               </div>
-              <p className="text-lg font-bold tabular-nums text-slate-800 sm:ml-auto sm:text-xl">
+              <p
+                className={`text-lg font-bold tabular-nums text-slate-800 sm:ml-auto sm:text-xl ${
+                  flashTotal ? "animate-pulse text-amber-700" : ""
+                }`}
+              >
                 Rs. {total.toLocaleString()}
               </p>
             </div>
