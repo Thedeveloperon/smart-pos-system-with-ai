@@ -157,7 +157,13 @@ const DenominationCounter = ({
             </span>
           </div>
 
-          <div className={`grid auto-rows-min content-start grid-cols-1 ${compact ? "flex-1 min-h-0 gap-0.5 overflow-y-auto pr-0.5" : "flex-1 min-h-0 gap-0.5 overflow-y-auto pr-1"}`}>
+          <div
+            className={`grid auto-rows-min content-start grid-cols-1 ${
+              compact
+                ? "flex-1 min-h-0 gap-0.5 overflow-y-scroll scrollbar-thin pr-0.5"
+                : "flex-1 min-h-0 gap-0.5 overflow-y-scroll scrollbar-thin pr-1"
+            }`}
+          >
             {notes.map((d) => renderItem(d, "note"))}
           </div>
         </section>
@@ -173,7 +179,13 @@ const DenominationCounter = ({
             </span>
           </div>
 
-          <div className={`grid auto-rows-min content-start grid-cols-1 ${compact ? "flex-1 min-h-0 gap-0.5 overflow-y-auto pr-0.5" : "flex-1 min-h-0 gap-0.5 overflow-y-auto pr-1"}`}>
+          <div
+            className={`grid auto-rows-min content-start grid-cols-1 ${
+              compact
+                ? "flex-1 min-h-0 gap-0.5 overflow-y-scroll scrollbar-thin pr-0.5"
+                : "flex-1 min-h-0 gap-0.5 overflow-y-scroll scrollbar-thin pr-1"
+            }`}
+          >
             {coins.map((d) => renderItem(d, "coin"))}
           </div>
         </section>

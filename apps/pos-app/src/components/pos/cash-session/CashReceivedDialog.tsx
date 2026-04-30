@@ -127,7 +127,7 @@ const CashReceivedDialog = ({
             </div>
           </DialogHeader>
 
-          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-6 py-4">
+          <div className="flex-1 overflow-y-auto px-6 py-4">
             {changeDue > 0 ? (
               <div
                 className={`rounded-2xl border px-4 py-3 ${
@@ -166,7 +166,7 @@ const CashReceivedDialog = ({
               </div>
             ) : null}
 
-            <div className="min-h-0 flex-1 overflow-hidden">
+            <div className="mt-4">
               <DenominationCounter
                 key={resetKey}
                 initialCounts={counts}

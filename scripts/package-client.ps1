@@ -93,6 +93,7 @@ $shortcutIconOutput = Join-Path $outputRoot "lanka-pos.ico"
 $shortcutIconPngSource = Join-Path $frontendDir "public/favicon.png"
 $shortcutIconIcoFallback = Join-Path $frontendDir "public/favicon.ico"
 $shortcutIconWritten = $false
+$iconGenerationFailed = $false
 
 $pythonCommand = Get-Command python3 -ErrorAction SilentlyContinue
 if ($null -eq $pythonCommand) {
@@ -113,12 +114,19 @@ img.save(target, format='ICO', sizes=sizes)
     if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $shortcutIconOutput)) {
         $shortcutIconWritten = $true
     }
+    elseif ($LASTEXITCODE -ne 0) {
+        $iconGenerationFailed = $true
+        Write-Warning "Shortcut icon generation failed with exit code $LASTEXITCODE. Falling back to the checked-in .ico file if available."
+    }
 }
 
 if (-not $shortcutIconWritten -and (Test-Path -LiteralPath $shortcutIconIcoFallback)) {
     Write-Host "Using fallback shortcut icon: $shortcutIconIcoFallback" -ForegroundColor Yellow
     Copy-Item -Path $shortcutIconIcoFallback -Destination $shortcutIconOutput -Force
     $shortcutIconWritten = $true
+    if ($iconGenerationFailed) {
+        $global:LASTEXITCODE = 0
+    }
 }
 
 if (-not $shortcutIconWritten) {
