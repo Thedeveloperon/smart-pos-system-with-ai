@@ -41,7 +41,6 @@ const CashReceivedDialog = ({
   const [flashDenominations, setFlashDenominations] = useState<number[]>([]);
   const onTotalChangeRef = useRef(onTotalChange);
   const hasAppliedSuggestionRef = useRef(false);
-  const flashTimerRef = useRef<number | null>(null);
   const changeDue = Math.max(0, Math.round(total - expectedCash));
   const exactChangeBreakdown = useMemo(
     () => (changeDue > 0 ? getExactChangeBreakdown(changeDue, availableCounts) : null),
@@ -65,10 +64,6 @@ const CashReceivedDialog = ({
       setSuggestionMessage(null);
       setFlashDenominations([]);
       hasAppliedSuggestionRef.current = false;
-      if (flashTimerRef.current !== null) {
-        window.clearTimeout(flashTimerRef.current);
-        flashTimerRef.current = null;
-      }
     }
   }, [open]);
 
@@ -91,15 +86,6 @@ const CashReceivedDialog = ({
     setSuggestionMessage(drawerNotice.message);
     setFlashDenominations(flashedDenominations);
     hasAppliedSuggestionRef.current = true;
-
-    if (flashTimerRef.current !== null) {
-      window.clearTimeout(flashTimerRef.current);
-    }
-
-    flashTimerRef.current = window.setTimeout(() => {
-      setFlashDenominations([]);
-      flashTimerRef.current = null;
-    }, 850);
   }, [changeDue, counts, drawerNotice, open, total]);
 
   const handleCountChange = (newCounts: DenominationCount[], newTotal: number) => {
@@ -107,6 +93,7 @@ const CashReceivedDialog = ({
     setTotal(newTotal);
     onTotalChangeRef.current?.(newTotal);
     setSuggestionMessage(null);
+    setFlashDenominations([]);
   };
 
   const handleProceed = () => {
@@ -140,7 +127,7 @@ const CashReceivedDialog = ({
             </div>
           </DialogHeader>
 
-          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-6 py-4">
+          <div className="flex-1 overflow-y-auto px-6 py-4">
             {changeDue > 0 ? (
               <div
                 className={`rounded-2xl border px-4 py-3 ${
@@ -179,7 +166,7 @@ const CashReceivedDialog = ({
               </div>
             ) : null}
 
-            <div className="min-h-0 flex-1 overflow-hidden">
+            <div className="mt-4">
               <DenominationCounter
                 key={resetKey}
                 initialCounts={counts}

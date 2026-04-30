@@ -15,15 +15,11 @@ import {
   LogOut,
   User,
   FileText,
-  Lock,
   BarChart3,
   Upload,
   Settings2,
-  CloudUpload,
-  Loader2,
   KeyRound,
   Menu,
-  Sparkles,
   Bell,
   Boxes,
 } from "lucide-react";
@@ -80,18 +76,11 @@ const HeaderBar = ({
   inventoryAlertCount = 0,
   onReports,
   onImportSupplierBill,
-  onAiInsights,
-  aiCredits = null,
-  isAiCreditLow = false,
-  cloudPortalUrl,
   onReminders,
   openReminderCount = 0,
   todayIssueCount = 0,
   onShopSettings,
   onMyAccountLicenses,
-  onSyncOffline,
-  offlinePendingCount = 0,
-  isOfflineSyncing = false,
   onSignOut,
   onAuditLog,
   onEndShift,
@@ -157,40 +146,6 @@ const HeaderBar = ({
           </Button>
         )}
 
-        {onAiInsights && allowCashier(cashierToolbarVisibility?.aiInsights) && (
-          <div className="flex flex-col items-center gap-0.5">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onAiInsights}
-              className="text-pos-header-foreground hover:bg-pos-header-foreground/10 relative"
-            >
-              <Sparkles className="h-4 w-4" />
-              <span className="hidden md:inline ml-1">AI Insights</span>
-              {aiCredits !== null && (
-                <Badge
-                  className={`absolute -top-1 -right-1 h-5 min-w-5 px-1.5 flex items-center justify-center text-[10px] text-white ${
-                    isAiCreditLow ? "bg-amber-500" : "bg-emerald-500"
-                  }`}
-                >
-                  {isAiCreditLow ? "!" : aiCredits > 999 ? "999+" : aiCredits.toFixed(0)}
-                </Badge>
-              )}
-            </Button>
-            {isAiCreditLow && cloudPortalUrl && (
-              <a
-                href={`${cloudPortalUrl}/en/account`}
-                target="_blank"
-                rel="noreferrer"
-                className="text-[10px] text-amber-400 hover:text-amber-300 leading-none"
-                onClick={(event) => event.stopPropagation()}
-              >
-                Top Up
-              </a>
-            )}
-          </div>
-        )}
-
         {onReminders && allowCashier(cashierToolbarVisibility?.reminders) && (
           <Button
             variant="ghost"
@@ -237,18 +192,6 @@ const HeaderBar = ({
           </Button>
         )}
 
-        {hasActiveSession && onEndShift && allowCashier(cashierToolbarVisibility?.endShift) && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onEndShift}
-            className="text-pos-header-foreground hover:bg-destructive/20 hover:text-destructive"
-          >
-            <Lock className="h-4 w-4" />
-            <span className="hidden md:inline ml-1">End Shift</span>
-          </Button>
-        )}
-
         {allowCashier(cashierToolbarVisibility?.importBill) && (
           <Button
             variant="ghost"
@@ -282,24 +225,6 @@ const HeaderBar = ({
           >
             <KeyRound className="h-4 w-4" />
             <span className="hidden md:inline ml-1">My Licenses</span>
-          </Button>
-        )}
-
-        {onSyncOffline && allowCashier(cashierToolbarVisibility?.sync) && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onSyncOffline}
-            disabled={isOfflineSyncing}
-            className="text-pos-header-foreground hover:bg-pos-header-foreground/10 relative"
-          >
-            {isOfflineSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudUpload className="h-4 w-4" />}
-            <span className="hidden md:inline ml-1">Sync</span>
-            {offlinePendingCount > 0 && (
-              <Badge className="absolute -top-1 -right-1 h-5 min-w-5 px-1.5 flex items-center justify-center text-[10px] bg-warning text-warning-foreground">
-                {offlinePendingCount > 99 ? "99+" : offlinePendingCount}
-              </Badge>
-            )}
           </Button>
         )}
 
@@ -368,22 +293,6 @@ const HeaderBar = ({
               </DropdownMenuItem>
             )}
 
-            {onAiInsights && allowCashier(cashierToolbarVisibility?.aiInsights) && (
-              <DropdownMenuItem onSelect={() => onAiInsights()} className="min-h-11 px-3 py-2 text-base">
-                <Sparkles className="mr-3 h-5 w-5" />
-                AI Insights
-                {aiCredits !== null && (
-                  <Badge
-                    className={`ml-auto h-5 min-w-5 px-1 text-[10px] text-white ${
-                      isAiCreditLow ? "bg-amber-500" : "bg-emerald-500"
-                    }`}
-                  >
-                    {isAiCreditLow ? "Low" : aiCredits > 999 ? "999+" : aiCredits.toFixed(0)}
-                  </Badge>
-                )}
-              </DropdownMenuItem>
-            )}
-
             {onReminders && allowCashier(cashierToolbarVisibility?.reminders) && (
               <DropdownMenuItem onSelect={() => onReminders()} className="min-h-11 px-3 py-2 text-base">
                 <Bell className="mr-3 h-5 w-5" />
@@ -415,13 +324,6 @@ const HeaderBar = ({
               </DropdownMenuItem>
             )}
 
-            {hasActiveSession && onEndShift && allowCashier(cashierToolbarVisibility?.endShift) && (
-              <DropdownMenuItem onSelect={() => onEndShift()} className="min-h-11 px-3 py-2 text-base">
-                <Lock className="mr-3 h-5 w-5" />
-                End Shift
-              </DropdownMenuItem>
-            )}
-
             {allowCashier(cashierToolbarVisibility?.importBill) && (
               <DropdownMenuItem onSelect={() => onImportSupplierBill()} className="min-h-11 px-3 py-2 text-base">
                 <Upload className="mr-3 h-5 w-5" />
@@ -440,13 +342,6 @@ const HeaderBar = ({
               <DropdownMenuItem onSelect={() => onMyAccountLicenses()} className="min-h-11 px-3 py-2 text-base">
                 <KeyRound className="mr-3 h-5 w-5" />
                 My Licenses
-              </DropdownMenuItem>
-            )}
-
-            {onSyncOffline && allowCashier(cashierToolbarVisibility?.sync) && (
-              <DropdownMenuItem onSelect={() => onSyncOffline()} className="min-h-11 px-3 py-2 text-base">
-                <CloudUpload className="mr-3 h-5 w-5" />
-                Sync
               </DropdownMenuItem>
             )}
 
