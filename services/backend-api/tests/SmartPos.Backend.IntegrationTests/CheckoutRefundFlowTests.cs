@@ -108,6 +108,18 @@ public sealed class CheckoutRefundFlowTests(CustomWebApplicationFactory factory)
         var paymentBreakdown = FirstObjectFromArray(finalReceipt, "payment_breakdown");
         var reversedAmount = TestJson.GetDecimal(paymentBreakdown, "reversed_amount");
         Assert.Equal(saleGrandTotal, reversedAmount);
+
+        var transactionsReport = await TestJson.ReadObjectAsync(
+            await client.GetAsync("/api/reports/transactions"));
+        var reportSale = transactionsReport["items"]!
+            .AsArray()
+            .OfType<JsonObject>()
+            .FirstOrDefault(item => Guid.Parse(TestJson.GetString(item, "sale_id")) == saleId)
+            ?? throw new InvalidOperationException("Completed sale was not found in the transactions report.");
+        var reportLineItem = FirstObjectFromArray(reportSale, "line_items");
+
+        Assert.Equal(productId, Guid.Parse(TestJson.GetString(reportLineItem, "product_id")));
+        Assert.Equal(2m, TestJson.GetDecimal(reportLineItem, "quantity"));
     }
 
     [Fact]

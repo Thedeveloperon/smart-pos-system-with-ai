@@ -339,11 +339,6 @@ const ShopProfileDialog = ({
               <div className="mt-4 grid gap-3 md:grid-cols-2">
                 {[
                   {
-                    key: "showNewItemForCashier",
-                    title: "New item",
-                    description: "Show the quick add-item entry in the header.",
-                  },
-                  {
                     key: "showManageForCashier",
                     title: "Manage",
                     description: "Show the product management entry in the header.",

@@ -58,6 +58,12 @@ public sealed class BrandItemResponse
     [JsonPropertyName("product_count")]
     public int ProductCount { get; set; }
 
+    [JsonPropertyName("can_delete")]
+    public bool CanDelete { get; set; }
+
+    [JsonPropertyName("delete_block_reason")]
+    public string? DeleteBlockReason { get; set; }
+
     [JsonPropertyName("created_at")]
     public DateTimeOffset CreatedAt { get; set; }
 
@@ -114,6 +120,12 @@ public sealed class SupplierItemResponse
 
     [JsonPropertyName("linked_product_count")]
     public int LinkedProductCount { get; set; }
+
+    [JsonPropertyName("can_delete")]
+    public bool CanDelete { get; set; }
+
+    [JsonPropertyName("delete_block_reason")]
+    public string? DeleteBlockReason { get; set; }
 
     [JsonPropertyName("created_at")]
     public DateTimeOffset CreatedAt { get; set; }
