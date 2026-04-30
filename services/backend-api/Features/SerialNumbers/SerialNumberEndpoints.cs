@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Infrastructure;
@@ -119,19 +120,18 @@ public static class SerialNumberEndpoints
             }).ToList();
 
             dbContext.SerialNumbers.AddRange(items);
-            await dbContext.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                return Results.Conflict(new { message = "Failed to save serial number changes. Refresh and try again." });
+            }
 
             return Results.Ok(new
             {
-                items = items.Select(x => new
-                {
-                    id = x.Id,
-                    product_id = x.ProductId,
-                    serial_value = x.SerialValue,
-                    status = x.Status,
-                    warranty_expiry_date = x.WarrantyExpiryDate,
-                    created_at = x.CreatedAtUtc
-                }).ToList()
+                items = items.Select(ToSerialResponse).ToList()
             });
         })
         .WithName("AddProductSerialNumbers")
@@ -161,20 +161,16 @@ public static class SerialNumberEndpoints
             serial.Status = request.Status;
             serial.WarrantyExpiryDate = request.WarrantyExpiryDate;
             serial.UpdatedAtUtc = DateTimeOffset.UtcNow;
-            await dbContext.SaveChangesAsync(cancellationToken);
-
-            return Results.Ok(new
+            try
             {
-                id = serial.Id,
-                product_id = serial.ProductId,
-                serial_value = serial.SerialValue,
-                status = serial.Status,
-                sale_id = serial.SaleId,
-                sale_item_id = serial.SaleItemId,
-                refund_id = serial.RefundId,
-                warranty_expiry_date = serial.WarrantyExpiryDate,
-                updated_at = serial.UpdatedAtUtc
-            });
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                return Results.Conflict(new { message = "Failed to save serial number changes. Refresh and try again." });
+            }
+
+            return Results.Ok(ToSerialResponse(serial));
         })
         .WithName("UpdateProductSerialNumber")
         .WithOpenApi();
@@ -284,15 +280,36 @@ public static class SerialNumberEndpoints
             _ => false
         };
     }
+
+    private static object ToSerialResponse(SerialNumber serial)
+    {
+        return new
+        {
+            id = serial.Id,
+            product_id = serial.ProductId,
+            serial_value = serial.SerialValue,
+            status = serial.Status,
+            sale_id = serial.SaleId,
+            sale_item_id = serial.SaleItemId,
+            refund_id = serial.RefundId,
+            warranty_expiry_date = serial.WarrantyExpiryDate,
+            created_at = serial.CreatedAtUtc,
+            updated_at = serial.UpdatedAtUtc
+        };
+    }
 }
 
 public sealed class AddSerialNumbersRequest
 {
+    [JsonPropertyName("serials")]
     public List<string> Serials { get; set; } = [];
 }
 
 public sealed class UpdateSerialNumberRequest
 {
+    [JsonPropertyName("status")]
     public SerialNumberStatus Status { get; set; } = SerialNumberStatus.Available;
+
+    [JsonPropertyName("warranty_expiry_date")]
     public DateTimeOffset? WarrantyExpiryDate { get; set; }
 }

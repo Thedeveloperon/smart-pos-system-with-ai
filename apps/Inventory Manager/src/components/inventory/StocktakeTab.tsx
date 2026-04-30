@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import {
   completeStocktakeSession,
   createStocktakeSession,
@@ -50,50 +51,74 @@ export default function StocktakeTab() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [readonlyMode, setReadonlyMode] = useState(false);
 
-  const reload = () => {
+  const reload = async () => {
     setLoading(true);
-    fetchStocktakeSessions()
-      .then(setSessions)
-      .finally(() => setLoading(false));
+    try {
+      setSessions(await fetchStocktakeSessions());
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load stocktake sessions.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    reload();
+    void reload();
   }, []);
 
   const openSession = async (s: StocktakeSession, readonly: boolean) => {
-    const { session, items } = await getStocktakeSession(s.id);
-    setActiveSession(session);
-    setItems(items);
-    setReadonlyMode(readonly);
-    setSheetOpen(true);
+    try {
+      const { session, items } = await getStocktakeSession(s.id);
+      setActiveSession(session);
+      setItems(items);
+      setReadonlyMode(readonly);
+      setSheetOpen(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to open stocktake session.");
+    }
   };
 
   const handleStart = async (s: StocktakeSession) => {
-    await startStocktakeSession(s.id);
-    reload();
+    try {
+      await startStocktakeSession(s.id);
+      await reload();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to start stocktake session.");
+    }
   };
 
   const handleNew = async () => {
-    const created = await createStocktakeSession();
-    await startStocktakeSession(created.id);
-    reload();
-    openSession({ ...created, status: "InProgress" }, false);
+    try {
+      const created = await createStocktakeSession();
+      await startStocktakeSession(created.id);
+      await reload();
+      await openSession({ ...created, status: "InProgress" }, false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to create stocktake session.");
+    }
   };
 
   const handleCount = async (item: StocktakeItem, value: string) => {
     const qty = Number(value);
     if (Number.isNaN(qty)) return;
-    const updated = await updateStocktakeItem(item.session_id, item.id, qty);
-    setItems((prev) => prev.map((i) => (i.id === item.id ? updated : i)));
+    try {
+      const updated = await updateStocktakeItem(item.session_id, item.id, qty);
+      setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, ...updated } : i)));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update stocktake count.");
+    }
   };
 
   const handleComplete = async () => {
     if (!activeSession) return;
-    await completeStocktakeSession(activeSession.id);
-    setConfirmOpen(false);
-    setSheetOpen(false);
-    reload();
+    try {
+      await completeStocktakeSession(activeSession.id);
+      setConfirmOpen(false);
+      setSheetOpen(false);
+      await reload();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to complete stocktake session.");
+    }
   };
 
   return (

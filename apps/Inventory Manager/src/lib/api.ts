@@ -406,13 +406,14 @@ type BackendProductBatch = {
 
 type BackendStocktakeSession = {
   id: string;
-  store_id: string;
+  store_id?: string;
   status: StocktakeSession["status"];
   started_at: string;
   completed_at?: string | null;
   created_by_user_id?: string | null;
-  item_count: number;
-  variance_count: number;
+  item_count?: number;
+  variance_count?: number;
+  items?: BackendStocktakeItem[];
 };
 
 type BackendStocktakeItem = {
@@ -777,15 +778,19 @@ function mapBatch(item: BackendProductBatch): ProductBatch {
 }
 
 function mapStocktakeSession(item: BackendStocktakeSession): StocktakeSession {
+  const items = item.items ?? [];
   return {
     id: item.id,
-    store_id: item.store_id,
+    store_id: item.store_id ?? "",
     status: item.status,
     started_at: item.started_at,
     completed_at: item.completed_at ?? undefined,
     created_by_user_id: item.created_by_user_id ?? undefined,
-    item_count: item.item_count,
-    variance_count: item.variance_count,
+    item_count: item.item_count ?? items.length,
+    variance_count:
+      item.variance_count ??
+      items.filter((entry) => entry.variance_quantity != null && entry.variance_quantity !== 0)
+        .length,
   };
 }
 
@@ -1242,6 +1247,16 @@ export async function fetchInventoryDashboard(): Promise<InventoryDashboard> {
     fetchWarrantyClaims(),
   ]);
 
+  if (
+    products.status === "rejected" &&
+    dashboard.status === "rejected" &&
+    expiringBatches.status === "rejected" &&
+    sessions.status === "rejected" &&
+    claims.status === "rejected"
+  ) {
+    throw new Error("Failed to load inventory dashboard.");
+  }
+
   const productItems = products.status === "fulfilled" ? products.value : [];
   const lowStockCount = productItems.filter((p) => (p.stock ?? 0) < 10).length;
   const expiryAlerts =
@@ -1322,7 +1337,7 @@ export async function addSerialNumbers(
     `/api/products/${productId}/serials`,
     {
       method: "POST",
-      body: JSON.stringify(serialValues),
+      body: JSON.stringify({ serials: serialValues }),
     },
   );
   return response.items;
@@ -1423,13 +1438,12 @@ export async function createStocktakeSession(): Promise<StocktakeSession> {
 export async function getStocktakeSession(
   sessionId: string,
 ): Promise<{ session: StocktakeSession; items: StocktakeItem[] }> {
-  const response = await requestJson<{
-    session: BackendStocktakeSession;
-    items: BackendStocktakeItem[];
-  }>(`/api/stocktake/sessions/${sessionId}`);
+  const response = await requestJson<BackendStocktakeSession>(
+    `/api/stocktake/sessions/${sessionId}`,
+  );
   return {
-    session: mapStocktakeSession(response.session),
-    items: response.items.map(mapStocktakeItem),
+    session: mapStocktakeSession(response),
+    items: (response.items ?? []).map(mapStocktakeItem),
   };
 }
 
@@ -1447,15 +1461,18 @@ export async function updateStocktakeItem(
   sessionId: string,
   itemId: string,
   countedQty: number,
-): Promise<StocktakeItem> {
-  const response = await requestJson<BackendStocktakeItem>(
-    `/api/stocktake/sessions/${sessionId}/items/${itemId}`,
-    {
-      method: "PUT",
-      body: JSON.stringify({ counted_quantity: countedQty }),
-    },
-  );
-  return mapStocktakeItem(response);
+): Promise<Pick<StocktakeItem, "id" | "counted_quantity" | "variance_quantity">> {
+  const response = await requestJson<
+    Pick<BackendStocktakeItem, "id" | "counted_quantity" | "variance_quantity">
+  >(`/api/stocktake/sessions/${sessionId}/items/${itemId}`, {
+    method: "PUT",
+    body: JSON.stringify({ counted_quantity: countedQty }),
+  });
+  return {
+    id: response.id,
+    counted_quantity: response.counted_quantity ?? undefined,
+    variance_quantity: response.variance_quantity ?? undefined,
+  };
 }
 
 export async function completeStocktakeSession(sessionId: string): Promise<StocktakeSession> {
@@ -1493,7 +1510,7 @@ export async function fetchWarrantyClaims(
 export async function createWarrantyClaim(data: {
   serial_number_id: string;
   claim_date: string;
-  notes?: string;
+  resolution_notes?: string;
 }): Promise<WarrantyClaim> {
   const response = await requestJson<BackendWarrantyClaim>("/api/warranty-claims", {
     method: "POST",

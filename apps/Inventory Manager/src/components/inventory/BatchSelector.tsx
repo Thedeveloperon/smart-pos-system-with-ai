@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { fetchProductBatches, type ProductBatch } from "@/lib/api";
 import {
   Select,
@@ -19,11 +20,32 @@ export default function BatchSelector({ productId, value, onChange }: Props) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!productId) return;
+    if (!productId) {
+      setBatches([]);
+      return;
+    }
+    let alive = true;
     setLoading(true);
     fetchProductBatches(productId)
-      .then(setBatches)
-      .finally(() => setLoading(false));
+      .then((items) => {
+        if (alive) {
+          setBatches(items);
+        }
+      })
+      .catch((error) => {
+        if (alive) {
+          setBatches([]);
+          toast.error(error instanceof Error ? error.message : "Failed to load batches.");
+        }
+      })
+      .finally(() => {
+        if (alive) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      alive = false;
+    };
   }, [productId]);
 
   return (

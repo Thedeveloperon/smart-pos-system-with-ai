@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import {
   createProductBatch,
   fetchProductBatches,
@@ -68,19 +69,47 @@ export default function BatchesTab() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetchProducts().then((p) => {
-      setProducts(p);
-      const first = p.find((x) => x.is_batch_tracked) ?? p[0];
-      if (first) setProductId(first.id);
-    });
+    let alive = true;
+    fetchProducts()
+      .then((p) => {
+        if (!alive) return;
+        setProducts(p);
+        const first = p.find((x) => x.is_batch_tracked) ?? p[0];
+        if (first) setProductId(first.id);
+      })
+      .catch((error) => {
+        if (alive) {
+          toast.error(error instanceof Error ? error.message : "Failed to load products.");
+        }
+      });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   useEffect(() => {
     if (!productId) return;
+    let alive = true;
     setLoading(true);
     fetchProductBatches(productId)
-      .then(setBatches)
-      .finally(() => setLoading(false));
+      .then((items) => {
+        if (alive) {
+          setBatches(items);
+        }
+      })
+      .catch((error) => {
+        if (alive) {
+          toast.error(error instanceof Error ? error.message : "Failed to load product batches.");
+        }
+      })
+      .finally(() => {
+        if (alive) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      alive = false;
+    };
   }, [productId]);
 
   const openCreate = () => {
@@ -115,13 +144,14 @@ export default function BatchesTab() {
         supplier_id: form.supplier_id || undefined,
       };
       if (editingId) {
-        const updated = await updateProductBatch(productId, editingId, payload);
-        setBatches((prev) => prev.map((b) => (b.id === editingId ? updated : b)));
+        await updateProductBatch(productId, editingId, payload);
       } else {
-        const created = await createProductBatch(productId, payload);
-        setBatches((prev) => [...prev, created]);
+        await createProductBatch(productId, payload);
       }
+      setBatches(await fetchProductBatches(productId));
       setOpen(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save product batch.");
     } finally {
       setSaving(false);
     }
