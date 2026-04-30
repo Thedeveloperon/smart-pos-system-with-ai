@@ -10,7 +10,6 @@ function renderHeaderBar(overrides: Partial<ComponentProps<typeof HeaderBar>> = 
       heldBillsCount={0}
       onHeldBills={vi.fn()}
       onTodaySales={vi.fn()}
-      onNewItem={vi.fn()}
       onImportSupplierBill={vi.fn()}
       onInventoryManager={vi.fn()}
       onAiInsights={vi.fn()}
@@ -80,5 +79,15 @@ describe("HeaderBar AI credit badge", () => {
     fireEvent.click(screen.getByRole("button", { name: "Inventory Manager" }));
 
     expect(onInventoryManager).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not render the new item action in the POS navigation", () => {
+    renderHeaderBar();
+
+    expect(screen.queryByRole("button", { name: "New Item" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
+
+    expect(screen.queryByText("New Item")).not.toBeInTheDocument();
   });
 });

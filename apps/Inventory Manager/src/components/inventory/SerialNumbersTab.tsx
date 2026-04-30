@@ -32,6 +32,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -181,9 +182,12 @@ export default function SerialNumbersTab() {
               <DialogTrigger asChild>
                 <Button size="sm">Add serials</Button>
               </DialogTrigger>
-              <DialogContent>
+              <DialogContent className="sm:max-w-xl">
                 <DialogHeader>
                   <DialogTitle>Add serial numbers</DialogTitle>
+                  <DialogDescription>
+                    Paste serials individually or generate them from a start and end range.
+                  </DialogDescription>
                 </DialogHeader>
                 <SerialInputList value={newSerials} onChange={setNewSerials} />
                 <DialogFooter>

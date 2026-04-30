@@ -6,15 +6,17 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchInventoryDashboard, fetchProducts, type Product } from "@/lib/api";
-import { Pencil, Plus } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Pencil } from "lucide-react";
 
 type Props = {
+  onBack: () => void;
   onOpenInventory: () => void;
   onOpenReports?: () => void;
   onOpenManager?: () => void;
 };
 
-export default function PosHome({ onOpenInventory, onOpenReports, onOpenManager }: Props) {
+export default function PosHome({ onBack, onOpenInventory, onOpenReports, onOpenManager }: Props) {
   const [products, setProducts] = useState<Product[] | null>(null);
   const [alertCount, setAlertCount] = useState(0);
   const [editing, setEditing] = useState<Product | null>(null);
@@ -38,18 +40,25 @@ export default function PosHome({ onOpenInventory, onOpenReports, onOpenManager 
   };
 
   const total = cart.reduce((sum, c) => sum + c.product.price * c.qty, 0);
+  const hasActiveSale = cart.length > 0;
 
   return (
     <div className="min-h-screen pos-shell">
       <HeaderBar
+        onBack={onBack}
         onInventory={onOpenInventory}
         onReports={onOpenReports}
         onManager={onOpenManager}
         inventoryAlertCount={alertCount}
       />
 
-      <div className="mx-auto grid max-w-7xl gap-4 px-4 py-6 lg:grid-cols-3">
-        <div className="lg:col-span-2">
+      <div
+        className={cn(
+          "mx-auto grid max-w-7xl gap-4 px-4 py-6",
+          hasActiveSale && "lg:grid-cols-3",
+        )}
+      >
+        <div className={cn(hasActiveSale && "lg:col-span-2")}>
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Products</CardTitle>
@@ -109,17 +118,12 @@ export default function PosHome({ onOpenInventory, onOpenReports, onOpenManager 
           </Card>
         </div>
 
-        <Card className="h-fit sticky top-4">
-          <CardHeader>
-            <CardTitle className="text-base">Current sale</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {cart.length === 0 ? (
-              <div className="text-sm text-muted-foreground py-8 text-center">
-                <Plus className="mx-auto h-6 w-6 opacity-40 mb-2" />
-                Tap a product to add it.
-              </div>
-            ) : (
+        {hasActiveSale ? (
+          <Card className="h-fit sticky top-4">
+            <CardHeader>
+              <CardTitle className="text-base">Current sale</CardTitle>
+            </CardHeader>
+            <CardContent>
               <div className="space-y-2">
                 {cart.map((c) => (
                   <div key={c.product.id} className="flex justify-between text-sm">
@@ -138,9 +142,9 @@ export default function PosHome({ onOpenInventory, onOpenReports, onOpenManager 
                   Clear
                 </Button>
               </div>
-            )}
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
 
       <ProductManagementDialog

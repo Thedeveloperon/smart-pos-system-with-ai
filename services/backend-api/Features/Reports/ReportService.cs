@@ -22,6 +22,7 @@ public sealed class ReportService(
 
         var sales = await dbContext.Sales
             .AsNoTracking()
+            .Include(x => x.Items)
             .ToListAsync(cancellationToken);
         var refunds = await dbContext.Refunds
             .AsNoTracking()
@@ -42,6 +43,7 @@ public sealed class ReportService(
             var row = rows[date];
             row.SalesCount += 1;
             row.GrossSales = RoundMoney(row.GrossSales + sale.GrandTotal);
+            row.ItemsSold = RoundQuantity(row.ItemsSold + sale.Items.Sum(x => x.Quantity));
         }
 
         foreach (var refund in refunds.Where(x => IsInRange(x.CreatedAtUtc, range)))
@@ -69,6 +71,7 @@ public sealed class ReportService(
             GrossSalesTotal = RoundMoney(items.Sum(x => x.GrossSales)),
             RefundedTotal = RoundMoney(items.Sum(x => x.RefundedTotal)),
             NetSalesTotal = RoundMoney(items.Sum(x => x.NetSales)),
+            ItemsSoldTotal = RoundQuantity(items.Sum(x => x.ItemsSold)),
             Items = items
         };
     }
@@ -79,12 +82,14 @@ public sealed class ReportService(
         int take,
         CancellationToken cancellationToken)
     {
-        var normalizedTake = Math.Clamp(take, 1, 200);
+        var normalizedTake = Math.Clamp(take, 1, 1000);
         var range = NormalizeDateRange(fromDate, toDate, defaultDays: 7);
 
         var sales = await dbContext.Sales
             .AsNoTracking()
             .Include(x => x.Items)
+            .ThenInclude(x => x.Product)
+            .ThenInclude(x => x.Category)
             .Include(x => x.Payments)
             .ToListAsync(cancellationToken);
 
@@ -138,6 +143,20 @@ public sealed class ReportService(
                     NetCollected = RoundMoney(paidTotal - reversedTotal),
                     CustomPayoutUsed = x.CustomPayoutUsed,
                     CashShortAmount = x.CashShortAmount,
+                    LineItems = x.Items
+                        .OrderBy(y => y.ProductNameSnapshot, StringComparer.OrdinalIgnoreCase)
+                        .Select(y => new TransactionReportLineItemRow
+                        {
+                            SaleItemId = y.Id,
+                            ProductId = y.ProductId,
+                            ProductName = y.ProductNameSnapshot,
+                            CategoryId = y.Product.CategoryId,
+                            CategoryName = y.Product.Category?.Name,
+                            Quantity = RoundQuantity(y.Quantity),
+                            UnitPrice = RoundMoney(y.UnitPrice),
+                            LineTotal = RoundMoney(y.LineTotal)
+                        })
+                        .ToList(),
                     PaymentBreakdown = BuildPaymentBreakdown(x.Payments
                         .Select(y => new PaymentSnapshot(y.Method, y.Amount, y.IsReversal)))
                 };
@@ -1290,6 +1309,7 @@ public sealed class ReportService(
             CashShortAmount = 0m,
             TransactionType = "cash_drawer_adjustment",
             CashMovementAmount = movement,
+            LineItems = [],
             PaymentBreakdown = []
         };
     }

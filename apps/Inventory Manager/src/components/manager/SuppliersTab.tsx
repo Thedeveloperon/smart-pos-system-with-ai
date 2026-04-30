@@ -1,9 +1,10 @@
 import { useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { toast } from "sonner";
-import { Loader2, Plus, PencilLine } from "lucide-react";
+import { Loader2, PencilLine, Plus, Power, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import {
   Dialog,
   DialogContent,
@@ -20,6 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   createSupplier,
   fetchSuppliers,
+  hardDeleteSupplier,
   type Supplier,
   updateSupplier,
 } from "@/lib/api";
@@ -38,6 +40,13 @@ type SupplierFormState = {
   isActive: boolean;
 };
 
+type SupplierActionMode = "activate" | "deactivate" | "delete";
+
+type SupplierActionState = {
+  supplier: Supplier;
+  mode: SupplierActionMode;
+} | null;
+
 const emptySupplierForm = (): SupplierFormState => ({
   name: "",
   code: "",
@@ -48,6 +57,16 @@ const emptySupplierForm = (): SupplierFormState => ({
   isActive: true,
 });
 
+const toSupplierUpdatePayload = (supplier: Supplier, isActive = supplier.is_active) => ({
+  name: supplier.name,
+  code: supplier.code ?? "",
+  contact_name: supplier.contact_name ?? "",
+  phone: supplier.phone ?? "",
+  email: supplier.email ?? "",
+  address: supplier.address ?? "",
+  is_active: isActive,
+});
+
 export default function SuppliersTab() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
@@ -55,6 +74,8 @@ export default function SuppliersTab() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [supplierForm, setSupplierForm] = useState<SupplierFormState>(emptySupplierForm());
+  const [actionState, setActionState] = useState<SupplierActionState>(null);
+  const [actionPending, setActionPending] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
@@ -135,6 +156,45 @@ export default function SuppliersTab() {
     }
   };
 
+  const handleSupplierAction = async () => {
+    if (!actionState) {
+      return;
+    }
+
+    setActionPending(true);
+    try {
+      if (actionState.mode === "activate") {
+        await updateSupplier(
+          actionState.supplier.supplier_id,
+          toSupplierUpdatePayload(actionState.supplier, true),
+        );
+        toast.success("Supplier activated.");
+      } else if (actionState.mode === "deactivate") {
+        await updateSupplier(
+          actionState.supplier.supplier_id,
+          toSupplierUpdatePayload(actionState.supplier, false),
+        );
+        toast.success("Supplier deactivated.");
+      } else {
+        await hardDeleteSupplier(actionState.supplier.supplier_id);
+        toast.success("Supplier deleted.");
+      }
+
+      setActionState(null);
+      await loadData();
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : actionState.mode === "delete"
+            ? "Failed to delete supplier."
+            : "Failed to update supplier.",
+      );
+    } finally {
+      setActionPending(false);
+    }
+  };
+
   return (
     <>
       <Card>
@@ -176,10 +236,49 @@ export default function SuppliersTab() {
                 <Badge key="badge" variant={item.is_active ? "default" : "secondary"}>
                   {item.is_active ? "Active" : "Inactive"}
                 </Badge>,
-                <Button key="action" type="button" size="sm" variant="ghost" onClick={() => openEditor(item.supplier_id)}>
-                  <PencilLine className="h-4 w-4" />
-                  Edit
-                </Button>,
+                <div key="action" className="flex flex-wrap justify-end gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => openEditor(item.supplier_id)}
+                  >
+                    <PencilLine className="h-4 w-4" />
+                    Edit
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      setActionState({
+                        supplier: item,
+                        mode: item.is_active ? "deactivate" : "activate",
+                      })
+                    }
+                  >
+                    <Power className="h-4 w-4" />
+                    {item.is_active ? "Deactivate" : "Activate"}
+                  </Button>
+                  <span title={item.delete_block_reason ?? undefined}>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive"
+                      disabled={!item.can_delete}
+                      onClick={() =>
+                        setActionState({
+                          supplier: item,
+                          mode: "delete",
+                        })
+                      }
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Delete
+                    </Button>
+                  </span>
+                </div>,
               ],
             }))}
           />
@@ -197,6 +296,52 @@ export default function SuppliersTab() {
           }
         }}
         onSave={() => void handleSave()}
+      />
+
+      <ConfirmationDialog
+        open={Boolean(actionState)}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen && !actionPending) {
+            setActionState(null);
+          }
+        }}
+        onCancel={() => {
+          if (!actionPending) {
+            setActionState(null);
+          }
+        }}
+        onConfirm={() => void handleSupplierAction()}
+        title={
+          actionState?.mode === "delete"
+            ? "Delete supplier?"
+            : actionState?.mode === "activate"
+              ? "Activate supplier?"
+              : "Deactivate supplier?"
+        }
+        description={
+          actionState?.mode === "delete"
+            ? actionState?.supplier
+              ? `Permanently delete "${actionState.supplier.name}"? This cannot be undone.`
+              : "Permanently delete this supplier?"
+            : actionState?.mode === "activate"
+              ? actionState?.supplier
+                ? `Activate "${actionState.supplier.name}"? It will appear in active supplier selectors again.`
+                : "Activate this supplier?"
+              : actionState?.supplier
+                ? `Deactivate "${actionState.supplier.name}"? It will stay in history but be hidden from active selectors.`
+                : "Deactivate this supplier?"
+        }
+        confirmLabel={
+          actionState?.mode === "delete"
+            ? "Delete"
+            : actionState?.mode === "activate"
+              ? "Activate"
+              : "Deactivate"
+        }
+        confirmVariant={actionState?.mode === "delete" ? "destructive" : "default"}
+        confirmDisabled={actionPending}
+        cancelDisabled={actionPending}
+        confirmContent={actionPending ? <Loader2 className="h-4 w-4 animate-spin" /> : undefined}
       />
     </>
   );
@@ -274,53 +419,83 @@ function SupplierEditorDialog({
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>{supplierForm.name ? "Edit supplier" : "Add supplier"}</DialogTitle>
-          <DialogDescription>Keep supplier records current for product setup and purchasing.</DialogDescription>
+          <DialogDescription>
+            Keep supplier records current for product setup and purchasing.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4">
           <div className="grid gap-1.5">
             <Label>Name</Label>
-            <Input value={supplierForm.name} onChange={(event) => setSupplierForm((prev) => ({ ...prev, name: event.target.value }))} />
+            <Input
+              value={supplierForm.name}
+              onChange={(event) =>
+                setSupplierForm((prev) => ({ ...prev, name: event.target.value }))
+              }
+            />
           </div>
           <div className="grid gap-1.5 md:grid-cols-2">
             <div className="grid gap-1.5">
               <Label>Code</Label>
-              <Input value={supplierForm.code} onChange={(event) => setSupplierForm((prev) => ({ ...prev, code: event.target.value }))} />
+              <Input
+                value={supplierForm.code}
+                onChange={(event) =>
+                  setSupplierForm((prev) => ({ ...prev, code: event.target.value }))
+                }
+              />
             </div>
             <div className="grid gap-1.5">
               <Label>Contact person</Label>
               <Input
                 value={supplierForm.contact_name}
-                onChange={(event) => setSupplierForm((prev) => ({ ...prev, contact_name: event.target.value }))}
+                onChange={(event) =>
+                  setSupplierForm((prev) => ({ ...prev, contact_name: event.target.value }))
+                }
               />
             </div>
           </div>
           <div className="grid gap-1.5 md:grid-cols-2">
             <div className="grid gap-1.5">
               <Label>Phone</Label>
-              <Input value={supplierForm.phone} onChange={(event) => setSupplierForm((prev) => ({ ...prev, phone: event.target.value }))} />
+              <Input
+                value={supplierForm.phone}
+                onChange={(event) =>
+                  setSupplierForm((prev) => ({ ...prev, phone: event.target.value }))
+                }
+              />
             </div>
             <div className="grid gap-1.5">
               <Label>Email</Label>
-              <Input value={supplierForm.email} onChange={(event) => setSupplierForm((prev) => ({ ...prev, email: event.target.value }))} />
+              <Input
+                value={supplierForm.email}
+                onChange={(event) =>
+                  setSupplierForm((prev) => ({ ...prev, email: event.target.value }))
+                }
+              />
             </div>
           </div>
           <div className="grid gap-1.5">
             <Label>Address</Label>
             <Textarea
               value={supplierForm.address}
-              onChange={(event) => setSupplierForm((prev) => ({ ...prev, address: event.target.value }))}
+              onChange={(event) =>
+                setSupplierForm((prev) => ({ ...prev, address: event.target.value }))
+              }
               rows={4}
             />
           </div>
           <div className="flex items-center justify-between rounded-lg border p-4">
             <div>
               <Label className="text-sm font-medium">Active</Label>
-              <p className="text-xs text-muted-foreground">Inactive suppliers stay in history but are hidden in selectors.</p>
+              <p className="text-xs text-muted-foreground">
+                Inactive suppliers stay in history but are hidden in selectors.
+              </p>
             </div>
             <Switch
               checked={supplierForm.isActive}
-              onCheckedChange={(checked) => setSupplierForm((prev) => ({ ...prev, isActive: checked }))}
+              onCheckedChange={(checked) =>
+                setSupplierForm((prev) => ({ ...prev, isActive: checked }))
+              }
             />
           </div>
         </div>

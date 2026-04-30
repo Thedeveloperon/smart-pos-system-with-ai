@@ -1,9 +1,10 @@
 import { useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { toast } from "sonner";
-import { Loader2, Plus, PencilLine } from "lucide-react";
+import { Loader2, PencilLine, Plus, Power, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import {
   Dialog,
   DialogContent,
@@ -23,6 +24,7 @@ import {
   createCategory,
   fetchBrands,
   fetchCategories,
+  hardDeleteBrand,
   type Brand,
   type Category,
   updateBrand,
@@ -47,6 +49,13 @@ type BrandFormState = {
   isActive: boolean;
 };
 
+type BrandActionMode = "activate" | "deactivate" | "delete";
+
+type BrandActionState = {
+  brand: Brand;
+  mode: BrandActionMode;
+} | null;
+
 const emptyCategoryForm = (): CategoryFormState => ({
   name: "",
   description: "",
@@ -60,6 +69,13 @@ const emptyBrandForm = (): BrandFormState => ({
   isActive: true,
 });
 
+const toBrandUpdatePayload = (brand: Brand, isActive = brand.is_active) => ({
+  name: brand.name,
+  code: brand.code ?? "",
+  description: brand.description ?? "",
+  is_active: isActive,
+});
+
 export default function CatalogueTab() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -69,6 +85,8 @@ export default function CatalogueTab() {
   const [saving, setSaving] = useState(false);
   const [categoryForm, setCategoryForm] = useState<CategoryFormState>(emptyCategoryForm());
   const [brandForm, setBrandForm] = useState<BrandFormState>(emptyBrandForm());
+  const [actionState, setActionState] = useState<BrandActionState>(null);
+  const [actionPending, setActionPending] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
@@ -163,6 +181,45 @@ export default function CatalogueTab() {
     }
   };
 
+  const handleBrandAction = async () => {
+    if (!actionState) {
+      return;
+    }
+
+    setActionPending(true);
+    try {
+      if (actionState.mode === "activate") {
+        await updateBrand(
+          actionState.brand.brand_id,
+          toBrandUpdatePayload(actionState.brand, true),
+        );
+        toast.success("Brand activated.");
+      } else if (actionState.mode === "deactivate") {
+        await updateBrand(
+          actionState.brand.brand_id,
+          toBrandUpdatePayload(actionState.brand, false),
+        );
+        toast.success("Brand deactivated.");
+      } else {
+        await hardDeleteBrand(actionState.brand.brand_id);
+        toast.success("Brand deleted.");
+      }
+
+      setActionState(null);
+      await loadData();
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : actionState.mode === "delete"
+            ? "Failed to delete brand."
+            : "Failed to update brand.",
+      );
+    } finally {
+      setActionPending(false);
+    }
+  };
+
   return (
     <>
       <Card>
@@ -230,10 +287,49 @@ export default function CatalogueTab() {
                     <Badge key="badge" variant={item.is_active ? "default" : "secondary"}>
                       {item.is_active ? "Active" : "Inactive"}
                     </Badge>,
-                    <Button key="action" type="button" size="sm" variant="ghost" onClick={() => openEditor("brand", item.brand_id)}>
-                      <PencilLine className="h-4 w-4" />
-                      Edit
-                    </Button>,
+                    <div key="action" className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => openEditor("brand", item.brand_id)}
+                      >
+                        <PencilLine className="h-4 w-4" />
+                        Edit
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setActionState({
+                            brand: item,
+                            mode: item.is_active ? "deactivate" : "activate",
+                          })
+                        }
+                      >
+                        <Power className="h-4 w-4" />
+                        {item.is_active ? "Deactivate" : "Activate"}
+                      </Button>
+                      <span title={item.delete_block_reason ?? undefined}>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive hover:text-destructive"
+                          disabled={!item.can_delete}
+                          onClick={() =>
+                            setActionState({
+                              brand: item,
+                              mode: "delete",
+                            })
+                          }
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Delete
+                        </Button>
+                      </span>
+                    </div>,
                   ],
                 }))}
               />
@@ -256,6 +352,52 @@ export default function CatalogueTab() {
           }
         }}
         onSave={() => void handleSave()}
+      />
+
+      <ConfirmationDialog
+        open={Boolean(actionState)}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen && !actionPending) {
+            setActionState(null);
+          }
+        }}
+        onCancel={() => {
+          if (!actionPending) {
+            setActionState(null);
+          }
+        }}
+        onConfirm={() => void handleBrandAction()}
+        title={
+          actionState?.mode === "delete"
+            ? "Delete brand?"
+            : actionState?.mode === "activate"
+              ? "Activate brand?"
+              : "Deactivate brand?"
+        }
+        description={
+          actionState?.mode === "delete"
+            ? actionState?.brand
+              ? `Permanently delete "${actionState.brand.name}"? This cannot be undone.`
+              : "Permanently delete this brand?"
+            : actionState?.mode === "activate"
+              ? actionState?.brand
+                ? `Activate "${actionState.brand.name}"? It will appear in active product selectors again.`
+                : "Activate this brand?"
+              : actionState?.brand
+                ? `Deactivate "${actionState.brand.name}"? It will stay on historical products but be hidden from active selectors.`
+                : "Deactivate this brand?"
+        }
+        confirmLabel={
+          actionState?.mode === "delete"
+            ? "Delete"
+            : actionState?.mode === "activate"
+              ? "Activate"
+              : "Deactivate"
+        }
+        confirmVariant={actionState?.mode === "delete" ? "destructive" : "default"}
+        confirmDisabled={actionPending}
+        cancelDisabled={actionPending}
+        confirmContent={actionPending ? <Loader2 className="h-4 w-4 animate-spin" /> : undefined}
       />
     </>
   );

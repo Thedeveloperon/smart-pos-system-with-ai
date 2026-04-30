@@ -4,6 +4,7 @@ import PosHome from "@/pages/PosHome";
 import InventoryPage from "@/pages/InventoryPage";
 import ReportsPage from "@/pages/ReportsPage";
 import ManagerPage from "@/pages/ManagerPage";
+import { navigateBackToPos } from "@/lib/navigation";
 
 export const Route = createFileRoute("/")({
   component: Index,
@@ -17,6 +18,7 @@ function Index() {
   if (view === "manager") return <ManagerPage onBack={() => setView("pos")} />;
   return (
     <PosHome
+      onBack={navigateBackToPos}
       onOpenInventory={() => setView("inventory")}
       onOpenReports={() => setView("reports")}
       onOpenManager={() => setView("manager")}
