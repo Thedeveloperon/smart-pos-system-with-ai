@@ -41,6 +41,7 @@ const CashReceivedDialog = ({
   const [flashTotal, setFlashTotal] = useState(false);
   const [flashDenominations, setFlashDenominations] = useState<number[]>([]);
   const [appliedSuggestion, setAppliedSuggestion] = useState<OptionalPayoutSuggestion | null>(null);
+  const onTotalChangeRef = useRef(onTotalChange);
   const appliedSuggestionKeyRef = useRef<string | null>(null);
   const flashTimerRef = useRef<number | null>(null);
   const availableCountsKey = useMemo(
@@ -58,10 +59,14 @@ const CashReceivedDialog = ({
   );
 
   useEffect(() => {
+    onTotalChangeRef.current = onTotalChange;
+  }, [onTotalChange]);
+
+  useEffect(() => {
     if (open) {
       setCounts([]);
       setTotal(0);
-      onTotalChange?.(0);
+      onTotalChangeRef.current?.(0);
       setResetKey((value) => value + 1);
       setFlashTotal(false);
       setFlashDenominations([]);
@@ -72,7 +77,7 @@ const CashReceivedDialog = ({
         flashTimerRef.current = null;
       }
     }
-  }, [onTotalChange, open]);
+  }, [open]);
 
   useEffect(() => {
     if (!open || !drawerSuggestion) {
@@ -92,7 +97,7 @@ const CashReceivedDialog = ({
 
     setCounts(nextCounts);
     setTotal(nextTotal);
-    onTotalChange?.(nextTotal);
+    onTotalChangeRef.current?.(nextTotal);
     setResetKey((value) => value + 1);
     setFlashDenominations(topUpCounts.filter((count) => count.quantity > 0).map((count) => count.denomination));
     setFlashTotal(true);
@@ -107,12 +112,12 @@ const CashReceivedDialog = ({
       setFlashDenominations([]);
       flashTimerRef.current = null;
     }, 900);
-  }, [availableCountsKey, changeDue, counts, drawerSuggestion, onTotalChange, open, total]);
+  }, [availableCountsKey, changeDue, counts, drawerSuggestion, open, total]);
 
   const handleCountChange = (newCounts: DenominationCount[], newTotal: number) => {
     setCounts(newCounts);
     setTotal(newTotal);
-    onTotalChange?.(newTotal);
+    onTotalChangeRef.current?.(newTotal);
   };
 
   const handleProceed = () => {
