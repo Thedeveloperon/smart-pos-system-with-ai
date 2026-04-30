@@ -8,7 +8,6 @@ import AiInsightsDialog from "@/components/pos/AiInsightsDialog";
 import AiInsightsFab from "@/components/pos/AiInsightsFab";
 import RemindersDialog from "@/components/pos/RemindersDialog";
 import LicenseAccountDialog from "@/components/pos/LicenseAccountDialog";
-import NewItemDialog from "@/components/pos/NewItemDialog";
 import ImportSupplierBillDialog from "@/components/pos/ImportSupplierBillDialog";
 import ManagerReportsDrawer from "@/components/pos/ManagerReportsDrawer";
 import ProductSearchPanel, { type ProductSearchPanelHandle } from "@/components/pos/ProductSearchPanel";
@@ -97,7 +96,6 @@ const IndexInner = () => {
   const [heldBills, setHeldBills] = useState<HeldBill[]>([]);
   const [activeHeldSaleId, setActiveHeldSaleId] = useState<string | null>(null);
   const [showHeldBills, setShowHeldBills] = useState(false);
-  const [showNewItem, setShowNewItem] = useState(false);
   const [showReports, setShowReports] = useState(false);
   const [showTodaySales, setShowTodaySales] = useState(false);
   const [showClosing, setShowClosing] = useState(false);
@@ -198,7 +196,12 @@ const IndexInner = () => {
     isAdmin && typeof aiCreditsBalance === "number" && aiCreditsBalance <= AI_LOW_CREDIT_THRESHOLD;
   const aiTopUpUrl = CLOUD_PORTAL_URL ? `${CLOUD_PORTAL_URL}/en/account` : "";
   const openInventoryManager = useCallback(() => {
-    window.location.assign(`${INVENTORY_MANAGER_URL}/`);
+    const inventoryManagerUrl = new URL(`${INVENTORY_MANAGER_URL}/`, window.location.origin);
+    inventoryManagerUrl.searchParams.set(
+      "returnTo",
+      `${window.location.pathname}${window.location.search}${window.location.hash}`,
+    );
+    window.location.assign(inventoryManagerUrl.toString());
   }, []);
 
   const dismissReminderBanner = useCallback(() => {
@@ -807,7 +810,6 @@ const IndexInner = () => {
 
   const isShortcutActionBlocked =
     showHeldBills ||
-    showNewItem ||
     showReports ||
     showTodaySales ||
     showClosing ||
@@ -973,7 +975,6 @@ const IndexInner = () => {
         todayIssueCount={todayIssueCount}
         onHeldBills={() => setShowHeldBills(true)}
         onTodaySales={() => setShowTodaySales(true)}
-        onNewItem={() => setShowNewItem(true)}
         onInventoryManager={openInventoryManager}
         inventoryAlertCount={inventoryAlertCount}
         onReports={() => setShowReports(true)}
@@ -999,7 +1000,6 @@ const IndexInner = () => {
         isAdmin={isAdmin}
         hasActiveSession={canSell}
         cashierToolbarVisibility={{
-          newItem: shopProfile?.showNewItemForCashier ?? true,
           manage: shopProfile?.showManageForCashier ?? true,
           reports: shopProfile?.showReportsForCashier ?? true,
           aiInsights: shopProfile?.showAiInsightsForCashier ?? true,
@@ -1275,12 +1275,6 @@ const IndexInner = () => {
         cashSalesTotal={cashSalesTotal}
         refreshToken={salesRefreshToken}
         onRefundSale={handleRefundRequested}
-      />
-
-      <NewItemDialog
-        open={showNewItem}
-        onOpenChange={setShowNewItem}
-        onCreated={() => void loadProducts()}
       />
 
       <ManagerReportsDrawer

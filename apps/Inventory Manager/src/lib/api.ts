@@ -22,6 +22,8 @@ export type Brand = {
   description?: string | null;
   is_active: boolean;
   product_count: number;
+  can_delete: boolean;
+  delete_block_reason?: string | null;
   created_at: string;
   updated_at?: string | null;
 };
@@ -36,6 +38,8 @@ export type Supplier = {
   address?: string | null;
   is_active: boolean;
   linked_product_count: number;
+  can_delete: boolean;
+  delete_block_reason?: string | null;
   created_at: string;
   updated_at?: string | null;
 };
@@ -312,6 +316,8 @@ type BackendBrandItem = {
   description?: string | null;
   is_active: boolean;
   product_count: number;
+  can_delete: boolean;
+  delete_block_reason?: string | null;
   created_at: string;
   updated_at?: string | null;
 };
@@ -326,6 +332,8 @@ type BackendSupplierItem = {
   address?: string | null;
   is_active: boolean;
   linked_product_count: number;
+  can_delete: boolean;
+  delete_block_reason?: string | null;
   created_at: string;
   updated_at?: string | null;
 };
@@ -445,6 +453,98 @@ type BackendInventoryDashboard = {
   }>;
 };
 
+type DailySalesReportResponse = {
+  from_date: string;
+  to_date: string;
+  sales_count: number;
+  refund_count: number;
+  gross_sales_total: number;
+  refunded_total: number;
+  net_sales_total: number;
+  items_sold_total: number;
+  items: {
+    date: string;
+    sales_count: number;
+    refund_count: number;
+    gross_sales: number;
+    refunded_total: number;
+    net_sales: number;
+    items_sold: number;
+  }[];
+};
+
+type TransactionsReportResponse = {
+  from_date: string;
+  to_date: string;
+  take: number;
+  transaction_count: number;
+  gross_total: number;
+  reversed_total: number;
+  net_collected_total: number;
+  items: {
+    sale_id: string;
+    sale_number: string;
+    status: string;
+    timestamp: string;
+    created_by_user_id?: string | null;
+    cashier_username?: string | null;
+    cashier_full_name?: string | null;
+    items_count: number;
+    grand_total: number;
+    paid_total: number;
+    reversed_total: number;
+    net_collected: number;
+    custom_payout_used: boolean;
+    cash_short_amount: number;
+    transaction_type?: string;
+    cash_movement_amount?: number | null;
+    payment_breakdown: {
+      method: string;
+      paid_amount: number;
+      reversed_amount: number;
+      net_amount: number;
+    }[];
+    line_items: {
+      sale_item_id: string;
+      product_id: string;
+      product_name: string;
+      category_id?: string | null;
+      category_name?: string | null;
+      quantity: number;
+      unit_price: number;
+      line_total: number;
+    }[];
+  }[];
+};
+
+type PaymentBreakdownReportResponse = {
+  from_date: string;
+  to_date: string;
+  paid_total: number;
+  reversed_total: number;
+  net_total: number;
+  items: {
+    method: string;
+    paid_amount: number;
+    reversed_amount: number;
+    net_amount: number;
+  }[];
+};
+
+type TopItemsReportResponse = {
+  from_date: string;
+  to_date: string;
+  take: number;
+  items: {
+    product_id: string;
+    product_name: string;
+    sold_quantity: number;
+    refunded_quantity: number;
+    net_quantity: number;
+    net_sales: number;
+  }[];
+};
+
 function getDefaultApiBaseUrl() {
   if (typeof window !== "undefined") {
     const host = window.location.hostname;
@@ -532,6 +632,17 @@ function buildQuery(params: Record<string, string | number | boolean | null | un
   return query ? `?${query}` : "";
 }
 
+function formatDateQueryValue(value: Date | string) {
+  if (typeof value === "string") {
+    return value.slice(0, 10);
+  }
+
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function mapProduct(item: BackendProductCatalogItem): Product {
   return {
     id: item.product_id,
@@ -587,6 +698,8 @@ function mapBrand(item: BackendBrandItem): Brand {
     description: item.description ?? undefined,
     is_active: item.is_active,
     product_count: item.product_count,
+    can_delete: item.can_delete,
+    delete_block_reason: item.delete_block_reason ?? undefined,
     created_at: item.created_at,
     updated_at: item.updated_at,
   };
@@ -603,6 +716,8 @@ function mapSupplier(item: BackendSupplierItem): Supplier {
     address: item.address ?? undefined,
     is_active: item.is_active,
     linked_product_count: item.linked_product_count,
+    can_delete: item.can_delete,
+    delete_block_reason: item.delete_block_reason ?? undefined,
     created_at: item.created_at,
     updated_at: item.updated_at,
   };
@@ -720,7 +835,10 @@ export async function fetchProducts(): Promise<Product[]> {
   return response.items.map(mapProduct);
 }
 
-function normalizeProductPayload(data: Partial<Product> & { name: string }, includeInitialStock: boolean) {
+function normalizeProductPayload(
+  data: Partial<Product> & { name: string },
+  includeInitialStock: boolean,
+) {
   const unitPrice = data.unit_price ?? data.price ?? 0;
   const costPrice = data.cost_price ?? data.price ?? unitPrice;
   const stockQuantity = data.stock_quantity ?? data.stock ?? data.initial_stock_quantity ?? 0;
@@ -738,7 +856,9 @@ function normalizeProductPayload(data: Partial<Product> & { name: string }, incl
     brand_id: brandId,
     unit_price: unitPrice,
     cost_price: costPrice,
-    initial_stock_quantity: includeInitialStock ? (data.initial_stock_quantity ?? stockQuantity) : undefined,
+    initial_stock_quantity: includeInitialStock
+      ? (data.initial_stock_quantity ?? stockQuantity)
+      : undefined,
     reorder_level: data.reorder_level ?? 0,
     safety_stock: data.safety_stock ?? 0,
     target_stock_level: data.target_stock_level ?? 0,
@@ -752,7 +872,10 @@ function normalizeProductPayload(data: Partial<Product> & { name: string }, incl
   };
 }
 
-export async function fetchProductCatalogItems(take = 200, includeInactive = true): Promise<Product[]> {
+export async function fetchProductCatalogItems(
+  take = 200,
+  includeInactive = true,
+): Promise<Product[]> {
   const query = buildQuery({
     take,
     include_inactive: includeInactive,
@@ -764,7 +887,10 @@ export async function fetchProductCatalogItems(take = 200, includeInactive = tru
   return response.items.map(mapProduct);
 }
 
-export async function updateProduct(id: string, data: Partial<Product> & { name: string }): Promise<Product> {
+export async function updateProduct(
+  id: string,
+  data: Partial<Product> & { name: string },
+): Promise<Product> {
   const payload = normalizeProductPayload(data, false);
   const response = await requestJson<BackendProductCatalogItem>(`/api/products/${id}`, {
     method: "PUT",
@@ -911,6 +1037,12 @@ export async function updateBrand(
   return mapBrand(response);
 }
 
+export async function hardDeleteBrand(brandId: string): Promise<void> {
+  await requestJson<void>(`/api/brands/${brandId}/hard-delete`, {
+    method: "DELETE",
+  });
+}
+
 export async function fetchSuppliers(includeInactive = false): Promise<Supplier[]> {
   const response = await safeRequestJson<BackendSupplierListResponse>(
     `/api/suppliers${buildQuery({ include_inactive: includeInactive })}`,
@@ -970,6 +1102,12 @@ export async function updateSupplier(
   return mapSupplier(response);
 }
 
+export async function hardDeleteSupplier(supplierId: string): Promise<void> {
+  await requestJson<void>(`/api/suppliers/${supplierId}/hard-delete`, {
+    method: "DELETE",
+  });
+}
+
 export async function fetchProductSuppliers(productId: string): Promise<ProductSupplier[]> {
   const response = await safeRequestJson<BackendProductSupplierListResponse>(
     `/api/products/${productId}/suppliers`,
@@ -992,38 +1130,49 @@ export async function upsertProductSupplier(
     is_active?: boolean;
   },
 ): Promise<ProductSupplier> {
-  const response = await requestJson<BackendProductSupplierItem>(`/api/products/${productId}/suppliers`, {
-    method: "PUT",
-    body: JSON.stringify({
-      supplier_id: payload.supplier_id,
-      supplier_sku: payload.supplier_sku ?? null,
-      supplier_item_name: payload.supplier_item_name ?? null,
-      is_preferred: payload.is_preferred,
-      lead_time_days: payload.lead_time_days ?? null,
-      min_order_qty: payload.min_order_qty ?? null,
-      pack_size: payload.pack_size ?? null,
-      last_purchase_price: payload.last_purchase_price ?? null,
-      is_active: payload.is_active ?? true,
-    }),
-  });
+  const response = await requestJson<BackendProductSupplierItem>(
+    `/api/products/${productId}/suppliers`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        supplier_id: payload.supplier_id,
+        supplier_sku: payload.supplier_sku ?? null,
+        supplier_item_name: payload.supplier_item_name ?? null,
+        is_preferred: payload.is_preferred,
+        lead_time_days: payload.lead_time_days ?? null,
+        min_order_qty: payload.min_order_qty ?? null,
+        pack_size: payload.pack_size ?? null,
+        last_purchase_price: payload.last_purchase_price ?? null,
+        is_active: payload.is_active ?? true,
+      }),
+    },
+  );
   return mapProductSupplier(response);
 }
 
-export async function setPreferredProductSupplier(productId: string, supplierId: string): Promise<ProductSupplier> {
-  const response = await requestJson<BackendProductSupplierItem>(`/api/products/${productId}/preferred-supplier`, {
-    method: "PUT",
-    body: JSON.stringify({
-      supplier_id: supplierId,
-    }),
-  });
+export async function setPreferredProductSupplier(
+  productId: string,
+  supplierId: string,
+): Promise<ProductSupplier> {
+  const response = await requestJson<BackendProductSupplierItem>(
+    `/api/products/${productId}/preferred-supplier`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        supplier_id: supplierId,
+      }),
+    },
+  );
   return mapProductSupplier(response);
 }
 
-export async function generateProductBarcode(payload: {
-  name?: string;
-  sku?: string;
-  seed?: string;
-} = {}): Promise<GenerateBarcodeResponse> {
+export async function generateProductBarcode(
+  payload: {
+    name?: string;
+    sku?: string;
+    seed?: string;
+  } = {},
+): Promise<GenerateBarcodeResponse> {
   return requestJson<GenerateBarcodeResponse>("/api/products/barcodes/generate", {
     method: "POST",
     body: JSON.stringify({
@@ -1053,27 +1202,33 @@ export async function generateAndAssignProductBarcode(
   productId: string,
   payload: { force_replace?: boolean; seed?: string } = {},
 ): Promise<Product> {
-  const response = await requestJson<BackendProductCatalogItem>(`/api/products/${productId}/barcode/generate`, {
-    method: "POST",
-    body: JSON.stringify({
-      force_replace: payload.force_replace ?? false,
-      seed: payload.seed ?? null,
-    }),
-  });
+  const response = await requestJson<BackendProductCatalogItem>(
+    `/api/products/${productId}/barcode/generate`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        force_replace: payload.force_replace ?? false,
+        seed: payload.seed ?? null,
+      }),
+    },
+  );
   return mapProduct(response);
 }
 
 export async function bulkGenerateMissingProductBarcodes(
   payload: { dry_run?: boolean; take?: number; include_inactive?: boolean } = {},
 ): Promise<BulkGenerateMissingProductBarcodesResponse> {
-  return requestJson<BulkGenerateMissingProductBarcodesResponse>("/api/products/barcodes/bulk-generate-missing", {
-    method: "POST",
-    body: JSON.stringify({
-      dry_run: payload.dry_run ?? false,
-      take: payload.take ?? 200,
-      include_inactive: payload.include_inactive ?? false,
-    }),
-  });
+  return requestJson<BulkGenerateMissingProductBarcodesResponse>(
+    "/api/products/barcodes/bulk-generate-missing",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        dry_run: payload.dry_run ?? false,
+        take: payload.take ?? 200,
+        include_inactive: payload.include_inactive ?? false,
+      }),
+    },
+  );
 }
 
 // ---------- Dashboard ----------
@@ -1356,4 +1511,48 @@ export async function updateWarrantyClaim(
     body: JSON.stringify(data),
   });
   return mapWarrantyClaim(response);
+}
+
+export async function fetchDailySalesReport(
+  fromDate: Date | string = new Date(),
+  toDate: Date | string = fromDate,
+) {
+  const from = formatDateQueryValue(fromDate);
+  const to = formatDateQueryValue(toDate);
+  return requestJson<DailySalesReportResponse>(`/api/reports/daily?from=${from}&to=${to}`);
+}
+
+export async function fetchTransactionsReport(
+  fromDate: Date | string = new Date(),
+  toDate: Date | string = fromDate,
+  take = 200,
+) {
+  const from = formatDateQueryValue(fromDate);
+  const to = formatDateQueryValue(toDate);
+  return requestJson<TransactionsReportResponse>(
+    `/api/reports/transactions?from=${from}&to=${to}&take=${take}`,
+  );
+}
+
+export async function fetchPaymentBreakdownReport(
+  fromDate: Date | string = new Date(),
+  toDate: Date | string = fromDate,
+) {
+  const from = formatDateQueryValue(fromDate);
+  const to = formatDateQueryValue(toDate);
+  return requestJson<PaymentBreakdownReportResponse>(
+    `/api/reports/payment-breakdown?from=${from}&to=${to}`,
+  );
+}
+
+export async function fetchTopItemsReport(
+  fromDate: Date | string = new Date(),
+  toDate: Date | string = fromDate,
+  take = 25,
+) {
+  const from = formatDateQueryValue(fromDate);
+  const to = formatDateQueryValue(toDate);
+  return requestJson<TopItemsReportResponse>(
+    `/api/reports/top-items?from=${from}&to=${to}&take=${take}`,
+  );
 }

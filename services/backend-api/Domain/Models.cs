@@ -75,6 +75,7 @@ public sealed class Supplier
 
     public ICollection<PurchaseBill> PurchaseBills { get; set; } = [];
     public ICollection<ProductSupplier> ProductSuppliers { get; set; } = [];
+    public ICollection<ProductBatch> ProductBatches { get; set; } = [];
 }
 
 public sealed class ProductSupplier

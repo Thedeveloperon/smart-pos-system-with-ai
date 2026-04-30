@@ -25,6 +25,9 @@ public sealed class DailySalesReportResponse
     [JsonPropertyName("net_sales_total")]
     public decimal NetSalesTotal { get; set; }
 
+    [JsonPropertyName("items_sold_total")]
+    public decimal ItemsSoldTotal { get; set; }
+
     [JsonPropertyName("items")]
     public List<DailySalesReportRow> Items { get; set; } = [];
 }
@@ -48,6 +51,9 @@ public sealed class DailySalesReportRow
 
     [JsonPropertyName("net_sales")]
     public decimal NetSales { get; set; }
+
+    [JsonPropertyName("items_sold")]
+    public decimal ItemsSold { get; set; }
 }
 
 public sealed class TransactionsReportResponse
@@ -129,6 +135,36 @@ public sealed class TransactionReportRow
 
     [JsonPropertyName("payment_breakdown")]
     public List<ReportPaymentBreakdownRow> PaymentBreakdown { get; set; } = [];
+
+    [JsonPropertyName("line_items")]
+    public List<TransactionReportLineItemRow> LineItems { get; set; } = [];
+}
+
+public sealed class TransactionReportLineItemRow
+{
+    [JsonPropertyName("sale_item_id")]
+    public Guid SaleItemId { get; set; }
+
+    [JsonPropertyName("product_id")]
+    public Guid ProductId { get; set; }
+
+    [JsonPropertyName("product_name")]
+    public string ProductName { get; set; } = string.Empty;
+
+    [JsonPropertyName("category_id")]
+    public Guid? CategoryId { get; set; }
+
+    [JsonPropertyName("category_name")]
+    public string? CategoryName { get; set; }
+
+    [JsonPropertyName("quantity")]
+    public decimal Quantity { get; set; }
+
+    [JsonPropertyName("unit_price")]
+    public decimal UnitPrice { get; set; }
+
+    [JsonPropertyName("line_total")]
+    public decimal LineTotal { get; set; }
 }
 
 public sealed class PaymentBreakdownReportResponse

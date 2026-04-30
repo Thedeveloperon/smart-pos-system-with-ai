@@ -11,6 +11,7 @@ import SplashScreen from "@/components/ui/SplashScreen";
 import { isSuperAdminBackendRole } from "@/lib/auth";
 import AdminConsole from "./pages/AdminConsole";
 import Index from "./pages/Index.tsx";
+import InventoryManagerDashboard from "./pages/InventoryManagerDashboard.tsx";
 import LicenseAccessSuccess from "./pages/LicenseAccessSuccess.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
@@ -84,6 +85,7 @@ const AuthGate = () => {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/inventory-manager/*" element={<InventoryManagerDashboard />} />
         <Route path="/" element={<Index />} />
         <Route path="*" element={<NotFound />} />
       </Routes>

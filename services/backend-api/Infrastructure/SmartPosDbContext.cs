@@ -182,7 +182,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
                 .HasForeignKey(x => x.ProductId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(x => x.Supplier)
-                .WithMany()
+                .WithMany(x => x.ProductBatches)
                 .HasForeignKey(x => x.SupplierId)
                 .OnDelete(DeleteBehavior.SetNull);
             entity.HasOne(x => x.PurchaseBill)

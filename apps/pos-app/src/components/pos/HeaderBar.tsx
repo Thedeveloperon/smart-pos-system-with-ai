@@ -16,7 +16,6 @@ import {
   User,
   FileText,
   Lock,
-  PlusCircle,
   BarChart3,
   Upload,
   Settings2,
@@ -34,7 +33,6 @@ interface HeaderBarProps {
   heldBillsCount: number;
   onHeldBills: () => void;
   onTodaySales: () => void;
-  onNewItem: () => void;
   onInventoryManager?: () => void;
   inventoryAlertCount?: number;
   onReports?: () => void;
@@ -57,7 +55,6 @@ interface HeaderBarProps {
   isAdmin?: boolean;
   hasActiveSession?: boolean;
   cashierToolbarVisibility?: {
-    newItem?: boolean;
     manage?: boolean;
     inventoryManager?: boolean;
     reports?: boolean;
@@ -79,7 +76,6 @@ const HeaderBar = ({
   heldBillsCount,
   onHeldBills,
   onTodaySales,
-  onNewItem,
   onInventoryManager,
   inventoryAlertCount = 0,
   onReports,
@@ -129,18 +125,6 @@ const HeaderBar = ({
               {heldBillsCount}
             </Badge>
           )}
-          </Button>
-        )}
-
-        {allowCashier(cashierToolbarVisibility?.newItem) && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onNewItem}
-            className="text-pos-header-foreground hover:bg-pos-header-foreground/10"
-          >
-            <PlusCircle className="h-4 w-4" />
-            <span className="hidden md:inline ml-1">New Item</span>
           </Button>
         )}
 
@@ -362,13 +346,6 @@ const HeaderBar = ({
                 <PauseCircle className="mr-3 h-5 w-5" />
                 Held
                 {heldBillsCount > 0 && <Badge className="ml-auto h-5 min-w-5 px-1 text-[10px]">{heldBillsCount}</Badge>}
-              </DropdownMenuItem>
-            )}
-
-            {allowCashier(cashierToolbarVisibility?.newItem) && (
-              <DropdownMenuItem onSelect={() => onNewItem()} className="min-h-11 px-3 py-2 text-base">
-                <PlusCircle className="mr-3 h-5 w-5" />
-                New Item
               </DropdownMenuItem>
             )}
 

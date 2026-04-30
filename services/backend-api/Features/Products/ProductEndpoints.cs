@@ -444,6 +444,29 @@ public static class ProductEndpoints
         .WithName("UpdateBrand")
         .WithOpenApi();
 
+        brandGroup.MapDelete("/{brandId:guid}/hard-delete", async (
+            Guid brandId,
+            ProductService productService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                await productService.HardDeleteBrandAsync(brandId, cancellationToken);
+                return Results.NoContent();
+            }
+            catch (KeyNotFoundException exception)
+            {
+                return Results.NotFound(new { message = exception.Message });
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.ManagerOrOwner)
+        .WithName("HardDeleteBrand")
+        .WithOpenApi();
+
         supplierGroup.MapGet("", async (
             bool? include_inactive,
             ProductService productService,
@@ -497,6 +520,29 @@ public static class ProductEndpoints
         })
         .RequireAuthorization(SmartPosPolicies.ManagerOrOwner)
         .WithName("UpdateSupplier")
+        .WithOpenApi();
+
+        supplierGroup.MapDelete("/{supplierId:guid}/hard-delete", async (
+            Guid supplierId,
+            ProductService productService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                await productService.HardDeleteSupplierAsync(supplierId, cancellationToken);
+                return Results.NoContent();
+            }
+            catch (KeyNotFoundException exception)
+            {
+                return Results.NotFound(new { message = exception.Message });
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.ManagerOrOwner)
+        .WithName("HardDeleteSupplier")
         .WithOpenApi();
 
         return app;

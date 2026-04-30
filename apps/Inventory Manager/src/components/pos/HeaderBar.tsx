@@ -1,8 +1,9 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Package, Receipt, Settings } from "lucide-react";
+import { ArrowLeft, Package, Receipt, Settings } from "lucide-react";
 
 type Props = {
+  onBack?: () => void;
   onInventory?: () => void;
   onReports?: () => void;
   onManager?: () => void;
@@ -10,6 +11,7 @@ type Props = {
 };
 
 export default function HeaderBar({
+  onBack,
   onInventory,
   onReports,
   onManager,
@@ -19,6 +21,21 @@ export default function HeaderBar({
     <header className="border-b border-white/10 bg-pos-header text-pos-header-foreground shadow-md">
       <div className="mx-auto max-w-7xl px-4 h-14 flex items-center justify-between">
         <div className="flex items-center gap-2">
+          {onBack && (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onBack}
+                aria-label="Back to POS"
+                className="text-pos-header-foreground/80 hover:bg-white/10 hover:text-pos-header-foreground"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                <span className="ml-1">Back</span>
+              </Button>
+              <div className="h-4 w-px bg-white/15" />
+            </>
+          )}
           <Receipt className="h-5 w-5" />
           <span className="font-semibold">Inventory Manager</span>
         </div>
