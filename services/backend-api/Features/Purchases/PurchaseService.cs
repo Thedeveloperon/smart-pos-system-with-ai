@@ -383,8 +383,21 @@ public sealed class PurchaseService(
             query = query.Where(x => x.InvoiceDateUtc < toDate.Value.AddDays(1));
         }
 
-        return await query
-            .OrderByDescending(x => x.InvoiceDateUtc)
+        var bills = await query
+            .Select(x => new
+            {
+                Id = x.Id,
+                PurchaseOrderId = x.PurchaseOrderId,
+                InvoiceNumber = x.InvoiceNumber,
+                InvoiceDate = x.InvoiceDateUtc,
+                SourceType = x.SourceType,
+                GrandTotal = x.GrandTotal,
+                CreatedAtUtc = x.CreatedAtUtc
+            })
+            .ToListAsync(cancellationToken);
+
+        return bills
+            .OrderByDescending(x => x.InvoiceDate)
             .ThenByDescending(x => x.CreatedAtUtc)
             .Skip((normalizedPage - 1) * normalizedTake)
             .Take(normalizedTake)
@@ -393,12 +406,12 @@ public sealed class PurchaseService(
                 Id = x.Id,
                 PurchaseOrderId = x.PurchaseOrderId,
                 InvoiceNumber = x.InvoiceNumber,
-                InvoiceDate = x.InvoiceDateUtc,
+                InvoiceDate = x.InvoiceDate,
                 SourceType = x.SourceType,
                 GrandTotal = RoundMoney(x.GrandTotal),
                 CreatedAtUtc = x.CreatedAtUtc
             })
-            .ToListAsync(cancellationToken);
+            .ToList();
     }
 
     public async Task<PurchaseBillDetailResponse> GetBillAsync(
