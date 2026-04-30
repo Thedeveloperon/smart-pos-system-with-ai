@@ -11,6 +11,8 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
     public DbSet<InventoryRecord> Inventory => Set<InventoryRecord>();
     public DbSet<Supplier> Suppliers => Set<Supplier>();
     public DbSet<ProductSupplier> ProductSuppliers => Set<ProductSupplier>();
+    public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
+    public DbSet<PurchaseOrderLine> PurchaseOrderLines => Set<PurchaseOrderLine>();
     public DbSet<ShopStockSettings> ShopStockSettings => Set<ShopStockSettings>();
     public DbSet<ShopProfile> ShopProfiles => Set<ShopProfile>();
     public DbSet<PurchaseBill> PurchaseBills => Set<PurchaseBill>();
@@ -304,10 +306,51 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.ReceiptFooter).HasMaxLength(500);
         });
 
+        modelBuilder.Entity<PurchaseOrder>(entity =>
+        {
+            entity.ToTable("purchase_orders");
+            entity.Property(x => x.PoNumber).HasMaxLength(80);
+            entity.Property(x => x.Currency).HasMaxLength(8);
+            entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.SubtotalEstimate).HasPrecision(18, 2);
+            entity.Property(x => x.Notes).HasMaxLength(500);
+            entity.HasIndex(x => new { x.StoreId, x.PoNumber }).IsUnique();
+            entity.HasIndex(x => x.SupplierId);
+            entity.HasIndex(x => x.Status);
+            entity.HasOne(x => x.Supplier)
+                .WithMany(x => x.PurchaseOrders)
+                .HasForeignKey(x => x.SupplierId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(x => x.CreatedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<PurchaseOrderLine>(entity =>
+        {
+            entity.ToTable("purchase_order_lines");
+            entity.Property(x => x.ProductNameSnapshot).HasMaxLength(200);
+            entity.Property(x => x.QuantityOrdered).HasPrecision(18, 3);
+            entity.Property(x => x.QuantityReceived).HasPrecision(18, 3);
+            entity.Property(x => x.UnitCostEstimate).HasPrecision(18, 2);
+            entity.HasIndex(x => x.PurchaseOrderId);
+            entity.HasIndex(x => x.ProductId);
+            entity.HasOne(x => x.PurchaseOrder)
+                .WithMany(x => x.Lines)
+                .HasForeignKey(x => x.PurchaseOrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Product)
+                .WithMany()
+                .HasForeignKey(x => x.ProductId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<PurchaseBill>(entity =>
         {
             entity.ToTable("purchase_bills");
             entity.Property(x => x.ImportRequestId).HasMaxLength(80);
+            entity.Property(x => x.PurchaseOrderId);
             entity.Property(x => x.InvoiceNumber).HasMaxLength(80);
             entity.Property(x => x.Currency).HasMaxLength(8);
             entity.Property(x => x.Subtotal).HasPrecision(18, 2);
@@ -320,10 +363,15 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.HasIndex(x => new { x.StoreId, x.SupplierId, x.InvoiceNumber }).IsUnique();
             entity.HasIndex(x => new { x.StoreId, x.ImportRequestId }).IsUnique();
             entity.HasIndex(x => x.ImportRequestId).IsUnique();
+            entity.HasIndex(x => x.PurchaseOrderId);
             entity.HasOne(x => x.Supplier)
                 .WithMany(x => x.PurchaseBills)
                 .HasForeignKey(x => x.SupplierId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.PurchaseOrder)
+                .WithMany(x => x.Bills)
+                .HasForeignKey(x => x.PurchaseOrderId)
+                .OnDelete(DeleteBehavior.SetNull);
             entity.HasOne(x => x.CreatedByUser)
                 .WithMany(x => x.CreatedPurchaseBills)
                 .HasForeignKey(x => x.CreatedByUserId)
