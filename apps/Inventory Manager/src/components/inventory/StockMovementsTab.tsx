@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import { fetchStockMovements, type StockMovement } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -64,13 +65,28 @@ export default function StockMovementsTab() {
   );
 
   useEffect(() => {
+    let alive = true;
     setLoading(true);
     fetchStockMovements(params)
       .then((res) => {
+        if (!alive) return;
         setTotal(res.total);
         setItems((prev) => (page === 1 ? res.items : [...prev, ...res.items]));
       })
-      .finally(() => setLoading(false));
+      .catch((error) => {
+        if (alive) {
+          toast.error(error instanceof Error ? error.message : "Failed to load stock movements.");
+        }
+      })
+      .finally(() => {
+        if (alive) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      alive = false;
+    };
   }, [params, page]);
 
   // Reset to page 1 when filters change

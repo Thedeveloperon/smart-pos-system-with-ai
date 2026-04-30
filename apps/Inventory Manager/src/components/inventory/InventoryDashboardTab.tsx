@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { fetchInventoryDashboard, type InventoryDashboard } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -43,11 +44,35 @@ function StatCard({
 export default function InventoryDashboardTab() {
   const [data, setData] = useState<InventoryDashboard | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchInventoryDashboard()
-      .then(setData)
-      .finally(() => setLoading(false));
+    let alive = true;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const dashboard = await fetchInventoryDashboard();
+        if (!alive) return;
+        setData(dashboard);
+        setError(null);
+      } catch (error) {
+        if (!alive) return;
+        const message =
+          error instanceof Error ? error.message : "Failed to load inventory dashboard.";
+        setData(null);
+        setError(message);
+        toast.error(message);
+      } finally {
+        if (alive) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void load();
+    return () => {
+      alive = false;
+    };
   }, []);
 
   if (loading) {
@@ -63,39 +88,50 @@ export default function InventoryDashboardTab() {
     );
   }
 
+  if (error) {
+    return (
+      <Card>
+        <CardContent className="py-12 text-center text-destructive">
+          <AlertTriangle className="mx-auto mb-2 h-8 w-8 opacity-70" />
+          {error}
+        </CardContent>
+      </Card>
+    );
+  }
+
   if (!data) return null;
 
   return (
     <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatCard
-        title="Low stock"
-        value={data.low_stock_count}
-        hint="items below threshold"
-        icon={PackageX}
-        tone="text-destructive"
-      />
+          title="Low stock"
+          value={data.low_stock_count}
+          hint="items below threshold"
+          icon={PackageX}
+          tone="text-destructive"
+        />
         <StatCard
-        title="Expiring soon"
-        value={data.expiry_alert_count}
-        hint="batches in next 30 days"
-        icon={AlertTriangle}
-        tone="text-warning"
-      />
+          title="Expiring soon"
+          value={data.expiry_alert_count}
+          hint="batches in next 30 days"
+          icon={AlertTriangle}
+          tone="text-warning"
+        />
         <StatCard
-        title="Open stocktake"
-        value={data.open_stocktake_sessions}
-        hint="sessions in progress"
-        icon={ClipboardList}
-        tone="text-info"
-      />
+          title="Open stocktake"
+          value={data.open_stocktake_sessions}
+          hint="sessions in progress"
+          icon={ClipboardList}
+          tone="text-info"
+        />
         <StatCard
-        title="Open claims"
-        value={data.open_warranty_claims}
-        hint="warranty claims pending"
-        icon={ShieldAlert}
-        tone="text-primary"
-      />
+          title="Open claims"
+          value={data.open_warranty_claims}
+          hint="warranty claims pending"
+          icon={ShieldAlert}
+          tone="text-primary"
+        />
       </div>
 
       <Card>

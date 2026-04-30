@@ -13,7 +13,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -106,7 +112,9 @@ const toFormState = (product: Product): ProductFormState => ({
     product.product_suppliers?.find((supplier) => supplier.is_preferred)?.supplier_id ?? "",
   unitPrice: String(product.unit_price ?? product.price ?? 0),
   costPrice: String(product.cost_price ?? product.price ?? 0),
-  initialStockQuantity: String(product.initial_stock_quantity ?? product.stock_quantity ?? product.stock ?? 0),
+  initialStockQuantity: String(
+    product.initial_stock_quantity ?? product.stock_quantity ?? product.stock ?? 0,
+  ),
   reorderLevel: String(product.reorder_level ?? 0),
   safetyStock: String(product.safety_stock ?? 0),
   targetStockLevel: String(product.target_stock_level ?? 0),
@@ -118,7 +126,11 @@ const toFormState = (product: Product): ProductFormState => ({
   isActive: product.is_active ?? true,
 });
 
-function snapshotProduct(product: Product | null, form: ProductFormState, stockQuantity: number): Product {
+function snapshotProduct(
+  product: Product | null,
+  form: ProductFormState,
+  stockQuantity: number,
+): Product {
   return {
     id: product?.id ?? "__draft__",
     name: form.name.trim(),
@@ -148,7 +160,13 @@ function snapshotProduct(product: Product | null, form: ProductFormState, stockQ
   };
 }
 
-export default function ProductManagementDialog({ open, product, onOpenChange, onSaved, onDeleted }: Props) {
+export default function ProductManagementDialog({
+  open,
+  product,
+  onOpenChange,
+  onSaved,
+  onDeleted,
+}: Props) {
   const [form, setForm] = useState<ProductFormState>(emptyFormState());
   const [categories, setCategories] = useState<Category[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -218,9 +236,10 @@ export default function ProductManagementDialog({ open, product, onOpenChange, o
             setBatches(items);
           }
         })
-        .catch(() => {
+        .catch((error) => {
           if (alive) {
             setBatches([]);
+            toast.error(error instanceof Error ? error.message : "Failed to load product batches.");
           }
         })
         .finally(() => {
@@ -245,8 +264,12 @@ export default function ProductManagementDialog({ open, product, onOpenChange, o
             setForm((prev) => ({ ...prev, preferredSupplierId: preferred }));
           }
         })
-        .catch(() => {
-          // Ignore supplier hydration errors.
+        .catch((error) => {
+          if (alive) {
+            toast.error(
+              error instanceof Error ? error.message : "Failed to load product suppliers.",
+            );
+          }
         });
     }
 
@@ -272,8 +295,12 @@ export default function ProductManagementDialog({ open, product, onOpenChange, o
         barcode: trimmed,
         exclude_product_id: product?.id ?? null,
       });
-      setBarcodeTone(result.is_valid && !result.exists ? "success" : result.exists ? "error" : "neutral");
-      setBarcodeFeedback(result.message || (result.exists ? "Barcode already exists." : "Barcode looks valid."));
+      setBarcodeTone(
+        result.is_valid && !result.exists ? "success" : result.exists ? "error" : "neutral",
+      );
+      setBarcodeFeedback(
+        result.message || (result.exists ? "Barcode already exists." : "Barcode looks valid."),
+      );
     } catch (error) {
       setBarcodeTone("error");
       setBarcodeFeedback(error instanceof Error ? error.message : "Failed to validate barcode.");
@@ -336,7 +363,9 @@ export default function ProductManagementDialog({ open, product, onOpenChange, o
           : [],
       };
 
-      const saved = product?.id ? await updateProduct(product.id, payload) : await createProduct(payload);
+      const saved = product?.id
+        ? await updateProduct(product.id, payload)
+        : await createProduct(payload);
       onSaved?.(saved);
       toast.success(isEditing ? "Product updated." : "Product created.");
       onOpenChange(false);
@@ -389,7 +418,12 @@ export default function ProductManagementDialog({ open, product, onOpenChange, o
 
     setSaving(true);
     try {
-      await adjustStock(product.id, delta, adjustReason.trim() || "manual_adjustment", adjustBatchId || null);
+      await adjustStock(
+        product.id,
+        delta,
+        adjustReason.trim() || "manual_adjustment",
+        adjustBatchId || null,
+      );
       const nextStock = currentStock + delta;
       setCurrentStock(nextStock);
       onSaved?.(snapshotProduct(product, form, nextStock));
@@ -456,7 +490,11 @@ export default function ProductManagementDialog({ open, product, onOpenChange, o
                     onClick={() => void handleGenerateBarcode()}
                     disabled={barcodeWorking}
                   >
-                    {barcodeWorking ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                    {barcodeWorking ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4" />
+                    )}
                     Generate
                   </Button>
                 </div>
@@ -490,9 +528,7 @@ export default function ProductManagementDialog({ open, product, onOpenChange, o
                       alt={form.name || "Product preview"}
                       className="h-14 w-14 rounded-md object-cover"
                     />
-                    <div className="text-sm text-muted-foreground">
-                      Image preview
-                    </div>
+                    <div className="text-sm text-muted-foreground">Image preview</div>
                   </div>
                 ) : null}
               </div>
@@ -505,7 +541,9 @@ export default function ProductManagementDialog({ open, product, onOpenChange, o
                 <Label>Category</Label>
                 <Select
                   value={form.categoryId}
-                  onValueChange={(value) => updateField("categoryId", value === "__none__" ? "" : value)}
+                  onValueChange={(value) =>
+                    updateField("categoryId", value === "__none__" ? "" : value)
+                  }
                 >
                   <SelectTrigger>
                     <SelectValue placeholder={loadingLookups ? "Loading..." : "Select category"} />
@@ -519,14 +557,20 @@ export default function ProductManagementDialog({ open, product, onOpenChange, o
                     ))}
                   </SelectContent>
                 </Select>
-                {selectedCategory ? <p className="text-xs text-muted-foreground">{selectedCategory.description || " "}</p> : null}
+                {selectedCategory ? (
+                  <p className="text-xs text-muted-foreground">
+                    {selectedCategory.description || " "}
+                  </p>
+                ) : null}
               </div>
 
               <div className="grid gap-1.5">
                 <Label>Brand</Label>
                 <Select
                   value={form.brandId}
-                  onValueChange={(value) => updateField("brandId", value === "__none__" ? "" : value)}
+                  onValueChange={(value) =>
+                    updateField("brandId", value === "__none__" ? "" : value)
+                  }
                 >
                   <SelectTrigger>
                     <SelectValue placeholder={loadingLookups ? "Loading..." : "Select brand"} />
@@ -540,14 +584,18 @@ export default function ProductManagementDialog({ open, product, onOpenChange, o
                     ))}
                   </SelectContent>
                 </Select>
-                {selectedBrand ? <p className="text-xs text-muted-foreground">{selectedBrand.code || " "}</p> : null}
+                {selectedBrand ? (
+                  <p className="text-xs text-muted-foreground">{selectedBrand.code || " "}</p>
+                ) : null}
               </div>
 
               <div className="grid gap-1.5">
                 <Label>Preferred supplier</Label>
                 <Select
                   value={form.preferredSupplierId}
-                  onValueChange={(value) => updateField("preferredSupplierId", value === "__none__" ? "" : value)}
+                  onValueChange={(value) =>
+                    updateField("preferredSupplierId", value === "__none__" ? "" : value)
+                  }
                 >
                   <SelectTrigger>
                     <SelectValue placeholder={loadingLookups ? "Loading..." : "Select supplier"} />
@@ -562,7 +610,9 @@ export default function ProductManagementDialog({ open, product, onOpenChange, o
                   </SelectContent>
                 </Select>
                 {selectedSupplier ? (
-                  <p className="text-xs text-muted-foreground">{selectedSupplier.contact_name || " "}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {selectedSupplier.contact_name || " "}
+                  </p>
                 ) : null}
               </div>
             </div>
@@ -599,7 +649,12 @@ export default function ProductManagementDialog({ open, product, onOpenChange, o
                   <Label>Current stock</Label>
                   <div className="flex h-10 items-center justify-between rounded-md border px-3 text-sm">
                     <span>{currentStock.toLocaleString()}</span>
-                    <Button type="button" size="sm" variant="outline" onClick={() => setAdjustOpen(true)}>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setAdjustOpen(true)}
+                    >
                       <Plus className="h-4 w-4" />
                       Adjust
                     </Button>
@@ -665,9 +720,14 @@ export default function ProductManagementDialog({ open, product, onOpenChange, o
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <Label className="text-sm font-medium">Allow negative stock</Label>
-                    <p className="text-xs text-muted-foreground">Let stock go below zero when required.</p>
+                    <p className="text-xs text-muted-foreground">
+                      Let stock go below zero when required.
+                    </p>
                   </div>
-                  <Switch checked={form.allowNegativeStock} onCheckedChange={(checked) => updateField("allowNegativeStock", checked)} />
+                  <Switch
+                    checked={form.allowNegativeStock}
+                    onCheckedChange={(checked) => updateField("allowNegativeStock", checked)}
+                  />
                 </div>
               </div>
 
@@ -677,7 +737,10 @@ export default function ProductManagementDialog({ open, product, onOpenChange, o
                     <Label className="text-sm font-medium">Active product</Label>
                     <p className="text-xs text-muted-foreground">Visible in the catalog and POS.</p>
                   </div>
-                  <Switch checked={form.isActive} onCheckedChange={(checked) => updateField("isActive", checked)} />
+                  <Switch
+                    checked={form.isActive}
+                    onCheckedChange={(checked) => updateField("isActive", checked)}
+                  />
                 </div>
               </div>
             </div>
@@ -687,9 +750,14 @@ export default function ProductManagementDialog({ open, product, onOpenChange, o
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <Label className="text-sm font-medium">Serial tracking</Label>
-                    <p className="text-xs text-muted-foreground">Track a unique serial number per unit.</p>
+                    <p className="text-xs text-muted-foreground">
+                      Track a unique serial number per unit.
+                    </p>
                   </div>
-                  <Switch checked={form.serialTracked} onCheckedChange={(checked) => updateField("serialTracked", checked)} />
+                  <Switch
+                    checked={form.serialTracked}
+                    onCheckedChange={(checked) => updateField("serialTracked", checked)}
+                  />
                 </div>
                 {form.serialTracked ? (
                   <div className="grid gap-1.5">
@@ -710,9 +778,14 @@ export default function ProductManagementDialog({ open, product, onOpenChange, o
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <Label className="text-sm font-medium">Batch tracking</Label>
-                    <p className="text-xs text-muted-foreground">Track purchase batches and expiry dates.</p>
+                    <p className="text-xs text-muted-foreground">
+                      Track purchase batches and expiry dates.
+                    </p>
                   </div>
-                  <Switch checked={form.batchTracked} onCheckedChange={(checked) => updateField("batchTracked", checked)} />
+                  <Switch
+                    checked={form.batchTracked}
+                    onCheckedChange={(checked) => updateField("batchTracked", checked)}
+                  />
                 </div>
                 {form.batchTracked ? (
                   <div className="grid gap-1.5">
@@ -735,10 +808,22 @@ export default function ProductManagementDialog({ open, product, onOpenChange, o
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium">Batch inventory</p>
-                    <p className="text-xs text-muted-foreground">Use a batch when adjusting stock for this product.</p>
+                    <p className="text-xs text-muted-foreground">
+                      Use a batch when adjusting stock for this product.
+                    </p>
                   </div>
-                  <Button type="button" variant="outline" size="sm" onClick={() => setAdjustOpen(true)} disabled={loadingBatches}>
-                    {loadingBatches ? <Loader2 className="h-4 w-4 animate-spin" /> : <AlertTriangle className="h-4 w-4" />}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setAdjustOpen(true)}
+                    disabled={loadingBatches}
+                  >
+                    {loadingBatches ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <AlertTriangle className="h-4 w-4" />
+                    )}
                     View batches
                   </Button>
                 </div>
@@ -761,7 +846,9 @@ export default function ProductManagementDialog({ open, product, onOpenChange, o
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium">Status</p>
-                  <p className="text-xs text-muted-foreground">Current product state in the catalog.</p>
+                  <p className="text-xs text-muted-foreground">
+                    Current product state in the catalog.
+                  </p>
                 </div>
                 <span className="text-sm font-semibold">{statusLabel}</span>
               </div>
@@ -779,7 +866,11 @@ export default function ProductManagementDialog({ open, product, onOpenChange, o
                     onClick={() => setDeleteMode("soft")}
                     disabled={saving || deleting}
                   >
-                    {deleting && deleteMode === "soft" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                    {deleting && deleteMode === "soft" ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
                     Deactivate
                   </Button>
                   {!form.isActive ? (
@@ -789,19 +880,37 @@ export default function ProductManagementDialog({ open, product, onOpenChange, o
                       onClick={() => setDeleteMode("hard")}
                       disabled={saving || deleting}
                     >
-                      {deleting && deleteMode === "hard" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                      {deleting && deleteMode === "hard" ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
                       Hard delete
                     </Button>
                   ) : null}
-                  <Button type="button" variant="outline" onClick={() => void handleGenerateBarcode()} disabled={barcodeWorking}>
-                    {barcodeWorking ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void handleGenerateBarcode()}
+                    disabled={barcodeWorking}
+                  >
+                    {barcodeWorking ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4" />
+                    )}
                     Regenerate barcode
                   </Button>
                 </>
               ) : null}
             </div>
             <div className="flex gap-2">
-              <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={saving || deleting}>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => onOpenChange(false)}
+                disabled={saving || deleting}
+              >
                 Cancel
               </Button>
               <Button type="button" onClick={() => void handleSave()} disabled={saving}>
@@ -847,9 +956,14 @@ export default function ProductManagementDialog({ open, product, onOpenChange, o
             {product?.is_batch_tracked ? (
               <div className="grid gap-1.5">
                 <Label>Batch</Label>
-                <Select value={adjustBatchId} onValueChange={(value) => setAdjustBatchId(value === "__none__" ? "" : value)}>
+                <Select
+                  value={adjustBatchId}
+                  onValueChange={(value) => setAdjustBatchId(value === "__none__" ? "" : value)}
+                >
                   <SelectTrigger>
-                    <SelectValue placeholder={loadingBatches ? "Loading batches..." : "Select batch"} />
+                    <SelectValue
+                      placeholder={loadingBatches ? "Loading batches..." : "Select batch"}
+                    />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">Select batch</SelectItem>
