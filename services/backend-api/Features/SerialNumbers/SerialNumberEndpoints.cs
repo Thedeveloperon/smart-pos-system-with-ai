@@ -177,6 +177,46 @@ public static class SerialNumberEndpoints
         .WithName("UpdateProductSerialNumber")
         .WithOpenApi();
 
+        productGroup.MapDelete("/{serialId:guid}", async (
+            Guid productId,
+            Guid serialId,
+            ClaimsPrincipal user,
+            SmartPosDbContext dbContext,
+            CancellationToken cancellationToken) =>
+        {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
+            var serial = await dbContext.SerialNumbers
+                .FirstOrDefaultAsync(x => x.Id == serialId && x.ProductId == productId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
+            if (serial is null)
+            {
+                return Results.NotFound(new { message = "Serial number not found." });
+            }
+
+            var isReferenced = serial.SaleId.HasValue
+                || serial.SaleItemId.HasValue
+                || serial.RefundId.HasValue
+                || await dbContext.WarrantyClaims.AnyAsync(x => x.SerialNumberId == serial.Id, cancellationToken);
+
+            if (isReferenced)
+            {
+                return Results.BadRequest(new { message = "Serial number cannot be deleted after it has been used in sales, refunds, or warranty claims." });
+            }
+
+            dbContext.SerialNumbers.Remove(serial);
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                return Results.Conflict(new { message = "Failed to delete the serial number. Refresh and try again." });
+            }
+
+            return Results.NoContent();
+        })
+        .WithName("DeleteProductSerialNumber")
+        .WithOpenApi();
+
         app.MapGet("/api/serials/lookup", async (
             string? serial,
             ClaimsPrincipal user,

@@ -175,6 +175,7 @@ export type SerialNumberRecord = {
   serial_value: string;
   status: "Available" | "Sold" | "Returned" | "Defective" | "UnderWarranty";
   sale_id?: string;
+  sale_item_id?: string;
   refund_id?: string;
   warranty_expiry_date?: string;
   created_at: string;
@@ -1346,11 +1347,17 @@ export async function addSerialNumbers(
 export async function updateSerialNumber(
   productId: string,
   serialId: string,
-  data: { status: SerialNumberRecord["status"] },
+  data: { status: SerialNumberRecord["status"]; warranty_expiry_date?: string | null },
 ): Promise<SerialNumberRecord> {
   return await requestJson<SerialNumberRecord>(`/api/products/${productId}/serials/${serialId}`, {
     method: "PUT",
     body: JSON.stringify(data),
+  });
+}
+
+export async function deleteSerialNumber(productId: string, serialId: string): Promise<void> {
+  await requestJson<void>(`/api/products/${productId}/serials/${serialId}`, {
+    method: "DELETE",
   });
 }
 
