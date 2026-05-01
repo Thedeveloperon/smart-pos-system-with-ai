@@ -1,66 +1,62 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import InventoryManagerDashboard from "./InventoryManagerDashboard";
 
-const fetchProductsMock = vi.fn();
-const fetchInventoryDashboardSummaryMock = vi.fn();
+const fetchInventoryDashboardMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
-  fetchProducts: (...args: unknown[]) => fetchProductsMock(...args),
-  fetchInventoryDashboardSummary: (...args: unknown[]) => fetchInventoryDashboardSummaryMock(...args),
+  fetchInventoryDashboard: (...args: unknown[]) => fetchInventoryDashboardMock(...args),
 }));
 
 describe("InventoryManagerDashboard", () => {
   beforeEach(() => {
-    fetchProductsMock.mockReset();
-    fetchInventoryDashboardSummaryMock.mockReset();
-
-    fetchProductsMock.mockResolvedValue([
-      {
-        id: "p-1",
-        name: "Milk Packet",
-        sku: "MILK-001",
-        price: 320,
-        stock: 12,
-      },
-      {
-        id: "p-2",
-        name: "Tea Powder",
-        sku: "TEA-001",
-        price: 850,
-        stock: 4,
-        isLowStock: true,
-      },
-    ]);
-    fetchInventoryDashboardSummaryMock.mockResolvedValue({
-      expiry_alert_count: 1,
-      open_warranty_claims: 2,
+    fetchInventoryDashboardMock.mockReset();
+    fetchInventoryDashboardMock.mockResolvedValue({
+      expiry_alert_count: 2,
+      open_warranty_claims: 1,
+      low_stock_count: 0,
+      open_stocktake_sessions: 0,
+      expiry_alerts: [
+        {
+          batch_id: "b-1",
+          product_name: "Rice",
+          batch_number: "B-001",
+          expiry_date: "2026-04-23T00:00:00.000Z",
+          remaining_quantity: 12,
+        },
+      ],
     });
 
     window.history.replaceState({}, "", "/inventory-manager?returnTo=%2F");
   });
 
-  it("renders the expected dashboard sections and lets users add products to the current sale", async () => {
+  it("keeps the inventory header fixed and switches tab content under it", async () => {
     render(<InventoryManagerDashboard />);
 
-    expect(await screen.findByRole("button", { name: /Inventory/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Products/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Purchases/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Reports/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Manager/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Inventory" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Current sale" })).toBeInTheDocument();
-    expect(screen.getByText("Tap a product to add it.")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Back to Dashboard/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Inventory Management" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Movements" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Serials" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Batches" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Stocktake" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Claims" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Low stock" })).toBeInTheDocument();
+    expect(screen.getByText("Expiring batches (next 30 days)")).toBeInTheDocument();
+    expect(screen.getByText("Rice")).toBeInTheDocument();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Milk Packet/i }));
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Movements" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Movements" }));
+    expect(
+      await screen.findByText("Stock movement history and filters will appear here."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Movements" })).toBeInTheDocument();
 
-    await waitFor(() => {
-      expect(screen.queryByText("Tap a product to add it.")).not.toBeInTheDocument();
-    });
-
-    const currentSale = within(screen.getByTestId("current-sale-panel"));
-    expect(currentSale.getByText("Milk Packet")).toBeInTheDocument();
-    expect(currentSale.getByText("Rs. 320.00 x 1")).toBeInTheDocument();
-    expect(currentSale.getAllByText("Rs. 320.00")).toHaveLength(2);
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Claims" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Claims" }));
+    expect(
+      await screen.findByText("Warranty and claim workflows will appear here."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Claims" })).toBeInTheDocument();
   });
 });

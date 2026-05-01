@@ -511,6 +511,20 @@ export type InventoryDashboardSummary = {
   open_warranty_claims: number;
 };
 
+export type InventoryDashboard = InventoryDashboardSummary & {
+  low_stock_count: number;
+  open_stocktake_sessions: number;
+  expiry_alerts: Array<{
+    batch_id: string;
+    product_id: string;
+    product_name: string;
+    batch_number: string;
+    expiry_date: string;
+    remaining_quantity: number;
+    days_until_expiry: number;
+  }>;
+};
+
 export type GenerateProductBarcodeRequest = {
   name?: string | null;
   sku?: string | null;
@@ -2800,6 +2814,10 @@ export async function validateProductBarcode(requestBody: ValidateProductBarcode
 
 export async function fetchInventoryDashboardSummary(): Promise<InventoryDashboardSummary> {
   return request<InventoryDashboardSummary>("/api/inventory/dashboard");
+}
+
+export async function fetchInventoryDashboard(): Promise<InventoryDashboard> {
+  return request<InventoryDashboard>("/api/inventory/dashboard");
 }
 
 export async function generateAndAssignProductBarcode(
