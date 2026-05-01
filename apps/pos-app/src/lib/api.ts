@@ -392,6 +392,14 @@ type BackendCategoryListResponse = {
   items: BackendCategoryItem[];
 };
 
+export type Category = BackendCategoryItem & {
+  id?: string;
+  isActive?: boolean;
+  productCount?: number;
+  createdAt?: string;
+  updatedAt?: string | null;
+};
+
 type BackendBrandItem = {
   brand_id: string;
   name: string;
@@ -399,6 +407,8 @@ type BackendBrandItem = {
   description?: string | null;
   is_active: boolean;
   product_count: number;
+  can_delete?: boolean;
+  delete_block_reason?: string | null;
   created_at: string;
   updated_at?: string | null;
 };
@@ -416,6 +426,16 @@ export type BrandRecord = {
   productCount: number;
   createdAt: string;
   updatedAt?: string | null;
+};
+
+export type Brand = BrandRecord & {
+  brand_id: string;
+  is_active: boolean;
+  product_count: number;
+  can_delete: boolean;
+  delete_block_reason?: string | null;
+  created_at: string;
+  updated_at?: string | null;
 };
 
 export type CreateBrandRequest = {
@@ -504,6 +524,10 @@ export type CreateProductRequest = {
   is_batch_tracked?: boolean;
   expiry_alert_days?: number | null;
   is_active: boolean;
+  product_suppliers?: {
+    supplier_id: string;
+    is_preferred: boolean;
+  }[];
 };
 
 export type InventoryDashboardSummary = {
@@ -547,6 +571,19 @@ export type StockMovement = {
   reason?: string;
   created_by_user_id?: string;
   created_at: string;
+};
+
+export type StockAdjustmentResponse = {
+  product_id: string;
+  delta_quantity: number;
+  previous_quantity: number;
+  new_quantity: number;
+  reason: string;
+  is_low_stock: boolean;
+  alert_level: number;
+  safety_stock: number;
+  target_stock_level: number;
+  updated_at: string;
 };
 
 export type StockMovementPage = {
@@ -708,6 +745,8 @@ type BackendSupplierItem = {
   address?: string | null;
   is_active: boolean;
   linked_product_count: number;
+  can_delete?: boolean;
+  delete_block_reason?: string | null;
   created_at: string;
   updated_at?: string | null;
 };
@@ -728,6 +767,17 @@ export type SupplierRecord = {
   linkedProductCount: number;
   createdAt: string;
   updatedAt?: string | null;
+};
+
+export type Supplier = SupplierRecord & {
+  supplier_id: string;
+  contact_name: string;
+  is_active: boolean;
+  linked_product_count: number;
+  can_delete: boolean;
+  delete_block_reason?: string | null;
+  created_at: string;
+  updated_at?: string | null;
 };
 
 export type CreateSupplierRequest = {
@@ -786,6 +836,19 @@ export type ProductSupplierRecord = {
   isActive: boolean;
   createdAt: string;
   updatedAt?: string | null;
+  product_supplier_id: string;
+  supplier_id: string;
+  supplier_name: string;
+  supplier_sku?: string | null;
+  supplier_item_name?: string | null;
+  is_preferred: boolean;
+  lead_time_days?: number | null;
+  min_order_qty?: number | null;
+  pack_size?: number | null;
+  last_purchase_price?: number | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at?: string | null;
 };
 
 function mapProductSupplier(item: BackendProductSupplierItem): ProductSupplierRecord {
@@ -803,6 +866,19 @@ function mapProductSupplier(item: BackendProductSupplierItem): ProductSupplierRe
     isActive: item.is_active,
     createdAt: item.created_at,
     updatedAt: item.updated_at,
+    product_supplier_id: item.product_supplier_id,
+    supplier_id: item.supplier_id,
+    supplier_name: item.supplier_name,
+    supplier_sku: item.supplier_sku ?? null,
+    supplier_item_name: item.supplier_item_name ?? null,
+    is_preferred: item.is_preferred,
+    lead_time_days: item.lead_time_days ?? null,
+    min_order_qty: item.min_order_qty ?? null,
+    pack_size: item.pack_size ?? null,
+    last_purchase_price: item.last_purchase_price ?? null,
+    is_active: item.is_active,
+    created_at: item.created_at,
+    updated_at: item.updated_at,
   };
 }
 
@@ -834,6 +910,33 @@ export type CatalogProduct = {
   isLowStock: boolean;
   createdAt: string;
   updatedAt?: string | null;
+};
+
+export type Product = CatalogProduct & {
+  product_id: string;
+  image_url?: string | null;
+  category_id?: string | null;
+  category_name?: string | null;
+  brand_id?: string | null;
+  brand_name?: string | null;
+  unit_price: number;
+  cost_price: number;
+  stock_quantity: number;
+  initial_stock_quantity?: number;
+  reorder_level: number;
+  safety_stock?: number;
+  target_stock_level?: number;
+  alert_level: number;
+  allow_negative_stock: boolean;
+  is_serial_tracked?: boolean;
+  warranty_months?: number | null;
+  is_batch_tracked?: boolean;
+  expiry_alert_days?: number | null;
+  is_active: boolean;
+  is_low_stock: boolean;
+  created_at: string;
+  updated_at?: string | null;
+  product_suppliers?: ProductSupplierRecord[];
 };
 
 export type PurchaseOcrTotalsValidation = {
@@ -2113,6 +2216,10 @@ async function request<T>(path: string, init: RequestInit = {}, options: Request
   }
 }
 
+export async function requestJson<T>(path: string, init: RequestInit = {}) {
+  return request<T>(path, init);
+}
+
 async function safeRequest<T>(path: string, fallback: T, init: RequestInit = {}, options: RequestExecutionOptions = {}) {
   try {
     return await request<T>(path, init, options);
@@ -2254,17 +2361,39 @@ function mapProduct(item: BackendProductSearchItem): Product {
   const sampleImage = getSampleProductImage(item.name);
   return {
     id: item.id,
+    product_id: item.id,
     name: item.name,
     sku: item.sku || item.id.slice(0, 8),
     barcode: item.barcode || undefined,
+    image_url: item.image_url || null,
     price: Number(item.unitPrice),
+    unit_price: Number(item.unitPrice),
     category: item.category_name || undefined,
+    category_id: item.category_id || null,
     categoryId: item.category_id || undefined,
     categoryName: item.category_name || undefined,
+    category_name: item.category_name || null,
     brandId: item.brand_id || undefined,
     brandName: item.brand_name || undefined,
+    brand_id: item.brand_id || null,
+    brand_name: item.brand_name || null,
     isLowStock: item.is_low_stock ?? undefined,
+    is_low_stock: item.is_low_stock ?? false,
     stock: Number(item.stockQuantity),
+    stock_quantity: Number(item.stockQuantity),
+    cost_price: Number(item.unitPrice),
+    initial_stock_quantity: Number(item.stockQuantity),
+    reorder_level: 0,
+    safety_stock: 0,
+    target_stock_level: 0,
+    alert_level: 0,
+    allow_negative_stock: false,
+    is_serial_tracked: false,
+    warranty_months: null,
+    is_batch_tracked: false,
+    expiry_alert_days: null,
+    is_active: true,
+    created_at: "",
     image: resolveImageUrl(item.image_url) || sampleImage || createProductImage(item.name, accent),
   };
 }
@@ -2274,17 +2403,39 @@ function mapCatalogProduct(item: BackendProductCatalogItem): Product {
   const sampleImage = getSampleProductImage(item.name);
   return {
     id: item.product_id,
+    product_id: item.product_id,
     name: item.name,
     sku: item.sku || item.product_id.slice(0, 8),
     barcode: item.barcode || undefined,
+    image_url: item.image_url || null,
     price: Number(item.unit_price),
+    unit_price: Number(item.unit_price),
     category: item.category_name || undefined,
+    category_id: item.category_id || null,
     categoryId: item.category_id || undefined,
     categoryName: item.category_name || undefined,
+    category_name: item.category_name || null,
     brandId: item.brand_id || undefined,
     brandName: item.brand_name || undefined,
+    brand_id: item.brand_id || null,
+    brand_name: item.brand_name || null,
     isLowStock: item.is_low_stock,
+    is_low_stock: item.is_low_stock,
     stock: Number(item.stock_quantity),
+    stock_quantity: Number(item.stock_quantity),
+    cost_price: Number(item.cost_price),
+    initial_stock_quantity: Number(item.initial_stock_quantity ?? item.stock_quantity),
+    reorder_level: Number(item.reorder_level),
+    safety_stock: Number(item.safety_stock ?? 0),
+    target_stock_level: Number(item.target_stock_level ?? 0),
+    alert_level: Number(item.alert_level),
+    allow_negative_stock: item.allow_negative_stock,
+    is_serial_tracked: item.is_serial_tracked ?? false,
+    warranty_months: item.warranty_months ?? null,
+    is_batch_tracked: item.is_batch_tracked ?? false,
+    expiry_alert_days: item.expiry_alert_days ?? null,
+    is_active: item.is_active,
+    created_at: item.created_at,
     image: resolveImageUrl(item.image_url) || sampleImage || createProductImage(item.name, accent),
   };
 }
@@ -2422,37 +2573,60 @@ function mapCashSessionHistoryItem(item: BackendCashSessionHistoryItem): CashSes
   };
 }
 
-function mapCatalogProductItem(item: BackendProductCatalogItem): CatalogProduct {
+function mapCatalogProductItem(item: BackendProductCatalogItem): Product {
   const accent = colorFromText(item.name + (item.barcode || ""));
   const sampleImage = getSampleProductImage(item.name);
   return {
     id: item.product_id,
+    product_id: item.product_id,
     name: item.name,
     sku: item.sku || item.product_id.slice(0, 8),
     barcode: item.barcode || undefined,
     image: item.image_url || sampleImage || createProductImage(item.name, accent),
     imageUrl: item.image_url || null,
+    image_url: item.image_url || null,
     categoryId: item.category_id || null,
+    category_id: item.category_id || null,
     categoryName: item.category_name || null,
+    category_name: item.category_name || null,
     brandId: item.brand_id || null,
+    brand_id: item.brand_id || null,
     brandName: item.brand_name || null,
+    brand_name: item.brand_name || null,
     unitPrice: Number(item.unit_price),
+    unit_price: Number(item.unit_price),
     costPrice: Number(item.cost_price),
+    cost_price: Number(item.cost_price),
     stockQuantity: Number(item.stock_quantity),
+    stock_quantity: Number(item.stock_quantity),
     initialStockQuantity: Number(item.initial_stock_quantity ?? item.stock_quantity),
+    initial_stock_quantity: Number(item.initial_stock_quantity ?? item.stock_quantity),
     reorderLevel: Number(item.reorder_level),
+    reorder_level: Number(item.reorder_level),
     safetyStock: Number(item.safety_stock ?? 0),
+    safety_stock: Number(item.safety_stock ?? 0),
     targetStockLevel: Number(item.target_stock_level ?? 0),
+    target_stock_level: Number(item.target_stock_level ?? 0),
     alertLevel: Number(item.alert_level),
+    alert_level: Number(item.alert_level),
     allowNegativeStock: item.allow_negative_stock,
+    allow_negative_stock: item.allow_negative_stock,
     isSerialTracked: item.is_serial_tracked ?? false,
+    is_serial_tracked: item.is_serial_tracked ?? false,
     warrantyMonths: item.warranty_months ?? null,
+    warranty_months: item.warranty_months ?? null,
     isBatchTracked: item.is_batch_tracked ?? false,
+    is_batch_tracked: item.is_batch_tracked ?? false,
     expiryAlertDays: item.expiry_alert_days ?? null,
+    expiry_alert_days: item.expiry_alert_days ?? null,
     isActive: item.is_active,
+    is_active: item.is_active,
     isLowStock: item.is_low_stock,
+    is_low_stock: item.is_low_stock,
     createdAt: item.created_at,
+    created_at: item.created_at,
     updatedAt: item.updated_at,
+    updated_at: item.updated_at,
   };
 }
 
@@ -2702,16 +2876,23 @@ export async function fetchCategories(includeInactive = false) {
   return response.items;
 }
 
-function mapBrand(item: BackendBrandItem): BrandRecord {
+function mapBrand(item: BackendBrandItem): Brand {
   return {
     id: item.brand_id,
+    brand_id: item.brand_id,
     name: item.name,
     code: item.code ?? "",
     description: item.description ?? "",
     isActive: item.is_active,
+    is_active: item.is_active,
     productCount: item.product_count,
+    product_count: item.product_count,
+    can_delete: item.can_delete ?? true,
+    delete_block_reason: item.delete_block_reason ?? null,
     createdAt: item.created_at,
+    created_at: item.created_at,
     updatedAt: item.updated_at,
+    updated_at: item.updated_at,
   };
 }
 
@@ -2749,6 +2930,12 @@ export async function updateBrand(brandId: string, requestBody: CreateBrandReque
   return mapBrand(response);
 }
 
+export async function hardDeleteBrand(brandId: string) {
+  return request<void>(`/api/brands/${encodeURIComponent(brandId)}/hard-delete`, {
+    method: "DELETE",
+  });
+}
+
 export async function createCategory(requestBody: CreateCategoryRequest) {
   return request<BackendCategoryItem>("/api/categories", {
     method: "POST",
@@ -2771,19 +2958,27 @@ export async function updateCategory(categoryId: string, requestBody: CreateCate
   });
 }
 
-function mapSupplier(item: BackendSupplierItem): SupplierRecord {
+function mapSupplier(item: BackendSupplierItem): Supplier {
   return {
     id: item.supplier_id,
+    supplier_id: item.supplier_id,
     name: item.name,
     code: item.code ?? "",
     contactPerson: item.contact_name ?? "",
+    contact_name: item.contact_name ?? "",
     phone: item.phone ?? "",
     email: item.email ?? "",
     address: item.address ?? "",
     isActive: item.is_active,
+    is_active: item.is_active,
     linkedProductCount: item.linked_product_count,
+    linked_product_count: item.linked_product_count,
+    can_delete: item.can_delete ?? true,
+    delete_block_reason: item.delete_block_reason ?? null,
     createdAt: item.created_at,
+    created_at: item.created_at,
     updatedAt: item.updated_at,
+    updated_at: item.updated_at,
   };
 }
 
@@ -2859,6 +3054,12 @@ export async function updateSupplier(supplierId: string, requestBody: CreateSupp
   });
 
   return mapSupplier(response);
+}
+
+export async function hardDeleteSupplier(supplierId: string) {
+  return request<void>(`/api/suppliers/${encodeURIComponent(supplierId)}/hard-delete`, {
+    method: "DELETE",
+  });
 }
 
 export async function fetchProductSuppliers(productId: string) {
@@ -3918,6 +4119,10 @@ export type UpdateProductRequest = {
   is_batch_tracked?: boolean;
   expiry_alert_days?: number | null;
   is_active: boolean;
+  product_suppliers?: {
+    supplier_id: string;
+    is_preferred: boolean;
+  }[];
 };
 
 export async function updateProduct(productId: string, requestBody: UpdateProductRequest) {
@@ -3938,6 +4143,22 @@ export async function deleteProduct(productId: string) {
 export async function hardDeleteProduct(productId: string) {
   return request<void>(`/api/products/${productId}/hard-delete`, {
     method: "DELETE",
+  });
+}
+
+export async function adjustStock(
+  productId: string,
+  deltaQuantity: number,
+  reason = "manual_adjustment",
+  batchId?: string | null,
+): Promise<StockAdjustmentResponse> {
+  return request<StockAdjustmentResponse>(`/api/products/${productId}/stock-adjustments`, {
+    method: "POST",
+    body: JSON.stringify({
+      delta_quantity: deltaQuantity,
+      reason,
+      batch_id: batchId ?? null,
+    }),
   });
 }
 
