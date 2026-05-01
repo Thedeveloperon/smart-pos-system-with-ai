@@ -1801,10 +1801,7 @@ public static class DbSchemaUpdater
             CREATE INDEX IF NOT EXISTS "IX_purchase_order_lines_PurchaseOrderId" ON "purchase_order_lines" ("PurchaseOrderId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_order_lines_ProductId" ON "purchase_order_lines" ("ProductId");
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_StoreId_SupplierId_InvoiceNumber" ON "purchase_bills" ("StoreId", "SupplierId", "InvoiceNumber");
-            CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_StoreId_ImportRequestId" ON "purchase_bills" ("StoreId", "ImportRequestId");
-            CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_ImportRequestId" ON "purchase_bills" ("ImportRequestId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_bills_SupplierId" ON "purchase_bills" ("SupplierId");
-            CREATE INDEX IF NOT EXISTS "IX_purchase_bills_PurchaseOrderId" ON "purchase_bills" ("PurchaseOrderId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_bills_CreatedByUserId" ON "purchase_bills" ("CreatedByUserId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_bill_items_PurchaseBillId" ON "purchase_bill_items" ("PurchaseBillId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_bill_items_ProductId" ON "purchase_bill_items" ("ProductId");
@@ -1828,6 +1825,8 @@ public static class DbSchemaUpdater
                 cancellationToken);
         }
 
+        // Older databases can already have purchase_bills without the newer columns above.
+        // Create these indexes only after the columns have been backfilled.
         await dbContext.Database.ExecuteSqlRawAsync(
             """CREATE INDEX IF NOT EXISTS "IX_purchase_bills_PurchaseOrderId" ON "purchase_bills" ("PurchaseOrderId");""",
             cancellationToken);
@@ -2387,10 +2386,7 @@ public static class DbSchemaUpdater
             CREATE INDEX IF NOT EXISTS "IX_purchase_order_lines_PurchaseOrderId" ON purchase_order_lines("PurchaseOrderId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_order_lines_ProductId" ON purchase_order_lines("ProductId");
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_StoreId_SupplierId_InvoiceNumber" ON purchase_bills("StoreId", "SupplierId", "InvoiceNumber");
-            CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_StoreId_ImportRequestId" ON purchase_bills("StoreId", "ImportRequestId");
-            CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_ImportRequestId" ON purchase_bills("ImportRequestId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_bills_SupplierId" ON purchase_bills("SupplierId");
-            CREATE INDEX IF NOT EXISTS "IX_purchase_bills_PurchaseOrderId" ON purchase_bills("PurchaseOrderId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_bills_CreatedByUserId" ON purchase_bills("CreatedByUserId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_bill_items_PurchaseBillId" ON purchase_bill_items("PurchaseBillId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_bill_items_ProductId" ON purchase_bill_items("ProductId");
@@ -2414,6 +2410,8 @@ public static class DbSchemaUpdater
                 cancellationToken);
         }
 
+        // Older databases can already have purchase_bills without the newer columns above.
+        // Create these indexes only after the columns have been backfilled.
         await dbContext.Database.ExecuteSqlRawAsync(
             """CREATE INDEX IF NOT EXISTS "IX_purchase_bills_PurchaseOrderId" ON purchase_bills("PurchaseOrderId");""",
             cancellationToken);
