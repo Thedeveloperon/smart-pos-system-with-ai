@@ -5,11 +5,17 @@ import InventoryManagerDashboard from "./InventoryManagerDashboard";
 const fetchInventoryDashboardMock = vi.fn();
 const fetchStockMovementsMock = vi.fn();
 const fetchWarrantyClaimsMock = vi.fn();
+const fetchProductsMock = vi.fn();
+const fetchCategoriesMock = vi.fn();
+const fetchBrandsMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   fetchInventoryDashboard: (...args: unknown[]) => fetchInventoryDashboardMock(...args),
   fetchStockMovements: (...args: unknown[]) => fetchStockMovementsMock(...args),
   fetchWarrantyClaims: (...args: unknown[]) => fetchWarrantyClaimsMock(...args),
+  fetchProducts: (...args: unknown[]) => fetchProductsMock(...args),
+  fetchCategories: (...args: unknown[]) => fetchCategoriesMock(...args),
+  fetchBrands: (...args: unknown[]) => fetchBrandsMock(...args),
 }));
 
 describe("InventoryManagerDashboard", () => {
@@ -17,6 +23,9 @@ describe("InventoryManagerDashboard", () => {
     fetchInventoryDashboardMock.mockReset();
     fetchStockMovementsMock.mockReset();
     fetchWarrantyClaimsMock.mockReset();
+    fetchProductsMock.mockReset();
+    fetchCategoriesMock.mockReset();
+    fetchBrandsMock.mockReset();
     fetchInventoryDashboardMock.mockResolvedValue({
       expiry_alert_count: 2,
       open_warranty_claims: 1,
@@ -39,6 +48,22 @@ describe("InventoryManagerDashboard", () => {
       take: 20,
     });
     fetchWarrantyClaimsMock.mockResolvedValue([]);
+    fetchProductsMock.mockResolvedValue([
+      {
+        id: "p-1",
+        name: "Rice",
+        sku: "SKU-001",
+        barcode: "BAR-001",
+        price: 40,
+        stock: 50,
+        category: "Groceries",
+        categoryName: "Groceries",
+        brandName: "SXSZ",
+        isLowStock: false,
+      },
+    ]);
+    fetchCategoriesMock.mockResolvedValue([]);
+    fetchBrandsMock.mockResolvedValue([]);
 
     window.history.replaceState({}, "", "/inventory-manager?returnTo=%2F");
   });
@@ -48,28 +73,19 @@ describe("InventoryManagerDashboard", () => {
 
     expect(await screen.findByRole("button", { name: /Back to Dashboard/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Inventory Management" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tab", { name: "Movements" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Serials" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Batches" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Stocktake" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Claims" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Products" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Purchases" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Reports" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Manager" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Products" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("heading", { name: "Products" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Current sale" })).toBeInTheDocument();
+    expect(screen.getByText("Browse products and add items to the current sale.")).toBeInTheDocument();
+    expect(screen.getByText("Rice")).toBeInTheDocument();
+
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Inventory" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Inventory" }));
     expect(await screen.findByText("Low stock")).toBeInTheDocument();
-    expect(screen.getByText("Expiring batches (next 30 days)")).toBeInTheDocument();
-    expect(await screen.findByText("Rice")).toBeInTheDocument();
-
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Movements" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Movements" }));
-    expect(
-      await screen.findByText("No movements match your filters."),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Movements" })).toHaveAttribute("aria-selected", "true");
-
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Claims" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Claims" }));
-    expect(
-      await screen.findByText("No warranty claims found."),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Claims" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Inventory" })).toHaveAttribute("aria-selected", "true");
   });
 });
