@@ -3,14 +3,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import InventoryManagerDashboard from "./InventoryManagerDashboard";
 
 const fetchInventoryDashboardMock = vi.fn();
+const fetchStockMovementsMock = vi.fn();
+const fetchWarrantyClaimsMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   fetchInventoryDashboard: (...args: unknown[]) => fetchInventoryDashboardMock(...args),
+  fetchStockMovements: (...args: unknown[]) => fetchStockMovementsMock(...args),
+  fetchWarrantyClaims: (...args: unknown[]) => fetchWarrantyClaimsMock(...args),
 }));
 
 describe("InventoryManagerDashboard", () => {
   beforeEach(() => {
     fetchInventoryDashboardMock.mockReset();
+    fetchStockMovementsMock.mockReset();
+    fetchWarrantyClaimsMock.mockReset();
     fetchInventoryDashboardMock.mockResolvedValue({
       expiry_alert_count: 2,
       open_warranty_claims: 1,
@@ -26,6 +32,13 @@ describe("InventoryManagerDashboard", () => {
         },
       ],
     });
+    fetchStockMovementsMock.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      take: 20,
+    });
+    fetchWarrantyClaimsMock.mockResolvedValue([]);
 
     window.history.replaceState({}, "", "/inventory-manager?returnTo=%2F");
   });
@@ -41,22 +54,22 @@ describe("InventoryManagerDashboard", () => {
     expect(screen.getByRole("tab", { name: "Batches" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Stocktake" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Claims" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Low stock" })).toBeInTheDocument();
+    expect(await screen.findByText("Low stock")).toBeInTheDocument();
     expect(screen.getByText("Expiring batches (next 30 days)")).toBeInTheDocument();
-    expect(screen.getByText("Rice")).toBeInTheDocument();
+    expect(await screen.findByText("Rice")).toBeInTheDocument();
 
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Movements" }));
     fireEvent.click(screen.getByRole("tab", { name: "Movements" }));
     expect(
-      await screen.findByText("Stock movement history and filters will appear here."),
+      await screen.findByText("No movements match your filters."),
     ).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Movements" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Movements" })).toHaveAttribute("aria-selected", "true");
 
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Claims" }));
     fireEvent.click(screen.getByRole("tab", { name: "Claims" }));
     expect(
-      await screen.findByText("Warranty and claim workflows will appear here."),
+      await screen.findByText("No warranty claims found."),
     ).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Claims" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Claims" })).toHaveAttribute("aria-selected", "true");
   });
 });
