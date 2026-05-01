@@ -43,7 +43,12 @@ describe("InventoryManagerDashboard", () => {
   it("renders the expected dashboard sections and lets users add products to the current sale", async () => {
     render(<InventoryManagerDashboard />);
 
-    expect(await screen.findByRole("heading", { name: "Products" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Inventory/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Products/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Purchases/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Reports/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Manager/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Inventory" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Current sale" })).toBeInTheDocument();
     expect(screen.getByText("Tap a product to add it.")).toBeInTheDocument();
 
