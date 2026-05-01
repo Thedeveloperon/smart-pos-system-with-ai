@@ -3257,6 +3257,7 @@ export async function fetchStocktakeSessions(
 export async function createStocktakeSession(): Promise<StocktakeSession> {
   const response = await request<BackendStocktakeSession>("/api/stocktake/sessions", {
     method: "POST",
+    body: JSON.stringify({}),
   });
   return mapStocktakeSession(response);
 }
