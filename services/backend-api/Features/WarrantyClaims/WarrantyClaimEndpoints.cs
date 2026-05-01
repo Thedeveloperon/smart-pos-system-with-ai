@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Infrastructure;
+using SmartPos.Backend.Infrastructure.Json;
 using SmartPos.Backend.Security;
 
 namespace SmartPos.Backend.Features.WarrantyClaims;
@@ -41,33 +42,69 @@ public static class WarrantyClaimEndpoints
                 query = query.Where(x => x.Status == parsedStatus);
             }
 
-            if (from_date.HasValue)
+            List<object> items;
+            if (dbContext.Database.IsSqlite())
             {
-                query = query.Where(x => x.ClaimDate >= from_date.Value);
-            }
+                var claims = await query.ToListAsync(cancellationToken);
 
-            if (to_date.HasValue)
-            {
-                query = query.Where(x => x.ClaimDate <= to_date.Value);
-            }
-
-            var items = await query
-                .OrderByDescending(x => x.ClaimDate)
-                .Select(x => new
+                if (from_date.HasValue)
                 {
-                    id = x.Id,
-                    serial_number_id = x.SerialNumberId,
-                    serial_value = x.SerialNumber.SerialValue,
-                    product_id = x.SerialNumber.ProductId,
-                    product_name = x.SerialNumber.Product.Name,
-                    claim_date = x.ClaimDate,
-                    status = x.Status,
-                    resolution_notes = x.ResolutionNotes,
-                    created_by_user_id = x.CreatedByUserId,
-                    created_at = x.CreatedAtUtc,
-                    updated_at = x.UpdatedAtUtc
-                })
-                .ToListAsync(cancellationToken);
+                    claims = claims.Where(x => x.ClaimDate >= from_date.Value).ToList();
+                }
+
+                if (to_date.HasValue)
+                {
+                    claims = claims.Where(x => x.ClaimDate <= to_date.Value).ToList();
+                }
+
+                items = claims
+                    .OrderByDescending(x => x.ClaimDate)
+                    .Select(x => (object)new
+                    {
+                        id = x.Id,
+                        serial_number_id = x.SerialNumberId,
+                        serial_value = x.SerialNumber?.SerialValue ?? string.Empty,
+                        product_id = x.SerialNumber?.ProductId,
+                        product_name = x.SerialNumber?.Product?.Name ?? string.Empty,
+                        claim_date = x.ClaimDate,
+                        status = x.Status,
+                        resolution_notes = x.ResolutionNotes,
+                        created_by_user_id = x.CreatedByUserId,
+                        created_at = x.CreatedAtUtc,
+                        updated_at = x.UpdatedAtUtc
+                    })
+                    .ToList();
+            }
+            else
+            {
+                if (from_date.HasValue)
+                {
+                    query = query.Where(x => x.ClaimDate >= from_date.Value);
+                }
+
+                if (to_date.HasValue)
+                {
+                    query = query.Where(x => x.ClaimDate <= to_date.Value);
+                }
+
+                items = await query
+                    .OrderByDescending(x => x.ClaimDate)
+                    .Select(x => (object)new
+                    {
+                        id = x.Id,
+                        serial_number_id = x.SerialNumberId,
+                        serial_value = x.SerialNumber.SerialValue,
+                        product_id = x.SerialNumber.ProductId,
+                        product_name = x.SerialNumber.Product.Name,
+                        claim_date = x.ClaimDate,
+                        status = x.Status,
+                        resolution_notes = x.ResolutionNotes,
+                        created_by_user_id = x.CreatedByUserId,
+                        created_at = x.CreatedAtUtc,
+                        updated_at = x.UpdatedAtUtc
+                    })
+                    .ToListAsync(cancellationToken);
+            }
 
             return Results.Ok(new { items });
         })
@@ -253,6 +290,7 @@ public sealed class CreateWarrantyClaimRequest
     public Guid SerialNumberId { get; set; }
 
     [JsonPropertyName("claim_date")]
+    [JsonConverter(typeof(FlexibleNullableDateTimeOffsetJsonConverter))]
     public DateTimeOffset? ClaimDate { get; set; }
 
     [JsonPropertyName("resolution_notes")]

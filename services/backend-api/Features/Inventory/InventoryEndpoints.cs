@@ -8,6 +8,21 @@ namespace SmartPos.Backend.Features.Inventory;
 
 public static class InventoryEndpoints
 {
+    private sealed record StockMovementListRow(
+        Guid Id,
+        Guid ProductId,
+        StockMovementType MovementType,
+        decimal QuantityBefore,
+        decimal QuantityChange,
+        decimal QuantityAfter,
+        StockMovementRef ReferenceType,
+        Guid? ReferenceId,
+        Guid? BatchId,
+        string? SerialNumber,
+        string? Reason,
+        Guid? CreatedByUserId,
+        DateTimeOffset CreatedAtUtc);
+
     public static IEndpointRouteBuilder MapInventoryEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/inventory")
@@ -110,10 +125,10 @@ public static class InventoryEndpoints
             var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var normalizedPage = Math.Max(1, page ?? 1);
             var normalizedTake = Math.Clamp(take ?? 20, 1, 100);
+            var isSqlite = dbContext.Database.IsSqlite();
 
             var query = dbContext.StockMovements
                 .AsNoTracking()
-                .Include(x => x.Product)
                 .AsQueryable();
 
             if (currentStoreId.HasValue)
@@ -137,24 +152,102 @@ public static class InventoryEndpoints
 
             if (from_date.HasValue)
             {
-                query = query.Where(x => x.CreatedAtUtc >= from_date.Value);
+                if (!isSqlite)
+                {
+                    query = query.Where(x => x.CreatedAtUtc >= from_date.Value);
+                }
             }
 
             if (to_date.HasValue)
             {
-                query = query.Where(x => x.CreatedAtUtc <= to_date.Value.AddDays(1));
+                if (!isSqlite)
+                {
+                    query = query.Where(x => x.CreatedAtUtc <= to_date.Value.AddDays(1));
+                }
             }
 
-            var total = await query.CountAsync(cancellationToken);
-            var items = await query
-                .OrderByDescending(x => x.CreatedAtUtc)
-                .Skip((normalizedPage - 1) * normalizedTake)
-                .Take(normalizedTake)
+            int total;
+            List<StockMovementListRow> pageRows;
+            if (isSqlite)
+            {
+                var movements = await query
+                    .Select(x => new StockMovementListRow(
+                        x.Id,
+                        x.ProductId,
+                        x.MovementType,
+                        x.QuantityBefore,
+                        x.QuantityChange,
+                        x.QuantityAfter,
+                        x.ReferenceType,
+                        x.ReferenceId,
+                        x.BatchId,
+                        x.SerialNumber,
+                        x.Reason,
+                        x.CreatedByUserId,
+                        x.CreatedAtUtc))
+                    .ToListAsync(cancellationToken);
+
+                if (from_date.HasValue)
+                {
+                    movements = movements.Where(x => x.CreatedAtUtc >= from_date.Value).ToList();
+                }
+
+                if (to_date.HasValue)
+                {
+                    movements = movements.Where(x => x.CreatedAtUtc <= to_date.Value.AddDays(1)).ToList();
+                }
+
+                total = movements.Count;
+                pageRows = movements
+                    .OrderByDescending(x => x.CreatedAtUtc)
+                    .Skip((normalizedPage - 1) * normalizedTake)
+                    .Take(normalizedTake)
+                    .ToList();
+            }
+            else
+            {
+                total = await query.CountAsync(cancellationToken);
+                pageRows = await query
+                    .OrderByDescending(x => x.CreatedAtUtc)
+                    .Skip((normalizedPage - 1) * normalizedTake)
+                    .Take(normalizedTake)
+                    .Select(x => new StockMovementListRow(
+                        x.Id,
+                        x.ProductId,
+                        x.MovementType,
+                        x.QuantityBefore,
+                        x.QuantityChange,
+                        x.QuantityAfter,
+                        x.ReferenceType,
+                        x.ReferenceId,
+                        x.BatchId,
+                        x.SerialNumber,
+                        x.Reason,
+                        x.CreatedByUserId,
+                        x.CreatedAtUtc))
+                    .ToListAsync(cancellationToken);
+            }
+
+            var productIds = pageRows
+                .Select(x => x.ProductId)
+                .Distinct()
+                .ToList();
+            var productNamesById = productIds.Count == 0
+                ? new Dictionary<Guid, string>()
+                : await dbContext.Products
+                    .AsNoTracking()
+                    .Where(x => productIds.Contains(x.Id))
+                    .Select(x => new { x.Id, x.Name })
+                    .ToDictionaryAsync(x => x.Id, x => x.Name, cancellationToken);
+
+            var items = pageRows
                 .Select(x => new
                 {
                     id = x.Id,
                     product_id = x.ProductId,
-                    product_name = x.Product.Name,
+                    product_name = productNamesById.TryGetValue(x.ProductId, out var productName)
+                        ? productName
+                        : string.Empty,
                     movement_type = x.MovementType,
                     quantity_before = x.QuantityBefore,
                     quantity_change = x.QuantityChange,
@@ -167,7 +260,7 @@ public static class InventoryEndpoints
                     created_by_user_id = x.CreatedByUserId,
                     created_at = x.CreatedAtUtc
                 })
-                .ToListAsync(cancellationToken);
+                .ToList();
 
             return Results.Ok(new
             {

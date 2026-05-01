@@ -183,6 +183,53 @@ public sealed class ProductInventoryTests(CustomWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task ProductSerialNumbers_ShouldListPersistedSerialsAfterReload()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+        var serialOne = $"SER-{runId}-001";
+        var serialTwo = $"SER-{runId}-002";
+
+        var createProduct = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"Serial Tracked Product {runId}",
+                sku = $"SER-{runId}",
+                unit_price = 250m,
+                cost_price = 180m,
+                initial_stock_quantity = 2m,
+                reorder_level = 1m,
+                allow_negative_stock = false,
+                is_active = true,
+                is_serial_tracked = true,
+                warranty_months = 12
+            }));
+
+        var productId = Guid.Parse(TestJson.GetString(createProduct, "product_id"));
+
+        await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync($"/api/products/{productId}/serials", new
+            {
+                serials = new[] { serialOne, serialTwo }
+            }));
+
+        var reloadPayload = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/products/{productId}/serials"));
+        var items = reloadPayload["items"]?.AsArray()
+                    ?? throw new InvalidOperationException("Missing serial items.");
+
+        var serialValues = items
+            .OfType<JsonObject>()
+            .Select(item => TestJson.GetString(item, "serial_value"))
+            .ToArray();
+
+        Assert.Equal(2, serialValues.Length);
+        Assert.Contains(serialOne, serialValues);
+        Assert.Contains(serialTwo, serialValues);
+    }
+
+    [Fact]
     public async Task ProductBarcodeEndpoints_ShouldGenerateValidateAssignAndBulkGenerateMissing()
     {
         await TestAuth.SignInAsManagerAsync(client);

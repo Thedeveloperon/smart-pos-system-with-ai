@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using SmartPos.Backend.Infrastructure.Json;
 
 namespace SmartPos.Backend.Features.Purchases;
 
@@ -173,6 +174,7 @@ public sealed class PurchaseImportConfirmRequest
     public string? InvoiceNumber { get; set; }
 
     [JsonPropertyName("invoice_date")]
+    [JsonConverter(typeof(FlexibleNullableDateTimeOffsetJsonConverter))]
     public DateTimeOffset? InvoiceDate { get; set; }
 
     [JsonPropertyName("currency")]
@@ -314,9 +316,11 @@ public sealed class CreatePurchaseOrderRequest
     public string PoNumber { get; set; } = string.Empty;
 
     [JsonPropertyName("po_date")]
+    [JsonConverter(typeof(FlexibleNullableDateTimeOffsetJsonConverter))]
     public DateTimeOffset? PoDate { get; set; }
 
     [JsonPropertyName("expected_delivery_date")]
+    [JsonConverter(typeof(FlexibleNullableDateTimeOffsetJsonConverter))]
     public DateTimeOffset? ExpectedDeliveryDate { get; set; }
 
     [JsonPropertyName("notes")]
@@ -347,6 +351,7 @@ public sealed class UpdatePurchaseOrderRequest
     public string? PoNumber { get; set; }
 
     [JsonPropertyName("expected_delivery_date")]
+    [JsonConverter(typeof(FlexibleNullableDateTimeOffsetJsonConverter))]
     public DateTimeOffset? ExpectedDeliveryDate { get; set; }
 
     [JsonPropertyName("notes")]
@@ -362,6 +367,7 @@ public sealed class ReceivePurchaseOrderRequest
     public string InvoiceNumber { get; set; } = string.Empty;
 
     [JsonPropertyName("invoice_date")]
+    [JsonConverter(typeof(FlexibleDateTimeOffsetJsonConverter))]
     public DateTimeOffset InvoiceDate { get; set; }
 
     [JsonPropertyName("notes")]
@@ -389,9 +395,11 @@ public sealed class ReceivePurchaseOrderLineRequest
     public string? BatchNumber { get; set; }
 
     [JsonPropertyName("expiry_date")]
+    [JsonConverter(typeof(FlexibleNullableDateTimeOffsetJsonConverter))]
     public DateTimeOffset? ExpiryDate { get; set; }
 
     [JsonPropertyName("manufacture_date")]
+    [JsonConverter(typeof(FlexibleNullableDateTimeOffsetJsonConverter))]
     public DateTimeOffset? ManufactureDate { get; set; }
 }
 
@@ -404,6 +412,7 @@ public sealed class CreateManualBillRequest
     public string InvoiceNumber { get; set; } = string.Empty;
 
     [JsonPropertyName("invoice_date")]
+    [JsonConverter(typeof(FlexibleDateTimeOffsetJsonConverter))]
     public DateTimeOffset InvoiceDate { get; set; }
 
     [JsonPropertyName("purchase_order_id")]
@@ -437,9 +446,11 @@ public sealed class CreateManualBillLineRequest
     public string? BatchNumber { get; set; }
 
     [JsonPropertyName("expiry_date")]
+    [JsonConverter(typeof(FlexibleNullableDateTimeOffsetJsonConverter))]
     public DateTimeOffset? ExpiryDate { get; set; }
 
     [JsonPropertyName("manufacture_date")]
+    [JsonConverter(typeof(FlexibleNullableDateTimeOffsetJsonConverter))]
     public DateTimeOffset? ManufactureDate { get; set; }
 }
 

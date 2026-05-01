@@ -4,9 +4,11 @@ import {
   createProductBatch,
   fetchProductBatches,
   fetchProducts,
+  fetchSuppliers,
   updateProductBatch,
   type Product,
   type ProductBatch,
+  type Supplier,
 } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -61,7 +63,9 @@ export default function BatchesTab() {
   const [products, setProducts] = useState<Product[]>([]);
   const [productId, setProductId] = useState("");
   const [batches, setBatches] = useState<ProductBatch[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingSuppliers, setLoadingSuppliers] = useState(false);
 
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -111,6 +115,31 @@ export default function BatchesTab() {
       alive = false;
     };
   }, [productId]);
+
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    setLoadingSuppliers(true);
+    fetchSuppliers(true)
+      .then((items) => {
+        if (alive) {
+          setSuppliers(items);
+        }
+      })
+      .catch((error) => {
+        if (alive) {
+          toast.error(error instanceof Error ? error.message : "Failed to load suppliers.");
+        }
+      })
+      .finally(() => {
+        if (alive) {
+          setLoadingSuppliers(false);
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [open]);
 
   const openCreate = () => {
     setEditingId(null);
@@ -237,17 +266,29 @@ export default function BatchesTab() {
                 <div className="grid gap-1">
                   <Label>Supplier</Label>
                   <Select
-                    value={form.supplier_id || "none"}
-                    onValueChange={(v) => setForm({ ...form, supplier_id: v === "none" ? "" : v })}
+                    value={form.supplier_id || "__none__"}
+                    onValueChange={(value) =>
+                      setForm({ ...form, supplier_id: value === "__none__" ? "" : value })
+                    }
                   >
-                    <SelectTrigger>
-                      <SelectValue />
+                    <SelectTrigger disabled={loadingSuppliers}>
+                      <SelectValue
+                        placeholder={
+                          loadingSuppliers
+                            ? "Loading suppliers..."
+                            : suppliers.length > 0
+                              ? "Select supplier (optional)"
+                              : "No suppliers available"
+                        }
+                      />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">No supplier</SelectItem>
-                      <SelectItem value="sup-1">Acme Distributors</SelectItem>
-                      <SelectItem value="sup-2">MedSupply Co.</SelectItem>
-                      <SelectItem value="sup-3">TechWholesale Ltd</SelectItem>
+                      <SelectItem value="__none__">No supplier</SelectItem>
+                      {suppliers.map((supplier) => (
+                        <SelectItem key={supplier.supplier_id} value={supplier.supplier_id}>
+                          {supplier.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>

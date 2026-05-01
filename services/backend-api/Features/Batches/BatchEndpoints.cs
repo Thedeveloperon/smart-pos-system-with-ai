@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Infrastructure;
+using SmartPos.Backend.Infrastructure.Json;
 using SmartPos.Backend.Security;
 
 namespace SmartPos.Backend.Features.Batches;
@@ -29,10 +30,9 @@ public static class BatchEndpoints
                 return Results.NotFound(new { message = "Product not found." });
             }
 
-            var batches = await dbContext.ProductBatches
+            var batchQuery = dbContext.ProductBatches
                 .AsNoTracking()
                 .Where(x => x.ProductId == productId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value))
-                .OrderByDescending(x => x.CreatedAtUtc)
                 .Select(x => new
                 {
                     id = x.Id,
@@ -48,8 +48,15 @@ public static class BatchEndpoints
                     received_at = x.ReceivedAtUtc,
                     created_at = x.CreatedAtUtc,
                     updated_at = x.UpdatedAtUtc
-                })
-                .ToListAsync(cancellationToken);
+                });
+
+            var batches = dbContext.Database.IsSqlite()
+                ? (await batchQuery.ToListAsync(cancellationToken))
+                    .OrderByDescending(x => x.created_at)
+                    .ToList()
+                : await batchQuery
+                    .OrderByDescending(x => x.created_at)
+                    .ToListAsync(cancellationToken);
 
             return Results.Ok(new { product_id = productId, items = batches });
         })
@@ -189,21 +196,29 @@ public static class BatchEndpoints
             var thresholdDays = Math.Clamp(days ?? 30, 1, 3650);
             var limitDate = DateTimeOffset.UtcNow.AddDays(thresholdDays);
 
-            var batches = await dbContext.ProductBatches
+            var batchesQuery = dbContext.ProductBatches
                 .AsNoTracking()
                 .Include(x => x.Product)
                 .Where(x => !currentStoreId.HasValue || x.StoreId == currentStoreId.Value)
-                .Where(x => x.ExpiryDate.HasValue && x.ExpiryDate <= limitDate)
-                .OrderBy(x => x.ExpiryDate)
-                .ToListAsync(cancellationToken);
+                .Where(x => x.ExpiryDate.HasValue);
+
+            var batches = dbContext.Database.IsSqlite()
+                ? (await batchesQuery.ToListAsync(cancellationToken))
+                    .Where(x => x.ExpiryDate <= limitDate)
+                    .OrderBy(x => x.ExpiryDate)
+                    .ToList()
+                : await batchesQuery
+                    .Where(x => x.ExpiryDate <= limitDate)
+                    .OrderBy(x => x.ExpiryDate)
+                    .ToListAsync(cancellationToken);
 
             var now = DateTimeOffset.UtcNow.Date;
             var items = batches
                 .Select(x => new
                 {
-                    id = x.Id,
+                    batch_id = x.Id,
                     product_id = x.ProductId,
-                    product_name = x.Product.Name,
+                    product_name = x.Product?.Name ?? string.Empty,
                     batch_number = x.BatchNumber,
                     expiry_date = x.ExpiryDate,
                     remaining_quantity = x.RemainingQuantity,
@@ -270,9 +285,11 @@ public sealed class CreateBatchRequest
     public string BatchNumber { get; set; } = string.Empty;
 
     [JsonPropertyName("manufacture_date")]
+    [JsonConverter(typeof(FlexibleNullableDateTimeOffsetJsonConverter))]
     public DateTimeOffset? ManufactureDate { get; set; }
 
     [JsonPropertyName("expiry_date")]
+    [JsonConverter(typeof(FlexibleNullableDateTimeOffsetJsonConverter))]
     public DateTimeOffset? ExpiryDate { get; set; }
 
     [JsonPropertyName("initial_quantity")]
@@ -285,6 +302,7 @@ public sealed class CreateBatchRequest
     public decimal CostPrice { get; set; }
 
     [JsonPropertyName("received_at")]
+    [JsonConverter(typeof(FlexibleNullableDateTimeOffsetJsonConverter))]
     public DateTimeOffset? ReceivedAtUtc { get; set; }
 }
 
@@ -300,9 +318,11 @@ public sealed class UpdateBatchRequest
     public string? BatchNumber { get; set; }
 
     [JsonPropertyName("manufacture_date")]
+    [JsonConverter(typeof(FlexibleNullableDateTimeOffsetJsonConverter))]
     public DateTimeOffset? ManufactureDate { get; set; }
 
     [JsonPropertyName("expiry_date")]
+    [JsonConverter(typeof(FlexibleNullableDateTimeOffsetJsonConverter))]
     public DateTimeOffset? ExpiryDate { get; set; }
 
     [JsonPropertyName("remaining_quantity")]

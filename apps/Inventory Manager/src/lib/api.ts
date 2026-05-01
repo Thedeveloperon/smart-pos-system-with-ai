@@ -1278,7 +1278,7 @@ export async function fetchInventoryDashboard(): Promise<InventoryDashboard> {
         ? claims.value.filter((claim) => claim.status === "Open" || claim.status === "InRepair")
             .length
         : 0,
-    expiry_alerts,
+    expiry_alerts: expiryAlerts,
   };
 }
 
