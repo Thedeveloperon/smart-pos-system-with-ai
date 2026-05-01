@@ -34,6 +34,31 @@ public sealed class InventoryManagerOverviewEndpointTests(CustomWebApplicationFa
     }
 
     [Fact]
+    public async Task CreateStocktakeSession_ShouldAcceptEmptyJsonBody()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var response = await client.PostAsJsonAsync("/api/stocktake/sessions", new { });
+        var session = await TestJson.ReadObjectAsync(response);
+
+        Assert.NotEqual(Guid.Empty, Guid.Parse(TestJson.GetString(session, "id")));
+        Assert.Equal("Draft", TestJson.GetString(session, "status"));
+        Assert.NotNull(session["items"]);
+    }
+
+    [Fact]
+    public async Task CreateStocktakeSession_ShouldAcceptMissingBody()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var response = await client.PostAsync("/api/stocktake/sessions", null);
+        var session = await TestJson.ReadObjectAsync(response);
+
+        Assert.NotEqual(Guid.Empty, Guid.Parse(TestJson.GetString(session, "id")));
+        Assert.Equal("Draft", TestJson.GetString(session, "status"));
+    }
+
+    [Fact]
     public async Task StocktakeSessions_ShouldLoadOnSqlite_WhenLegacyRowsContainMalformedVarianceQuantity()
     {
         var sessionId = Guid.NewGuid();

@@ -83,7 +83,6 @@ type SummaryCardProps = {
   value: string;
 };
 
-const AUTO_REFRESH_MS = 60_000;
 const ALL_FILTER_VALUE = "__all__";
 const UNCATEGORIZED_FILTER_VALUE = "__uncategorized__";
 const TRANSACTION_TAKE = 1000;
@@ -361,18 +360,6 @@ export default function ReportsPage({ onBack }: Props) {
     }
 
     void loadReports(false);
-  }, [fromDate, hasInvalidDateRange, loadReports, toDate]);
-
-  useEffect(() => {
-    if (hasInvalidDateRange) {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      void loadReports(true);
-    }, AUTO_REFRESH_MS);
-
-    return () => window.clearInterval(intervalId);
   }, [fromDate, hasInvalidDateRange, loadReports, toDate]);
 
   const products = reportData?.products ?? [];
