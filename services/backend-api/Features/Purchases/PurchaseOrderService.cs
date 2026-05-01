@@ -516,7 +516,6 @@ public sealed class PurchaseOrderService(
         }
 
         var products = await dbContext.Products
-            .AsNoTracking()
             .Where(x => productIds.Contains(x.Id))
             .Where(x => !currentStoreId.HasValue || x.StoreId == currentStoreId.Value)
             .ToDictionaryAsync(x => x.Id, cancellationToken);

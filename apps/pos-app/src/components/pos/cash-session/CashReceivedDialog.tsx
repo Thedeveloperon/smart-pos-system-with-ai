@@ -11,11 +11,10 @@ import { playCashCountSound, primeConfirmationSound } from "@/lib/sound";
 import DenominationCounter from "./DenominationCounter";
 import type { DenominationCount } from "./types";
 import {
-  buildTopUpCounts,
-  getDrawerChangeSuggestion,
   getExactChangeBreakdown,
+  getDrawerChangeNotice,
+  buildTopUpCounts,
   mergeDenominationCounts,
-  type OptionalPayoutSuggestion,
 } from "./changeBreakdown";
 
 interface CashReceivedDialogProps {
@@ -38,23 +37,17 @@ const CashReceivedDialog = ({
   const [counts, setCounts] = useState<DenominationCount[]>([]);
   const [total, setTotal] = useState(0);
   const [resetKey, setResetKey] = useState(0);
-  const [flashTotal, setFlashTotal] = useState(false);
+  const [suggestionMessage, setSuggestionMessage] = useState<string | null>(null);
   const [flashDenominations, setFlashDenominations] = useState<number[]>([]);
-  const [appliedSuggestion, setAppliedSuggestion] = useState<OptionalPayoutSuggestion | null>(null);
   const onTotalChangeRef = useRef(onTotalChange);
-  const appliedSuggestionKeyRef = useRef<string | null>(null);
-  const flashTimerRef = useRef<number | null>(null);
-  const availableCountsKey = useMemo(
-    () => availableCounts.map((count) => `${count.denomination}:${count.quantity}`).join("|"),
-    [availableCounts],
-  );
+  const hasAppliedSuggestionRef = useRef(false);
   const changeDue = Math.max(0, Math.round(total - expectedCash));
   const exactChangeBreakdown = useMemo(
     () => (changeDue > 0 ? getExactChangeBreakdown(changeDue, availableCounts) : null),
     [availableCounts, changeDue],
   );
-  const drawerSuggestion = useMemo(
-    () => (changeDue > 0 && !exactChangeBreakdown ? getDrawerChangeSuggestion(changeDue, availableCounts) : null),
+  const drawerNotice = useMemo(
+    () => (changeDue > 0 && !exactChangeBreakdown ? getDrawerChangeNotice(changeDue, availableCounts) : null),
     [availableCounts, changeDue, exactChangeBreakdown],
   );
 
@@ -68,56 +61,39 @@ const CashReceivedDialog = ({
       setTotal(0);
       onTotalChangeRef.current?.(0);
       setResetKey((value) => value + 1);
-      setFlashTotal(false);
+      setSuggestionMessage(null);
       setFlashDenominations([]);
-      setAppliedSuggestion(null);
-      appliedSuggestionKeyRef.current = null;
-      if (flashTimerRef.current !== null) {
-        window.clearTimeout(flashTimerRef.current);
-        flashTimerRef.current = null;
-      }
+      hasAppliedSuggestionRef.current = false;
     }
   }, [open]);
 
   useEffect(() => {
-    if (!open || !drawerSuggestion) {
+    if (!open || !drawerNotice?.suggestion || hasAppliedSuggestionRef.current) {
       return;
     }
 
-    const suggestionKey = `${availableCountsKey}:${changeDue}:${drawerSuggestion.payoutAmount}`;
-    if (appliedSuggestionKeyRef.current === suggestionKey) {
-      return;
-    }
-
-    appliedSuggestionKeyRef.current = suggestionKey;
-
-    const topUpCounts = buildTopUpCounts(drawerSuggestion.requestAmount);
+    const topUpCounts = buildTopUpCounts(drawerNotice.suggestion.requestAmount);
     const nextCounts = mergeDenominationCounts(counts, topUpCounts);
-    const nextTotal = total + drawerSuggestion.requestAmount;
+    const nextTotal = total + drawerNotice.suggestion.requestAmount;
+    const flashedDenominations = topUpCounts
+      .filter((count) => count.quantity > 0)
+      .map((count) => count.denomination);
 
     setCounts(nextCounts);
     setTotal(nextTotal);
     onTotalChangeRef.current?.(nextTotal);
     setResetKey((value) => value + 1);
-    setFlashDenominations(topUpCounts.filter((count) => count.quantity > 0).map((count) => count.denomination));
-    setFlashTotal(true);
-    setAppliedSuggestion(drawerSuggestion);
-
-    if (flashTimerRef.current !== null) {
-      window.clearTimeout(flashTimerRef.current);
-    }
-
-    flashTimerRef.current = window.setTimeout(() => {
-      setFlashTotal(false);
-      setFlashDenominations([]);
-      flashTimerRef.current = null;
-    }, 900);
-  }, [availableCountsKey, changeDue, counts, drawerSuggestion, open, total]);
+    setSuggestionMessage(drawerNotice.message);
+    setFlashDenominations(flashedDenominations);
+    hasAppliedSuggestionRef.current = true;
+  }, [changeDue, counts, drawerNotice, open, total]);
 
   const handleCountChange = (newCounts: DenominationCount[], newTotal: number) => {
     setCounts(newCounts);
     setTotal(newTotal);
     onTotalChangeRef.current?.(newTotal);
+    setSuggestionMessage(null);
+    setFlashDenominations([]);
   };
 
   const handleProceed = () => {
@@ -151,7 +127,7 @@ const CashReceivedDialog = ({
             </div>
           </DialogHeader>
 
-          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-6 py-4">
+          <div className="flex-1 overflow-y-auto px-6 py-4">
             {changeDue > 0 ? (
               <div
                 className={`rounded-2xl border px-4 py-3 ${
@@ -174,43 +150,23 @@ const CashReceivedDialog = ({
                     >
                       {exactChangeBreakdown ? "Change available" : "Insufficient change available"}
                     </p>
-                    {exactChangeBreakdown ? (
+                    {suggestionMessage ? (
+                      <p className="mt-1 text-sm text-amber-900">{suggestionMessage}</p>
+                    ) : exactChangeBreakdown ? (
                       <p className="mt-1 text-sm text-emerald-800">
                         The drawer can return the current balance with the available denominations.
-                      </p>
-                    ) : drawerSuggestion ? (
-                      <p className="mt-1 text-sm text-amber-900">
-                        Insufficient change available. Please request{" "}
-                        <span className="font-semibold tabular-nums animate-pulse text-amber-700">
-                          Rs. {drawerSuggestion.requestAmount.toLocaleString()}
-                        </span>{" "}
-                        from the customer and return{" "}
-                        <span className="font-semibold tabular-nums animate-pulse text-amber-700">
-                          Rs. {drawerSuggestion.payoutAmount.toLocaleString()}
-                        </span>{" "}
-                        instead.
                       </p>
                     ) : (
                       <p className="mt-1 text-sm text-red-700">
                         Insufficient change available in the drawer. Please choose another cash amount.
                       </p>
                     )}
-                    {!exactChangeBreakdown && drawerSuggestion ? (
-                      <p className="mt-1 text-xs text-amber-700">
-                        The cash total has been updated automatically.
-                      </p>
-                    ) : null}
-                    {appliedSuggestion ? (
-                      <p className="mt-2 inline-flex rounded-full border border-amber-200 bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 animate-pulse">
-                        Auto-added Rs. {appliedSuggestion.requestAmount.toLocaleString()} to match Rs. {appliedSuggestion.payoutAmount.toLocaleString()}
-                      </p>
-                    ) : null}
                   </div>
                 </div>
               </div>
             ) : null}
 
-            <div className="min-h-0 flex-1 overflow-hidden">
+            <div className="mt-4">
               <DenominationCounter
                 key={resetKey}
                 initialCounts={counts}
@@ -246,11 +202,7 @@ const CashReceivedDialog = ({
                   Proceed - Rs. {total.toLocaleString()}
                 </Button>
               </div>
-              <p
-                className={`text-lg font-bold tabular-nums text-slate-800 sm:ml-auto sm:text-xl ${
-                  flashTotal ? "animate-pulse text-amber-700" : ""
-                }`}
-              >
+              <p className="text-lg font-bold tabular-nums text-slate-800 sm:ml-auto sm:text-xl">
                 Rs. {total.toLocaleString()}
               </p>
             </div>

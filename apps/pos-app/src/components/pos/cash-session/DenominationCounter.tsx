@@ -129,8 +129,8 @@ const DenominationCounter = ({
                 isFlash
                   ? `animate-pulse bg-amber-500 ring-2 ring-amber-200 ${compact ? "h-[18px] min-w-[18px] px-1" : "h-5 min-w-5 px-1"}`
                   : isWarning
-                  ? `animate-pulse bg-red-600 ring-2 ring-red-300 ${compact ? "h-[18px] min-w-[18px] px-1" : "h-5 min-w-5 px-1"}`
-                  : `bg-red-500 ${compact ? "h-[18px] min-w-[18px] px-1" : "h-5 min-w-5 px-1"}`
+                    ? `animate-pulse bg-red-600 ring-2 ring-red-300 ${compact ? "h-[18px] min-w-[18px] px-1" : "h-5 min-w-5 px-1"}`
+                    : `bg-red-500 ${compact ? "h-[18px] min-w-[18px] px-1" : "h-5 min-w-5 px-1"}`
               }`}
               aria-live="polite"
               aria-atomic="true"
@@ -157,7 +157,13 @@ const DenominationCounter = ({
             </span>
           </div>
 
-          <div className={`grid auto-rows-min content-start grid-cols-1 ${compact ? "flex-1 min-h-0 gap-0.5 overflow-y-auto pr-0.5" : "flex-1 min-h-0 gap-0.5 overflow-y-auto pr-1"}`}>
+          <div
+            className={`grid auto-rows-min content-start grid-cols-1 ${
+              compact
+                ? "flex-1 min-h-0 gap-0.5 overflow-y-scroll scrollbar-thin pr-0.5"
+                : "flex-1 min-h-0 gap-0.5 overflow-y-scroll scrollbar-thin pr-1"
+            }`}
+          >
             {notes.map((d) => renderItem(d, "note"))}
           </div>
         </section>
@@ -173,7 +179,13 @@ const DenominationCounter = ({
             </span>
           </div>
 
-          <div className={`grid auto-rows-min content-start grid-cols-1 ${compact ? "flex-1 min-h-0 gap-0.5 overflow-y-auto pr-0.5" : "flex-1 min-h-0 gap-0.5 overflow-y-auto pr-1"}`}>
+          <div
+            className={`grid auto-rows-min content-start grid-cols-1 ${
+              compact
+                ? "flex-1 min-h-0 gap-0.5 overflow-y-scroll scrollbar-thin pr-0.5"
+                : "flex-1 min-h-0 gap-0.5 overflow-y-scroll scrollbar-thin pr-1"
+            }`}
+          >
             {coins.map((d) => renderItem(d, "coin"))}
           </div>
         </section>
