@@ -230,6 +230,124 @@ public sealed class ProductInventoryTests(CustomWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task ProductSerialNumbers_ShouldUpdateAndDeleteSerials()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+        var serialOne = $"SER-UPDATE-{runId}-001";
+        var serialTwo = $"SER-UPDATE-{runId}-002";
+
+        var createProduct = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"Serial Update Product {runId}",
+                sku = $"SER-UPD-{runId}",
+                unit_price = 250m,
+                cost_price = 180m,
+                initial_stock_quantity = 2m,
+                reorder_level = 1m,
+                allow_negative_stock = false,
+                is_active = true,
+                is_serial_tracked = true,
+                warranty_months = 12
+            }));
+
+        var productId = Guid.Parse(TestJson.GetString(createProduct, "product_id"));
+
+        var added = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync($"/api/products/{productId}/serials", new
+            {
+                serials = new[] { serialOne, serialTwo }
+            }));
+
+        var addedItems = added["items"]?.AsArray()
+                        ?? throw new InvalidOperationException("Missing added serial items.");
+        var firstSerial = addedItems.OfType<JsonObject>().FirstOrDefault()
+                         ?? throw new InvalidOperationException("Missing first serial item.");
+        var firstSerialId = Guid.Parse(TestJson.GetString(firstSerial, "id"));
+        var firstWarranty = DateTimeOffset.UtcNow.AddMonths(6);
+
+        var updatedSerial = await TestJson.ReadObjectAsync(
+            await client.PutAsJsonAsync($"/api/products/{productId}/serials/{firstSerialId}", new
+            {
+                status = "Defective",
+                warranty_expiry_date = firstWarranty.ToString("O")
+            }));
+
+        Assert.Equal("Defective", TestJson.GetString(updatedSerial, "status"));
+        Assert.Equal(
+            firstWarranty.UtcDateTime,
+            DateTimeOffset.Parse(TestJson.GetString(updatedSerial, "warranty_expiry_date")).UtcDateTime);
+
+        var remainingSerial = addedItems.OfType<JsonObject>().Skip(1).FirstOrDefault()
+                             ?? throw new InvalidOperationException("Missing second serial item.");
+        var remainingSerialId = Guid.Parse(TestJson.GetString(remainingSerial, "id"));
+
+        var deleteResponse = await client.DeleteAsync($"/api/products/{productId}/serials/{remainingSerialId}");
+        Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
+
+        var reloadPayload = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/products/{productId}/serials"));
+        var items = reloadPayload["items"]?.AsArray()
+                    ?? throw new InvalidOperationException("Missing serial items.");
+
+        var serialValues = items
+            .OfType<JsonObject>()
+            .Select(item => TestJson.GetString(item, "serial_value"))
+            .ToArray();
+
+        Assert.Single(serialValues);
+        Assert.Contains(serialOne, serialValues);
+        Assert.DoesNotContain(serialTwo, serialValues);
+    }
+
+    [Fact]
+    public async Task ProductSerialNumbers_ShouldMarkSerialDefective()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+        var serialValue = $"SER-DEF-{runId}-001";
+
+        var createProduct = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"Serial Defective Product {runId}",
+                sku = $"SER-DEF-{runId}",
+                unit_price = 250m,
+                cost_price = 180m,
+                initial_stock_quantity = 1m,
+                reorder_level = 1m,
+                allow_negative_stock = false,
+                is_active = true,
+                is_serial_tracked = true,
+                warranty_months = 12
+            }));
+
+        var productId = Guid.Parse(TestJson.GetString(createProduct, "product_id"));
+
+        var added = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync($"/api/products/{productId}/serials", new
+            {
+                serials = new[] { serialValue }
+            }));
+
+        var serialItem = added["items"]?.AsArray()?.OfType<JsonObject>().FirstOrDefault()
+                         ?? throw new InvalidOperationException("Missing serial item.");
+        var serialId = Guid.Parse(TestJson.GetString(serialItem, "id"));
+
+        var markedDefective = await TestJson.ReadObjectAsync(
+            await client.PutAsJsonAsync($"/api/products/{productId}/serials/{serialId}", new
+            {
+                status = "Defective"
+            }));
+
+        Assert.Equal("Defective", TestJson.GetString(markedDefective, "status"));
+        Assert.Equal(serialValue, TestJson.GetString(markedDefective, "serial_value"));
+    }
+
+    [Fact]
     public async Task ProductBarcodeEndpoints_ShouldGenerateValidateAssignAndBulkGenerateMissing()
     {
         await TestAuth.SignInAsManagerAsync(client);

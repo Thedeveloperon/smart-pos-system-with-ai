@@ -56,12 +56,13 @@ public sealed class PurchaseOrderService(
             query = query.Where(x => x.PoDate < toDate.Value.AddDays(1));
         }
 
-        var orders = await query
+        var orders = await query.ToListAsync(cancellationToken);
+
+        return orders
             .OrderByDescending(x => x.PoDate)
             .ThenByDescending(x => x.CreatedAtUtc)
-            .ToListAsync(cancellationToken);
-
-        return orders.Select(ToResponse).ToList();
+            .Select(ToResponse)
+            .ToList();
     }
 
     public async Task<PurchaseOrderResponse> CreatePurchaseOrderAsync(
