@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
+  addSerialNumbers,
+  deleteSerialNumber,
   fetchProducts,
   fetchSerialNumbers,
   lookupSerial,
   updateSerialNumber,
-  addSerialNumbers,
   type Product,
   type SerialLookupResult,
   type SerialNumberRecord,
@@ -40,8 +41,15 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import SerialInputList from "./SerialInputList";
-import { Search, Hash } from "lucide-react";
+import { Search, Hash, MoreHorizontal, BadgeAlert, PencilLine, Trash2 } from "lucide-react";
 
 const STATUS_TONES: Record<string, string> = {
   Available: "bg-success/15 text-success",
@@ -49,6 +57,21 @@ const STATUS_TONES: Record<string, string> = {
   Returned: "bg-warning/15 text-warning-foreground",
   Defective: "bg-destructive/15 text-destructive",
   UnderWarranty: "bg-primary/15 text-primary",
+};
+
+const STATUS_OPTIONS: SerialNumberRecord["status"][] = [
+  "Available",
+  "Sold",
+  "Returned",
+  "Defective",
+  "UnderWarranty",
+];
+
+const toDateInputValue = (value?: string) => (value ? value.slice(0, 10) : "");
+
+const toIsoDateString = (value: string) => {
+  if (!value) return null;
+  return `${value}T00:00:00.000Z`;
 };
 
 export default function SerialNumbersTab() {
@@ -64,6 +87,15 @@ export default function SerialNumbersTab() {
   const [addOpen, setAddOpen] = useState(false);
   const [newSerials, setNewSerials] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+
+  const [editOpen, setEditOpen] = useState(false);
+  const [editSerial, setEditSerial] = useState<SerialNumberRecord | null>(null);
+  const [editStatus, setEditStatus] = useState<SerialNumberRecord["status"]>("Available");
+  const [editWarrantyDate, setEditWarrantyDate] = useState("");
+  const [updating, setUpdating] = useState(false);
+
+  const [deleteSerial, setDeleteSerial] = useState<SerialNumberRecord | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -121,12 +153,47 @@ export default function SerialNumbersTab() {
     }
   };
 
-  const handleMarkDefective = async (sid: string) => {
+  const handleOpenEdit = (serial: SerialNumberRecord) => {
+    setEditSerial(serial);
+    setEditStatus(serial.status);
+    setEditWarrantyDate(toDateInputValue(serial.warranty_expiry_date));
+    setEditOpen(true);
+  };
+
+  const handleMarkDefective = async (serial: SerialNumberRecord) => {
+    if (!productId) return;
     try {
-      const updated = await updateSerialNumber(productId, sid, { status: "Defective" });
-      setSerials((prev) => prev.map((s) => (s.id === sid ? { ...s, ...updated } : s)));
+      const updated = await updateSerialNumber(productId, serial.id, {
+        status: "Defective",
+        warranty_expiry_date: serial.warranty_expiry_date ?? null,
+      });
+      setSerials((prev) =>
+        prev.map((current) => (current.id === serial.id ? { ...current, ...updated } : current)),
+      );
+      toast.success(`Marked ${serial.serial_value} as defective.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to mark serial defective.");
+    }
+  };
+
+  const handleSaveSerial = async () => {
+    if (!productId || !editSerial) return;
+    setUpdating(true);
+    try {
+      const updated = await updateSerialNumber(productId, editSerial.id, {
+        status: editStatus,
+        warranty_expiry_date: toIsoDateString(editWarrantyDate),
+      });
+      setSerials((prev) =>
+        prev.map((serial) => (serial.id === editSerial.id ? { ...serial, ...updated } : serial)),
+      );
+      setEditOpen(false);
+      setEditSerial(null);
+      toast.success("Serial updated.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to update serial number.");
+    } finally {
+      setUpdating(false);
     }
   };
 
@@ -145,18 +212,33 @@ export default function SerialNumbersTab() {
     }
   };
 
+  const handleDeleteSerial = async () => {
+    if (!productId || !deleteSerial) return;
+    setDeleting(true);
+    try {
+      await deleteSerialNumber(productId, deleteSerial.id);
+      setSerials((prev) => prev.filter((serial) => serial.id !== deleteSerial.id));
+      setDeleteSerial(null);
+      toast.success("Serial deleted.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to delete serial number.");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <Card>
         <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
+          <CardTitle className="flex items-center gap-2 text-base">
             <Search className="h-4 w-4" /> Serial lookup
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex gap-2">
             <Input
-              placeholder="Enter a serial number…"
+              placeholder="Enter a serial number..."
               value={lookupValue}
               onChange={(e) => setLookupValue(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleLookup()}
@@ -165,7 +247,7 @@ export default function SerialNumbersTab() {
           </div>
           {lookupError && <p className="text-sm text-destructive">{lookupError}</p>}
           {lookupResult && (
-            <div className="rounded-md border p-3 grid gap-1 text-sm">
+            <div className="grid gap-1 rounded-md border p-3 text-sm">
               <div>
                 <span className="text-muted-foreground">Serial:</span>{" "}
                 <span className="font-mono">{lookupResult.serial_value}</span>
@@ -230,7 +312,7 @@ export default function SerialNumbersTab() {
                     Cancel
                   </Button>
                   <Button onClick={handleAdd} disabled={saving || newSerials.length === 0}>
-                    {saving ? "Saving…" : `Add ${newSerials.length}`}
+                    {saving ? "Saving..." : `Add ${newSerials.length}`}
                   </Button>
                 </DialogFooter>
               </DialogContent>
@@ -246,7 +328,7 @@ export default function SerialNumbersTab() {
             </div>
           ) : serials.length === 0 ? (
             <div className="py-12 text-center text-muted-foreground">
-              <Hash className="mx-auto h-8 w-8 mb-2 opacity-50" />
+              <Hash className="mx-auto mb-2 h-8 w-8 opacity-50" />
               No serials recorded for this product yet.
             </div>
           ) : (
@@ -271,18 +353,34 @@ export default function SerialNumbersTab() {
                     <TableCell>
                       {s.warranty_expiry_date
                         ? new Date(s.warranty_expiry_date).toLocaleDateString()
-                        : "—"}
+                        : "-"}
                     </TableCell>
                     <TableCell className="text-right">
-                      {s.status !== "Defective" && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleMarkDefective(s.id)}
-                        >
-                          Mark defective
-                        </Button>
-                      )}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <MoreHorizontal className="h-4 w-4" />
+                            <span className="sr-only">Open serial actions</span>
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => void handleMarkDefective(s)}>
+                            <BadgeAlert className="mr-2 h-4 w-4" />
+                            Mark defective
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleOpenEdit(s)}>
+                            <PencilLine className="mr-2 h-4 w-4" />
+                            Update
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="text-destructive focus:text-destructive"
+                            onClick={() => setDeleteSerial(s)}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -291,6 +389,92 @@ export default function SerialNumbersTab() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog
+        open={editOpen}
+        onOpenChange={(open) => {
+          setEditOpen(open);
+          if (!open) {
+            setEditSerial(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Update serial</DialogTitle>
+            <DialogDescription>
+              Adjust the status or warranty date for the selected serial number.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Serial number</Label>
+              <Input value={editSerial?.serial_value ?? ""} readOnly />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="serial-status">Status</Label>
+              <Select
+                value={editStatus}
+                onValueChange={(value) => setEditStatus(value as SerialNumberRecord["status"])}
+              >
+                <SelectTrigger id="serial-status">
+                  <SelectValue placeholder="Select status" />
+                </SelectTrigger>
+                <SelectContent>
+                  {STATUS_OPTIONS.map((status) => (
+                    <SelectItem key={status} value={status}>
+                      {status}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="warranty-expiry">Warranty expiry date</Label>
+              <Input
+                id="warranty-expiry"
+                type="date"
+                value={editWarrantyDate}
+                onChange={(e) => setEditWarrantyDate(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setEditOpen(false);
+                setEditSerial(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSaveSerial} disabled={updating || !editSerial}>
+              {updating ? "Saving..." : "Save changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmationDialog
+        open={!!deleteSerial}
+        onOpenChange={(open) => !open && setDeleteSerial(null)}
+        onCancel={() => setDeleteSerial(null)}
+        onConfirm={() => void handleDeleteSerial()}
+        title="Delete serial?"
+        description={
+          deleteSerial
+            ? `Delete ${deleteSerial.serial_value}? This cannot be undone.`
+            : "Delete this serial? This cannot be undone."
+        }
+        confirmLabel="Delete"
+        confirmVariant="destructive"
+        confirmDisabled={deleting}
+      />
     </div>
   );
 }

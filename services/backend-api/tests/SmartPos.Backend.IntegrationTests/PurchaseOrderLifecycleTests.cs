@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using System.Net;
+using System.Text.Json.Nodes;
 
 namespace SmartPos.Backend.IntegrationTests;
 
@@ -118,5 +119,95 @@ public sealed class PurchaseOrderLifecycleTests(CustomWebApplicationFactory fact
 
         Assert.StartsWith("2026-05-01", TestJson.GetString(createdOrder, "po_date"));
         Assert.StartsWith("2026-05-08", TestJson.GetString(createdOrder, "expected_delivery_date"));
+    }
+
+    [Fact]
+    public async Task ListPurchaseOrders_ShouldReturnSuccess()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var response = await client.GetAsync("/api/purchase-orders");
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.True(response.IsSuccessStatusCode, $"Expected success but got {(int)response.StatusCode} {response.StatusCode}: {body}");
+    }
+
+    [Fact]
+    public async Task ListPurchaseOrders_ShouldFilterByStatus()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/suppliers", new
+            {
+                name = $"PO Filter Supplier {runId}",
+                code = $"PO-FLT-SUP-{runId}",
+                is_active = true
+            }));
+        var supplierId = Guid.Parse(TestJson.GetString(supplier, "supplier_id"));
+
+        var product = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"PO Filter Product {runId}",
+                sku = $"PO-FLT-{runId}",
+                unit_price = 150m,
+                cost_price = 100m,
+                initial_stock_quantity = 0m,
+                allow_negative_stock = false,
+                is_active = true
+            }));
+        var productId = Guid.Parse(TestJson.GetString(product, "product_id"));
+
+        var draftOrder = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/purchase-orders", new
+            {
+                supplier_id = supplierId,
+                po_number = $"PO-FLT-DRAFT-{runId}",
+                lines = new[]
+                {
+                    new
+                    {
+                        product_id = productId,
+                        quantity_ordered = 1m,
+                        unit_cost_estimate = 25m
+                    }
+                }
+            }));
+
+        var sentOrder = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/purchase-orders", new
+            {
+                supplier_id = supplierId,
+                po_number = $"PO-FLT-SENT-{runId}",
+                lines = new[]
+                {
+                    new
+                    {
+                        product_id = productId,
+                        quantity_ordered = 2m,
+                        unit_cost_estimate = 30m
+                    }
+                }
+            }));
+
+        var sentOrderId = Guid.Parse(TestJson.GetString(sentOrder, "id"));
+        await TestJson.ReadObjectAsync(
+            await client.PostAsync($"/api/purchase-orders/{sentOrderId}/send", null));
+
+        var allBody = await (await client.GetAsync("/api/purchase-orders")).Content.ReadAsStringAsync();
+        var allItems = JsonNode.Parse(allBody)?.AsArray()
+                      ?? throw new InvalidOperationException("Missing purchase order list.");
+        Assert.True(allItems.Count >= 2);
+
+        var sentBody = await (await client.GetAsync("/api/purchase-orders?status=Sent")).Content.ReadAsStringAsync();
+        var sentItems = JsonNode.Parse(sentBody)?.AsArray().OfType<JsonObject>().ToArray()
+                        ?? throw new InvalidOperationException("Missing filtered purchase order list.");
+
+        Assert.Single(sentItems);
+        Assert.Equal("Sent", TestJson.GetString(sentItems[0], "status"));
+        Assert.Contains(TestJson.GetString(sentItems[0], "po_number"), sentItems[0].ToJsonString());
+        Assert.Contains(TestJson.GetString(draftOrder, "po_number"), allBody);
     }
 }

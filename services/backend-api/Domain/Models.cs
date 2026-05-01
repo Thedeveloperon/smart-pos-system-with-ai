@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SmartPos.Backend.Domain;
 
 public sealed class Category
@@ -1138,6 +1140,7 @@ public enum LedgerEntryType
     StockAdjustment = 5
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum SerialNumberStatus
 {
     Available = 1,
