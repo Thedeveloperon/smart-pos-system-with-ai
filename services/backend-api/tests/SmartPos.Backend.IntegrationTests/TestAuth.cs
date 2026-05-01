@@ -29,6 +29,21 @@ internal static class TestAuth
         response.EnsureSuccessStatusCode();
     }
 
+    public static async Task SignInAsOwnerAsync(HttpClient client)
+    {
+        await EnsureProvisionedAsync(client);
+
+        var response = await client.PostAsJsonAsync("/api/auth/login", new
+        {
+            username = "owner",
+            password = "owner123",
+            device_code = DeviceCode,
+            device_name = DeviceName
+        });
+
+        response.EnsureSuccessStatusCode();
+    }
+
     public static async Task SignInAsManagerAccountAsync(HttpClient client)
     {
         await SignInAsAccountAsync(client, "manager", "manager123");
