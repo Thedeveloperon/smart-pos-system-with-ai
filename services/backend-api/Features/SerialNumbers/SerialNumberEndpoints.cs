@@ -30,24 +30,26 @@ public static class SerialNumberEndpoints
                 return Results.NotFound(new { message = "Product not found." });
             }
 
-            var serials = await dbContext.SerialNumbers
-                .AsNoTracking()
-                .Where(x => x.ProductId == productId)
-                .OrderByDescending(x => x.CreatedAtUtc)
-                .Select(x => new
-                {
-                    id = x.Id,
-                    product_id = x.ProductId,
-                    serial_value = x.SerialValue,
-                    status = x.Status,
-                    sale_id = x.SaleId,
-                    sale_item_id = x.SaleItemId,
-                    refund_id = x.RefundId,
-                    warranty_expiry_date = x.WarrantyExpiryDate,
-                    created_at = x.CreatedAtUtc,
-                    updated_at = x.UpdatedAtUtc
-                })
-                .ToListAsync(cancellationToken);
+            // SQLite cannot translate ORDER BY over DateTimeOffset columns, so sort after materialization.
+            var serials = (await dbContext.SerialNumbers
+                    .AsNoTracking()
+                    .Where(x => x.ProductId == productId)
+                    .Select(x => new
+                    {
+                        id = x.Id,
+                        product_id = x.ProductId,
+                        serial_value = x.SerialValue,
+                        status = x.Status,
+                        sale_id = x.SaleId,
+                        sale_item_id = x.SaleItemId,
+                        refund_id = x.RefundId,
+                        warranty_expiry_date = x.WarrantyExpiryDate,
+                        created_at = x.CreatedAtUtc,
+                        updated_at = x.UpdatedAtUtc
+                    })
+                    .ToListAsync(cancellationToken))
+                .OrderByDescending(x => x.created_at)
+                .ToList();
 
             return Results.Ok(new
             {

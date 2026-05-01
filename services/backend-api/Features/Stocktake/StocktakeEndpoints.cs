@@ -1,3 +1,6 @@
+using System.Data;
+using System.Data.Common;
+using System.Globalization;
 using System.Security.Claims;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
@@ -23,33 +26,53 @@ public static class StocktakeEndpoints
             CancellationToken cancellationToken) =>
         {
             var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
-            var query = dbContext.StocktakeSessions.AsNoTracking().AsQueryable();
-            if (currentStoreId.HasValue)
-            {
-                query = query.Where(x => x.StoreId == currentStoreId.Value);
-            }
+            StocktakeStatus? statusFilter = null;
             if (!string.IsNullOrWhiteSpace(status) &&
                 Enum.TryParse<StocktakeStatus>(status, true, out var parsedStatus))
             {
-                query = query.Where(x => x.Status == parsedStatus);
+                statusFilter = parsedStatus;
             }
 
-            var items = await query
-                .OrderByDescending(x => x.CreatedAtUtc)
-                .Select(x => new
+            List<object> items;
+            if (dbContext.Database.IsSqlite())
+            {
+                // Keep the SQLite summary query raw so malformed legacy numeric text
+                // in stocktake_items cannot crash the page while loading the session list.
+                items = await ListSqliteSessionSummariesAsync(
+                    dbContext,
+                    currentStoreId,
+                    statusFilter,
+                    cancellationToken);
+            }
+            else
+            {
+                var query = dbContext.StocktakeSessions.AsNoTracking().AsQueryable();
+                if (currentStoreId.HasValue)
                 {
-                    id = x.Id,
-                    store_id = x.StoreId,
-                    status = x.Status,
-                    started_at = x.StartedAtUtc,
-                    completed_at = x.CompletedAtUtc,
-                    created_by_user_id = x.CreatedByUserId,
-                    item_count = x.Items.Count(),
-                    variance_count = x.Items.Count(item => item.VarianceQuantity.HasValue && item.VarianceQuantity.Value != 0m),
-                    created_at = x.CreatedAtUtc,
-                    updated_at = x.UpdatedAtUtc
-                })
-                .ToListAsync(cancellationToken);
+                    query = query.Where(x => x.StoreId == currentStoreId.Value);
+                }
+                if (statusFilter.HasValue)
+                {
+                    query = query.Where(x => x.Status == statusFilter.Value);
+                }
+
+                items = await query
+                    .OrderByDescending(x => x.CreatedAtUtc)
+                    .Select(x => (object)new
+                    {
+                        id = x.Id,
+                        store_id = x.StoreId,
+                        status = x.Status.ToString(),
+                        started_at = x.StartedAtUtc,
+                        completed_at = x.CompletedAtUtc,
+                        created_by_user_id = x.CreatedByUserId,
+                        item_count = x.Items.Count(),
+                        variance_count = x.Items.Count(item => item.VarianceQuantity.HasValue && item.VarianceQuantity.Value != 0m),
+                        created_at = x.CreatedAtUtc,
+                        updated_at = x.UpdatedAtUtc
+                    })
+                    .ToListAsync(cancellationToken);
+            }
 
             return Results.Ok(new { items });
         })
@@ -351,7 +374,7 @@ public static class StocktakeEndpoints
         {
             id = session.Id,
             store_id = session.StoreId,
-            status = session.Status,
+            status = session.Status.ToString(),
             started_at = session.StartedAtUtc,
             completed_at = session.CompletedAtUtc,
             created_at = session.CreatedAtUtc,
@@ -372,6 +395,178 @@ public static class StocktakeEndpoints
                 updated_at = item.UpdatedAtUtc
             }).ToList()
         };
+    }
+
+    private static async Task<List<object>> ListSqliteSessionSummariesAsync(
+        SmartPosDbContext dbContext,
+        Guid? currentStoreId,
+        StocktakeStatus? statusFilter,
+        CancellationToken cancellationToken)
+    {
+        var connection = dbContext.Database.GetDbConnection();
+        var shouldCloseConnection = connection.State != ConnectionState.Open;
+        if (shouldCloseConnection)
+        {
+            await connection.OpenAsync(cancellationToken);
+        }
+
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText =
+                """
+                SELECT
+                  s."Id",
+                  s."StoreId",
+                  s."Status",
+                  s."StartedAtUtc",
+                  s."CompletedAtUtc",
+                  s."CreatedByUserId",
+                  s."CreatedAtUtc",
+                  s."UpdatedAtUtc",
+                  COUNT(i."Id") AS "ItemCount",
+                  COALESCE(SUM(
+                    CASE
+                      WHEN i."VarianceQuantity" IS NULL THEN 0
+                      WHEN trim(CAST(i."VarianceQuantity" AS TEXT)) IN ('', '0', '0.0', '0.00', '0.000', '-0', '-0.0', '-0.00', '-0.000') THEN 0
+                      ELSE 1
+                    END
+                  ), 0) AS "VarianceCount"
+                FROM "stocktake_sessions" AS s
+                LEFT JOIN "stocktake_items" AS i ON i."SessionId" = s."Id"
+                WHERE (@storeId IS NULL OR (s."StoreId" IS NOT NULL AND lower(s."StoreId") = lower(@storeId)))
+                  AND (@status IS NULL OR lower(s."Status") = lower(@status))
+                GROUP BY
+                  s."Id",
+                  s."StoreId",
+                  s."Status",
+                  s."StartedAtUtc",
+                  s."CompletedAtUtc",
+                  s."CreatedByUserId",
+                  s."CreatedAtUtc",
+                  s."UpdatedAtUtc"
+                ORDER BY s."CreatedAtUtc" DESC;
+                """;
+
+            AddNullableTextParameter(command, "@storeId", currentStoreId?.ToString());
+            AddNullableTextParameter(command, "@status", statusFilter?.ToString());
+
+            var items = new List<object>();
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                items.Add(new
+                {
+                    id = ReadGuid(reader, 0),
+                    store_id = ReadNullableGuid(reader, 1),
+                    status = ReadStocktakeStatus(reader, 2).ToString(),
+                    started_at = ReadDateTimeOffset(reader, 3),
+                    completed_at = ReadNullableDateTimeOffset(reader, 4),
+                    created_by_user_id = ReadNullableGuid(reader, 5),
+                    item_count = ReadInt32(reader, 8),
+                    variance_count = ReadInt32(reader, 9),
+                    created_at = ReadDateTimeOffset(reader, 6),
+                    updated_at = ReadNullableDateTimeOffset(reader, 7)
+                });
+            }
+
+            return items;
+        }
+        finally
+        {
+            if (shouldCloseConnection)
+            {
+                await connection.CloseAsync();
+            }
+        }
+    }
+
+    private static void AddNullableTextParameter(DbCommand command, string name, string? value)
+    {
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.Value = value is null ? DBNull.Value : value;
+        command.Parameters.Add(parameter);
+    }
+
+    private static Guid ReadGuid(DbDataReader reader, int ordinal)
+    {
+        return Guid.Parse(ReadString(reader, ordinal));
+    }
+
+    private static Guid? ReadNullableGuid(DbDataReader reader, int ordinal)
+    {
+        if (reader.IsDBNull(ordinal))
+        {
+            return null;
+        }
+
+        var rawValue = ReadString(reader, ordinal);
+        return Guid.TryParse(rawValue, out var parsedValue) ? parsedValue : null;
+    }
+
+    private static StocktakeStatus ReadStocktakeStatus(DbDataReader reader, int ordinal)
+    {
+        var rawValue = ReadString(reader, ordinal);
+        return Enum.TryParse<StocktakeStatus>(rawValue, true, out var parsedStatus)
+            ? parsedStatus
+            : StocktakeStatus.Draft;
+    }
+
+    private static DateTimeOffset ReadDateTimeOffset(DbDataReader reader, int ordinal)
+    {
+        return ParseDateTimeOffset(reader.GetValue(ordinal));
+    }
+
+    private static DateTimeOffset? ReadNullableDateTimeOffset(DbDataReader reader, int ordinal)
+    {
+        return reader.IsDBNull(ordinal) ? null : ParseDateTimeOffset(reader.GetValue(ordinal));
+    }
+
+    private static DateTimeOffset ParseDateTimeOffset(object value)
+    {
+        return value switch
+        {
+            DateTimeOffset offset => offset,
+            DateTime dateTime => new DateTimeOffset(
+                dateTime.Kind == DateTimeKind.Unspecified
+                    ? DateTime.SpecifyKind(dateTime, DateTimeKind.Utc)
+                    : dateTime.ToUniversalTime()),
+            _ when DateTimeOffset.TryParse(
+                Convert.ToString(value, CultureInfo.InvariantCulture),
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out var parsedValue) => parsedValue,
+            _ => throw new FormatException($"Failed to parse SQLite DateTimeOffset value '{value}'.")
+        };
+    }
+
+    private static int ReadInt32(DbDataReader reader, int ordinal)
+    {
+        if (reader.IsDBNull(ordinal))
+        {
+            return 0;
+        }
+
+        var value = reader.GetValue(ordinal);
+        return value switch
+        {
+            int intValue => intValue,
+            long longValue => checked((int)longValue),
+            short shortValue => shortValue,
+            byte byteValue => byteValue,
+            string stringValue when int.TryParse(
+                stringValue,
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var parsedValue) => parsedValue,
+            _ => Convert.ToInt32(value, CultureInfo.InvariantCulture)
+        };
+    }
+
+    private static string ReadString(DbDataReader reader, int ordinal)
+    {
+        return Convert.ToString(reader.GetValue(ordinal), CultureInfo.InvariantCulture) ?? string.Empty;
     }
 }
 
