@@ -201,6 +201,7 @@ const IndexInner = () => {
       "returnTo",
       `${window.location.pathname}${window.location.search}${window.location.hash}`,
     );
+    inventoryManagerUrl.searchParams.set("tab", "inventory");
     window.location.assign(inventoryManagerUrl.toString());
   }, []);
 
