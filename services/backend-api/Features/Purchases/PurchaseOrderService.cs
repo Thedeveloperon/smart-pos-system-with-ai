@@ -375,7 +375,8 @@ public sealed class PurchaseOrderService(
                     SupplierItemName: null,
                     BatchNumber: x.BatchNumber,
                     ExpiryDate: x.ExpiryDate,
-                    ManufactureDate: x.ManufactureDate);
+                    ManufactureDate: x.ManufactureDate,
+                    Serials: x.Serials);
             })
             .ToList();
 

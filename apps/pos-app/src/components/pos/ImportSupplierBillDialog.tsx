@@ -190,9 +190,6 @@ function toDraftLine(line: PurchaseOcrDraftLineItem): EditableLine {
   const unitCost = line.unit_cost == null ? "" : String(line.unit_cost);
   const computedLineTotal = getAutoLineTotal(quantity, unitCost);
   const extractedLineTotal = line.line_total == null ? null : Number(line.line_total);
-  const isLineTotalManual =
-    extractedLineTotal != null &&
-    (computedLineTotal == null || Math.abs(extractedLineTotal - computedLineTotal) > 0.009);
 
   return {
     lineNo: line.line_no,
@@ -201,7 +198,7 @@ function toDraftLine(line: PurchaseOcrDraftLineItem): EditableLine {
     quantity,
     unitCost,
     lineTotal: formatMoneyInput(extractedLineTotal ?? computedLineTotal),
-    isLineTotalManual,
+    isLineTotalManual: false,
     selectedProductId: line.matched_product_id || "",
     matchStatus: line.match_status,
     matchMethod: line.match_method,

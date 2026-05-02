@@ -401,6 +401,9 @@ public sealed class ReceivePurchaseOrderLineRequest
     [JsonPropertyName("manufacture_date")]
     [JsonConverter(typeof(FlexibleNullableDateTimeOffsetJsonConverter))]
     public DateTimeOffset? ManufactureDate { get; set; }
+
+    [JsonPropertyName("serials")]
+    public List<string> Serials { get; set; } = [];
 }
 
 public sealed class CreateManualBillRequest

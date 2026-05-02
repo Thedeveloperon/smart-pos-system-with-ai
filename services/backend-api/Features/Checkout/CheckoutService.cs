@@ -154,6 +154,11 @@ public sealed class CheckoutService(
             .Where(x => productIds.Contains(x.Id))
             .ToDictionaryAsync(x => x.Id, cancellationToken);
         var reservedSerialIds = requestedSerialBySaleItemId.Values.ToHashSet();
+        if (request.SaleId.HasValue && sale.Items.Any(item => loadedProducts[item.ProductId].IsSerialTracked))
+        {
+            throw new InvalidOperationException(
+                "Held bills cannot contain serial-tracked items. Add the item again and validate its serial number.");
+        }
 
         foreach (var saleItem in sale.Items)
         {
@@ -518,6 +523,12 @@ public sealed class CheckoutService(
         foreach (var item in groupedGenericItems)
         {
             var product = products[item.ProductId];
+            if (product.IsSerialTracked)
+            {
+                throw new InvalidOperationException(
+                    $"'{product.Name}' requires a validated serial number before it can be added to the cart.");
+            }
+
             var lineGross = decimal.Round(product.UnitPrice * item.Quantity, 2, MidpointRounding.AwayFromZero);
             subtotal += lineGross;
 

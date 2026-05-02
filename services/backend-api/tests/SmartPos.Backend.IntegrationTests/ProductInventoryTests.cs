@@ -471,6 +471,75 @@ public sealed class ProductInventoryTests(CustomWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task Checkout_ShouldRejectSerialTrackedProductsWithoutValidatedSerialNumber()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+        var serialValue = $"SER-REQ-{runId}-001";
+
+        var createProduct = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"Serial Required Product {runId}",
+                sku = $"SER-REQ-{runId}",
+                unit_price = 320m,
+                cost_price = 240m,
+                initial_stock_quantity = 1m,
+                reorder_level = 1m,
+                allow_negative_stock = false,
+                is_active = true,
+                is_serial_tracked = true,
+                warranty_months = 6
+            }));
+
+        var productId = Guid.Parse(TestJson.GetString(createProduct, "product_id"));
+
+        await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync($"/api/products/{productId}/serials", new
+            {
+                serials = new[] { serialValue }
+            }));
+
+        var response = await client.PostAsJsonAsync("/api/checkout/complete", new
+        {
+            sale_id = (Guid?)null,
+            items = new[]
+            {
+                new
+                {
+                    product_id = productId,
+                    quantity = 1m
+                }
+            },
+            discount_percent = 0m,
+            role = "cashier",
+            payments = new[]
+            {
+                new
+                {
+                    method = "cash",
+                    amount = 320m,
+                    reference_number = (string?)null
+                }
+            }
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var error = JsonNode.Parse(await response.Content.ReadAsStringAsync())?.AsObject()
+                    ?? throw new InvalidOperationException("Missing checkout validation error.");
+        Assert.Contains("validated serial number", TestJson.GetString(error, "message"));
+
+        var serialReload = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/products/{productId}/serials"));
+        var serialItem = serialReload["items"]?.AsArray()?.OfType<JsonObject>().FirstOrDefault()
+                         ?? throw new InvalidOperationException("Missing serial item after failed checkout.");
+
+        Assert.Equal("Available", TestJson.GetString(serialItem, "status"));
+        Assert.True(serialItem["sale_id"] is null || serialItem["sale_id"]!.GetValue<string?>() is null);
+    }
+
+    [Fact]
     public async Task ProductSerialNumbers_ShouldReplaceDefectiveSerial()
     {
         await TestAuth.SignInAsManagerAsync(client);

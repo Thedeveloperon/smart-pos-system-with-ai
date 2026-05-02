@@ -191,4 +191,62 @@ describe("ProductSearchPanel", () => {
     });
     expect(onAddToCart).toHaveBeenCalledTimes(1);
   });
+
+  it("opens serial validation for serial-tracked products before adding them", async () => {
+    const onAddToCart = vi.fn();
+    lookupSerialMock.mockResolvedValue({
+      serial_id: "serial-2",
+      serial_value: "CAM-SN-002",
+      product_id: "serial-product",
+      product_name: "Serial Camera",
+      status: "Available",
+      product: {
+        id: "serial-product",
+        name: "Serial Camera",
+        sku: "SER-CAM-1",
+        price: 150000,
+        stock: 3,
+        barcode: "SER-CAM-BAR",
+        is_serial_tracked: true,
+      },
+    });
+
+    render(
+      <ProductSearchPanel
+        products={[
+          {
+            id: "serial-product",
+            name: "Serial Camera",
+            sku: "SER-CAM-1",
+            barcode: "SER-CAM-BAR",
+            price: 150000,
+            stock: 3,
+            is_serial_tracked: true,
+          },
+        ]}
+        onAddToCart={onAddToCart}
+        expertMode
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("Search products by name, SKU, serial..."), {
+      target: { value: "Serial Camera" },
+    });
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(onAddToCart).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText("Serial number"), {
+      target: { value: "CAM-SN-002" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Validate" }));
+
+    await waitFor(() => {
+      expect(onAddToCart).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "serial-product", name: "Serial Camera" }),
+        1,
+        { id: "serial-2", value: "CAM-SN-002" },
+      );
+    });
+  });
 });

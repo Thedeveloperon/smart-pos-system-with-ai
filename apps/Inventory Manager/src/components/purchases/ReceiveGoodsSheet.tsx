@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/table";
 import { fetchProducts, type Product } from "@/lib/api";
 import { receivePurchaseOrder, type PurchaseOrder } from "@/lib/purchases";
+import SerialInputList from "@/components/inventory/SerialInputList";
 import { fmtCurrency, todayIso } from "./utils";
 
 type ReceiveLine = {
@@ -29,9 +30,11 @@ type ReceiveLine = {
   quantity_receiving: number;
   unit_cost: number;
   is_batch_tracked: boolean;
+  is_serial_tracked: boolean;
   batch_number: string;
   expiry_date: string;
   manufacture_date: string;
+  serials: string[];
 };
 
 type Props = {
@@ -75,9 +78,11 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
             quantity_receiving: l.quantity_pending,
             unit_cost: l.unit_cost_estimate,
             is_batch_tracked: !!p?.is_batch_tracked,
+            is_serial_tracked: !!p?.is_serial_tracked,
             batch_number: "",
             expiry_date: "",
             manufacture_date: "",
+            serials: [],
           };
         }),
     );
@@ -95,6 +100,28 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
       toast.error("All receiving quantities must be greater than zero.");
       return;
     }
+    const invalidSerialLine = lines.find((line) => {
+      if (!line.is_serial_tracked) {
+        return false;
+      }
+
+      if (!Number.isInteger(line.quantity_receiving)) {
+        return true;
+      }
+
+      return line.serials.length !== line.quantity_receiving;
+    });
+    if (invalidSerialLine) {
+      if (!Number.isInteger(invalidSerialLine.quantity_receiving)) {
+        toast.error(`${invalidSerialLine.product_name} must use a whole-number receiving quantity.`);
+        return;
+      }
+
+      toast.error(
+        `${invalidSerialLine.product_name} requires ${invalidSerialLine.quantity_receiving} serial number(s).`,
+      );
+      return;
+    }
     setSaving(true);
     try {
       await receivePurchaseOrder(po.id, {
@@ -109,6 +136,7 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
           batch_number: l.batch_number || undefined,
           expiry_date: l.expiry_date || undefined,
           manufacture_date: l.manufacture_date || undefined,
+          serials: l.is_serial_tracked ? l.serials : undefined,
         })),
       });
       toast.success("Goods received and stock updated.");
@@ -218,33 +246,64 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
                         )}
                       </TableCell>
                     </TableRow>
-                    {l.is_batch_tracked && (
+                    {(l.is_batch_tracked || l.is_serial_tracked) && (
                       <TableRow className="bg-muted/30">
                         <TableCell colSpan={7}>
-                          <div className="grid grid-cols-3 gap-2">
-                            <div>
-                              <Label className="text-xs">Batch #</Label>
-                              <Input
-                                value={l.batch_number}
-                                onChange={(e) => update(idx, { batch_number: e.target.value })}
-                              />
-                            </div>
-                            <div>
-                              <Label className="text-xs">Manufacture Date</Label>
-                              <Input
-                                type="date"
-                                value={l.manufacture_date}
-                                onChange={(e) => update(idx, { manufacture_date: e.target.value })}
-                              />
-                            </div>
-                            <div>
-                              <Label className="text-xs">Expiry Date</Label>
-                              <Input
-                                type="date"
-                                value={l.expiry_date}
-                                onChange={(e) => update(idx, { expiry_date: e.target.value })}
-                              />
-                            </div>
+                          <div className="space-y-4">
+                            {l.is_batch_tracked && (
+                              <div className="grid grid-cols-3 gap-2">
+                                <div>
+                                  <Label className="text-xs">Batch #</Label>
+                                  <Input
+                                    value={l.batch_number}
+                                    onChange={(e) => update(idx, { batch_number: e.target.value })}
+                                  />
+                                </div>
+                                <div>
+                                  <Label className="text-xs">Manufacture Date</Label>
+                                  <Input
+                                    type="date"
+                                    value={l.manufacture_date}
+                                    onChange={(e) => update(idx, { manufacture_date: e.target.value })}
+                                  />
+                                </div>
+                                <div>
+                                  <Label className="text-xs">Expiry Date</Label>
+                                  <Input
+                                    type="date"
+                                    value={l.expiry_date}
+                                    onChange={(e) => update(idx, { expiry_date: e.target.value })}
+                                  />
+                                </div>
+                              </div>
+                            )}
+
+                            {l.is_serial_tracked && (
+                              <div className="space-y-2">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div>
+                                    <Label className="text-xs">Serial numbers</Label>
+                                    <p className="text-xs text-muted-foreground">
+                                      Enter one serial per received unit before confirming the receipt.
+                                    </p>
+                                  </div>
+                                  <p
+                                    className={`text-xs font-medium ${
+                                      Number.isInteger(l.quantity_receiving) &&
+                                      l.serials.length === l.quantity_receiving
+                                        ? "text-green-700"
+                                        : "text-amber-700"
+                                    }`}
+                                  >
+                                    {l.serials.length}/{l.quantity_receiving} entered
+                                  </p>
+                                </div>
+                                <SerialInputList
+                                  value={l.serials}
+                                  onChange={(serials) => update(idx, { serials })}
+                                />
+                              </div>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>

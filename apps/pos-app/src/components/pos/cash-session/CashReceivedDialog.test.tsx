@@ -31,6 +31,9 @@ describe("CashReceivedDialog", () => {
       />,
     );
 
+    expect(screen.getByAltText("Sri Lankan Rs. 100 note")).toBeInTheDocument();
+    expect(screen.getByAltText("Sri Lankan Rs. 10 coin")).toBeInTheDocument();
+
     fireEvent.change(screen.getByLabelText("100 quantity"), { target: { value: "1" } });
 
     expect(

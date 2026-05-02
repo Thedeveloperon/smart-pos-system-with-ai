@@ -601,7 +601,8 @@ public sealed class PurchaseService(
         }
 
         var currentStoreId = purchaseBill.StoreId;
-        var productIds = lines.Select(x => x.ProductId).Distinct().ToArray();
+        var inventoryLines = lines.ToList();
+        var productIds = inventoryLines.Select(x => x.ProductId).Distinct().ToArray();
         var products = await dbContext.Products
             .Include(x => x.Inventory)
             .Where(x => productIds.Contains(x.Id))
@@ -616,12 +617,72 @@ public sealed class PurchaseService(
         var createdByUserId = ParseGuid(
             httpContextAccessor.HttpContext?.User?.FindFirstValue(ClaimTypes.NameIdentifier));
         var inventoryUpdates = new List<PurchaseInventoryUpdateResponse>();
+        var serialsByLine = new List<List<string>>(inventoryLines.Count);
+        var requestedSerials = new List<string>();
 
-        var lineIndex = 0;
-        foreach (var line in lines)
+        foreach (var line in inventoryLines)
         {
-            lineIndex++;
             var product = products[line.ProductId];
+            var normalizedSerials = NormalizeSerialValues(line.Serials);
+            serialsByLine.Add(normalizedSerials);
+
+            if (!product.IsSerialTracked)
+            {
+                if (normalizedSerials.Count > 0)
+                {
+                    throw new InvalidOperationException(
+                        $"'{product.Name}' is not serial tracked and cannot receive serial numbers.");
+                }
+
+                continue;
+            }
+
+            if (line.Quantity != decimal.Truncate(line.Quantity))
+            {
+                throw new InvalidOperationException("Serial-tracked items must use whole-number received quantities.");
+            }
+
+            var expectedSerialCount = (int)line.Quantity;
+            if (normalizedSerials.Count != expectedSerialCount)
+            {
+                throw new InvalidOperationException(
+                    $"'{product.Name}' requires exactly {expectedSerialCount} serial number(s) for this receipt.");
+            }
+
+            requestedSerials.AddRange(normalizedSerials);
+        }
+
+        var duplicateSerials = requestedSerials
+            .GroupBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .Where(x => x.Count() > 1)
+            .Select(x => x.Key)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (duplicateSerials.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Duplicate serial numbers were provided: {string.Join(", ", duplicateSerials)}");
+        }
+
+        if (requestedSerials.Count > 0)
+        {
+            var existingSerials = await dbContext.SerialNumbers
+                .Where(x => x.StoreId == currentStoreId && requestedSerials.Contains(x.SerialValue))
+                .Select(x => x.SerialValue)
+                .ToListAsync(cancellationToken);
+            if (existingSerials.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"Serial numbers already exist: {string.Join(", ", existingSerials.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))}");
+            }
+        }
+
+        for (var index = 0; index < inventoryLines.Count; index++)
+        {
+            var line = inventoryLines[index];
+            var lineIndex = index + 1;
+            var product = products[line.ProductId];
+            var receivedSerials = serialsByLine[index];
             var inventory = product.Inventory;
             if (inventory is null)
             {
@@ -727,6 +788,19 @@ public sealed class PurchaseService(
                 userId: createdByUserId,
                 cancellationToken);
 
+            foreach (var serialValue in receivedSerials)
+            {
+                dbContext.SerialNumbers.Add(new SerialNumber
+                {
+                    StoreId = currentStoreId,
+                    ProductId = product.Id,
+                    SerialValue = serialValue,
+                    Status = SerialNumberStatus.Available,
+                    CreatedAtUtc = now,
+                    Product = product
+                });
+            }
+
             inventoryUpdates.Add(new PurchaseInventoryUpdateResponse
             {
                 ProductId = product.Id,
@@ -741,7 +815,7 @@ public sealed class PurchaseService(
         {
             StoreId = currentStoreId,
             EntryType = LedgerEntryType.StockAdjustment,
-            Description = $"Purchase {purchaseBill.SourceType} {purchaseBill.InvoiceNumber} ({lines.Count} items)",
+            Description = $"Purchase {purchaseBill.SourceType} {purchaseBill.InvoiceNumber} ({inventoryLines.Count} items)",
             Debit = purchaseBill.GrandTotal,
             Credit = 0m,
             OccurredAtUtc = now,
@@ -1811,7 +1885,22 @@ public sealed class PurchaseService(
             SupplierItemName: NormalizeOptional(supplierItemName),
             BatchNumber: NormalizeOptional(batchNumber),
             ExpiryDate: expiryDate,
-            ManufactureDate: manufactureDate);
+            ManufactureDate: manufactureDate,
+            Serials: []);
+    }
+
+    private static List<string> NormalizeSerialValues(IEnumerable<string>? serials)
+    {
+        if (serials is null)
+        {
+            return [];
+        }
+
+        return serials
+            .Select(serial => serial?.Trim())
+            .Where(serial => !string.IsNullOrWhiteSpace(serial))
+            .Select(serial => serial!)
+            .ToList();
     }
 
     private static PurchaseBillDetailResponse ToBillDetailResponse(PurchaseBill purchaseBill)

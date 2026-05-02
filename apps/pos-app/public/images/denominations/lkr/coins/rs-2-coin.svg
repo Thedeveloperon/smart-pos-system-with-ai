@@ -1,0 +1,15 @@
+<svg width="160" height="160" viewBox="0 0 160 160" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>Rs. 2 coin</title>
+  <defs>
+    <linearGradient id="coin2" x1="18" y1="18" x2="142" y2="142" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#EFF1F4"/>
+      <stop offset="1" stop-color="#A7AFBA"/>
+    </linearGradient>
+  </defs>
+  <circle cx="80" cy="80" r="74" fill="url(#coin2)" stroke="#7B8592" stroke-width="6"/>
+  <circle cx="80" cy="80" r="58" fill="#F7F9FB" stroke="#C4CAD2" stroke-width="4"/>
+  <circle cx="80" cy="80" r="43" fill="#FFFFFF" fill-opacity=".45"/>
+  <text x="80" y="63" fill="#6A7380" font-family="Arial, sans-serif" font-size="15" font-weight="700" text-anchor="middle">LKR</text>
+  <text x="80" y="105" fill="#6A7380" font-family="Arial, sans-serif" font-size="42" font-weight="700" text-anchor="middle">2</text>
+</svg>
+

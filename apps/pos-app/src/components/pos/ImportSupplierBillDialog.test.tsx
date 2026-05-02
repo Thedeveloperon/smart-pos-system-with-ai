@@ -326,6 +326,51 @@ describe("ImportSupplierBillDialog", () => {
     });
   });
 
+  it("recalculates the line total when quantity or unit cost changes after OCR mismatch", async () => {
+    vi.mocked(createPurchaseOcrDraft).mockResolvedValue(
+      createDraftResponse({
+        line_items: [
+          {
+            line_no: 1,
+            raw_text: "Rice 5kg 2 x 50 = 500",
+            item_name: "Rice 5kg",
+            quantity: 2,
+            unit_cost: 50,
+            line_total: 500,
+            confidence: 0.95,
+            review_status: "ready",
+            match_status: "matched",
+            match_method: "exact_name",
+            match_score: 0.99,
+            matched_product_id: "prod-1",
+            matched_product_name: "Rice 5kg",
+            matched_product_sku: "RICE-5KG",
+            matched_product_barcode: "111222333",
+          },
+        ],
+      }),
+    );
+
+    renderDialog();
+    await uploadDraft();
+
+    const quantityInput = screen.getByLabelText("Quantity for line 1");
+    const unitCostInput = screen.getByLabelText("Unit cost for line 1");
+    const lineTotalInput = screen.getByLabelText("Line total for line 1") as HTMLInputElement;
+
+    expect(lineTotalInput.value).toBe("500.00");
+
+    fireEvent.change(quantityInput, { target: { value: "3" } });
+    await waitFor(() => {
+      expect(lineTotalInput.value).toBe("150.00");
+    });
+
+    fireEvent.change(unitCostInput, { target: { value: "60" } });
+    await waitFor(() => {
+      expect(lineTotalInput.value).toBe("180.00");
+    });
+  });
+
   it("creates a new product inline and auto-maps the detected line", async () => {
     vi.mocked(createPurchaseOcrDraft).mockResolvedValue(
       createDraftResponse({

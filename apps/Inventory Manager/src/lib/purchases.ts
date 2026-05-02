@@ -195,6 +195,7 @@ export async function receivePurchaseOrder(
       batch_number?: string;
       expiry_date?: string;
       manufacture_date?: string;
+      serials?: string[];
     }[];
   },
 ): Promise<PurchaseOrder> {
