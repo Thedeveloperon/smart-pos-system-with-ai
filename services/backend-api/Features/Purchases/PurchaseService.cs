@@ -623,7 +623,7 @@ public sealed class PurchaseService(
         foreach (var line in inventoryLines)
         {
             var product = products[line.ProductId];
-            var normalizedSerials = NormalizeSerialValues(line.Serials);
+            var normalizedSerials = NormalizeSerialValues(line.SerialValues);
             serialsByLine.Add(normalizedSerials);
 
             if (!product.IsSerialTracked)
@@ -708,6 +708,59 @@ public sealed class PurchaseService(
             var batchNumber = NormalizeOptional(line.BatchNumber) ??
                               NormalizeOptional(line.SupplierItemName) ??
                               $"{purchaseBill.InvoiceNumber}-{lineIndex:000}";
+
+            var serialValues = line.SerialValues?.ToList() ?? [];
+            if (product.IsSerialTracked)
+            {
+                if (serialValues.Count == 0)
+                {
+                    throw new InvalidOperationException($"Product {product.Name} requires serial numbers on receipt.");
+                }
+
+                if (decimal.Truncate(deltaQty) != deltaQty)
+                {
+                    throw new InvalidOperationException($"Serial-tracked product {product.Name} must be received in whole units.");
+                }
+
+                if (serialValues.Count != (int)deltaQty)
+                {
+                    throw new InvalidOperationException($"Serial count must match received quantity for {product.Name}.");
+                }
+
+                var normalizedSerials = serialValues
+                    .Select(NormalizeOptional)
+                    .Where(serial => !string.IsNullOrWhiteSpace(serial))
+                    .Select(serial => serial!)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                if (normalizedSerials.Count != serialValues.Count)
+                {
+                    throw new InvalidOperationException($"Duplicate serial numbers were provided for {product.Name}.");
+                }
+
+                var nowSerial = now;
+                foreach (var serialValue in normalizedSerials)
+                {
+                    var duplicateSerial = await dbContext.SerialNumbers.AnyAsync(
+                        x => x.StoreId == currentStoreId && x.SerialValue == serialValue,
+                        cancellationToken);
+                    if (duplicateSerial)
+                    {
+                        throw new InvalidOperationException($"Serial number {serialValue} already exists.");
+                    }
+
+                    dbContext.SerialNumbers.Add(new SerialNumber
+                    {
+                        StoreId = currentStoreId,
+                        Product = product,
+                        ProductId = product.Id,
+                        SerialValue = serialValue,
+                        Status = SerialNumberStatus.Available,
+                        CreatedAtUtc = nowSerial
+                    });
+                }
+            }
 
             if (product.IsBatchTracked)
             {
@@ -1886,7 +1939,7 @@ public sealed class PurchaseService(
             BatchNumber: NormalizeOptional(batchNumber),
             ExpiryDate: expiryDate,
             ManufactureDate: manufactureDate,
-            Serials: []);
+            SerialValues: []);
     }
 
     private static List<string> NormalizeSerialValues(IEnumerable<string>? serials)

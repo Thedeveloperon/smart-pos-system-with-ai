@@ -11,6 +11,8 @@ export type Category = {
   description?: string | null;
   is_active: boolean;
   product_count: number;
+  can_delete: boolean;
+  delete_block_reason?: string | null;
   created_at: string;
   updated_at?: string | null;
 };
@@ -306,6 +308,8 @@ type BackendCategoryItem = {
   description?: string | null;
   is_active: boolean;
   product_count: number;
+  can_delete: boolean;
+  delete_block_reason?: string | null;
   created_at: string;
   updated_at?: string | null;
 };
@@ -687,6 +691,8 @@ function mapCategory(item: BackendCategoryItem): Category {
     description: item.description ?? undefined,
     is_active: item.is_active,
     product_count: item.product_count,
+    can_delete: item.can_delete,
+    delete_block_reason: item.delete_block_reason ?? undefined,
     created_at: item.created_at,
     updated_at: item.updated_at,
   };
@@ -999,6 +1005,12 @@ export async function updateCategory(
     }),
   });
   return mapCategory(response);
+}
+
+export async function hardDeleteCategory(categoryId: string): Promise<void> {
+  await requestJson<void>(`/api/categories/${categoryId}/hard-delete`, {
+    method: "DELETE",
+  });
 }
 
 export async function fetchBrands(includeInactive = false): Promise<Brand[]> {

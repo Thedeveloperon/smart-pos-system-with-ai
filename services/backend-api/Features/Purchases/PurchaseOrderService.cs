@@ -367,6 +367,13 @@ public sealed class PurchaseOrderService(
                     throw new InvalidOperationException("Received unit_cost cannot be negative.");
                 }
 
+                var normalizedSerials = x.Serials
+                    .Select(NormalizeSerialValue)
+                    .Where(serial => !string.IsNullOrWhiteSpace(serial))
+                    .Select(serial => serial!)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
                 return new PurchaseBillInventoryLine(
                     ProductId: x.ProductId,
                     Quantity: RoundQuantity(x.QuantityReceived),
@@ -376,7 +383,7 @@ public sealed class PurchaseOrderService(
                     BatchNumber: x.BatchNumber,
                     ExpiryDate: x.ExpiryDate,
                     ManufactureDate: x.ManufactureDate,
-                    Serials: x.Serials);
+                    SerialValues: normalizedSerials);
             })
             .ToList();
 
@@ -387,6 +394,11 @@ public sealed class PurchaseOrderService(
             if (line.Quantity > pending)
             {
                 throw new InvalidOperationException("Received quantity cannot exceed the ordered quantity.");
+            }
+
+            if (line.SerialValues is { Count: > 0 } && line.SerialValues.Count != (int)line.Quantity)
+            {
+                throw new InvalidOperationException("Serial count must match the received quantity.");
             }
         }
 
@@ -476,6 +488,16 @@ public sealed class PurchaseOrderService(
             await transaction.RollbackAsync(cancellationToken);
             throw;
         }
+    }
+
+    private static string? NormalizeSerialValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return value.Trim();
     }
 
     private async Task<PurchaseOrderResponse> TransitionPurchaseOrderAsync(

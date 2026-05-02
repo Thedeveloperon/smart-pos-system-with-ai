@@ -389,6 +389,29 @@ public static class ProductEndpoints
         .WithName("UpdateCategory")
         .WithOpenApi();
 
+        categoryGroup.MapDelete("/{categoryId:guid}/hard-delete", async (
+            Guid categoryId,
+            ProductService productService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                await productService.HardDeleteCategoryAsync(categoryId, cancellationToken);
+                return Results.NoContent();
+            }
+            catch (KeyNotFoundException exception)
+            {
+                return Results.NotFound(new { message = exception.Message });
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.ManagerOrOwner)
+        .WithName("HardDeleteCategory")
+        .WithOpenApi();
+
         brandGroup.MapGet("", async (
             bool? include_inactive,
             ProductService productService,
