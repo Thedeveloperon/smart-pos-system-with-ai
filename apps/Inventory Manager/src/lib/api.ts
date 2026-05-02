@@ -1355,6 +1355,17 @@ export async function updateSerialNumber(
   });
 }
 
+export async function replaceSerialNumber(
+  productId: string,
+  serialId: string,
+  data: { new_serial_value: string },
+): Promise<SerialNumberRecord> {
+  return await requestJson<SerialNumberRecord>(`/api/products/${productId}/serials/${serialId}/replace`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
 export async function deleteSerialNumber(productId: string, serialId: string): Promise<void> {
   await requestJson<void>(`/api/products/${productId}/serials/${serialId}`, {
     method: "DELETE",

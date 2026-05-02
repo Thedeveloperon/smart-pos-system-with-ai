@@ -236,14 +236,7 @@ public sealed class PurchaseOrderService(
 
             var normalizedLines = await NormalizePurchaseOrderLinesAsync(request.Lines, currentStoreId, cancellationToken);
             var existingLines = order.Lines.ToList();
-            await dbContext.PurchaseOrderLines
-                .Where(x => x.PurchaseOrderId == order.Id)
-                .ExecuteDeleteAsync(cancellationToken);
-
-            foreach (var existingLine in existingLines)
-            {
-                dbContext.Entry(existingLine).State = EntityState.Detached;
-            }
+            dbContext.PurchaseOrderLines.RemoveRange(existingLines);
 
             foreach (var line in normalizedLines)
             {
