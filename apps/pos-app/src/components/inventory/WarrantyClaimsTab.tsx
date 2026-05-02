@@ -5,6 +5,7 @@ import {
   createWarrantyClaim,
   fetchSerialNumbers,
   fetchWarrantyClaims,
+  formatWarrantyClaimStatus,
   lookupSerial,
   updateWarrantyClaim,
   type WarrantyClaim,
@@ -247,7 +248,7 @@ export default function WarrantyClaimsTab() {
                     <TableCell className="font-mono text-xs">{claim.serial_value}</TableCell>
                     <TableCell>{claim.product_name}</TableCell>
                     <TableCell>
-                      <Badge className={STATUS_TONES[claim.status]}>{claim.status}</Badge>
+                      <Badge className={STATUS_TONES[claim.status]}>{formatWarrantyClaimStatus(claim.status)}</Badge>
                     </TableCell>
                     <TableCell>{new Date(claim.claim_date).toLocaleDateString()}</TableCell>
                     <TableCell className="max-w-xs truncate text-xs text-muted-foreground">
@@ -259,8 +260,8 @@ export default function WarrantyClaimsTab() {
                           <Button size="sm" variant="outline" onClick={() => transition(claim, "InRepair")}>
                             In repair
                           </Button>
-                          <Button size="sm" onClick={() => openResolve(claim)}>
-                            Resolve
+                          <Button size="sm" variant="destructive" onClick={() => transition(claim, "Rejected")}>
+                            Reject
                           </Button>
                         </>
                       )}
