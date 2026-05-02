@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, Loader2, Plus, Printer, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import {
@@ -125,6 +125,167 @@ const toFormState = (product: Product): ProductFormState => ({
   expiryAlertDays: String(product.expiry_alert_days ?? 30),
   isActive: product.is_active ?? true,
 });
+
+const EAN13_LEFT_A = ["0001101", "0011001", "0010011", "0111101", "0100011", "0110001", "0101111", "0111011", "0110111", "0001011"];
+const EAN13_LEFT_B = ["0100111", "0110011", "0011011", "0100001", "0011101", "0111001", "0000101", "0010001", "0001001", "0010111"];
+const EAN13_RIGHT = ["1110010", "1100110", "1101100", "1000010", "1011100", "1001110", "1010000", "1000100", "1001000", "1110100"];
+const EAN13_PARITY = ["AAAAAA", "AABABB", "AABBAB", "AABBBA", "ABAABB", "ABBAAB", "ABBBAA", "ABABAB", "ABABBA", "ABBABA"];
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function computeEan13CheckDigit(firstTwelveDigits: string): number {
+  let sum = 0;
+  for (let index = 0; index < firstTwelveDigits.length; index += 1) {
+    const digit = Number(firstTwelveDigits[index]);
+    sum += index % 2 === 0 ? digit : digit * 3;
+  }
+
+  return (10 - (sum % 10)) % 10;
+}
+
+function buildEan13Pattern(barcode: string): string | null {
+  const digits = barcode.trim().replace(/\s+/g, "");
+  if (!/^\d{13}$/.test(digits)) {
+    return null;
+  }
+
+  const expectedCheckDigit = computeEan13CheckDigit(digits.slice(0, 12));
+  if (expectedCheckDigit !== Number(digits[12])) {
+    return null;
+  }
+
+  const firstDigit = Number(digits[0]);
+  const parityPattern = EAN13_PARITY[firstDigit];
+  if (!parityPattern) {
+    return null;
+  }
+
+  const leftEncoded = digits
+    .slice(1, 7)
+    .split("")
+    .map((char, index) => {
+      const digit = Number(char);
+      return parityPattern[index] === "A" ? EAN13_LEFT_A[digit] : EAN13_LEFT_B[digit];
+    })
+    .join("");
+  const rightEncoded = digits
+    .slice(7)
+    .split("")
+    .map((char) => EAN13_RIGHT[Number(char)])
+    .join("");
+
+  return `101${leftEncoded}01010${rightEncoded}101`;
+}
+
+function buildBarcodeSvgMarkup(barcode: string): string {
+  const pattern = buildEan13Pattern(barcode);
+  if (!pattern) {
+    return `<div style="height:72px;display:flex;align-items:center;justify-content:center;border:1px dashed #cbd5e1;color:#475569;font-size:12px;">${escapeHtml(
+      barcode,
+    )}</div>`;
+  }
+
+  const moduleWidth = 2;
+  const width = pattern.length * moduleWidth;
+  const normalBarHeight = 58;
+  const guardBarHeight = 66;
+  const bars: string[] = [];
+
+  for (let index = 0; index < pattern.length; index += 1) {
+    if (pattern[index] !== "1") {
+      continue;
+    }
+
+    const isGuard = index < 3 || (index >= 45 && index <= 49) || index >= 92;
+    const height = isGuard ? guardBarHeight : normalBarHeight;
+    bars.push(`<rect x="${index * moduleWidth}" y="0" width="${moduleWidth}" height="${height}" fill="#0f172a" />`);
+  }
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${guardBarHeight}" width="100%" height="66" preserveAspectRatio="none">${bars.join(
+    "",
+  )}</svg>`;
+}
+
+function buildBarcodePrintHtml(product: Product): string {
+  const name = escapeHtml(product.name || "Item");
+  const sku = escapeHtml(product.sku || "-");
+  const barcode = escapeHtml(product.barcode || "-");
+  const barcodeSvg = buildBarcodeSvgMarkup(product.barcode || "");
+
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Barcode Label</title>
+    <style>
+      @page {
+        size: 58mm 40mm;
+        margin: 2mm;
+      }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        color: #0f172a;
+      }
+      .label {
+        box-sizing: border-box;
+        width: 54mm;
+        min-height: 34mm;
+        border: 1px solid #cbd5e1;
+        border-radius: 3mm;
+        padding: 2mm;
+      }
+      .name {
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1.25;
+        margin-bottom: 1mm;
+        max-height: 7mm;
+        overflow: hidden;
+      }
+      .meta {
+        font-size: 10px;
+        color: #475569;
+        margin-bottom: 1.5mm;
+      }
+      .barcode-wrap {
+        width: 100%;
+        margin-bottom: 1mm;
+      }
+      .barcode-text {
+        text-align: center;
+        letter-spacing: 0.08em;
+        font-size: 11px;
+        font-weight: 600;
+      }
+      .note {
+        margin-top: 4mm;
+        font-size: 10px;
+        color: #64748b;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="label">
+      <div class="name">${name}</div>
+      <div class="meta">SKU: ${sku}</div>
+      <div class="barcode-wrap">${barcodeSvg}</div>
+      <div class="barcode-text">${barcode}</div>
+    </main>
+    <div class="note">Use the print dialog to send this label to your barcode printer.</div>
+    <script>
+      window.onload = function () { window.print(); };
+    </script>
+  </body>
+</html>`;
+}
 
 function snapshotProduct(
   product: Product | null,
@@ -440,6 +601,29 @@ export default function ProductManagementDialog({
   const selectedCategory = categories.find((item) => item.category_id === form.categoryId);
   const selectedBrand = brands.find((item) => item.brand_id === form.brandId);
   const selectedSupplier = suppliers.find((item) => item.supplier_id === form.preferredSupplierId);
+  const printableProduct = product ? snapshotProduct(product, form, currentStock) : null;
+  const currentBarcode = form.barcode.trim();
+
+  const handlePrintBarcode = () => {
+    if (!printableProduct) {
+      return;
+    }
+
+    if (!currentBarcode) {
+      toast.error("Add or generate a barcode before printing.");
+      return;
+    }
+
+    const popup = window.open("", "_blank", "width=900,height=700");
+    if (!popup) {
+      toast.error("Popup blocked. Allow popups to print the barcode label.");
+      return;
+    }
+
+    popup.document.write(buildBarcodePrintHtml(printableProduct));
+    popup.document.close();
+    toast.success("Opened barcode label for printing.");
+  };
 
   return (
     <>
@@ -900,6 +1084,15 @@ export default function ProductManagementDialog({
                       <RefreshCw className="h-4 w-4" />
                     )}
                     Regenerate barcode
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handlePrintBarcode}
+                    disabled={!currentBarcode}
+                  >
+                    <Printer className="h-4 w-4" />
+                    Print barcode
                   </Button>
                 </>
               ) : null}

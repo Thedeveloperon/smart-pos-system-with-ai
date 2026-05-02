@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, Loader2, Plus, Printer, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import {
@@ -23,6 +23,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import BarcodeLabelPrintDialog from "@/components/pos/BarcodeLabelPrintDialog";
 import {
   adjustStock,
   createProduct,
@@ -179,6 +180,7 @@ export default function ProductManagementDialog({
   const [barcodeWorking, setBarcodeWorking] = useState(false);
   const [barcodeFeedback, setBarcodeFeedback] = useState<string>("");
   const [barcodeTone, setBarcodeTone] = useState<"neutral" | "success" | "error">("neutral");
+  const [barcodePrintOpen, setBarcodePrintOpen] = useState(false);
   const [currentStock, setCurrentStock] = useState(0);
   const [deleteMode, setDeleteMode] = useState<"soft" | "hard" | null>(null);
   const [adjustOpen, setAdjustOpen] = useState(false);
@@ -198,6 +200,7 @@ export default function ProductManagementDialog({
     setCurrentStock(product?.stock_quantity ?? product?.stock ?? 0);
     setBarcodeFeedback("");
     setBarcodeTone("neutral");
+    setBarcodePrintOpen(false);
     setDeleteMode(null);
     setAdjustQuantity("0");
     setAdjustReason("manual_adjustment");
@@ -440,6 +443,24 @@ export default function ProductManagementDialog({
   const selectedCategory = categories.find((item) => item.category_id === form.categoryId);
   const selectedBrand = brands.find((item) => item.brand_id === form.brandId);
   const selectedSupplier = suppliers.find((item) => item.supplier_id === form.preferredSupplierId);
+  const barcodePrintProducts = useMemo(
+    () => (product ? [snapshotProduct(product, form, currentStock)] : []),
+    [product, form, currentStock],
+  );
+  const currentBarcode = form.barcode.trim();
+
+  const handlePrintBarcode = () => {
+    if (!product) {
+      return;
+    }
+
+    if (!currentBarcode) {
+      toast.error("Add or generate a barcode before printing.");
+      return;
+    }
+
+    setBarcodePrintOpen(true);
+  };
 
   return (
     <>
@@ -901,6 +922,15 @@ export default function ProductManagementDialog({
                     )}
                     Regenerate barcode
                   </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handlePrintBarcode}
+                    disabled={!product || !currentBarcode}
+                  >
+                    <Printer className="h-4 w-4" />
+                    Print barcode
+                  </Button>
                 </>
               ) : null}
             </div>
@@ -921,6 +951,12 @@ export default function ProductManagementDialog({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <BarcodeLabelPrintDialog
+        open={barcodePrintOpen}
+        onOpenChange={setBarcodePrintOpen}
+        products={barcodePrintProducts}
+      />
 
       <Dialog open={adjustOpen} onOpenChange={setAdjustOpen}>
         <DialogContent className="max-w-lg">

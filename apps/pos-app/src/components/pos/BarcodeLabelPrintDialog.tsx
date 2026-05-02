@@ -146,7 +146,8 @@ export function buildPrintDocumentHtml(
   quantityPerProduct: number,
   showPrice: boolean,
   preset: LabelPreset,
-  runtime: PrintRuntime
+  runtime: PrintRuntime,
+  a4Columns = 6
 ): string {
   const labels: CatalogProduct[] = [];
   const safeQuantity = Math.max(1, Math.min(200, Math.trunc(quantityPerProduct)));
@@ -159,6 +160,7 @@ export function buildPrintDocumentHtml(
 
   const labelMarkup = labels.map((product) => buildLabelMarkup(product, showPrice)).join("");
   const isThermal = preset === "thermal";
+  const safeA4Columns = Math.max(1, Math.min(6, Math.trunc(a4Columns) || 6));
   const runtimeNote =
     runtime === "electron"
       ? "Electron runtime detected: open the system print dialog and verify selected label printer before confirming."
@@ -185,7 +187,7 @@ export function buildPrintDocumentHtml(
       }
       .sheet {
         display: ${isThermal ? "block" : "grid"};
-        ${isThermal ? "" : "grid-template-columns: repeat(6, minmax(0, 1fr));"}
+        ${isThermal ? "" : `grid-template-columns: repeat(${safeA4Columns}, minmax(0, 1fr));`}
         gap: ${isThermal ? "2mm" : "4mm"};
       }
       .label {
@@ -250,6 +252,7 @@ export default function BarcodeLabelPrintDialog({
   products,
 }: BarcodeLabelPrintDialogProps) {
   const [preset, setPreset] = useState<LabelPreset>("thermal");
+  const [a4Columns, setA4Columns] = useState("6");
   const [quantity, setQuantity] = useState("1");
   const [showPrice, setShowPrice] = useState(true);
   const [printing, setPrinting] = useState(false);
@@ -268,6 +271,14 @@ export default function BarcodeLabelPrintDialog({
   const missingBarcodeCount = products.filter((product) => !product.barcode?.trim()).length;
   const canPrint = products.length > 0 && missingBarcodeCount === 0;
   const totalLabels = products.length * quantityNumber;
+  const a4ColumnsNumber = useMemo(() => {
+    const parsed = Number(a4Columns);
+    if (!Number.isFinite(parsed)) {
+      return 6;
+    }
+
+    return Math.max(1, Math.min(6, Math.trunc(parsed)));
+  }, [a4Columns]);
 
   const handlePrint = () => {
     if (!canPrint) {
@@ -283,7 +294,9 @@ export default function BarcodeLabelPrintDialog({
         return;
       }
 
-      popup.document.write(buildPrintDocumentHtml(products, quantityNumber, showPrice, preset, printRuntime));
+      popup.document.write(
+        buildPrintDocumentHtml(products, quantityNumber, showPrice, preset, printRuntime, a4ColumnsNumber),
+      );
       popup.document.close();
       toast.success(`Opened ${totalLabels} labels for printing.`);
     } finally {
@@ -311,10 +324,29 @@ export default function BarcodeLabelPrintDialog({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="thermal">Thermal (58mm)</SelectItem>
-                  <SelectItem value="a4">A4 Grid (6 columns)</SelectItem>
+                  <SelectItem value="a4">A4 Grid</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+
+            {preset === "a4" ? (
+              <div className="space-y-2">
+                <Label htmlFor="label-columns">Columns per row</Label>
+                <Select value={a4Columns} onValueChange={setA4Columns}>
+                  <SelectTrigger id="label-columns">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">1 column</SelectItem>
+                    <SelectItem value="2">2 columns</SelectItem>
+                    <SelectItem value="3">3 columns</SelectItem>
+                    <SelectItem value="4">4 columns</SelectItem>
+                    <SelectItem value="5">5 columns</SelectItem>
+                    <SelectItem value="6">6 columns</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
 
             <div className="space-y-2">
               <Label htmlFor="label-quantity">Copies per product</Label>
