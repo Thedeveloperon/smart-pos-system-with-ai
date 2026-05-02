@@ -158,7 +158,11 @@ export default function CatalogueTab() {
             is_active: categoryForm.isActive,
           });
         } else {
-          await createCategory(categoryForm.name.trim(), categoryForm.description.trim(), categoryForm.isActive);
+          await createCategory({
+            name: categoryForm.name.trim(),
+            description: categoryForm.description.trim(),
+            is_active: categoryForm.isActive,
+          });
         }
       } else {
         if (!brandForm.name.trim()) {
