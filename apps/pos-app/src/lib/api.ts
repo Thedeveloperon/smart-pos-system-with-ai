@@ -3307,10 +3307,67 @@ type BackendWarrantyClaim = {
   serial_value: string;
   product_name: string;
   claim_date: string;
-  status: WarrantyClaim["status"];
+  status: WarrantyClaim["status"] | number | string;
   resolution_notes?: string | null;
   created_at: string;
 };
+
+const WARRANTY_CLAIM_STATUS_CODES: Record<WarrantyClaim["status"], number> = {
+  Open: 1,
+  InRepair: 2,
+  Resolved: 3,
+  Rejected: 4,
+};
+
+const WARRANTY_CLAIM_STATUS_LABELS: Record<WarrantyClaim["status"], string> = {
+  Open: "Open",
+  InRepair: "In repair",
+  Resolved: "Resolved",
+  Rejected: "Rejected",
+};
+
+function normalizeWarrantyClaimStatus(status: BackendWarrantyClaim["status"]): WarrantyClaim["status"] {
+  if (typeof status === "number") {
+    switch (status) {
+      case 1:
+        return "Open";
+      case 2:
+        return "InRepair";
+      case 3:
+        return "Resolved";
+      case 4:
+        return "Rejected";
+      default:
+        return "Open";
+    }
+  }
+
+  const normalized = status.trim().toLowerCase().replace(/\s+/g, "");
+  switch (normalized) {
+    case "1":
+    case "open":
+      return "Open";
+    case "2":
+    case "inrepair":
+      return "InRepair";
+    case "3":
+    case "resolved":
+      return "Resolved";
+    case "4":
+    case "rejected":
+      return "Rejected";
+    default:
+      return "Open";
+  }
+}
+
+function serializeWarrantyClaimStatus(status: WarrantyClaim["status"]): number {
+  return WARRANTY_CLAIM_STATUS_CODES[status];
+}
+
+export function formatWarrantyClaimStatus(status: WarrantyClaim["status"]) {
+  return WARRANTY_CLAIM_STATUS_LABELS[status];
+}
 
 function mapStockMovement(item: BackendStockMovementPage["items"][number]): StockMovement {
   return {
@@ -3384,7 +3441,7 @@ function mapWarrantyClaim(item: BackendWarrantyClaim): WarrantyClaim {
     serial_value: item.serial_value,
     product_name: item.product_name,
     claim_date: item.claim_date,
-    status: item.status,
+    status: normalizeWarrantyClaimStatus(item.status),
     resolution_notes: item.resolution_notes ?? undefined,
     created_at: item.created_at,
   };
@@ -3637,7 +3694,10 @@ export async function updateWarrantyClaim(
 ): Promise<WarrantyClaim> {
   const response = await request<BackendWarrantyClaim>(`/api/warranty-claims/${claimId}`, {
     method: "PUT",
-    body: JSON.stringify(data),
+    body: JSON.stringify({
+      status: serializeWarrantyClaimStatus(data.status),
+      resolution_notes: data.resolution_notes,
+    }),
   });
   return mapWarrantyClaim(response);
 }
