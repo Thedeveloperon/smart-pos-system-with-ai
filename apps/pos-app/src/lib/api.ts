@@ -1,4 +1,4 @@
-import type { CartItem, HeldBill, PaymentMethod, Product, RecentSale } from "@/components/pos/types";
+import type { CartItem, HeldBill, PaymentMethod, Product, RecentSale, SelectedSerial } from "@/components/pos/types";
 import type {
   CashSession,
   CashSessionEntry,
@@ -179,6 +179,7 @@ type BackendProductSearchItem = {
   unitPrice: number;
   stockQuantity: number;
   is_low_stock?: boolean;
+  is_serial_tracked?: boolean;
 };
 
 type BackendProductSearchResponse = {
@@ -607,12 +608,17 @@ export type SerialNumberRecord = {
 };
 
 export type SerialLookupResult = {
+  serial_id: string;
   serial_value: string;
   product_id: string;
   product_name: string;
   status: string;
+  sale_id?: string;
+  sale_item_id?: string;
+  refund_id?: string;
   sale_date?: string;
   warranty_expiry_date?: string;
+  product: Product;
 };
 
 export type ProductBatch = {
@@ -1749,7 +1755,7 @@ export type SyncEventsRequestOptions = {
 
 type CreateSaleRequest = {
   sale_id?: string;
-  items?: { product_id: string; quantity: number }[];
+  items?: { product_id: string; quantity: number; serial_number_id?: string }[];
   discount_percent?: number;
   role: string;
   payments: { method: string; amount: number; reference_number?: string | null }[];
@@ -1760,7 +1766,7 @@ type CreateSaleRequest = {
 };
 
 type HoldSaleRequest = {
-  items: { product_id: string; quantity: number }[];
+  items: { product_id: string; quantity: number; serial_number_id?: string }[];
   discount_percent: number;
   role: string;
 };
@@ -2379,6 +2385,8 @@ function mapProduct(item: BackendProductSearchItem): Product {
     brand_name: item.brand_name || null,
     isLowStock: item.is_low_stock ?? undefined,
     is_low_stock: item.is_low_stock ?? false,
+    isSerialTracked: item.is_serial_tracked ?? false,
+    is_serial_tracked: item.is_serial_tracked ?? false,
     stock: Number(item.stockQuantity),
     stock_quantity: Number(item.stockQuantity),
     cost_price: Number(item.unitPrice),
@@ -2388,8 +2396,50 @@ function mapProduct(item: BackendProductSearchItem): Product {
     target_stock_level: 0,
     alert_level: 0,
     allow_negative_stock: false,
-    is_serial_tracked: false,
     warranty_months: null,
+    is_batch_tracked: false,
+    expiry_alert_days: null,
+    is_active: true,
+    created_at: "",
+    image: resolveImageUrl(item.image_url) || sampleImage || createProductImage(item.name, accent),
+  };
+}
+
+function mapSerialLookupProduct(item: BackendSerialLookupResponse["product"]): Product {
+  const accent = colorFromText(item.name + (item.barcode || ""));
+  const sampleImage = getSampleProductImage(item.name);
+  return {
+    id: item.id,
+    product_id: item.id,
+    name: item.name,
+    sku: item.sku || item.id.slice(0, 8),
+    barcode: item.barcode || undefined,
+    image_url: item.image_url || null,
+    price: Number(item.unit_price),
+    unit_price: Number(item.unit_price),
+    category: item.category_name || undefined,
+    category_id: item.category_id || null,
+    categoryId: item.category_id || undefined,
+    categoryName: item.category_name || undefined,
+    category_name: item.category_name || null,
+    brandId: item.brand_id || undefined,
+    brandName: item.brand_name || undefined,
+    brand_id: item.brand_id || null,
+    brand_name: item.brand_name || null,
+    isLowStock: item.is_low_stock ?? undefined,
+    is_low_stock: item.is_low_stock ?? false,
+    isSerialTracked: item.is_serial_tracked ?? false,
+    is_serial_tracked: item.is_serial_tracked ?? false,
+    stock: Number(item.stock_quantity),
+    stock_quantity: Number(item.stock_quantity),
+    cost_price: Number(item.unit_price),
+    initial_stock_quantity: Number(item.stock_quantity),
+    reorder_level: 0,
+    safety_stock: 0,
+    target_stock_level: 0,
+    alert_level: 0,
+    allow_negative_stock: false,
+    warranty_months: item.warranty_months ?? null,
     is_batch_tracked: false,
     expiry_alert_days: null,
     is_active: true,
@@ -2442,6 +2492,7 @@ function mapCatalogProduct(item: BackendProductCatalogItem): Product {
 
 function mapSaleItems(items: BackendSaleItem[]): CartItem[] {
   return items.map((item) => ({
+    lineId: item.sale_item_id,
     product: {
       id: item.product_id,
       name: item.product_name,
@@ -3179,13 +3230,38 @@ type BackendStockMovementPage = {
   take: number;
 };
 
-type BackendSerialLookupResult = {
-  serial_value: string;
-  product_id: string;
-  product_name: string;
-  status: string;
-  sale_date?: string | null;
-  warranty_expiry_date?: string | null;
+type BackendSerialLookupResponse = {
+  serial: {
+    id: string;
+    product_id: string;
+    serial_value: string;
+    status: string;
+    sale_id?: string | null;
+    sale_item_id?: string | null;
+    refund_id?: string | null;
+    warranty_expiry_date?: string | null;
+  };
+  product: {
+    id: string;
+    name: string;
+    sku?: string | null;
+    barcode?: string | null;
+    image_url?: string | null;
+    category_id?: string | null;
+    category_name?: string | null;
+    brand_id?: string | null;
+    brand_name?: string | null;
+    unit_price: number;
+    stock_quantity: number;
+    is_low_stock?: boolean;
+    warranty_months?: number | null;
+    is_serial_tracked?: boolean;
+  };
+  sale?: {
+    id: string;
+    sale_number: string;
+    completed_at?: string | null;
+  } | null;
 };
 
 type BackendProductBatch = {
@@ -3381,17 +3457,23 @@ export async function deleteSerialNumber(productId: string, serialId: string): P
 }
 
 export async function lookupSerial(serialValue: string): Promise<SerialLookupResult> {
-  const response = await request<BackendSerialLookupResult>(
+  const response = await request<BackendSerialLookupResponse>(
     `/api/serials/lookup${buildQuery({ serial: serialValue })}`,
   );
+  const product = mapSerialLookupProduct(response.product);
 
   return {
-    serial_value: response.serial_value,
-    product_id: response.product_id,
-    product_name: response.product_name,
-    status: response.status,
-    sale_date: response.sale_date ?? undefined,
-    warranty_expiry_date: response.warranty_expiry_date ?? undefined,
+    serial_id: response.serial.id,
+    serial_value: response.serial.serial_value,
+    product_id: response.product.id,
+    product_name: response.product.name,
+    status: response.serial.status,
+    sale_id: response.serial.sale_id ?? undefined,
+    sale_item_id: response.serial.sale_item_id ?? undefined,
+    refund_id: response.serial.refund_id ?? undefined,
+    sale_date: response.sale?.completed_at ?? undefined,
+    warranty_expiry_date: response.serial.warranty_expiry_date ?? undefined,
+    product,
   };
 }
 
@@ -4269,6 +4351,7 @@ export async function holdSale(items: CartItem[], role: "admin" | "manager" | "c
     items: items.map((item) => ({
       product_id: item.product.id,
       quantity: item.quantity,
+      serial_number_id: item.selectedSerial?.id,
     })),
     discount_percent: 0,
     role: toBackendRole(role),
@@ -4299,6 +4382,7 @@ export async function completeSale(
       : items.map((item) => ({
           product_id: item.product.id,
           quantity: item.quantity,
+          serial_number_id: item.selectedSerial?.id,
         })),
     discount_percent: 0,
     role: toBackendRole(role),

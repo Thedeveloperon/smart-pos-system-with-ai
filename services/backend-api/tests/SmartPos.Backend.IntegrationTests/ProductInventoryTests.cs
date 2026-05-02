@@ -230,6 +230,45 @@ public sealed class ProductInventoryTests(CustomWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task ProductSearch_ShouldMatchSerialNumberQueries()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+        var serialValue = $"SER-SEARCH-{runId}-001";
+
+        var createProduct = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"Serial Search Product {runId}",
+                sku = $"SER-SEARCH-{runId}",
+                unit_price = 250m,
+                cost_price = 180m,
+                initial_stock_quantity = 1m,
+                reorder_level = 1m,
+                allow_negative_stock = false,
+                is_active = true,
+                is_serial_tracked = true,
+                warranty_months = 12
+            }));
+
+        var productId = Guid.Parse(TestJson.GetString(createProduct, "product_id"));
+
+        await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync($"/api/products/{productId}/serials", new
+            {
+                serials = new[] { serialValue }
+            }));
+
+        var serialSearch = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/products/search?q={Uri.EscapeDataString(serialValue)}"));
+        var serialHit = FindObjectInArray(serialSearch, "items", "id", productId.ToString());
+
+        Assert.Equal($"Serial Search Product {runId}", TestJson.GetString(serialHit, "name"));
+        Assert.True(serialHit["is_serial_tracked"]?.GetValue<bool>() ?? false);
+    }
+
+    [Fact]
     public async Task ProductSerialNumbers_ShouldUpdateAndDeleteSerials()
     {
         await TestAuth.SignInAsManagerAsync(client);
@@ -345,6 +384,90 @@ public sealed class ProductInventoryTests(CustomWebApplicationFactory factory)
 
         Assert.Equal("Defective", TestJson.GetString(markedDefective, "status"));
         Assert.Equal(serialValue, TestJson.GetString(markedDefective, "serial_value"));
+    }
+
+    [Fact]
+    public async Task Checkout_ShouldSellTheRequestedSerialNumber()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+        var serialOne = $"SER-CHECKOUT-{runId}-001";
+        var serialTwo = $"SER-CHECKOUT-{runId}-002";
+
+        var createProduct = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"Serial Checkout Product {runId}",
+                sku = $"SER-CHK-{runId}",
+                unit_price = 250m,
+                cost_price = 180m,
+                initial_stock_quantity = 2m,
+                reorder_level = 1m,
+                allow_negative_stock = false,
+                is_active = true,
+                is_serial_tracked = true,
+                warranty_months = 12
+            }));
+
+        var productId = Guid.Parse(TestJson.GetString(createProduct, "product_id"));
+
+        var added = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync($"/api/products/{productId}/serials", new
+            {
+                serials = new[] { serialOne, serialTwo }
+            }));
+
+        var addedItems = added["items"]?.AsArray()
+                        ?? throw new InvalidOperationException("Missing added serial items.");
+        var targetSerial = addedItems
+            .OfType<JsonObject>()
+            .FirstOrDefault(item => string.Equals(TestJson.GetString(item, "serial_value"), serialTwo, StringComparison.Ordinal))
+                           ?? throw new InvalidOperationException("Missing target serial item.");
+        var targetSerialId = Guid.Parse(TestJson.GetString(targetSerial, "id"));
+
+        var saleResponse = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/checkout/complete", new
+            {
+                sale_id = (Guid?)null,
+                items = new[]
+                {
+                    new
+                    {
+                        product_id = productId,
+                        quantity = 1m,
+                        serial_number_id = targetSerialId
+                    }
+                },
+                discount_percent = 0m,
+                role = "cashier",
+                payments = new[]
+                {
+                    new
+                    {
+                        method = "cash",
+                        amount = 250m,
+                        reference_number = (string?)null
+                    }
+                }
+            }));
+
+        Assert.Equal("completed", TestJson.GetString(saleResponse, "status"));
+
+        var serialReload = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/products/{productId}/serials"));
+        var serialItems = serialReload["items"]?.AsArray()
+                          ?? throw new InvalidOperationException("Missing serial items after sale.");
+        var soldSerial = serialItems
+            .OfType<JsonObject>()
+            .First(item => string.Equals(TestJson.GetString(item, "serial_value"), serialTwo, StringComparison.Ordinal));
+        var untouchedSerial = serialItems
+            .OfType<JsonObject>()
+            .First(item => string.Equals(TestJson.GetString(item, "serial_value"), serialOne, StringComparison.Ordinal));
+
+        Assert.Equal("Sold", TestJson.GetString(soldSerial, "status"));
+        Assert.False(string.IsNullOrWhiteSpace(TestJson.GetString(soldSerial, "sale_id")));
+        Assert.Equal("Available", TestJson.GetString(untouchedSerial, "status"));
     }
 
     [Fact]

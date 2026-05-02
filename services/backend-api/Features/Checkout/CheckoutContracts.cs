@@ -10,6 +10,9 @@ public sealed class CartItemRequest
 
     [JsonPropertyName("quantity")]
     public decimal Quantity { get; set; }
+
+    [JsonPropertyName("serial_number_id")]
+    public Guid? SerialNumberId { get; set; }
 }
 
 public sealed class PaymentRequest

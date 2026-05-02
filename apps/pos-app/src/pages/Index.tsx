@@ -25,7 +25,7 @@ import CashSessionBanner from "@/components/pos/cash-session/CashSessionBanner";
 import SessionClosedSummary from "@/components/pos/cash-session/SessionClosedSummary";
 import ManageDrawerDialog from "@/components/pos/cash-session/ManageDrawerDialog";
 import AuditLogPanel from "@/components/pos/cash-session/AuditLogPanel";
-import type { CartItem, HeldBill, PaymentMethod, Product } from "@/components/pos/types";
+import type { CartItem, HeldBill, PaymentMethod, Product, SelectedSerial } from "@/components/pos/types";
 import type { CashSession, DenominationCount } from "@/components/pos/cash-session/types";
 import {
   acknowledgeReminder,
@@ -472,41 +472,75 @@ const IndexInner = () => {
   }, [flushOfflineQueue, refreshOfflineQueueSummary]);
 
   const cartCount = cartItems.reduce((a, i) => a + i.quantity, 0);
+  const holdBlockReason = cartItems.some((item) => item.selectedSerial)
+    ? "Serial-selected items must be completed without holding."
+    : null;
   const needsOpening = !session || session.status === "closed";
   const isClosed = session?.status === "closed";
 
-  const handleAddToCart = useCallback((product: Product, qty: number) => {
+  const handleAddToCart = useCallback((product: Product, qty: number, selectedSerial?: SelectedSerial) => {
+    const normalizedQty = selectedSerial ? 1 : qty;
+    const nextLineId = selectedSerial ? `serial:${selectedSerial.id}` : `product:${product.id}`;
+
+    if (selectedSerial && cartItems.some((item) => item.selectedSerial?.id === selectedSerial.id)) {
+      toast.info(`Serial ${selectedSerial.value} is already in the cart.`);
+      return;
+    }
+
     setCartItems((prev) => {
-      const existing = prev.find((i) => i.product.id === product.id);
+      const existing = prev.find((item) => (item.lineId ?? `product:${item.product.id}`) === nextLineId);
       if (existing) {
-        return prev.map((i) =>
-          i.product.id === product.id ? { ...i, quantity: i.quantity + qty } : i
+        return prev.map((item) =>
+          (item.lineId ?? `product:${item.product.id}`) === nextLineId
+            ? { ...item, quantity: item.quantity + normalizedQty }
+            : item
         );
       }
-      return [...prev, { product, quantity: qty }];
+
+      return [
+        ...prev,
+        {
+          lineId: nextLineId,
+          product,
+          quantity: normalizedQty,
+          selectedSerial,
+        },
+      ];
     });
     void playCartAddSound();
-    toast.success(`Added ${product.name}`, { duration: 1500 });
-  }, []);
+    toast.success(
+      selectedSerial ? `Added ${product.name} (${selectedSerial.value})` : `Added ${product.name}`,
+      { duration: 1500 },
+    );
+  }, [cartItems]);
 
-  const handleUpdateQty = useCallback((productId: string, qty: number) => {
+  const handleUpdateQty = useCallback((lineId: string, qty: number) => {
     if (qty <= 0) {
-      setCartItems((prev) => prev.filter((i) => i.product.id !== productId));
+      setCartItems((prev) => prev.filter((item) => (item.lineId ?? `product:${item.product.id}`) !== lineId));
       return;
     }
 
     setCartItems((prev) =>
-      prev.map((i) => (i.product.id === productId ? { ...i, quantity: qty } : i))
+      prev.map((item) =>
+        (item.lineId ?? `product:${item.product.id}`) === lineId
+          ? { ...item, quantity: item.selectedSerial ? 1 : qty }
+          : item,
+      )
     );
   }, []);
 
-  const handleRemove = useCallback((productId: string) => {
-    setCartItems((prev) => prev.filter((i) => i.product.id !== productId));
+  const handleRemove = useCallback((lineId: string) => {
+    setCartItems((prev) => prev.filter((item) => (item.lineId ?? `product:${item.product.id}`) !== lineId));
     toast.info("Item removed");
   }, []);
 
   const handleHoldBill = useCallback(async () => {
     if (cartItems.length === 0) {
+      return;
+    }
+
+    if (holdBlockReason) {
+      toast.error(holdBlockReason);
       return;
     }
 
@@ -520,7 +554,7 @@ const IndexInner = () => {
       console.error(error);
       toast.error("Failed to hold bill.");
     }
-  }, [backendRole, cartItems, loadHeldBills]);
+  }, [backendRole, cartItems, holdBlockReason, loadHeldBills]);
 
   const handleResumeBill = useCallback(
     async (billId: string) => {
@@ -1183,6 +1217,7 @@ const IndexInner = () => {
                     items={cartItems}
                     cashDrawer={session?.drawer}
                     allowCustomPayout={isAdmin}
+                    holdBlockReason={holdBlockReason}
                     onCompleteSale={handleCompleteSale}
                     onHoldBill={() => void handleHoldBill()}
                     onCancelSale={handleCancelSale}
@@ -1219,6 +1254,7 @@ const IndexInner = () => {
                   items={cartItems}
                   cashDrawer={session?.drawer}
                   allowCustomPayout={isAdmin}
+                  holdBlockReason={holdBlockReason}
                   onCompleteSale={handleCompleteSale}
                   onHoldBill={() => void handleHoldBill()}
                   onCancelSale={handleCancelSale}

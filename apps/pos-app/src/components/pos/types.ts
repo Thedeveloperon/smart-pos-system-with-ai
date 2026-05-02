@@ -11,12 +11,24 @@ export interface Product {
   brandId?: string;
   brandName?: string;
   isLowStock?: boolean;
+  isSerialTracked?: boolean;
+  is_serial_tracked?: boolean;
+  matchedSerialId?: string;
+  matchedSerialValue?: string;
+  matchedSerialStatus?: string;
   stock: number;
 }
 
+export interface SelectedSerial {
+  id: string;
+  value: string;
+}
+
 export interface CartItem {
+  lineId?: string;
   product: Product;
   quantity: number;
+  selectedSerial?: SelectedSerial;
 }
 
 export interface HeldBill {

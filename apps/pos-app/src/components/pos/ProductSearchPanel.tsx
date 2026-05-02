@@ -16,14 +16,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Camera, Check, ChevronsUpDown, Keyboard, Package, Plus, ScanBarcode, Search } from "lucide-react";
 import { BrowserMultiFormatReader, type IScannerControls } from "@zxing/browser";
 import { NotFoundException } from "@zxing/library";
+import { ApiError, lookupSerial } from "@/lib/api";
 import ProductCard from "./ProductCard";
-import type { Product } from "./types";
+import type { Product, SelectedSerial } from "./types";
 import { POS_SHORTCUT_INLINE_HINT, POS_SHORTCUT_LABELS } from "./shortcuts";
 
 const SCANNER_BURST_INTERVAL_MS = 45;
 const SCANNER_ENTER_GRACE_MS = 120;
 const SCANNER_BURST_MIN_CHARS = 6;
 const CAMERA_SCAN_DUPLICATE_COOLDOWN_MS = 1300;
+const SERIAL_LOOKUP_DEBOUNCE_MS = 220;
 const normalizeBarcode = (value: string) => value.trim().toLowerCase();
 const isBarcodeFeatureEnabled = import.meta.env.VITE_BARCODE_FEATURE_ENABLED !== "false";
 const DEFAULT_CATEGORY = "Uncategorized";
@@ -52,7 +54,7 @@ const resolveBrandName = (product: Product) => {
 
 interface ProductSearchPanelProps {
   products: Product[];
-  onAddToCart: (product: Product, qty: number) => void;
+  onAddToCart: (product: Product, qty: number, selectedSerial?: SelectedSerial) => void;
   showShortcutHints?: boolean;
   expertMode?: boolean;
 }
@@ -75,12 +77,15 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
     const [cameraOpen, setCameraOpen] = useState(false);
     const [cameraStarting, setCameraStarting] = useState(false);
     const [cameraFeedback, setCameraFeedback] = useState<string | null>(null);
+    const [serialLookupProduct, setSerialLookupProduct] = useState<Product | null>(null);
+    const [serialLookupFeedback, setSerialLookupFeedback] = useState<string | null>(null);
     const searchInputRef = useRef<HTMLInputElement>(null);
     const cameraVideoRef = useRef<HTMLVideoElement>(null);
     const scannerControlsRef = useRef<IScannerControls | null>(null);
     const lastCameraScanRef = useRef({ value: "", at: 0 });
     const scannerBurstRef = useRef({ charCount: 0, lastKeyAt: 0 });
     const lastAutoAddKeyRef = useRef<string | null>(null);
+    const serialLookupRequestIdRef = useRef(0);
 
     const focusAndSelectSearch = useCallback(() => {
       const input = searchInputRef.current;
@@ -251,6 +256,18 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
       return next;
     }, [products, selectedCategory, selectedBrand, selectedProductId, stockFilter, normalizedQuery, sortOption]);
 
+    const displayedProducts = useMemo(() => {
+      if (!serialLookupProduct) {
+        return filtered;
+      }
+
+      if (filtered.some((product) => product.id === serialLookupProduct.id)) {
+        return filtered;
+      }
+
+      return [serialLookupProduct, ...filtered];
+    }, [filtered, serialLookupProduct]);
+
     const selectedProductLabel = useMemo(() => {
       if (selectedProductId === "all") {
         return "All products";
@@ -258,6 +275,17 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
 
       return productOptions.find((product) => product.id === selectedProductId)?.name ?? "All products";
     }, [productOptions, selectedProductId]);
+
+    const getSelectedSerial = useCallback(
+      (product: Product): SelectedSerial | undefined =>
+        product.matchedSerialId && product.matchedSerialValue
+          ? {
+              id: product.matchedSerialId,
+              value: product.matchedSerialValue,
+            }
+          : undefined,
+      [],
+    );
 
     const clearFilters = useCallback(() => {
       setSearchQuery("");
@@ -267,6 +295,8 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
       setStockFilter("all");
       setSortOption("name_asc");
       setBarcodeFeedback(null);
+      setSerialLookupProduct(null);
+      setSerialLookupFeedback(null);
       focusAndSelectSearch();
     }, [focusAndSelectSearch]);
 
@@ -315,14 +345,16 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
     );
 
     const handleAddProduct = useCallback(
-      (product: Product) => {
-        onAddToCart(product, 1);
+      (product: Product, _qty = 1) => {
+        onAddToCart(product, 1, getSelectedSerial(product));
         setSearchQuery("");
+        setSerialLookupProduct(null);
+        setSerialLookupFeedback(null);
         window.setTimeout(() => {
           focusAndSelectSearch();
         }, 0);
       },
-      [focusAndSelectSearch, onAddToCart],
+      [focusAndSelectSearch, getSelectedSerial, onAddToCart],
     );
 
     const handleSearchKeyDown = useCallback(
@@ -344,14 +376,20 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
           return;
         }
 
-        const exactMatch = filtered.find((product) => {
+        const exactMatch = displayedProducts.find((product) => {
           const name = product.name.toLowerCase();
           const sku = product.sku.toLowerCase();
           const barcode = product.barcode?.toLowerCase();
-          return name === normalizedQuery || sku === normalizedQuery || barcode === normalizedQuery;
+          const serial = product.matchedSerialValue?.toLowerCase();
+          return (
+            name === normalizedQuery ||
+            sku === normalizedQuery ||
+            barcode === normalizedQuery ||
+            serial === normalizedQuery
+          );
         });
 
-        const nextProduct = exactMatch ?? filtered[0];
+        const nextProduct = exactMatch ?? displayedProducts[0];
         if (!nextProduct) {
           return;
         }
@@ -368,7 +406,7 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
         event.preventDefault();
         handleAddProduct(nextProduct);
       },
-      [expertMode, filtered, handleAddProduct, handleBarcodeInputKeyDown, normalizedQuery, searchMode],
+      [displayedProducts, expertMode, handleAddProduct, handleBarcodeInputKeyDown, normalizedQuery, searchMode],
     );
 
     const toggleSearchMode = useCallback(() => {
@@ -540,11 +578,17 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
         return;
       }
 
-      const exactMatch = filtered.find((product) => {
+      const exactMatch = displayedProducts.find((product) => {
         const name = product.name.toLowerCase();
         const sku = product.sku.toLowerCase();
         const barcode = product.barcode?.toLowerCase();
-        return name === normalizedQuery || sku === normalizedQuery || barcode === normalizedQuery;
+        const serial = product.matchedSerialValue?.toLowerCase();
+        return (
+          name === normalizedQuery ||
+          sku === normalizedQuery ||
+          barcode === normalizedQuery ||
+          serial === normalizedQuery
+        );
       });
 
       if (!exactMatch) {
@@ -558,7 +602,75 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
 
       lastAutoAddKeyRef.current = autoAddKey;
       handleAddProduct(exactMatch);
-    }, [expertMode, filtered, handleAddProduct, normalizedQuery, searchMode]);
+    }, [displayedProducts, expertMode, handleAddProduct, normalizedQuery, searchMode]);
+
+    useEffect(() => {
+      if (searchMode !== "manual") {
+        serialLookupRequestIdRef.current += 1;
+        setSerialLookupProduct(null);
+        setSerialLookupFeedback(null);
+        return;
+      }
+
+      const trimmedQuery = searchQuery.trim();
+      const localExactMatch = products.some((product) => {
+        const name = product.name.toLowerCase();
+        const sku = product.sku.toLowerCase();
+        const barcode = product.barcode?.toLowerCase();
+        return name === normalizedQuery || sku === normalizedQuery || barcode === normalizedQuery;
+      });
+
+      if (trimmedQuery.length < 4 || localExactMatch || filtered.length > 0) {
+        serialLookupRequestIdRef.current += 1;
+        setSerialLookupProduct(null);
+        setSerialLookupFeedback(null);
+        return;
+      }
+
+      const requestId = serialLookupRequestIdRef.current + 1;
+      serialLookupRequestIdRef.current = requestId;
+      const timeoutId = window.setTimeout(() => {
+        void lookupSerial(trimmedQuery)
+          .then((result) => {
+            if (serialLookupRequestIdRef.current !== requestId) {
+              return;
+            }
+
+            if (result.status !== "Available") {
+              setSerialLookupProduct(null);
+              setSerialLookupFeedback(
+                `Serial ${result.serial_value} is ${result.status.toLowerCase()} and cannot be added.`,
+              );
+              return;
+            }
+
+            setSerialLookupProduct({
+              ...result.product,
+              matchedSerialId: result.serial_id,
+              matchedSerialValue: result.serial_value,
+              matchedSerialStatus: result.status,
+            });
+            setSerialLookupFeedback(`Serial match: ${result.serial_value}`);
+          })
+          .catch((error: unknown) => {
+            if (serialLookupRequestIdRef.current !== requestId) {
+              return;
+            }
+
+            setSerialLookupProduct(null);
+            if (error instanceof ApiError && error.status === 404) {
+              setSerialLookupFeedback(null);
+              return;
+            }
+
+            setSerialLookupFeedback("Serial lookup is unavailable right now.");
+          });
+      }, SERIAL_LOOKUP_DEBOUNCE_MS);
+
+      return () => {
+        window.clearTimeout(timeoutId);
+      };
+    }, [filtered.length, normalizedQuery, products, searchMode, searchQuery]);
 
     return (
       <div className="flex flex-col h-full">
@@ -571,6 +683,12 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
                 value={searchQuery}
                 onChange={(event) => {
                   setSearchQuery(event.target.value);
+                  if (searchMode === "manual" && serialLookupProduct) {
+                    setSerialLookupProduct(null);
+                  }
+                  if (searchMode === "manual" && serialLookupFeedback) {
+                    setSerialLookupFeedback(null);
+                  }
                   if (searchMode === "barcode" && barcodeFeedback) {
                     setBarcodeFeedback(null);
                   }
@@ -579,7 +697,7 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
                 placeholder={
                   searchMode === "barcode"
                     ? "Scan or enter barcode..."
-                    : "Search products by name, SKU..."
+                    : "Search products by name, SKU, serial..."
                 }
                 className="pl-10 h-11 text-base rounded-xl border-border bg-background"
                 autoFocus
@@ -706,7 +824,7 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
             </div>
           </div>
           <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
-            <span>{filtered.length} products</span>
+            <span>{displayedProducts.length} products</span>
             {searchQuery && (
               <button className="text-primary hover:underline" onClick={() => setSearchQuery("")}>
                 Clear search
@@ -714,6 +832,21 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
             )}
             {showShortcutHints && <span className="ml-auto hidden lg:inline">Shortcuts: {POS_SHORTCUT_INLINE_HINT}</span>}
           </div>
+          {searchMode === "manual" && serialLookupFeedback && (
+            <p
+              className={`mt-2 text-xs ${
+                serialLookupProduct
+                  ? "text-primary font-medium"
+                  : serialLookupFeedback.startsWith("Serial ")
+                    ? "text-destructive font-medium"
+                    : "text-muted-foreground"
+              }`}
+              role="status"
+              aria-live="polite"
+            >
+              {serialLookupFeedback}
+            </p>
+          )}
           {isBarcodeFeatureEnabled && searchMode === "barcode" && (
             <p
               className={`mt-2 text-xs ${barcodeFeedback ? "text-destructive font-medium" : "text-muted-foreground"}`}
@@ -773,27 +906,29 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
                 <Search className="h-10 w-10 opacity-50" />
                 <div className="space-y-1">
                   <p className="text-sm font-medium text-foreground">Search-first billing</p>
-                  <p className="text-xs">Type a product name, SKU, or barcode to filter results and add items fast.</p>
+                  <p className="text-xs">Type a product name, SKU, serial number, or barcode to add items fast.</p>
                 </div>
               </div>
-            ) : filtered.length === 0 ? (
+            ) : displayedProducts.length === 0 ? (
               <div className="flex h-full min-h-[280px] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border bg-muted/20 px-4 text-center text-muted-foreground">
                 <Package className="h-10 w-10 opacity-40" />
                 <p className="text-sm">No products found</p>
-                <p className="text-xs">Check the spelling or scan a barcode again.</p>
+                <p className="text-xs">Check the spelling, serial number, or scan a barcode again.</p>
               </div>
             ) : (
               <div className="space-y-2">
-                {filtered.slice(0, 24).map((product) => (
+                {displayedProducts.slice(0, 24).map((product) => (
                   <button
-                    key={product.id}
+                    key={product.matchedSerialId ?? product.id}
                     type="button"
                     className="flex w-full items-center justify-between gap-3 rounded-2xl border border-border bg-card px-3 py-2.5 text-left transition hover:-translate-y-px hover:border-primary/40 hover:shadow-sm"
                     onClick={() => handleAddProduct(product)}
                   >
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold text-foreground">{product.name}</p>
-                      <p className="truncate text-[11px] text-muted-foreground font-mono">{product.sku}</p>
+                      <p className="truncate text-[11px] text-muted-foreground font-mono">
+                        {product.matchedSerialValue ? `Serial ${product.matchedSerialValue}` : product.sku}
+                      </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-3 text-right">
                       <div>
@@ -806,21 +941,21 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
                     </div>
                   </button>
                 ))}
-                {filtered.length > 24 && <p className="px-1 text-xs text-muted-foreground">Showing first 24 matches.</p>}
+                {displayedProducts.length > 24 && <p className="px-1 text-xs text-muted-foreground">Showing first 24 matches.</p>}
               </div>
             )}
           </div>
         ) : (
           <div className="flex-1 overflow-y-scroll scrollbar-thin p-2.5 pr-3">
-            {filtered.length === 0 ? (
+            {displayedProducts.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-64 text-muted-foreground gap-3">
                 <Package className="h-12 w-12 opacity-40" />
                 <p className="text-sm">No products found</p>
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
-                {filtered.map((product) => (
-                  <ProductCard key={product.id} product={product} onAdd={onAddToCart} />
+                {displayedProducts.map((product) => (
+                  <ProductCard key={product.matchedSerialId ?? product.id} product={product} onAdd={handleAddProduct} />
                 ))}
               </div>
             )}

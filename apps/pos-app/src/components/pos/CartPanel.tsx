@@ -4,8 +4,8 @@ import type { CartItem } from "./types";
 
 interface CartPanelProps {
   items: CartItem[];
-  onUpdateQty: (productId: string, qty: number) => void;
-  onRemove: (productId: string) => void;
+  onUpdateQty: (lineId: string, qty: number) => void;
+  onRemove: (lineId: string) => void;
   expertMode?: boolean;
 }
 
@@ -53,7 +53,7 @@ const CartPanel = ({ items, onUpdateQty, onRemove, expertMode = false }: CartPan
         ) : (
           items.map((item) => (
             <CartItemRow
-              key={item.product.id}
+              key={item.lineId ?? item.selectedSerial?.id ?? item.product.id}
               item={item}
               onUpdateQty={onUpdateQty}
               onRemove={onRemove}
