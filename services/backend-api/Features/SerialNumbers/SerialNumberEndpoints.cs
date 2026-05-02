@@ -177,6 +177,61 @@ public static class SerialNumberEndpoints
         .WithName("UpdateProductSerialNumber")
         .WithOpenApi();
 
+        productGroup.MapPost("/{serialId:guid}/replace", async (
+            Guid productId,
+            Guid serialId,
+            ReplaceSerialNumberRequest request,
+            ClaimsPrincipal user,
+            SmartPosDbContext dbContext,
+            CancellationToken cancellationToken) =>
+        {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
+            var serial = await dbContext.SerialNumbers
+                .FirstOrDefaultAsync(x => x.Id == serialId && x.ProductId == productId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
+            if (serial is null)
+            {
+                return Results.NotFound(new { message = "Serial number not found." });
+            }
+
+            if (serial.Status != SerialNumberStatus.Defective)
+            {
+                return Results.BadRequest(new { message = "Only defective serial numbers can be replaced." });
+            }
+
+            var nextSerial = NormalizeSerial(request.NewSerialValue);
+            if (string.IsNullOrWhiteSpace(nextSerial))
+            {
+                return Results.BadRequest(new { message = "new_serial_value is required." });
+            }
+
+            var duplicate = await dbContext.SerialNumbers.AnyAsync(
+                x => x.Id != serial.Id &&
+                     x.StoreId == serial.StoreId &&
+                     x.SerialValue == nextSerial,
+                cancellationToken);
+            if (duplicate)
+            {
+                return Results.BadRequest(new { message = "A serial number with this value already exists." });
+            }
+
+            serial.SerialValue = nextSerial;
+            serial.Status = SerialNumberStatus.Available;
+            serial.UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                return Results.Conflict(new { message = "Failed to save serial number changes. Refresh and try again." });
+            }
+
+            return Results.Ok(ToSerialResponse(serial));
+        })
+        .WithName("ReplaceProductSerialNumber")
+        .WithOpenApi();
+
         productGroup.MapDelete("/{serialId:guid}", async (
             Guid productId,
             Guid serialId,
@@ -354,4 +409,10 @@ public sealed class UpdateSerialNumberRequest
 
     [JsonPropertyName("warranty_expiry_date")]
     public DateTimeOffset? WarrantyExpiryDate { get; set; }
+}
+
+public sealed class ReplaceSerialNumberRequest
+{
+    [JsonPropertyName("new_serial_value")]
+    public string NewSerialValue { get; set; } = string.Empty;
 }
