@@ -67,6 +67,11 @@ const ProductCard = ({ product, onAdd, showAddButton = true }: ProductCardProps)
         <p className="text-[9px] text-muted-foreground font-mono">
           {product.sku}
         </p>
+        {product.matchedSerialValue && (
+          <p className="text-[9px] font-mono text-primary/80">
+            Serial {product.matchedSerialValue}
+          </p>
+        )}
         <div className="mt-auto flex items-center justify-between pt-1">
           <span className="text-[13px] font-bold text-primary">
             Rs. {product.price.toLocaleString()}

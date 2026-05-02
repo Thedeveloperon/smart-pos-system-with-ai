@@ -49,6 +49,8 @@ type EditableLine = {
   rawText?: string | null;
   quantity: string;
   unitCost: string;
+  lineTotal: string;
+  isLineTotalManual: boolean;
   selectedProductId: string;
   matchStatus: string;
   matchMethod?: string | null;
@@ -139,6 +141,25 @@ function toDecimalOrNull(value: string) {
   return parsed;
 }
 
+function getAutoLineTotal(quantity: string, unitCost: string) {
+  const parsedQuantity = toDecimalOrNull(quantity);
+  const parsedUnitCost = toDecimalOrNull(unitCost);
+
+  if (parsedQuantity == null || parsedQuantity <= 0 || parsedUnitCost == null || parsedUnitCost < 0) {
+    return null;
+  }
+
+  return Number((parsedQuantity * parsedUnitCost).toFixed(2));
+}
+
+function formatMoneyInput(value?: number | null) {
+  if (value == null || !Number.isFinite(value)) {
+    return "";
+  }
+
+  return value.toFixed(2);
+}
+
 function formatFileSize(bytes?: number | null) {
   if (bytes == null || Number.isNaN(bytes)) {
     return "";
@@ -165,13 +186,22 @@ function toDraftLine(line: PurchaseOcrDraftLineItem): EditableLine {
   const sourceName = formatSupplierItemText(
     line.item_name?.trim() || line.raw_text?.trim() || `Line ${line.line_no}`,
   );
+  const quantity = line.quantity == null ? "" : String(line.quantity);
+  const unitCost = line.unit_cost == null ? "" : String(line.unit_cost);
+  const computedLineTotal = getAutoLineTotal(quantity, unitCost);
+  const extractedLineTotal = line.line_total == null ? null : Number(line.line_total);
+  const isLineTotalManual =
+    extractedLineTotal != null &&
+    (computedLineTotal == null || Math.abs(extractedLineTotal - computedLineTotal) > 0.009);
 
   return {
     lineNo: line.line_no,
     sourceName,
     rawText: line.raw_text,
-    quantity: line.quantity == null ? "" : String(line.quantity),
-    unitCost: line.unit_cost == null ? "" : String(line.unit_cost),
+    quantity,
+    unitCost,
+    lineTotal: formatMoneyInput(extractedLineTotal ?? computedLineTotal),
+    isLineTotalManual,
     selectedProductId: line.matched_product_id || "",
     matchStatus: line.match_status,
     matchMethod: line.match_method,
@@ -184,16 +214,20 @@ function toDraftLine(line: PurchaseOcrDraftLineItem): EditableLine {
 function getLineValidation(line: EditableLine) {
   const quantity = toDecimalOrNull(line.quantity);
   const unitCost = toDecimalOrNull(line.unitCost);
+  const autoLineTotal = getAutoLineTotal(line.quantity, line.unitCost);
+  const parsedLineTotal = line.lineTotal.trim() ? toDecimalOrNull(line.lineTotal) : autoLineTotal;
 
   const hasValidQuantity = quantity != null && quantity > 0;
   const hasValidUnitCost = unitCost != null && unitCost >= 0;
+  const hasValidLineTotal = parsedLineTotal != null && parsedLineTotal >= 0;
 
   return {
     quantity,
     unitCost,
+    lineTotal: hasValidLineTotal && parsedLineTotal != null ? Number(parsedLineTotal.toFixed(2)) : null,
     hasValidQuantity,
     hasValidUnitCost,
-    lineTotal: hasValidQuantity && hasValidUnitCost ? Number((quantity * unitCost).toFixed(2)) : null,
+    hasValidLineTotal,
   };
 }
 
@@ -397,7 +431,12 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
 
   const invalidLineCount = useMemo(
     () =>
-      lineSummaries.filter((item) => !item.validation.hasValidQuantity || !item.validation.hasValidUnitCost).length,
+      lineSummaries.filter(
+        (item) =>
+          !item.validation.hasValidQuantity ||
+          !item.validation.hasValidUnitCost ||
+          !item.validation.hasValidLineTotal,
+      ).length,
     [lineSummaries],
   );
 
@@ -473,7 +512,7 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
 
     if (invalidLineCount > 0) {
       blockers.push(
-        `${invalidLineCount} line${invalidLineCount === 1 ? "" : "s"} have invalid quantity or unit cost.`,
+        `${invalidLineCount} line${invalidLineCount === 1 ? "" : "s"} have invalid quantity, unit cost, or line total.`,
       );
     }
 
@@ -504,6 +543,15 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
   ]);
 
   const primaryConfirmBlocker = confirmBlockers[0] ?? null;
+
+  const updateLineField = useCallback(
+    (lineNo: number, updater: (line: EditableLine) => EditableLine) => {
+      setEditableLines((previous) =>
+        previous.map((line) => (line.lineNo === lineNo ? updater(line) : line)),
+      );
+    },
+    [],
+  );
 
   const resetState = () => {
     setSelectedFile(null);
@@ -1372,6 +1420,119 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                     </section>
                   )}
 
+                  <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-semibold">Bill Details</h3>
+                        <p className="text-xs text-muted-foreground">
+                          Review and edit the supplier and totals before exporting to inventory.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3 rounded-full border border-slate-200 bg-slate-50 px-3 py-2">
+                        <Switch
+                          id="import-update-cost-price"
+                          checked={updateCostPrice}
+                          onCheckedChange={setUpdateCostPrice}
+                          disabled={isBusy}
+                        />
+                        <Label htmlFor="import-update-cost-price" className="text-sm font-medium">
+                          Update product cost price
+                        </Label>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="import-supplier-name">Supplier</Label>
+                        <Input
+                          id="import-supplier-name"
+                          value={supplierName}
+                          onChange={(event) => setSupplierName(event.target.value)}
+                          disabled={isBusy}
+                          className={cn("h-11 rounded-xl bg-background", !supplierName.trim() && "border-destructive")}
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <Label htmlFor="import-invoice-number">Invoice Number</Label>
+                        <Input
+                          id="import-invoice-number"
+                          value={invoiceNumber}
+                          onChange={(event) => setInvoiceNumber(event.target.value)}
+                          disabled={isBusy}
+                          className={cn("h-11 rounded-xl bg-background", !invoiceNumber.trim() && "border-destructive")}
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <Label htmlFor="import-invoice-date">Invoice Date</Label>
+                        <Input
+                          id="import-invoice-date"
+                          type="date"
+                          value={invoiceDate}
+                          onChange={(event) => setInvoiceDate(event.target.value)}
+                          disabled={isBusy}
+                          className="h-11 rounded-xl bg-background"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <Label htmlFor="import-currency">Currency</Label>
+                        <Input
+                          id="import-currency"
+                          value={currency}
+                          onChange={(event) => setCurrency(event.target.value.toUpperCase())}
+                          disabled={isBusy}
+                          className="h-11 rounded-xl bg-background uppercase"
+                          maxLength={8}
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <Label htmlFor="import-tax-total">Tax Total</Label>
+                        <Input
+                          id="import-tax-total"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={taxTotal}
+                          onChange={(event) => setTaxTotal(event.target.value)}
+                          disabled={isBusy}
+                          className={cn(
+                            "h-11 rounded-xl bg-background",
+                            taxTotal.trim() && toDecimalOrNull(taxTotal) == null && "border-destructive",
+                          )}
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <Label htmlFor="import-grand-total">Grand Total</Label>
+                        <Input
+                          id="import-grand-total"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={grandTotal}
+                          onChange={(event) => setGrandTotal(event.target.value)}
+                          disabled={isBusy}
+                          className={cn(
+                            "h-11 rounded-xl bg-background",
+                            grandTotal.trim() && toDecimalOrNull(grandTotal) == null && "border-destructive",
+                          )}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                      <span>
+                        Computed subtotal: {currency} {computedSubtotal.toFixed(2)}
+                      </span>
+                      <span>
+                        Draft total: {currency} {draft.totals.line_total_sum.toFixed(2)}
+                      </span>
+                    </div>
+                  </section>
+
                   <section className="flex max-h-[62vh] flex-col rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
                     <div className="mb-3 flex items-center justify-between gap-3">
                       <h3 className="text-sm font-semibold">Item Review and Mapping</h3>
@@ -1411,9 +1572,19 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                               <TableRow key={line.lineNo}>
                                 <TableCell className="font-medium">{line.lineNo}</TableCell>
                                 <TableCell>
-                                  <p className="text-sm font-semibold leading-snug" title={line.sourceName}>
-                                    {line.sourceName}
-                                  </p>
+                                  <Textarea
+                                    aria-label={`Supplier item for line ${line.lineNo}`}
+                                    value={line.sourceName}
+                                    onChange={(event) => {
+                                      const nextSourceName = event.target.value;
+                                      updateLineField(line.lineNo, (currentLine) => ({
+                                        ...currentLine,
+                                        sourceName: nextSourceName,
+                                      }));
+                                    }}
+                                    disabled={isBusy}
+                                    className="min-h-[88px] rounded-xl bg-background text-sm"
+                                  />
                                   {shouldShowRawTextPreview(line.sourceName, line.rawText) && (
                                     <p className="mt-1 line-clamp-2 break-words text-xs text-muted-foreground">
                                       Detected text: {line.rawText}
@@ -1423,17 +1594,25 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
 
                                 <TableCell>
                                   <Input
+                                    aria-label={`Quantity for line ${line.lineNo}`}
                                     type="number"
                                     step="0.001"
                                     min="0"
                                     value={line.quantity}
-                                    onChange={(event) =>
-                                      setEditableLines((prev) =>
-                                        prev.map((item) =>
-                                          item.lineNo === line.lineNo ? { ...item, quantity: event.target.value } : item,
-                                        ),
-                                      )
-                                    }
+                                    onChange={(event) => {
+                                      const nextQuantity = event.target.value;
+                                      updateLineField(line.lineNo, (currentLine) => {
+                                        const autoLineTotal = getAutoLineTotal(nextQuantity, currentLine.unitCost);
+
+                                        return {
+                                          ...currentLine,
+                                          quantity: nextQuantity,
+                                          lineTotal: currentLine.isLineTotalManual
+                                            ? currentLine.lineTotal
+                                            : formatMoneyInput(autoLineTotal),
+                                        };
+                                      });
+                                    }}
                                     disabled={isBusy}
                                     className={cn("h-11 rounded-xl bg-background", !validation.hasValidQuantity && "border-destructive")}
                                   />
@@ -1441,24 +1620,58 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
 
                                 <TableCell>
                                   <Input
+                                    aria-label={`Unit cost for line ${line.lineNo}`}
                                     type="number"
                                     step="0.01"
                                     min="0"
                                     value={line.unitCost}
-                                    onChange={(event) =>
-                                      setEditableLines((prev) =>
-                                        prev.map((item) =>
-                                          item.lineNo === line.lineNo ? { ...item, unitCost: event.target.value } : item,
-                                        ),
-                                      )
-                                    }
+                                    onChange={(event) => {
+                                      const nextUnitCost = event.target.value;
+                                      updateLineField(line.lineNo, (currentLine) => {
+                                        const autoLineTotal = getAutoLineTotal(currentLine.quantity, nextUnitCost);
+
+                                        return {
+                                          ...currentLine,
+                                          unitCost: nextUnitCost,
+                                          lineTotal: currentLine.isLineTotalManual
+                                            ? currentLine.lineTotal
+                                            : formatMoneyInput(autoLineTotal),
+                                        };
+                                      });
+                                    }}
                                     disabled={isBusy}
                                     className={cn("h-11 rounded-xl bg-background", !validation.hasValidUnitCost && "border-destructive")}
                                   />
                                 </TableCell>
 
-                                <TableCell className="text-sm font-medium">
-                                  {validation.lineTotal == null ? "-" : `${currency} ${validation.lineTotal.toFixed(2)}`}
+                                <TableCell>
+                                  <Input
+                                    aria-label={`Line total for line ${line.lineNo}`}
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={line.lineTotal}
+                                    onChange={(event) => {
+                                      const nextLineTotal = event.target.value;
+                                      updateLineField(line.lineNo, (currentLine) => {
+                                        const autoLineTotal = getAutoLineTotal(
+                                          currentLine.quantity,
+                                          currentLine.unitCost,
+                                        );
+
+                                        return {
+                                          ...currentLine,
+                                          lineTotal:
+                                            nextLineTotal.trim().length === 0
+                                              ? formatMoneyInput(autoLineTotal)
+                                              : nextLineTotal,
+                                          isLineTotalManual: nextLineTotal.trim().length > 0,
+                                        };
+                                      });
+                                    }}
+                                    disabled={isBusy}
+                                    className={cn("h-11 rounded-xl bg-background", !validation.hasValidLineTotal && "border-destructive")}
+                                  />
                                 </TableCell>
 
                                 <TableCell>
@@ -1468,16 +1681,10 @@ export default function ImportSupplierBillDialog({ open, onOpenChange, onImporte
                                       const selectedProductId =
                                         value === UNASSIGNED_PRODUCT_VALUE ? "" : value;
 
-                                      setEditableLines((prev) =>
-                                        prev.map((item) =>
-                                          item.lineNo === line.lineNo
-                                            ? {
-                                                ...item,
-                                                selectedProductId,
-                                              }
-                                            : item,
-                                        ),
-                                      );
+                                      updateLineField(line.lineNo, (currentLine) => ({
+                                        ...currentLine,
+                                        selectedProductId,
+                                      }));
 
                                       if (createProductDraft?.lineNo === line.lineNo && selectedProductId) {
                                         setCreateProductDraft(null);

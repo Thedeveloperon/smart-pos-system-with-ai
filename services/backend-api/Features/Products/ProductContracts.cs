@@ -30,6 +30,8 @@ public sealed class ProductSearchItem
     public decimal StockQuantity { get; set; }
     [JsonPropertyName("is_low_stock")]
     public bool IsLowStock { get; set; }
+    [JsonPropertyName("is_serial_tracked")]
+    public bool IsSerialTracked { get; set; }
 }
 
 public sealed class BrandListResponse

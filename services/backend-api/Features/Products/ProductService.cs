@@ -51,7 +51,8 @@ public sealed class ProductService(
             productQuery = productQuery.Where(x =>
                 x.Name.ToLower().Contains(term) ||
                 (x.Sku != null && x.Sku.ToLower().Contains(term)) ||
-                (x.Barcode != null && x.Barcode.ToLower().Contains(term)));
+                (x.Barcode != null && x.Barcode.ToLower().Contains(term)) ||
+                x.SerialNumbers.Any(serial => serial.SerialValue.ToLower().Contains(term)));
         }
 
         var items = await productQuery
@@ -70,7 +71,8 @@ public sealed class ProductService(
                 BrandName = x.Brand != null ? x.Brand.Name : null,
                 UnitPrice = x.UnitPrice,
                 StockQuantity = x.Inventory != null ? x.Inventory.QuantityOnHand : 0m,
-                ReorderLevel = x.Inventory != null ? x.Inventory.ReorderLevel : 0m
+                ReorderLevel = x.Inventory != null ? x.Inventory.ReorderLevel : 0m,
+                IsSerialTracked = x.IsSerialTracked
             })
             .ToListAsync(cancellationToken);
 
@@ -93,7 +95,8 @@ public sealed class ProductService(
                     BrandName = item.BrandName,
                     UnitPrice = RoundMoney(item.UnitPrice),
                     StockQuantity = stockQuantity,
-                    IsLowStock = stockQuantity <= alertLevel
+                    IsLowStock = stockQuantity <= alertLevel,
+                    IsSerialTracked = item.IsSerialTracked
                 };
             }).ToList()
         };

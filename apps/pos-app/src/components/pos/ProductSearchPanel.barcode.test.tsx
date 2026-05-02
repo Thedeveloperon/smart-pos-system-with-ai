@@ -1,9 +1,24 @@
 import { createRef } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "@/lib/api";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import ProductSearchPanel, { type ProductSearchPanelHandle } from "./ProductSearchPanel";
 import type { Product } from "./types";
+
+const lookupSerialMock = vi.fn();
+
+vi.mock("@/lib/api", () => ({
+  ApiError: class ApiError extends Error {
+    status: number;
+
+    constructor(message: string, status: number) {
+      super(message);
+      this.status = status;
+    }
+  },
+  lookupSerial: (...args: unknown[]) => lookupSerialMock(...args),
+}));
 
 const sampleProducts: Product[] = [
   {
@@ -17,6 +32,11 @@ const sampleProducts: Product[] = [
 ];
 
 describe("ProductSearchPanel barcode mode", () => {
+  beforeEach(() => {
+    lookupSerialMock.mockReset();
+    lookupSerialMock.mockRejectedValue(new ApiError("Serial number not found.", 404));
+  });
+
   it("adds exact barcode match to cart when Enter is pressed in barcode mode", () => {
     const onAddToCart = vi.fn();
 
@@ -55,7 +75,7 @@ describe("ProductSearchPanel barcode mode", () => {
 
     render(<ProductSearchPanel products={sampleProducts} onAddToCart={onAddToCart} />);
 
-    const input = screen.getByPlaceholderText("Search products by name, SKU...");
+    const input = screen.getByPlaceholderText("Search products by name, SKU, serial...");
     fireEvent.change(input, { target: { value: "Milk" } });
     fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
 
@@ -68,7 +88,7 @@ describe("ProductSearchPanel barcode mode", () => {
 
     render(<ProductSearchPanel ref={panelRef} products={sampleProducts} onAddToCart={onAddToCart} />);
 
-    const input = screen.getByPlaceholderText("Search products by name, SKU...");
+    const input = screen.getByPlaceholderText("Search products by name, SKU, serial...");
     input.blur();
 
     act(() => {

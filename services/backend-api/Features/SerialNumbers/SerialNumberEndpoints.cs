@@ -288,6 +288,11 @@ public static class SerialNumberEndpoints
             var record = await dbContext.SerialNumbers
                 .AsNoTracking()
                 .Include(x => x.Product)
+                    .ThenInclude(x => x.Category)
+                .Include(x => x.Product)
+                    .ThenInclude(x => x.Brand)
+                .Include(x => x.Product)
+                    .ThenInclude(x => x.Inventory)
                 .Include(x => x.Sale)
                 .Include(x => x.SaleItem)
                 .Include(x => x.Refund)
@@ -297,6 +302,10 @@ public static class SerialNumberEndpoints
             {
                 return Results.NotFound(new { message = "Serial number not found." });
             }
+
+            var stockQuantity = record.Product.Inventory?.QuantityOnHand ?? 0m;
+            var reorderLevel = record.Product.Inventory?.ReorderLevel ?? 0m;
+            var lowStockThreshold = Math.Max(reorderLevel, 5m);
 
             return Results.Ok(new
             {
@@ -319,6 +328,14 @@ public static class SerialNumberEndpoints
                     name = record.Product.Name,
                     sku = record.Product.Sku,
                     barcode = record.Product.Barcode,
+                    image_url = record.Product.ImageUrl,
+                    category_id = record.Product.CategoryId,
+                    category_name = record.Product.Category?.Name,
+                    brand_id = record.Product.BrandId,
+                    brand_name = record.Product.Brand?.Name,
+                    unit_price = record.Product.UnitPrice,
+                    stock_quantity = stockQuantity,
+                    is_low_stock = stockQuantity <= lowStockThreshold,
                     warranty_months = record.Product.WarrantyMonths,
                     is_serial_tracked = record.Product.IsSerialTracked
                 },

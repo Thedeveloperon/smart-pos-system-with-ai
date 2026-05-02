@@ -21,6 +21,12 @@ public sealed class CheckoutService(
         CancellationToken cancellationToken)
     {
         var cart = await BuildCartAsync(request.Items, request.DiscountPercent, request.Role, cancellationToken);
+        if (cart.Items.Any(x => x.SerialNumberId.HasValue))
+        {
+            throw new InvalidOperationException(
+                "Serial-selected items cannot be held. Complete the sale without holding it.");
+        }
+
         var sale = new Sale
         {
             StoreId = cart.StoreId,
@@ -63,6 +69,7 @@ public sealed class CheckoutService(
 
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
         Sale sale;
+        var requestedSerialBySaleItemId = new Dictionary<Guid, Guid>();
 
         if (request.SaleId.HasValue)
         {
@@ -83,6 +90,29 @@ public sealed class CheckoutService(
         else
         {
             var cart = await BuildCartAsync(request.Items, request.DiscountPercent, request.Role, cancellationToken);
+            var saleItems = new List<SaleItem>();
+            foreach (var line in cart.Items)
+            {
+                var saleItem = new SaleItem
+                {
+                    ProductId = line.Product.Id,
+                    ProductNameSnapshot = line.Product.Name,
+                    UnitPrice = line.UnitPrice,
+                    Quantity = line.Quantity,
+                    DiscountAmount = line.DiscountAmount,
+                    TaxAmount = 0m,
+                    LineTotal = line.LineTotal,
+                    Sale = null!,
+                    Product = null!
+                };
+
+                saleItems.Add(saleItem);
+                if (line.SerialNumberId.HasValue)
+                {
+                    requestedSerialBySaleItemId[saleItem.Id] = line.SerialNumberId.Value;
+                }
+            }
+
             sale = new Sale
             {
                 StoreId = cart.StoreId,
@@ -96,18 +126,7 @@ public sealed class CheckoutService(
                 CashShortAmount = request.CashShortAmount,
                 CreatedByUserId = createdByUserId,
                 CreatedAtUtc = DateTimeOffset.UtcNow,
-                Items = cart.Items.Select(x => new SaleItem
-                {
-                    ProductId = x.Product.Id,
-                    ProductNameSnapshot = x.Product.Name,
-                    UnitPrice = x.UnitPrice,
-                    Quantity = x.Quantity,
-                    DiscountAmount = x.DiscountAmount,
-                    TaxAmount = 0m,
-                    LineTotal = x.LineTotal,
-                    Sale = null!,
-                    Product = null!
-                }).ToList()
+                Items = saleItems
             };
 
             dbContext.Sales.Add(sale);
@@ -134,6 +153,7 @@ public sealed class CheckoutService(
             .Include(x => x.Inventory)
             .Where(x => productIds.Contains(x.Id))
             .ToDictionaryAsync(x => x.Id, cancellationToken);
+        var reservedSerialIds = requestedSerialBySaleItemId.Values.ToHashSet();
 
         foreach (var saleItem in sale.Items)
         {
@@ -176,19 +196,13 @@ public sealed class CheckoutService(
                     throw new InvalidOperationException("Serial-tracked items must use whole-number quantities.");
                 }
 
-                var serialsNeeded = (int)saleItem.Quantity;
-                var availableSerials = product.SerialNumbers
-                    .Where(x => x.Status == SerialNumberStatus.Available)
-                    .OrderBy(x => x.CreatedAtUtc)
-                    .Take(serialsNeeded)
-                    .ToList();
+                var serialsToAssign = ResolveSerialAssignmentsForSaleItem(
+                    saleItem,
+                    product,
+                    requestedSerialBySaleItemId,
+                    reservedSerialIds);
 
-                if (availableSerials.Count != serialsNeeded)
-                {
-                    throw new InvalidOperationException($"Not enough serial numbers available for '{saleItem.ProductNameSnapshot}'.");
-                }
-
-                foreach (var serial in availableSerials)
+                foreach (var serial in serialsToAssign)
                 {
                     serial.Status = SerialNumberStatus.Sold;
                     serial.SaleId = sale.Id;
@@ -431,17 +445,41 @@ public sealed class CheckoutService(
             throw new InvalidOperationException($"Discount exceeds role limit ({maxDiscount}%).");
         }
 
-        var grouped = requestItems
+        var groupedGenericItems = requestItems
+            .Where(x => !x.SerialNumberId.HasValue)
             .GroupBy(x => x.ProductId)
             .Select(x => new { ProductId = x.Key, Quantity = x.Sum(y => y.Quantity) })
             .ToList();
+        var serialSpecificItems = requestItems
+            .Where(x => x.SerialNumberId.HasValue)
+            .ToList();
 
-        if (grouped.Any(x => x.Quantity <= 0m))
+        if (groupedGenericItems.Any(x => x.Quantity <= 0m) || serialSpecificItems.Any(x => x.Quantity <= 0m))
         {
             throw new InvalidOperationException("All quantities must be greater than zero.");
         }
 
-        var productIds = grouped.Select(x => x.ProductId).ToArray();
+        if (serialSpecificItems.Any(x => x.Quantity != 1m))
+        {
+            throw new InvalidOperationException("Serial-selected items must use a quantity of 1.");
+        }
+
+        var duplicateSerialIds = serialSpecificItems
+            .Select(x => x.SerialNumberId!.Value)
+            .GroupBy(x => x)
+            .Where(x => x.Count() > 1)
+            .Select(x => x.Key)
+            .ToList();
+        if (duplicateSerialIds.Count > 0)
+        {
+            throw new InvalidOperationException("The same serial number cannot be added to the cart more than once.");
+        }
+
+        var productIds = groupedGenericItems
+            .Select(x => x.ProductId)
+            .Concat(serialSpecificItems.Select(x => x.ProductId))
+            .Distinct()
+            .ToArray();
         var products = await dbContext.Products
             .AsNoTracking()
             .Where(x => productIds.Contains(x.Id) && x.IsActive)
@@ -452,9 +490,32 @@ public sealed class CheckoutService(
             throw new InvalidOperationException("Some products are missing or inactive.");
         }
 
+        Dictionary<Guid, SerialNumber> serialsById;
+        if (serialSpecificItems.Count == 0)
+        {
+            serialsById = [];
+        }
+        else
+        {
+            var serialIds = serialSpecificItems
+                .Select(x => x.SerialNumberId!.Value)
+                .Distinct()
+                .ToArray();
+
+            serialsById = await dbContext.SerialNumbers
+                .AsNoTracking()
+                .Where(x => serialIds.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+            if (serialsById.Count != serialIds.Length)
+            {
+                throw new InvalidOperationException("Some selected serial numbers were not found.");
+            }
+        }
+
         var cartLines = new List<CartLine>();
         decimal subtotal = 0m;
-        foreach (var item in grouped)
+        foreach (var item in groupedGenericItems)
         {
             var product = products[item.ProductId];
             var lineGross = decimal.Round(product.UnitPrice * item.Quantity, 2, MidpointRounding.AwayFromZero);
@@ -466,6 +527,39 @@ public sealed class CheckoutService(
                 Quantity = item.Quantity,
                 UnitPrice = product.UnitPrice,
                 LineGross = lineGross
+            });
+        }
+
+        foreach (var item in serialSpecificItems)
+        {
+            var product = products[item.ProductId];
+            if (!product.IsSerialTracked)
+            {
+                throw new InvalidOperationException($"'{product.Name}' is not configured for serial tracking.");
+            }
+
+            var serial = serialsById[item.SerialNumberId!.Value];
+            if (serial.ProductId != product.Id)
+            {
+                throw new InvalidOperationException($"Serial number '{serial.SerialValue}' does not belong to '{product.Name}'.");
+            }
+
+            if (serial.Status != SerialNumberStatus.Available)
+            {
+                throw new InvalidOperationException($"Serial number '{serial.SerialValue}' is not available for sale.");
+            }
+
+            var lineGross = decimal.Round(product.UnitPrice * item.Quantity, 2, MidpointRounding.AwayFromZero);
+            subtotal += lineGross;
+
+            cartLines.Add(new CartLine
+            {
+                Product = product,
+                Quantity = item.Quantity,
+                UnitPrice = product.UnitPrice,
+                LineGross = lineGross,
+                SerialNumberId = serial.Id,
+                SerialValue = serial.SerialValue
             });
         }
 
@@ -689,6 +783,48 @@ public sealed class CheckoutService(
         return decimal.Round(value, 2, MidpointRounding.AwayFromZero);
     }
 
+    private static List<SerialNumber> ResolveSerialAssignmentsForSaleItem(
+        SaleItem saleItem,
+        Product product,
+        IReadOnlyDictionary<Guid, Guid> requestedSerialBySaleItemId,
+        IReadOnlySet<Guid> reservedSerialIds)
+    {
+        if (requestedSerialBySaleItemId.TryGetValue(saleItem.Id, out var requestedSerialId))
+        {
+            if (saleItem.Quantity != 1m)
+            {
+                throw new InvalidOperationException("Serial-selected items must use a quantity of 1.");
+            }
+
+            var requestedSerial = product.SerialNumbers.FirstOrDefault(x => x.Id == requestedSerialId);
+            if (requestedSerial is null)
+            {
+                throw new InvalidOperationException($"Selected serial number was not found for '{saleItem.ProductNameSnapshot}'.");
+            }
+
+            if (requestedSerial.Status != SerialNumberStatus.Available)
+            {
+                throw new InvalidOperationException($"Serial number '{requestedSerial.SerialValue}' is no longer available for sale.");
+            }
+
+            return [requestedSerial];
+        }
+
+        var serialsNeeded = (int)saleItem.Quantity;
+        var availableSerials = product.SerialNumbers
+            .Where(x => x.Status == SerialNumberStatus.Available && !reservedSerialIds.Contains(x.Id))
+            .OrderBy(x => x.CreatedAtUtc)
+            .Take(serialsNeeded)
+            .ToList();
+
+        if (availableSerials.Count != serialsNeeded)
+        {
+            throw new InvalidOperationException($"Not enough serial numbers available for '{saleItem.ProductNameSnapshot}'.");
+        }
+
+        return availableSerials;
+    }
+
     private sealed record PaymentSnapshot(
         Guid SaleId,
         PaymentMethod Method,
@@ -712,5 +848,7 @@ public sealed class CheckoutService(
         public decimal LineGross { get; set; }
         public decimal DiscountAmount { get; set; }
         public decimal LineTotal { get; set; }
+        public Guid? SerialNumberId { get; set; }
+        public string? SerialValue { get; set; }
     }
 }

@@ -1,7 +1,22 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "@/lib/api";
 import ProductSearchPanel from "./ProductSearchPanel";
 import type { Product } from "./types";
+
+const lookupSerialMock = vi.fn();
+
+vi.mock("@/lib/api", () => ({
+  ApiError: class ApiError extends Error {
+    status: number;
+
+    constructor(message: string, status: number) {
+      super(message);
+      this.status = status;
+    }
+  },
+  lookupSerial: (...args: unknown[]) => lookupSerialMock(...args),
+}));
 
 const products: Product[] = [
   {
@@ -65,6 +80,11 @@ describe("ProductSearchPanel", () => {
     HTMLElement.prototype.releasePointerCapture = vi.fn();
   });
 
+  beforeEach(() => {
+    lookupSerialMock.mockReset();
+    lookupSerialMock.mockRejectedValue(new ApiError("Serial number not found.", 404));
+  });
+
   it("filters by stock and brand, then clears filters back to default", async () => {
     render(<ProductSearchPanel products={products} onAddToCart={vi.fn()} />);
 
@@ -80,7 +100,7 @@ describe("ProductSearchPanel", () => {
       expect(screen.getByText("1 products")).toBeInTheDocument();
     });
 
-    fireEvent.change(screen.getByPlaceholderText("Search products by name, SKU..."), {
+    fireEvent.change(screen.getByPlaceholderText("Search products by name, SKU, serial..."), {
       target: { value: "ball" },
     });
     await waitFor(() => {
@@ -91,7 +111,7 @@ describe("ProductSearchPanel", () => {
 
     await waitFor(() => {
       expect(screen.getByText("3 products")).toBeInTheDocument();
-      expect(screen.getByPlaceholderText("Search products by name, SKU...")).toHaveValue("");
+      expect(screen.getByPlaceholderText("Search products by name, SKU, serial...")).toHaveValue("");
     });
   });
 
@@ -127,7 +147,7 @@ describe("ProductSearchPanel", () => {
 
     render(<ProductSearchPanel products={exactMatchProducts} onAddToCart={onAddToCart} expertMode />);
 
-    const input = screen.getByPlaceholderText("Search products by name, SKU...");
+    const input = screen.getByPlaceholderText("Search products by name, SKU, serial...");
     fireEvent.change(input, { target: { value: "1234567890128" } });
 
     await waitFor(() => expect(onAddToCart).toHaveBeenCalledTimes(1));
@@ -136,5 +156,39 @@ describe("ProductSearchPanel", () => {
 
     expect(onAddToCart).toHaveBeenCalledTimes(1);
     expect(input).toHaveValue("");
+  });
+
+  it("adds an available serial match in expert mode", async () => {
+    const onAddToCart = vi.fn();
+    lookupSerialMock.mockResolvedValue({
+      serial_id: "serial-1",
+      serial_value: "SERIAL-0001",
+      product_id: "serial-product",
+      product_name: "Serial Camera",
+      status: "Available",
+      product: {
+        id: "serial-product",
+        name: "Serial Camera",
+        sku: "SER-CAM-1",
+        price: 150000,
+        stock: 1,
+        barcode: "SER-CAM-BAR",
+      },
+    });
+
+    render(<ProductSearchPanel products={products} onAddToCart={onAddToCart} expertMode />);
+
+    fireEvent.change(screen.getByPlaceholderText("Search products by name, SKU, serial..."), {
+      target: { value: "SERIAL-0001" },
+    });
+
+    await waitFor(() => {
+      expect(onAddToCart).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "serial-product", name: "Serial Camera" }),
+        1,
+        { id: "serial-1", value: "SERIAL-0001" },
+      );
+    });
+    expect(onAddToCart).toHaveBeenCalledTimes(1);
   });
 });

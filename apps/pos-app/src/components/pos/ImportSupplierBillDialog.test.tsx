@@ -259,6 +259,73 @@ describe("ImportSupplierBillDialog", () => {
     expect(toast.success).toHaveBeenCalled();
   });
 
+  it("allows entering missing supplier details after OCR review", async () => {
+    vi.mocked(createPurchaseOcrDraft).mockResolvedValue(
+      createDraftResponse({
+        supplier_name: null,
+        invoice_number: null,
+      }),
+    );
+
+    renderDialog();
+    await uploadDraft();
+
+    const confirmButton = screen.getByRole("button", { name: /confirm import/i });
+    expect(confirmButton).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Supplier"), {
+      target: { value: "Supplier B" },
+    });
+    fireEvent.change(screen.getByLabelText("Invoice Number"), {
+      target: { value: "INV-NEW-002" },
+    });
+
+    await waitFor(() => {
+      expect(confirmButton).toBeEnabled();
+    });
+  });
+
+  it("submits edited supplier and line fields in the confirm payload", async () => {
+    const confirmResponse = createConfirmResponse();
+
+    vi.mocked(createPurchaseOcrDraft).mockResolvedValue(createDraftResponse());
+    vi.mocked(confirmPurchaseImport).mockResolvedValue(confirmResponse);
+
+    renderDialog();
+    await uploadDraft();
+
+    fireEvent.change(screen.getByLabelText("Supplier"), {
+      target: { value: "Supplier B" },
+    });
+    fireEvent.change(screen.getByLabelText("Supplier item for line 1"), {
+      target: { value: "Rice 10kg" },
+    });
+    fireEvent.change(screen.getByLabelText("Quantity for line 1"), {
+      target: { value: "3" },
+    });
+    fireEvent.change(screen.getByLabelText("Unit cost for line 1"), {
+      target: { value: "60" },
+    });
+    fireEvent.change(screen.getByLabelText("Line total for line 1"), {
+      target: { value: "175.5" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /confirm import/i }));
+
+    await waitFor(() => {
+      expect(confirmPurchaseImport).toHaveBeenCalledTimes(1);
+    });
+
+    const payload = vi.mocked(confirmPurchaseImport).mock.calls[0][0];
+    expect(payload.supplier_name).toBe("Supplier B");
+    expect(payload.items[0]).toMatchObject({
+      supplier_item_name: "Rice 10kg",
+      quantity: 3,
+      unit_cost: 60,
+      line_total: 175.5,
+    });
+  });
+
   it("creates a new product inline and auto-maps the detected line", async () => {
     vi.mocked(createPurchaseOcrDraft).mockResolvedValue(
       createDraftResponse({

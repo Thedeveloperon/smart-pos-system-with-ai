@@ -22,15 +22,16 @@ interface CheckoutPanelProps {
   items: CartItem[];
   cashDrawer?: CashDrawerState | null;
   allowCustomPayout?: boolean;
-    onCompleteSale: (
-      paymentMethod: PaymentMethod,
-      cashReceived: number,
-      customerMobile: string,
-      cashReceivedCounts?: DenominationCount[],
-      cashChangeCounts?: DenominationCount[],
-      customPayoutUsed?: boolean,
-      cashShortAmount?: number
-    ) => void;
+  holdBlockReason?: string | null;
+  onCompleteSale: (
+    paymentMethod: PaymentMethod,
+    cashReceived: number,
+    customerMobile: string,
+    cashReceivedCounts?: DenominationCount[],
+    cashChangeCounts?: DenominationCount[],
+    customPayoutUsed?: boolean,
+    cashShortAmount?: number
+  ) => void;
   onHoldBill: () => void;
   onCancelSale: () => void;
   showShortcutHints?: boolean;
@@ -51,6 +52,7 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
     items,
     cashDrawer,
     allowCustomPayout = false,
+    holdBlockReason = null,
     onCompleteSale,
     onHoldBill,
     onCancelSale,
@@ -271,7 +273,8 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
               variant="pos-outline"
               className="h-10 w-full rounded-xl px-4 text-sm justify-center"
               onClick={onHoldBill}
-              disabled={items.length === 0}
+              disabled={items.length === 0 || holdBlockReason != null}
+              title={holdBlockReason ?? undefined}
             >
               <PauseCircle className="h-4 w-4" />
               Hold{showShortcutHints ? ` (${POS_SHORTCUT_LABELS.holdBill})` : ""}
