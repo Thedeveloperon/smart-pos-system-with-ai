@@ -80,11 +80,12 @@ public static class StocktakeEndpoints
         .WithOpenApi();
 
         group.MapPost("/sessions", async (
-            CreateStocktakeSessionRequest request,
+            CreateStocktakeSessionRequest? request,
             ClaimsPrincipal user,
             SmartPosDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
+            request ??= new CreateStocktakeSessionRequest();
             var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var now = DateTimeOffset.UtcNow;
             var products = await dbContext.Products

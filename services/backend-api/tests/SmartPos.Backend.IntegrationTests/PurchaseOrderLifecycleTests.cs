@@ -122,6 +122,100 @@ public sealed class PurchaseOrderLifecycleTests(CustomWebApplicationFactory fact
     }
 
     [Fact]
+    public async Task UpdatePurchaseOrder_ShouldAllowReplacingLines()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/suppliers", new
+            {
+                name = $"PO Update Supplier {runId}",
+                code = $"PO-UPD-SUP-{runId}",
+                is_active = true
+            }));
+        var supplierId = Guid.Parse(TestJson.GetString(supplier, "supplier_id"));
+
+        var firstProduct = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"PO Update Product A {runId}",
+                sku = $"PO-UPD-A-{runId}",
+                unit_price = 150m,
+                cost_price = 100m,
+                initial_stock_quantity = 0m,
+                allow_negative_stock = false,
+                is_active = true
+            }));
+        var firstProductId = Guid.Parse(TestJson.GetString(firstProduct, "product_id"));
+
+        var secondProduct = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"PO Update Product B {runId}",
+                sku = $"PO-UPD-B-{runId}",
+                unit_price = 220m,
+                cost_price = 180m,
+                initial_stock_quantity = 0m,
+                allow_negative_stock = false,
+                is_active = true
+            }));
+        var secondProductId = Guid.Parse(TestJson.GetString(secondProduct, "product_id"));
+
+        var createdOrder = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/purchase-orders", new
+            {
+                supplier_id = supplierId,
+                po_number = $"PO-UPD-{runId}",
+                lines = new[]
+                {
+                    new
+                    {
+                        product_id = firstProductId,
+                        quantity_ordered = 2m,
+                        unit_cost_estimate = 95m
+                    }
+                }
+            }));
+
+        var purchaseOrderId = Guid.Parse(TestJson.GetString(createdOrder, "id"));
+
+        var updateResponse = await client.PatchAsJsonAsync($"/api/purchase-orders/{purchaseOrderId}", new
+        {
+            po_number = $"PO-UPD-{runId}-REV",
+            notes = "Updated draft order",
+            lines = new[]
+            {
+                new
+                {
+                    product_id = firstProductId,
+                    quantity_ordered = 3m,
+                    unit_cost_estimate = 102.5m
+                },
+                new
+                {
+                    product_id = secondProductId,
+                    quantity_ordered = 1m,
+                    unit_cost_estimate = 175m
+                }
+            }
+        });
+
+        var updatedOrder = await TestJson.ReadObjectAsync(updateResponse);
+        var updatedLines = updatedOrder["lines"]!.AsArray().OfType<JsonObject>().ToArray();
+
+        Assert.Equal($"PO-UPD-{runId}-REV", TestJson.GetString(updatedOrder, "po_number"));
+        Assert.Equal("Updated draft order", TestJson.GetString(updatedOrder, "notes"));
+        Assert.Equal(2, updatedLines.Length);
+        var firstLine = updatedLines.Single(line => TestJson.GetString(line, "product_id") == firstProductId.ToString());
+        var secondLine = updatedLines.Single(line => TestJson.GetString(line, "product_id") == secondProductId.ToString());
+        Assert.Equal(3m, TestJson.GetDecimal(firstLine, "quantity_ordered"));
+        Assert.Equal(102.5m, TestJson.GetDecimal(firstLine, "unit_cost_estimate"));
+        Assert.Equal(1m, TestJson.GetDecimal(secondLine, "quantity_ordered"));
+        Assert.Equal(175m, TestJson.GetDecimal(secondLine, "unit_cost_estimate"));
+    }
+
+    [Fact]
     public async Task ListPurchaseOrders_ShouldReturnSuccess()
     {
         await TestAuth.SignInAsManagerAsync(client);

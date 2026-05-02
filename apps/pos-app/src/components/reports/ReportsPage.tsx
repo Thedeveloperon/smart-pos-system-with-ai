@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -48,7 +48,10 @@ import {
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-type Props = { onBack: () => void };
+type Props = {
+  onBack?: () => void;
+  compact?: boolean;
+};
 
 type ReportSection = "sales" | "transactions" | "products" | "payments";
 type DailySalesReport = Awaited<ReturnType<typeof fetchDailySalesReport>>;
@@ -283,7 +286,7 @@ function ReportsSkeleton() {
   );
 }
 
-export default function ReportsPage({ onBack }: Props) {
+export default function ReportsPage({ onBack, compact = false }: Props) {
   const [fromDate, setFromDate] = useState(defaultFromDate);
   const [toDate, setToDate] = useState(defaultToDate);
   const [categoryFilter, setCategoryFilter] = useState(ALL_FILTER_VALUE);
@@ -304,55 +307,58 @@ export default function ReportsPage({ onBack }: Props) {
 
   const hasInvalidDateRange = fromDate > toDate;
 
-  const loadReports = useEffectEvent(async (backgroundRefresh: boolean) => {
-    const requestId = requestSequenceRef.current + 1;
-    requestSequenceRef.current = requestId;
+  const loadReports = useCallback(
+    async (backgroundRefresh: boolean) => {
+      const requestId = requestSequenceRef.current + 1;
+      requestSequenceRef.current = requestId;
 
-    if (!reportData) {
-      setIsLoading(true);
-    } else if (!backgroundRefresh) {
-      setIsRefreshing(true);
-    }
-
-    if (!backgroundRefresh) {
-      setError(null);
-    }
-
-    try {
-      const [products, summary, transactions, payments, topItems] = await Promise.all([
-        fetchProducts(),
-        fetchDailySalesReport(fromDate, toDate),
-        fetchTransactionsReport(fromDate, toDate, TRANSACTION_TAKE),
-        fetchPaymentBreakdownReport(fromDate, toDate),
-        fetchTopItemsReport(fromDate, toDate, 25),
-      ]);
-
-      if (requestId !== requestSequenceRef.current) {
-        return;
+      if (!reportData) {
+        setIsLoading(true);
+      } else if (!backgroundRefresh) {
+        setIsRefreshing(true);
       }
 
-      setReportData({
-        products,
-        summary,
-        transactions,
-        payments,
-        topItems,
-      });
-      setLastUpdatedAt(new Date().toISOString());
-      setError(null);
-    } catch (loadError) {
-      if (requestId !== requestSequenceRef.current) {
-        return;
+      if (!backgroundRefresh) {
+        setError(null);
       }
 
-      setError(loadError instanceof Error ? loadError.message : "Unable to load reports.");
-    } finally {
-      if (requestId === requestSequenceRef.current) {
-        setIsLoading(false);
-        setIsRefreshing(false);
+      try {
+        const [products, summary, transactions, payments, topItems] = await Promise.all([
+          fetchProducts(),
+          fetchDailySalesReport(fromDate, toDate),
+          fetchTransactionsReport(fromDate, toDate, TRANSACTION_TAKE),
+          fetchPaymentBreakdownReport(fromDate, toDate),
+          fetchTopItemsReport(fromDate, toDate, 25),
+        ]);
+
+        if (requestId !== requestSequenceRef.current) {
+          return;
+        }
+
+        setReportData({
+          products,
+          summary,
+          transactions,
+          payments,
+          topItems,
+        });
+        setLastUpdatedAt(new Date().toISOString());
+        setError(null);
+      } catch (loadError) {
+        if (requestId !== requestSequenceRef.current) {
+          return;
+        }
+
+        setError(loadError instanceof Error ? loadError.message : "Unable to load reports.");
+      } finally {
+        if (requestId === requestSequenceRef.current) {
+          setIsLoading(false);
+          setIsRefreshing(false);
+        }
       }
-    }
-  });
+    },
+    [fromDate, reportData, toDate],
+  );
 
   useEffect(() => {
     if (hasInvalidDateRange) {
@@ -483,39 +489,41 @@ export default function ReportsPage({ onBack }: Props) {
   };
 
   return (
-    <div className="min-h-screen pos-shell">
-      <header className="sticky top-0 z-50 border-b border-white/10 bg-pos-header text-pos-header-foreground shadow-md">
-        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-3 px-4">
-          <div className="flex items-center gap-3">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onBack}
-              className="text-pos-header-foreground/80 hover:bg-white/10 hover:text-pos-header-foreground"
-            >
-              <ArrowLeft className="mr-1 h-4 w-4" /> Back
-            </Button>
-            <div>
-              <h1 className="font-semibold">Reports</h1>
-              <p className="text-xs text-pos-header-foreground/70">
-                Date-based dashboard with transaction drill-down and filterable detail tables
-              </p>
+    <div className={compact ? "space-y-4" : "min-h-screen pos-shell"}>
+      {!compact ? (
+        <header className="sticky top-0 z-50 border-b border-white/10 bg-pos-header text-pos-header-foreground shadow-md">
+          <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-3 px-4">
+            <div className="flex items-center gap-3">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onBack}
+                className="text-pos-header-foreground/80 hover:bg-white/10 hover:text-pos-header-foreground"
+              >
+                <ArrowLeft className="mr-1 h-4 w-4" /> Back
+              </Button>
+              <div>
+                <h1 className="font-semibold">Reports</h1>
+                <p className="text-xs text-pos-header-foreground/70">
+                  Date-based dashboard with transaction drill-down and filterable detail tables
+                </p>
+              </div>
             </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void loadReports(false)}
+              disabled={isRefreshing || hasInvalidDateRange}
+              className="gap-2"
+            >
+              <RefreshCw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
+              Refresh
+            </Button>
           </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => void loadReports(false)}
-            disabled={isRefreshing || hasInvalidDateRange}
-            className="gap-2"
-          >
-            <RefreshCw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
-            Refresh
-          </Button>
-        </div>
-      </header>
+        </header>
+      ) : null}
 
-      <div className="mx-auto max-w-7xl space-y-4 px-4 py-6">
+      <div className={compact ? "space-y-4" : "mx-auto max-w-7xl space-y-4 px-4 py-6"}>
         <Card>
           <CardHeader className="pb-4">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -528,7 +536,7 @@ export default function ReportsPage({ onBack }: Props) {
               </div>
               <div className="inline-flex items-center gap-2 text-xs text-muted-foreground">
                 <CalendarDays className="h-4 w-4" />
-                Auto-refresh every 60 seconds
+                Date range controls the visible report data
               </div>
             </div>
           </CardHeader>

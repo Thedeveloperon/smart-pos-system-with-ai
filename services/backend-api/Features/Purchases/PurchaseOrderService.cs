@@ -190,6 +190,7 @@ public sealed class PurchaseOrderService(
         }
 
         var now = DateTimeOffset.UtcNow;
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
         if (request.SupplierId.HasValue && request.SupplierId.Value != order.SupplierId)
         {
@@ -234,12 +235,19 @@ public sealed class PurchaseOrderService(
             }
 
             var normalizedLines = await NormalizePurchaseOrderLinesAsync(request.Lines, currentStoreId, cancellationToken);
-            dbContext.PurchaseOrderLines.RemoveRange(order.Lines);
-            order.Lines.Clear();
+            var existingLines = order.Lines.ToList();
+            await dbContext.PurchaseOrderLines
+                .Where(x => x.PurchaseOrderId == order.Id)
+                .ExecuteDeleteAsync(cancellationToken);
+
+            foreach (var existingLine in existingLines)
+            {
+                dbContext.Entry(existingLine).State = EntityState.Detached;
+            }
 
             foreach (var line in normalizedLines)
             {
-                order.Lines.Add(new PurchaseOrderLine
+                dbContext.PurchaseOrderLines.Add(new PurchaseOrderLine
                 {
                     PurchaseOrder = order,
                     Product = line.Product,
@@ -257,6 +265,7 @@ public sealed class PurchaseOrderService(
 
         order.UpdatedAtUtc = now;
         await dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
 
         return await GetPurchaseOrderAsync(order.Id, cancellationToken);
     }

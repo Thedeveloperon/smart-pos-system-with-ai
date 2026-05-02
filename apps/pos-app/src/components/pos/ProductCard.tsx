@@ -7,9 +7,10 @@ import type { Product } from "./types";
 interface ProductCardProps {
   product: Product;
   onAdd: (product: Product, qty: number) => void;
+  showAddButton?: boolean;
 }
 
-const ProductCard = ({ product, onAdd }: ProductCardProps) => {
+const ProductCard = ({ product, onAdd, showAddButton = true }: ProductCardProps) => {
   const isLowStock = product.stock > 0 && product.stock <= 5;
   const isOutOfStock = product.stock === 0;
 
@@ -75,23 +76,25 @@ const ProductCard = ({ product, onAdd }: ProductCardProps) => {
           </span>
         </div>
 
-        <div className="mt-1" onClick={(e) => e.stopPropagation()}>
-          <Button
-            size="sm"
-            variant="pos-primary"
-            className="h-10 w-full rounded-xl text-sm font-semibold shadow-md"
-            disabled={isOutOfStock}
-            onPointerDown={() => {
-              void primeCartAddSound();
-            }}
-            onClick={() => {
-              onAdd(product, 1);
-            }}
-          >
-            <Plus className="h-4 w-4" />
-            <span>Add</span>
-          </Button>
-        </div>
+        {showAddButton && (
+          <div className="mt-1" onClick={(e) => e.stopPropagation()}>
+            <Button
+              size="sm"
+              variant="pos-primary"
+              className="h-10 w-full rounded-xl text-sm font-semibold shadow-md"
+              disabled={isOutOfStock}
+              onPointerDown={() => {
+                void primeCartAddSound();
+              }}
+              onClick={() => {
+                onAdd(product, 1);
+              }}
+            >
+              <Plus className="h-4 w-4" />
+              <span>Add</span>
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );
