@@ -16,14 +16,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import SerialInputList from "@/components/inventory/SerialInputList";
 import { fetchProducts, type Product } from "@/lib/api";
 import { receivePurchaseOrder, type PurchaseOrder } from "@/lib/purchases";
@@ -58,10 +50,6 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
   const [notes, setNotes] = useState("");
   const [updateCostPrice, setUpdateCostPrice] = useState(true);
   const [lines, setLines] = useState<ReceiveLine[]>([]);
-  const [serialDialogState, setSerialDialogState] = useState<{
-    lineIndex: number;
-    serials: string[];
-  } | null>(null);
   const [saving, setSaving] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
 
@@ -76,7 +64,6 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
     setInvoiceDate(todayIso());
     setNotes("");
     setUpdateCostPrice(true);
-    setSerialDialogState(null);
     setLines(
       po.lines
         .filter((l) => l.quantity_pending > 0)
@@ -103,28 +90,6 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
 
   const update = (idx: number, patch: Partial<ReceiveLine>) =>
     setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
-
-  const openSerialDialog = (lineIndex: number) => {
-    setSerialDialogState({
-      lineIndex,
-      serials: [...lines[lineIndex].serials],
-    });
-  };
-
-  const closeSerialDialog = () => {
-    setSerialDialogState(null);
-  };
-
-  const saveSerialDialog = () => {
-    if (!serialDialogState) {
-      return;
-    }
-
-    update(serialDialogState.lineIndex, {
-      serials: serialDialogState.serials,
-    });
-    setSerialDialogState(null);
-  };
 
   const handleConfirm = async () => {
     if (!invoiceNumber) {
@@ -315,14 +280,14 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
                             )}
 
                             {l.is_serial_tracked && (
-                              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-background p-3">
-                                <div>
-                                  <Label className="text-xs">Serial numbers</Label>
-                                  <p className="text-xs text-muted-foreground">
-                                    Add one serial for each received unit.
-                                  </p>
-                                </div>
-                                <div className="flex items-center gap-2">
+                              <div className="space-y-2 rounded-lg border bg-background p-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div>
+                                    <Label className="text-xs">Serial numbers</Label>
+                                    <p className="text-xs text-muted-foreground">
+                                      Add one serial for each received unit before confirming the receipt.
+                                    </p>
+                                  </div>
                                   <p
                                     className={`text-xs font-medium ${
                                       Number.isInteger(l.quantity_receiving) &&
@@ -333,15 +298,11 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
                                   >
                                     {l.serials.length}/{l.quantity_receiving} entered
                                   </p>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => openSerialDialog(idx)}
-                                  >
-                                    {l.serials.length > 0 ? "Edit serials" : "Add serial numbers"}
-                                  </Button>
                                 </div>
+                                <SerialInputList
+                                  value={l.serials}
+                                  onChange={(serials) => update(idx, { serials })}
+                                />
                               </div>
                             )}
                           </div>
@@ -374,46 +335,6 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
           </div>
         </SheetFooter>
       </SheetContent>
-
-      <Dialog
-        open={Boolean(serialDialogState)}
-        onOpenChange={(nextOpen) => {
-          if (!nextOpen) {
-            closeSerialDialog();
-          }
-        }}
-      >
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>Add serial numbers</DialogTitle>
-            <DialogDescription>
-              Paste serials or generate a range for{" "}
-              {serialDialogState ? lines[serialDialogState.lineIndex]?.product_name : "this item"}.
-            </DialogDescription>
-          </DialogHeader>
-          {serialDialogState && (
-            <div className="space-y-4">
-              <SerialInputList
-                value={serialDialogState.serials}
-                onChange={(serials) =>
-                  setSerialDialogState((current) => (current ? { ...current, serials } : current))
-                }
-              />
-              <div className="rounded-lg border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                {serialDialogState.serials.length} serials entered
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={closeSerialDialog}>
-              Cancel
-            </Button>
-            <Button onClick={saveSerialDialog} disabled={!serialDialogState?.serials.length}>
-              Add serials
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </Sheet>
   );
 }
