@@ -2991,9 +2991,9 @@ export async function createCategory(requestBody: CreateCategoryRequest) {
   return request<BackendCategoryItem>("/api/categories", {
     method: "POST",
     body: JSON.stringify({
-      description: requestBody.description ?? null,
+      description: requestBody.description?.trim() || null,
       is_active: requestBody.is_active ?? true,
-      name: requestBody.name,
+      name: requestBody.name.trim(),
     }),
   });
 }
@@ -3002,14 +3002,20 @@ export async function updateCategory(categoryId: string, requestBody: CreateCate
   return request<BackendCategoryItem>(`/api/categories/${encodeURIComponent(categoryId)}`, {
     method: "PUT",
     body: JSON.stringify({
-      description: requestBody.description ?? null,
+      description: requestBody.description?.trim() || null,
       is_active: requestBody.is_active ?? true,
-      name: requestBody.name,
+      name: requestBody.name.trim(),
     }),
   });
 }
 
-function mapSupplier(item: BackendSupplierItem): Supplier {
+export async function hardDeleteCategory(categoryId: string) {
+  return request<void>(`/api/categories/${encodeURIComponent(categoryId)}/hard-delete`, {
+    method: "DELETE",
+  });
+}
+
+function mapSupplier(item: BackendSupplierItem): SupplierRecord {
   return {
     id: item.supplier_id,
     supplier_id: item.supplier_id,
