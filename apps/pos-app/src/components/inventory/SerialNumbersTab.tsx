@@ -1,12 +1,21 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { BadgeAlert, Hash, MoreHorizontal, PencilLine, Search, Trash2 } from "lucide-react";
+import {
+  ArrowLeftRight,
+  BadgeAlert,
+  Hash,
+  MoreHorizontal,
+  PencilLine,
+  Search,
+  Trash2,
+} from "lucide-react";
 import {
   addSerialNumbers,
   deleteSerialNumber,
   fetchProductCatalogItems,
   fetchSerialNumbers,
   lookupSerial,
+  replaceSerialNumber,
   updateSerialNumber,
   type CatalogProduct,
   type SerialLookupResult,
@@ -87,6 +96,11 @@ export default function SerialNumbersTab() {
   const [editStatus, setEditStatus] = useState<SerialNumberRecord["status"]>("Available");
   const [editWarrantyDate, setEditWarrantyDate] = useState("");
   const [updating, setUpdating] = useState(false);
+
+  const [replaceOpen, setReplaceOpen] = useState(false);
+  const [replaceSerial, setReplaceSerial] = useState<SerialNumberRecord | null>(null);
+  const [replaceValue, setReplaceValue] = useState("");
+  const [replacing, setReplacing] = useState(false);
 
   const [deleteSerial, setDeleteSerial] = useState<SerialNumberRecord | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -172,6 +186,22 @@ export default function SerialNumbersTab() {
     }
   };
 
+  const handleUnmarkDefective = async (serial: SerialNumberRecord) => {
+    if (!productId) return;
+    try {
+      const updated = await updateSerialNumber(productId, serial.id, {
+        status: "Available",
+        warranty_expiry_date: serial.warranty_expiry_date ?? null,
+      });
+      setSerials((prev) =>
+        prev.map((current) => (current.id === serial.id ? { ...current, ...updated } : current)),
+      );
+      toast.success(`Unmarked ${serial.serial_value} as defective.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to unmark serial defective.");
+    }
+  };
+
   const handleSaveSerial = async () => {
     if (!productId || !editSerial) return;
     setUpdating(true);
@@ -190,6 +220,39 @@ export default function SerialNumbersTab() {
       toast.error(error instanceof Error ? error.message : "Failed to update serial number.");
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const handleOpenReplace = (serial: SerialNumberRecord) => {
+    setReplaceSerial(serial);
+    setReplaceValue("");
+    setReplaceOpen(true);
+  };
+
+  const handleReplaceSerial = async () => {
+    if (!productId || !replaceSerial) return;
+    const nextValue = replaceValue.trim();
+    if (!nextValue) {
+      toast.error("New serial number is required.");
+      return;
+    }
+
+    setReplacing(true);
+    try {
+      const updated = await replaceSerialNumber(productId, replaceSerial.id, {
+        new_serial_value: nextValue,
+      });
+      setSerials((prev) =>
+        prev.map((serial) => (serial.id === replaceSerial.id ? { ...serial, ...updated } : serial)),
+      );
+      setReplaceOpen(false);
+      setReplaceSerial(null);
+      setReplaceValue("");
+      toast.success("Serial replaced.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to replace serial number.");
+    } finally {
+      setReplacing(false);
     }
   };
 
@@ -339,10 +402,23 @@ export default function SerialNumbersTab() {
                             <PencilLine className="mr-2 h-4 w-4" />
                             Edit
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleMarkDefective(serial)}>
-                            <BadgeAlert className="mr-2 h-4 w-4" />
-                            Mark defective
-                          </DropdownMenuItem>
+                          {serial.status === "Defective" ? (
+                            <>
+                              <DropdownMenuItem onClick={() => handleOpenReplace(serial)}>
+                                <ArrowLeftRight className="mr-2 h-4 w-4" />
+                                Replace
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleUnmarkDefective(serial)}>
+                                <BadgeAlert className="mr-2 h-4 w-4" />
+                                Unmark defective
+                              </DropdownMenuItem>
+                            </>
+                          ) : (
+                            <DropdownMenuItem onClick={() => handleMarkDefective(serial)}>
+                              <BadgeAlert className="mr-2 h-4 w-4" />
+                              Mark defective
+                            </DropdownMenuItem>
+                          )}
                           <DropdownMenuItem onClick={() => setDeleteSerial(serial)} className="text-destructive">
                             <Trash2 className="mr-2 h-4 w-4" />
                             Delete
@@ -394,6 +470,56 @@ export default function SerialNumbersTab() {
             </Button>
             <Button onClick={handleSaveSerial} disabled={updating}>
               {updating ? "Saving..." : "Save changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={replaceOpen}
+        onOpenChange={(open) => {
+          setReplaceOpen(open);
+          if (!open) {
+            setReplaceSerial(null);
+            setReplaceValue("");
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Replace serial</DialogTitle>
+            <DialogDescription>
+              Replace the defective serial with a new serial number and mark it available again.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="grid gap-1">
+              <Label>Current serial</Label>
+              <Input value={replaceSerial?.serial_value ?? ""} readOnly />
+            </div>
+            <div className="grid gap-1">
+              <Label>New serial</Label>
+              <Input
+                value={replaceValue}
+                onChange={(e) => setReplaceValue(e.target.value)}
+                placeholder="Enter replacement serial"
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setReplaceOpen(false);
+                setReplaceSerial(null);
+                setReplaceValue("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleReplaceSerial} disabled={replacing || !replaceSerial}>
+              {replacing ? "Replacing..." : "Replace"}
             </Button>
           </DialogFooter>
         </DialogContent>
