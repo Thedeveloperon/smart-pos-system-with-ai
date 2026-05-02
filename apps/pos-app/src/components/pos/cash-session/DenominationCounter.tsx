@@ -191,9 +191,6 @@ const DenominationCounter = ({
                 {d.kind}
               </span>
             </div>
-            <p className="mt-1 text-xs text-slate-500">
-              Use the controls to count each {d.kind} received from the customer.
-            </p>
           </div>
         </div>
 
