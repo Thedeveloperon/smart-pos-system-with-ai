@@ -623,7 +623,7 @@ public sealed class PurchaseService(
         foreach (var line in inventoryLines)
         {
             var product = products[line.ProductId];
-            var normalizedSerials = NormalizeSerialValues(line.Serials);
+            var normalizedSerials = NormalizeSerialValues(line.SerialValues);
             serialsByLine.Add(normalizedSerials);
 
             if (!product.IsSerialTracked)
@@ -1939,7 +1939,7 @@ public sealed class PurchaseService(
             BatchNumber: NormalizeOptional(batchNumber),
             ExpiryDate: expiryDate,
             ManufactureDate: manufactureDate,
-            Serials: []);
+            SerialValues: []);
     }
 
     private static List<string> NormalizeSerialValues(IEnumerable<string>? serials)
