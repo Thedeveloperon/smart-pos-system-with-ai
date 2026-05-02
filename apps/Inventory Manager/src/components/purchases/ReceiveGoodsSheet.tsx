@@ -16,9 +16,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import SerialInputList from "@/components/inventory/SerialInputList";
 import { fetchProducts, type Product } from "@/lib/api";
 import { receivePurchaseOrder, type PurchaseOrder } from "@/lib/purchases";
-import SerialInputList from "@/components/inventory/SerialInputList";
 import { fmtCurrency, todayIso } from "./utils";
 
 type ReceiveLine = {
@@ -219,6 +219,7 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
                         <Input
                           type="number"
                           min={0}
+                          step={1}
                           value={l.quantity_receiving}
                           onChange={(e) =>
                             update(idx, { quantity_receiving: Number(e.target.value) || 0 })

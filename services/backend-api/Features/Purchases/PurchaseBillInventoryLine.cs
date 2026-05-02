@@ -9,4 +9,4 @@ internal sealed record PurchaseBillInventoryLine(
     string? BatchNumber,
     DateTimeOffset? ExpiryDate,
     DateTimeOffset? ManufactureDate,
-    IReadOnlyList<string> Serials);
+    IReadOnlyCollection<string>? SerialValues = null);

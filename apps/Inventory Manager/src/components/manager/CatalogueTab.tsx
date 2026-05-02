@@ -24,6 +24,7 @@ import {
   createCategory,
   fetchBrands,
   fetchCategories,
+  hardDeleteCategory,
   hardDeleteBrand,
   type Brand,
   type Category,
@@ -56,6 +57,13 @@ type BrandActionState = {
   mode: BrandActionMode;
 } | null;
 
+type CategoryActionMode = "activate" | "deactivate" | "delete";
+
+type CategoryActionState = {
+  category: Category;
+  mode: CategoryActionMode;
+} | null;
+
 const emptyCategoryForm = (): CategoryFormState => ({
   name: "",
   description: "",
@@ -86,7 +94,9 @@ export default function CatalogueTab() {
   const [categoryForm, setCategoryForm] = useState<CategoryFormState>(emptyCategoryForm());
   const [brandForm, setBrandForm] = useState<BrandFormState>(emptyBrandForm());
   const [actionState, setActionState] = useState<BrandActionState>(null);
+  const [categoryActionState, setCategoryActionState] = useState<CategoryActionState>(null);
   const [actionPending, setActionPending] = useState(false);
+  const [categoryActionPending, setCategoryActionPending] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
@@ -220,6 +230,47 @@ export default function CatalogueTab() {
     }
   };
 
+  const handleCategoryAction = async () => {
+    if (!categoryActionState) {
+      return;
+    }
+
+    setCategoryActionPending(true);
+    try {
+      if (categoryActionState.mode === "activate") {
+        await updateCategory(categoryActionState.category.category_id, {
+          name: categoryActionState.category.name,
+          description: categoryActionState.category.description ?? undefined,
+          is_active: true,
+        });
+        toast.success("Category activated.");
+      } else if (categoryActionState.mode === "deactivate") {
+        await updateCategory(categoryActionState.category.category_id, {
+          name: categoryActionState.category.name,
+          description: categoryActionState.category.description ?? undefined,
+          is_active: false,
+        });
+        toast.success("Category deactivated.");
+      } else {
+        await hardDeleteCategory(categoryActionState.category.category_id);
+        toast.success("Category deleted.");
+      }
+
+      setCategoryActionState(null);
+      await loadData();
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : categoryActionState.mode === "delete"
+            ? "Failed to delete category."
+            : "Failed to update category.",
+      );
+    } finally {
+      setCategoryActionPending(false);
+    }
+  };
+
   return (
     <>
       <Card>
@@ -258,10 +309,49 @@ export default function CatalogueTab() {
                     <Badge key="badge" variant={item.is_active ? "default" : "secondary"}>
                       {item.is_active ? "Active" : "Inactive"}
                     </Badge>,
-                    <Button key="action" type="button" size="sm" variant="ghost" onClick={() => openEditor("category", item.category_id)}>
-                      <PencilLine className="h-4 w-4" />
-                      Edit
-                    </Button>,
+                    <div key="action" className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => openEditor("category", item.category_id)}
+                      >
+                        <PencilLine className="h-4 w-4" />
+                        Edit
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setCategoryActionState({
+                            category: item,
+                            mode: item.is_active ? "deactivate" : "activate",
+                          })
+                        }
+                      >
+                        <Power className="h-4 w-4" />
+                        {item.is_active ? "Deactivate" : "Activate"}
+                      </Button>
+                      <span title={item.delete_block_reason ?? undefined}>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive hover:text-destructive"
+                          disabled={!item.can_delete}
+                          onClick={() =>
+                            setCategoryActionState({
+                              category: item,
+                              mode: "delete",
+                            })
+                          }
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Delete
+                        </Button>
+                      </span>
+                    </div>,
                   ],
                 }))}
               />
@@ -398,6 +488,54 @@ export default function CatalogueTab() {
         confirmDisabled={actionPending}
         cancelDisabled={actionPending}
         confirmContent={actionPending ? <Loader2 className="h-4 w-4 animate-spin" /> : undefined}
+      />
+
+      <ConfirmationDialog
+        open={Boolean(categoryActionState)}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen && !categoryActionPending) {
+            setCategoryActionState(null);
+          }
+        }}
+        onCancel={() => {
+          if (!categoryActionPending) {
+            setCategoryActionState(null);
+          }
+        }}
+        onConfirm={() => void handleCategoryAction()}
+        title={
+          categoryActionState?.mode === "delete"
+            ? "Delete category?"
+            : categoryActionState?.mode === "activate"
+              ? "Activate category?"
+              : "Deactivate category?"
+        }
+        description={
+          categoryActionState?.mode === "delete"
+            ? categoryActionState?.category
+              ? `Permanently delete "${categoryActionState.category.name}"? This cannot be undone.`
+              : "Permanently delete this category?"
+            : categoryActionState?.mode === "activate"
+              ? categoryActionState?.category
+                ? `Activate "${categoryActionState.category.name}"? It will appear in active product selectors again.`
+                : "Activate this category?"
+              : categoryActionState?.category
+                ? `Deactivate "${categoryActionState.category.name}"? It will stay on historical products but be hidden from active selectors.`
+                : "Deactivate this category?"
+        }
+        confirmLabel={
+          categoryActionState?.mode === "delete"
+            ? "Delete"
+            : categoryActionState?.mode === "activate"
+              ? "Activate"
+              : "Deactivate"
+        }
+        confirmVariant={categoryActionState?.mode === "delete" ? "destructive" : "default"}
+        confirmDisabled={categoryActionPending}
+        cancelDisabled={categoryActionPending}
+        confirmContent={
+          categoryActionPending ? <Loader2 className="h-4 w-4 animate-spin" /> : undefined
+        }
       />
     </>
   );

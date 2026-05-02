@@ -20,6 +20,9 @@ public sealed class ProductService(
     private const string BrandDeleteRequiresDeactivateMessage = "Deactivate the brand before deleting.";
     private const string BrandDeleteOnlyInactiveMessage = "Only inactive brands can be permanently deleted.";
     private const string BrandDeleteProductLinksMessage = "This brand is linked to products and cannot be permanently deleted.";
+    private const string CategoryDeleteRequiresDeactivateMessage = "Deactivate the category before deleting.";
+    private const string CategoryDeleteOnlyInactiveMessage = "Only inactive categories can be permanently deleted.";
+    private const string CategoryDeleteProductLinksMessage = "This category is linked to products and cannot be permanently deleted.";
     private const string SupplierDeleteRequiresDeactivateMessage = "Deactivate the supplier before deleting.";
     private const string SupplierDeleteOnlyInactiveMessage = "Only inactive suppliers can be permanently deleted.";
     private const string SupplierDeleteProductLinksMessage = "This supplier has product links and cannot be permanently deleted.";
@@ -988,6 +991,12 @@ public sealed class ProductService(
                 Description = x.Description,
                 IsActive = x.IsActive,
                 ProductCount = x.Products.Count(y => y.IsActive),
+                CanDelete = !x.IsActive && !x.Products.Any(y => !currentStoreId.HasValue || y.StoreId == currentStoreId.Value),
+                DeleteBlockReason = x.IsActive
+                    ? CategoryDeleteRequiresDeactivateMessage
+                    : x.Products.Any(y => !currentStoreId.HasValue || y.StoreId == currentStoreId.Value)
+                        ? CategoryDeleteProductLinksMessage
+                        : null,
                 CreatedAt = x.CreatedAtUtc,
                 UpdatedAt = x.UpdatedAtUtc
             })
@@ -1027,7 +1036,15 @@ public sealed class ProductService(
                 category.IsActive
             });
         await dbContext.SaveChangesAsync(cancellationToken);
-        return ToCategoryItemResponse(category, productCount: 0);
+        var deleteAvailability = await GetCategoryDeleteAvailabilityAsync(
+            category.Id,
+            category.IsActive,
+            cancellationToken);
+        return ToCategoryItemResponse(
+            category,
+            productCount: 0,
+            canDelete: deleteAvailability.CanDelete,
+            deleteBlockReason: deleteAvailability.BlockReason);
     }
 
     public async Task<CategoryItemResponse> UpdateCategoryAsync(
@@ -1072,7 +1089,50 @@ public sealed class ProductService(
             .AsNoTracking()
             .CountAsync(x => x.CategoryId == categoryId && x.IsActive && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
 
-        return ToCategoryItemResponse(category, productCount);
+        var deleteAvailability = await GetCategoryDeleteAvailabilityAsync(
+            category.Id,
+            category.IsActive,
+            cancellationToken);
+        return ToCategoryItemResponse(
+            category,
+            productCount,
+            canDelete: deleteAvailability.CanDelete,
+            deleteBlockReason: deleteAvailability.BlockReason);
+    }
+
+    public async Task HardDeleteCategoryAsync(Guid categoryId, CancellationToken cancellationToken)
+    {
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
+        var category = await dbContext.Categories
+            .FirstOrDefaultAsync(x => x.Id == categoryId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken)
+            ?? throw new KeyNotFoundException("Category not found.");
+
+        if (category.IsActive)
+        {
+            throw new InvalidOperationException(CategoryDeleteOnlyInactiveMessage);
+        }
+
+        var deleteAvailability = await GetCategoryDeleteAvailabilityAsync(categoryId, false, cancellationToken);
+        if (!deleteAvailability.CanDelete)
+        {
+            throw new InvalidOperationException(deleteAvailability.BlockReason ?? "This category cannot be permanently deleted.");
+        }
+
+        var before = new
+        {
+            category.Name,
+            category.Description,
+            category.IsActive
+        };
+
+        dbContext.Categories.Remove(category);
+        auditLogService.Queue(
+            action: "category_hard_deleted",
+            entityName: "category",
+            entityId: categoryId.ToString(),
+            before: before);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<BrandListResponse> GetBrandsAsync(
@@ -2013,7 +2073,32 @@ public sealed class ProductService(
         };
     }
 
-    private static CategoryItemResponse ToCategoryItemResponse(Category category, int productCount)
+    private async Task<CategoryDeleteAvailability> GetCategoryDeleteAvailabilityAsync(
+        Guid categoryId,
+        bool isActive,
+        CancellationToken cancellationToken)
+    {
+        if (isActive)
+        {
+            return new CategoryDeleteAvailability(false, CategoryDeleteRequiresDeactivateMessage);
+        }
+
+        var hasProductLinks = await dbContext.Products
+            .AsNoTracking()
+            .AnyAsync(x => x.CategoryId == categoryId, cancellationToken);
+        if (hasProductLinks)
+        {
+            return new CategoryDeleteAvailability(false, CategoryDeleteProductLinksMessage);
+        }
+
+        return new CategoryDeleteAvailability(true, null);
+    }
+
+    private static CategoryItemResponse ToCategoryItemResponse(
+        Category category,
+        int productCount,
+        bool canDelete,
+        string? deleteBlockReason)
     {
         return new CategoryItemResponse
         {
@@ -2022,10 +2107,14 @@ public sealed class ProductService(
             Description = category.Description,
             IsActive = category.IsActive,
             ProductCount = productCount,
+            CanDelete = canDelete,
+            DeleteBlockReason = deleteBlockReason,
             CreatedAt = category.CreatedAtUtc,
             UpdatedAt = category.UpdatedAtUtc
         };
     }
+
+    private sealed record CategoryDeleteAvailability(bool CanDelete, string? BlockReason);
 
     private async Task<BrandDeleteAvailability> GetBrandDeleteAvailabilityAsync(
         Guid brandId,
