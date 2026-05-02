@@ -30,6 +30,12 @@ export type Brand = {
   updated_at?: string | null;
 };
 
+export type CreateCategoryRequest = {
+  name: string;
+  description?: string | null;
+  is_active?: boolean;
+};
+
 export type Supplier = {
   supplier_id: string;
   name: string;
@@ -976,17 +982,13 @@ export async function fetchCategories(includeInactive = false): Promise<Category
   return response.items.map(mapCategory);
 }
 
-export async function createCategory(
-  name: string,
-  description?: string,
-  isActive = true,
-): Promise<Category> {
+export async function createCategory(requestBody: CreateCategoryRequest): Promise<Category> {
   const response = await requestJson<BackendCategoryItem>("/api/categories", {
     method: "POST",
     body: JSON.stringify({
-      name,
-      description: description ?? null,
-      is_active: isActive,
+      name: requestBody.name.trim(),
+      description: requestBody.description?.trim() || null,
+      is_active: requestBody.is_active ?? true,
     }),
   });
   return mapCategory(response);
@@ -994,14 +996,14 @@ export async function createCategory(
 
 export async function updateCategory(
   categoryId: string,
-  payload: Partial<{ name: string; description: string; is_active: boolean }>,
+  requestBody: CreateCategoryRequest,
 ): Promise<Category> {
   const response = await requestJson<BackendCategoryItem>(`/api/categories/${categoryId}`, {
     method: "PUT",
     body: JSON.stringify({
-      name: payload.name,
-      description: payload.description ?? null,
-      is_active: payload.is_active ?? true,
+      name: requestBody.name.trim(),
+      description: requestBody.description?.trim() || null,
+      is_active: requestBody.is_active ?? true,
     }),
   });
   return mapCategory(response);

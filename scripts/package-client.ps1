@@ -99,7 +99,23 @@ if ($null -eq $pythonCommand) {
     $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
 }
 
-if ($null -ne $pythonCommand -and (Test-Path -LiteralPath $shortcutIconPngSource)) {
+function Test-RealPythonCommand {
+    param([Parameter(Mandatory = $true)]$CommandInfo)
+
+    if ($null -eq $CommandInfo) {
+        return $false
+    }
+
+    $source = [string]$CommandInfo.Source
+    if ([string]::IsNullOrWhiteSpace($source)) {
+        return $false
+    }
+
+    # Windows Store aliases resolve to the App Execution Aliases shim and are not usable here.
+    return -not ($source -match 'WindowsApps')
+}
+
+if ((Test-RealPythonCommand -CommandInfo $pythonCommand) -and (Test-Path -LiteralPath $shortcutIconPngSource)) {
     Write-Host "Generating shortcut icon from $shortcutIconPngSource" -ForegroundColor Cyan
     $pythonScript = @"
 from PIL import Image
@@ -113,6 +129,11 @@ img.save(target, format='ICO', sizes=sizes)
     if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $shortcutIconOutput)) {
         $shortcutIconWritten = $true
     }
+    else {
+        Write-Host "Python icon generation failed; falling back to the bundled ICO." -ForegroundColor Yellow
+    }
+
+    $global:LASTEXITCODE = 0
 }
 
 if (-not $shortcutIconWritten -and (Test-Path -LiteralPath $shortcutIconIcoFallback)) {
@@ -124,6 +145,8 @@ if (-not $shortcutIconWritten -and (Test-Path -LiteralPath $shortcutIconIcoFallb
 if (-not $shortcutIconWritten) {
     Write-Host "Warning: shortcut icon was not generated. Shortcuts will fall back to backend.exe icon." -ForegroundColor Yellow
 }
+
+$global:LASTEXITCODE = 0
 
 Copy-Item -Path (Join-Path $clientTemplatesDir "Start-SmartPOS.bat") -Destination $outputRoot -Force
 Copy-Item -Path (Join-Path $clientTemplatesDir "Start-SmartPOS.ps1") -Destination $outputRoot -Force
