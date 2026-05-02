@@ -8,4 +8,5 @@ internal sealed record PurchaseBillInventoryLine(
     string? SupplierItemName,
     string? BatchNumber,
     DateTimeOffset? ExpiryDate,
-    DateTimeOffset? ManufactureDate);
+    DateTimeOffset? ManufactureDate,
+    IReadOnlyList<string> Serials);

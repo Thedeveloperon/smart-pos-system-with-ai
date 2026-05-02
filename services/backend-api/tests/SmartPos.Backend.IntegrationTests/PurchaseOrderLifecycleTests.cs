@@ -304,4 +304,93 @@ public sealed class PurchaseOrderLifecycleTests(CustomWebApplicationFactory fact
         Assert.Contains(TestJson.GetString(sentItems[0], "po_number"), sentItems[0].ToJsonString());
         Assert.Contains(TestJson.GetString(draftOrder, "po_number"), allBody);
     }
+
+    [Fact]
+    public async Task ReceivePurchaseOrder_ShouldCreateAvailableSerialNumbersForSerialTrackedProducts()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+        var serialOne = $"PO-SER-{runId}-001";
+        var serialTwo = $"PO-SER-{runId}-002";
+
+        var supplier = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/suppliers", new
+            {
+                name = $"PO Serial Supplier {runId}",
+                code = $"PO-SER-SUP-{runId}",
+                is_active = true
+            }));
+        var supplierId = Guid.Parse(TestJson.GetString(supplier, "supplier_id"));
+
+        var product = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"PO Serial Product {runId}",
+                sku = $"PO-SER-PROD-{runId}",
+                unit_price = 400m,
+                cost_price = 300m,
+                initial_stock_quantity = 0m,
+                allow_negative_stock = false,
+                is_active = true,
+                is_serial_tracked = true,
+                warranty_months = 12
+            }));
+        var productId = Guid.Parse(TestJson.GetString(product, "product_id"));
+
+        var purchaseOrder = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/purchase-orders", new
+            {
+                supplier_id = supplierId,
+                po_number = $"PO-SER-{runId}",
+                lines = new[]
+                {
+                    new
+                    {
+                        product_id = productId,
+                        quantity_ordered = 2m,
+                        unit_cost_estimate = 275m
+                    }
+                }
+            }));
+        var purchaseOrderId = Guid.Parse(TestJson.GetString(purchaseOrder, "id"));
+
+        var receiveResponse = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync($"/api/purchase-orders/{purchaseOrderId}/receive", new
+            {
+                invoice_number = $"INV-SER-{runId}",
+                invoice_date = DateTimeOffset.UtcNow,
+                update_cost_price = true,
+                lines = new[]
+                {
+                    new
+                    {
+                        product_id = productId,
+                        quantity_received = 2m,
+                        unit_cost = 275m,
+                        serials = new[] { serialOne, serialTwo }
+                    }
+                }
+            }));
+
+        Assert.Equal("Received", TestJson.GetString(receiveResponse["purchase_order"]!, "status"));
+
+        var serialReload = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/products/{productId}/serials"));
+        var serialItems = serialReload["items"]?.AsArray().OfType<JsonObject>().ToArray()
+                          ?? throw new InvalidOperationException("Missing serials after purchase receipt.");
+
+        Assert.Equal(2, serialItems.Length);
+        Assert.Contains(serialItems, item => string.Equals(TestJson.GetString(item, "serial_value"), serialOne, StringComparison.Ordinal));
+        Assert.Contains(serialItems, item => string.Equals(TestJson.GetString(item, "serial_value"), serialTwo, StringComparison.Ordinal));
+        Assert.All(serialItems, item => Assert.Equal("Available", TestJson.GetString(item, "status")));
+
+        var catalog = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/products/catalog?q={Uri.EscapeDataString($"PO-SER-PROD-{runId}")}&take=20"));
+        var catalogItem = catalog["items"]?.AsArray().OfType<JsonObject>()
+            .FirstOrDefault(item => TestJson.GetString(item, "product_id") == productId.ToString())
+            ?? throw new InvalidOperationException("Received product was not returned in the product catalog.");
+
+        Assert.Equal(2m, TestJson.GetDecimal(catalogItem, "stock_quantity"));
+    }
 }

@@ -13,6 +13,15 @@ import { Button } from "@/components/ui/button";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { Camera, Check, ChevronsUpDown, Keyboard, Package, Plus, ScanBarcode, Search } from "lucide-react";
 import { BrowserMultiFormatReader, type IScannerControls } from "@zxing/browser";
 import { NotFoundException } from "@zxing/library";
@@ -30,6 +39,8 @@ const normalizeBarcode = (value: string) => value.trim().toLowerCase();
 const isBarcodeFeatureEnabled = import.meta.env.VITE_BARCODE_FEATURE_ENABLED !== "false";
 const DEFAULT_CATEGORY = "Uncategorized";
 const DEFAULT_BRAND = "Unbranded";
+const isSerialTrackedProduct = (product: Product) =>
+  Boolean(product.isSerialTracked ?? product.is_serial_tracked);
 
 type StockFilter = "all" | "in" | "out" | "low";
 type SortOption = "name_asc" | "name_desc" | "price_asc" | "price_desc" | "stock_asc" | "stock_desc";
@@ -79,6 +90,10 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
     const [cameraFeedback, setCameraFeedback] = useState<string | null>(null);
     const [serialLookupProduct, setSerialLookupProduct] = useState<Product | null>(null);
     const [serialLookupFeedback, setSerialLookupFeedback] = useState<string | null>(null);
+    const [serialDialogProduct, setSerialDialogProduct] = useState<Product | null>(null);
+    const [serialDialogValue, setSerialDialogValue] = useState("");
+    const [serialDialogError, setSerialDialogError] = useState<string | null>(null);
+    const [serialDialogSubmitting, setSerialDialogSubmitting] = useState(false);
     const searchInputRef = useRef<HTMLInputElement>(null);
     const cameraVideoRef = useRef<HTMLVideoElement>(null);
     const scannerControlsRef = useRef<IScannerControls | null>(null);
@@ -137,7 +152,13 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
         });
 
         if (matchedProduct) {
-          onAddToCart(matchedProduct, 1);
+          if (isSerialTrackedProduct(matchedProduct)) {
+            setSerialDialogProduct(matchedProduct);
+            setSerialDialogValue("");
+            setSerialDialogError(null);
+          } else {
+            onAddToCart(matchedProduct, 1);
+          }
           setSearchQuery("");
           setBarcodeFeedback(null);
         } else {
@@ -300,6 +321,67 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
       focusAndSelectSearch();
     }, [focusAndSelectSearch]);
 
+    const closeSerialDialog = useCallback(() => {
+      setSerialDialogProduct(null);
+      setSerialDialogValue("");
+      setSerialDialogError(null);
+      setSerialDialogSubmitting(false);
+      window.setTimeout(() => {
+        focusAndSelectSearch();
+      }, 0);
+    }, [focusAndSelectSearch]);
+
+    const handleValidateSerial = useCallback(async () => {
+      if (!serialDialogProduct) {
+        return;
+      }
+
+      const nextSerialValue = serialDialogValue.trim();
+      if (!nextSerialValue) {
+        setSerialDialogError("Enter a serial number to validate.");
+        return;
+      }
+
+      setSerialDialogSubmitting(true);
+      setSerialDialogError(null);
+
+      try {
+        const result = await lookupSerial(nextSerialValue);
+        if (result.product_id !== serialDialogProduct.id) {
+          setSerialDialogError(
+            `Serial ${result.serial_value} belongs to ${result.product_name}, not ${serialDialogProduct.name}.`,
+          );
+          return;
+        }
+
+        if (result.status !== "Available") {
+          setSerialDialogError(
+            `Serial ${result.serial_value} is ${result.status.toLowerCase()} and cannot be sold.`,
+          );
+          return;
+        }
+
+        onAddToCart(result.product, 1, {
+          id: result.serial_id,
+          value: result.serial_value,
+        });
+        setSearchQuery("");
+        setSerialLookupProduct(null);
+        setSerialLookupFeedback(null);
+        closeSerialDialog();
+      } catch (error) {
+        if (error instanceof ApiError) {
+          setSerialDialogError(error.message);
+        } else if (error instanceof Error) {
+          setSerialDialogError(error.message);
+        } else {
+          setSerialDialogError("Failed to validate the serial number.");
+        }
+      } finally {
+        setSerialDialogSubmitting(false);
+      }
+    }, [closeSerialDialog, onAddToCart, serialDialogProduct, serialDialogValue]);
+
     const submitBarcodeQuery = useCallback(
       (scannerLike: boolean) => {
         processBarcodeValue(searchQuery, scannerLike, true);
@@ -346,7 +428,15 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
 
     const handleAddProduct = useCallback(
       (product: Product, _qty = 1) => {
-        onAddToCart(product, 1, getSelectedSerial(product));
+        const selectedSerial = getSelectedSerial(product);
+        if (isSerialTrackedProduct(product) && !selectedSerial) {
+          setSerialDialogProduct(product);
+          setSerialDialogValue("");
+          setSerialDialogError(null);
+          return;
+        }
+
+        onAddToCart(product, 1, selectedSerial);
         setSearchQuery("");
         setSerialLookupProduct(null);
         setSerialLookupFeedback(null);
@@ -961,6 +1051,64 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
             )}
           </div>
         )}
+
+        <Dialog
+          open={serialDialogProduct !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              closeSerialDialog();
+            }
+          }}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Validate Serial Number</DialogTitle>
+              <DialogDescription>
+                Enter the product serial number to verify availability before adding it to the cart.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="rounded-xl border border-border/70 bg-muted/20 px-3 py-2">
+                <p className="text-sm font-medium">{serialDialogProduct?.name}</p>
+                <p className="text-xs text-muted-foreground font-mono">{serialDialogProduct?.sku}</p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="serial-validation-input">Serial number</Label>
+                <Input
+                  id="serial-validation-input"
+                  value={serialDialogValue}
+                  onChange={(event) => {
+                    setSerialDialogValue(event.target.value);
+                    if (serialDialogError) {
+                      setSerialDialogError(null);
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void handleValidateSerial();
+                    }
+                  }}
+                  placeholder="Enter the item serial number"
+                  autoFocus
+                />
+                {serialDialogError && (
+                  <p className="text-xs font-medium text-destructive" role="status" aria-live="polite">
+                    {serialDialogError}
+                  </p>
+                )}
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={closeSerialDialog} disabled={serialDialogSubmitting}>
+                Cancel
+              </Button>
+              <Button onClick={() => void handleValidateSerial()} disabled={serialDialogSubmitting}>
+                {serialDialogSubmitting ? "Validating..." : "Validate"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   },
