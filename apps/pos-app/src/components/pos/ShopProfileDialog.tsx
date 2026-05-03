@@ -28,7 +28,7 @@ interface ShopProfileDialogProps {
 
 const emptyProfile = (): ShopProfile => ({
   id: "",
-  shopName: "SmartPOS Lanka",
+  shopName: "Open Lanka POS",
   language: "english",
   addressLine1: "",
   addressLine2: "",
