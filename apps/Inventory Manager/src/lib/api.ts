@@ -253,7 +253,12 @@ export type WarrantyClaim = {
   claim_date: string;
   status: "Open" | "InRepair" | "Resolved" | "Rejected";
   resolution_notes?: string;
+  supplier_name?: string;
+  handover_date?: string;
+  pickup_person_name?: string;
+  received_back_date?: string;
   created_at: string;
+  updated_at?: string;
 };
 
 export type InventoryDashboard = {
@@ -446,7 +451,12 @@ type BackendWarrantyClaim = {
   claim_date: string;
   status: WarrantyClaim["status"];
   resolution_notes?: string | null;
+  supplier_name?: string | null;
+  handover_date?: string | null;
+  pickup_person_name?: string | null;
+  received_back_date?: string | null;
   created_at: string;
+  updated_at?: string | null;
 };
 
 type BackendInventoryDashboard = {
@@ -829,7 +839,12 @@ function mapWarrantyClaim(item: BackendWarrantyClaim): WarrantyClaim {
     claim_date: item.claim_date,
     status: item.status,
     resolution_notes: item.resolution_notes ?? undefined,
+    supplier_name: item.supplier_name ?? undefined,
+    handover_date: item.handover_date ?? undefined,
+    pickup_person_name: item.pickup_person_name ?? undefined,
+    received_back_date: item.received_back_date ?? undefined,
     created_at: item.created_at,
+    updated_at: item.updated_at ?? undefined,
   };
 }
 
@@ -1554,7 +1569,14 @@ export async function createWarrantyClaim(data: {
 
 export async function updateWarrantyClaim(
   claimId: string,
-  data: { status: WarrantyClaim["status"]; resolution_notes?: string },
+  data: {
+    status: WarrantyClaim["status"];
+    resolution_notes?: string;
+    supplier_name?: string;
+    handover_date?: string;
+    pickup_person_name?: string;
+    received_back_date?: string;
+  },
 ): Promise<WarrantyClaim> {
   const response = await requestJson<BackendWarrantyClaim>(`/api/warranty-claims/${claimId}`, {
     method: "PUT",

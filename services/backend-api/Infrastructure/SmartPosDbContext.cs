@@ -157,6 +157,8 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.ToTable("warranty_claims");
             entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(32);
             entity.Property(x => x.ResolutionNotes).HasMaxLength(1000);
+            entity.Property(x => x.SupplierName).HasMaxLength(200);
+            entity.Property(x => x.PickupPersonName).HasMaxLength(200);
             entity.HasIndex(x => new { x.StoreId, x.Status });
             entity.HasIndex(x => x.SerialNumberId);
             entity.HasOne(x => x.SerialNumber)

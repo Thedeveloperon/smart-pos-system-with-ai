@@ -717,6 +717,7 @@ using (var scope = app.Services.CreateScope())
     await DbSchemaUpdater.EnsureProductBarcodeSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureStockPlanningSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureInventoryManagementSchemaAsync(dbContext);
+    await DbSchemaUpdater.EnsureWarrantyTimelineSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureShopProfileSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureRefundSchemaAsync(dbContext);
     await DbSchemaUpdater.EnsureSaleSchemaAsync(dbContext);
