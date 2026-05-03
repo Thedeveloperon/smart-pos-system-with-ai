@@ -10,7 +10,6 @@ import {
   Pencil,
   Plus,
   Power,
-  Search,
   Settings2,
   Star,
   StickyNote,
@@ -39,6 +38,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { ApiError, requestJson } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import CustomerSearchInput from "@/components/customers/CustomerSearchInput";
 
 type PriceTier = {
   id: string;
@@ -861,15 +861,13 @@ function DirectoryPanel({
           </Button>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative max-w-sm flex-1">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              className="pl-8"
-              placeholder="Search name, code, phone, email..."
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-          </div>
+          <CustomerSearchInput
+            value={search}
+            onChange={setSearch}
+            placeholder="Search name, code, phone, email..."
+            wrapperClassName="max-w-sm flex-1"
+            className="pl-8"
+          />
           <label className="flex items-center gap-2 text-sm text-muted-foreground">
             <input
               type="checkbox"
