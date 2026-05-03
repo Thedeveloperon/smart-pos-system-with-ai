@@ -1883,6 +1883,20 @@ public static class DbSchemaUpdater
 
         await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
 
+        if (!await ColumnExistsAsync(dbContext, "suppliers", "CompanyName", cancellationToken))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "suppliers" ADD COLUMN "CompanyName" TEXT NULL;""",
+                cancellationToken);
+        }
+
+        if (!await ColumnExistsAsync(dbContext, "suppliers", "CompanyPhone", cancellationToken))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "suppliers" ADD COLUMN "CompanyPhone" TEXT NULL;""",
+                cancellationToken);
+        }
+
         if (!await ColumnExistsAsync(dbContext, "purchase_bills", "PurchaseOrderId", cancellationToken))
         {
             await dbContext.Database.ExecuteSqlRawAsync(
@@ -2476,6 +2490,20 @@ public static class DbSchemaUpdater
             """;
 
         await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+
+        if (!await ColumnExistsAsync(dbContext, "suppliers", "CompanyName", cancellationToken))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS "CompanyName" varchar(160) NULL;""",
+                cancellationToken);
+        }
+
+        if (!await ColumnExistsAsync(dbContext, "suppliers", "CompanyPhone", cancellationToken))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS "CompanyPhone" varchar(32) NULL;""",
+                cancellationToken);
+        }
 
         if (!await ColumnExistsAsync(dbContext, "purchase_bills", "PurchaseOrderId", cancellationToken))
         {
