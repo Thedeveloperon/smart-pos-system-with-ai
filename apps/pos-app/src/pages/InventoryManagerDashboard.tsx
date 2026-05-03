@@ -9,16 +9,17 @@ import ReportsPage from "@/components/reports/ReportsPage";
 import InventoryProductsWorkspace from "@/components/pos/InventoryProductsWorkspace";
 
 const InventoryDashboardTab = lazy(() => import("@/components/inventory/InventoryDashboardTab"));
+const CustomersWorkspace = lazy(() => import("@/components/customers/CustomersWorkspace"));
 const StockMovementsTab = lazy(() => import("@/components/inventory/StockMovementsTab"));
 const SerialNumbersTab = lazy(() => import("@/components/inventory/SerialNumbersTab"));
 const BatchesTab = lazy(() => import("@/components/inventory/BatchesTab"));
 const StocktakeTab = lazy(() => import("@/components/inventory/StocktakeTab"));
 const WarrantyClaimsTab = lazy(() => import("@/components/inventory/WarrantyClaimsTab"));
 
-type ModuleTab = "inventory" | "products" | "purchases" | "reports" | "manager";
+type ModuleTab = "inventory" | "products" | "customers" | "purchases" | "reports" | "manager";
 type InventoryTab = "overview" | "movements" | "serials" | "batches" | "stocktake" | "claims";
 
-const TAB_VALUES: ModuleTab[] = ["inventory", "products", "purchases", "reports", "manager"];
+const TAB_VALUES: ModuleTab[] = ["inventory", "products", "customers", "purchases", "reports", "manager"];
 
 const TabFallback = () => (
   <div className="space-y-3">
@@ -111,6 +112,12 @@ export default function InventoryManagerDashboard() {
                   Products
                 </TabsTrigger>
                 <TabsTrigger
+                  value="customers"
+                  className="rounded-lg px-4 py-2 text-sm font-semibold text-pos-header-foreground/80 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+                >
+                  Customers
+                </TabsTrigger>
+                <TabsTrigger
                   value="inventory"
                   className="rounded-lg px-4 py-2 text-sm font-semibold text-pos-header-foreground/80 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
                 >
@@ -187,6 +194,11 @@ export default function InventoryManagerDashboard() {
           </TabsContent>
           <TabsContent value="products" className="mt-0">
             <InventoryProductsWorkspace />
+          </TabsContent>
+          <TabsContent value="customers" className="mt-0">
+            <Suspense fallback={<TabFallback />}>
+              <CustomersWorkspace />
+            </Suspense>
           </TabsContent>
           <TabsContent value="purchases" className="mt-0">
             <PurchasesWorkspace />

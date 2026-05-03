@@ -74,6 +74,7 @@ describe("InventoryManagerDashboard", () => {
     expect(await screen.findByRole("button", { name: /Back to Dashboard/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Inventory Management" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Products" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Customers" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Purchases" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Reports" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Manager" })).toBeInTheDocument();
@@ -87,5 +88,10 @@ describe("InventoryManagerDashboard", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Inventory" }));
     expect(await screen.findByText("Low stock")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Inventory" })).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Customers" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Customers" }));
+    expect(await screen.findByRole("heading", { name: "Customer Directory" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Customers" })).toHaveAttribute("aria-selected", "true");
   });
 });
