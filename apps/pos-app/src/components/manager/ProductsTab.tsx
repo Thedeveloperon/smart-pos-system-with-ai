@@ -43,13 +43,17 @@ import {
   type Product,
 } from "@/lib/api";
 
+type Props = {
+  onNavigate?: (tab: "catalogue" | "suppliers") => void;
+};
+
 const currencyFormatter = new Intl.NumberFormat("en-LK", {
   style: "currency",
   currency: "LKR",
   maximumFractionDigits: 2,
 });
 
-export default function ProductsTab() {
+export default function ProductsTab({ onNavigate }: Props) {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -391,6 +395,7 @@ export default function ProductsTab() {
         open={dialogOpen}
         product={dialogProduct}
         onOpenChange={setDialogOpen}
+        onNavigate={onNavigate}
         onSaved={async () => {
           await loadProducts();
         }}
