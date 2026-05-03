@@ -283,6 +283,206 @@ public static class DbSchemaUpdater
         }
     }
 
+    public static async Task EnsureCustomerSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken = default)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+
+        if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            var sql = """
+                CREATE TABLE IF NOT EXISTS "customer_price_tiers" (
+                  "Id" TEXT NOT NULL CONSTRAINT "PK_customer_price_tiers" PRIMARY KEY,
+                  "StoreId" TEXT NULL,
+                  "Name" TEXT NOT NULL,
+                  "Code" TEXT NOT NULL,
+                  "DiscountPercent" TEXT NOT NULL,
+                  "Description" TEXT NULL,
+                  "IsActive" INTEGER NOT NULL DEFAULT 1,
+                  "CreatedAtUtc" TEXT NOT NULL,
+                  "UpdatedAtUtc" TEXT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS "customers" (
+                  "Id" TEXT NOT NULL CONSTRAINT "PK_customers" PRIMARY KEY,
+                  "StoreId" TEXT NULL,
+                  "PriceTierId" TEXT NULL,
+                  "Name" TEXT NOT NULL,
+                  "Code" TEXT NULL,
+                  "Phone" TEXT NULL,
+                  "Email" TEXT NULL,
+                  "Address" TEXT NULL,
+                  "DateOfBirth" TEXT NULL,
+                  "FixedDiscountPercent" TEXT NULL,
+                  "CreditLimit" TEXT NOT NULL DEFAULT '0',
+                  "OutstandingBalance" TEXT NOT NULL DEFAULT '0',
+                  "LoyaltyPoints" TEXT NOT NULL DEFAULT '0',
+                  "Notes" TEXT NULL,
+                  "IsActive" INTEGER NOT NULL DEFAULT 1,
+                  "CreatedAtUtc" TEXT NOT NULL,
+                  "UpdatedAtUtc" TEXT NULL,
+                  CONSTRAINT "FK_customers_customer_price_tiers_PriceTierId" FOREIGN KEY ("PriceTierId") REFERENCES "customer_price_tiers" ("Id") ON DELETE SET NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS "customer_tags" (
+                  "Id" TEXT NOT NULL CONSTRAINT "PK_customer_tags" PRIMARY KEY,
+                  "StoreId" TEXT NULL,
+                  "CustomerId" TEXT NOT NULL,
+                  "Tag" TEXT NOT NULL,
+                  "CreatedAtUtc" TEXT NOT NULL,
+                  CONSTRAINT "FK_customer_tags_customers_CustomerId" FOREIGN KEY ("CustomerId") REFERENCES "customers" ("Id") ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS "customer_credit_ledger" (
+                  "Id" TEXT NOT NULL CONSTRAINT "PK_customer_credit_ledger" PRIMARY KEY,
+                  "StoreId" TEXT NULL,
+                  "CustomerId" TEXT NOT NULL,
+                  "SaleId" TEXT NULL,
+                  "EntryType" TEXT NOT NULL,
+                  "Amount" TEXT NOT NULL,
+                  "BalanceAfter" TEXT NOT NULL,
+                  "Description" TEXT NOT NULL,
+                  "Reference" TEXT NULL,
+                  "RecordedByUserId" TEXT NULL,
+                  "OccurredAtUtc" TEXT NOT NULL,
+                  "CreatedAtUtc" TEXT NOT NULL,
+                  CONSTRAINT "FK_customer_credit_ledger_customers_CustomerId" FOREIGN KEY ("CustomerId") REFERENCES "customers" ("Id") ON DELETE CASCADE,
+                  CONSTRAINT "FK_customer_credit_ledger_sales_SaleId" FOREIGN KEY ("SaleId") REFERENCES "sales" ("Id") ON DELETE SET NULL,
+                  CONSTRAINT "FK_customer_credit_ledger_users_RecordedByUserId" FOREIGN KEY ("RecordedByUserId") REFERENCES "users" ("Id") ON DELETE SET NULL
+                );
+
+                CREATE UNIQUE INDEX IF NOT EXISTS "IX_customer_price_tiers_StoreId_Code" ON "customer_price_tiers" ("StoreId", "Code");
+                CREATE UNIQUE INDEX IF NOT EXISTS "IX_customer_price_tiers_StoreId_Name" ON "customer_price_tiers" ("StoreId", "Name");
+                CREATE UNIQUE INDEX IF NOT EXISTS "IX_customers_StoreId_Code" ON "customers" ("StoreId", "Code");
+                CREATE INDEX IF NOT EXISTS "IX_customers_StoreId_Phone" ON "customers" ("StoreId", "Phone");
+                CREATE INDEX IF NOT EXISTS "IX_customers_StoreId_Email" ON "customers" ("StoreId", "Email");
+                CREATE INDEX IF NOT EXISTS "IX_customers_PriceTierId" ON "customers" ("PriceTierId");
+                CREATE UNIQUE INDEX IF NOT EXISTS "IX_customer_tags_StoreId_CustomerId_Tag" ON "customer_tags" ("StoreId", "CustomerId", "Tag");
+                CREATE INDEX IF NOT EXISTS "IX_customer_tags_CustomerId" ON "customer_tags" ("CustomerId");
+                CREATE INDEX IF NOT EXISTS "IX_customer_credit_ledger_StoreId_CustomerId_OccurredAtUtc" ON "customer_credit_ledger" ("StoreId", "CustomerId", "OccurredAtUtc");
+                CREATE INDEX IF NOT EXISTS "IX_customer_credit_ledger_SaleId" ON "customer_credit_ledger" ("SaleId");
+                CREATE INDEX IF NOT EXISTS "IX_customer_credit_ledger_RecordedByUserId" ON "customer_credit_ledger" ("RecordedByUserId");
+                """;
+
+            await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "sales",
+                "CustomerId",
+                """ALTER TABLE "sales" ADD COLUMN "CustomerId" TEXT NULL;""",
+                cancellationToken);
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "sales",
+                "LoyaltyPointsEarned",
+                """ALTER TABLE "sales" ADD COLUMN "LoyaltyPointsEarned" TEXT NOT NULL DEFAULT '0';""",
+                cancellationToken);
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "sales",
+                "LoyaltyPointsRedeemed",
+                """ALTER TABLE "sales" ADD COLUMN "LoyaltyPointsRedeemed" TEXT NOT NULL DEFAULT '0';""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE INDEX IF NOT EXISTS "IX_sales_StoreId_CustomerId" ON "sales" ("StoreId", "CustomerId");""",
+                cancellationToken);
+            return;
+        }
+
+        if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            var sql = """
+                CREATE TABLE IF NOT EXISTS customer_price_tiers (
+                  "Id" uuid NOT NULL PRIMARY KEY,
+                  "StoreId" uuid NULL,
+                  "Name" varchar(160) NOT NULL,
+                  "Code" varchar(64) NOT NULL,
+                  "DiscountPercent" numeric(6,4) NOT NULL,
+                  "Description" varchar(500) NULL,
+                  "IsActive" boolean NOT NULL DEFAULT true,
+                  "CreatedAtUtc" timestamptz NOT NULL,
+                  "UpdatedAtUtc" timestamptz NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS customers (
+                  "Id" uuid NOT NULL PRIMARY KEY,
+                  "StoreId" uuid NULL,
+                  "PriceTierId" uuid NULL,
+                  "Name" varchar(160) NOT NULL,
+                  "Code" varchar(64) NULL,
+                  "Phone" varchar(32) NULL,
+                  "Email" varchar(120) NULL,
+                  "Address" varchar(500) NULL,
+                  "DateOfBirth" date NULL,
+                  "FixedDiscountPercent" numeric(6,4) NULL,
+                  "CreditLimit" numeric(18,2) NOT NULL DEFAULT 0,
+                  "OutstandingBalance" numeric(18,2) NOT NULL DEFAULT 0,
+                  "LoyaltyPoints" numeric(18,3) NOT NULL DEFAULT 0,
+                  "Notes" varchar(1000) NULL,
+                  "IsActive" boolean NOT NULL DEFAULT true,
+                  "CreatedAtUtc" timestamptz NOT NULL,
+                  "UpdatedAtUtc" timestamptz NULL,
+                  CONSTRAINT "FK_customers_customer_price_tiers_PriceTierId" FOREIGN KEY ("PriceTierId") REFERENCES customer_price_tiers("Id") ON DELETE SET NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS customer_tags (
+                  "Id" uuid NOT NULL PRIMARY KEY,
+                  "StoreId" uuid NULL,
+                  "CustomerId" uuid NOT NULL,
+                  "Tag" varchar(120) NOT NULL,
+                  "CreatedAtUtc" timestamptz NOT NULL,
+                  CONSTRAINT "FK_customer_tags_customers_CustomerId" FOREIGN KEY ("CustomerId") REFERENCES customers("Id") ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS customer_credit_ledger (
+                  "Id" uuid NOT NULL PRIMARY KEY,
+                  "StoreId" uuid NULL,
+                  "CustomerId" uuid NOT NULL,
+                  "SaleId" uuid NULL,
+                  "EntryType" varchar(32) NOT NULL,
+                  "Amount" numeric(18,2) NOT NULL,
+                  "BalanceAfter" numeric(18,2) NOT NULL,
+                  "Description" varchar(500) NOT NULL,
+                  "Reference" varchar(160) NULL,
+                  "RecordedByUserId" uuid NULL,
+                  "OccurredAtUtc" timestamptz NOT NULL,
+                  "CreatedAtUtc" timestamptz NOT NULL,
+                  CONSTRAINT "FK_customer_credit_ledger_customers_CustomerId" FOREIGN KEY ("CustomerId") REFERENCES customers("Id") ON DELETE CASCADE,
+                  CONSTRAINT "FK_customer_credit_ledger_sales_SaleId" FOREIGN KEY ("SaleId") REFERENCES sales("Id") ON DELETE SET NULL,
+                  CONSTRAINT "FK_customer_credit_ledger_users_RecordedByUserId" FOREIGN KEY ("RecordedByUserId") REFERENCES users("Id") ON DELETE SET NULL
+                );
+
+                CREATE UNIQUE INDEX IF NOT EXISTS "IX_customer_price_tiers_StoreId_Code" ON customer_price_tiers("StoreId", "Code");
+                CREATE UNIQUE INDEX IF NOT EXISTS "IX_customer_price_tiers_StoreId_Name" ON customer_price_tiers("StoreId", "Name");
+                CREATE UNIQUE INDEX IF NOT EXISTS "IX_customers_StoreId_Code" ON customers("StoreId", "Code");
+                CREATE INDEX IF NOT EXISTS "IX_customers_StoreId_Phone" ON customers("StoreId", "Phone");
+                CREATE INDEX IF NOT EXISTS "IX_customers_StoreId_Email" ON customers("StoreId", "Email");
+                CREATE INDEX IF NOT EXISTS "IX_customers_PriceTierId" ON customers("PriceTierId");
+                CREATE UNIQUE INDEX IF NOT EXISTS "IX_customer_tags_StoreId_CustomerId_Tag" ON customer_tags("StoreId", "CustomerId", "Tag");
+                CREATE INDEX IF NOT EXISTS "IX_customer_tags_CustomerId" ON customer_tags("CustomerId");
+                CREATE INDEX IF NOT EXISTS "IX_customer_credit_ledger_StoreId_CustomerId_OccurredAtUtc" ON customer_credit_ledger("StoreId", "CustomerId", "OccurredAtUtc");
+                CREATE INDEX IF NOT EXISTS "IX_customer_credit_ledger_SaleId" ON customer_credit_ledger("SaleId");
+                CREATE INDEX IF NOT EXISTS "IX_customer_credit_ledger_RecordedByUserId" ON customer_credit_ledger("RecordedByUserId");
+                """;
+
+            await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE sales ADD COLUMN IF NOT EXISTS "CustomerId" uuid NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE sales ADD COLUMN IF NOT EXISTS "LoyaltyPointsEarned" numeric(18,3) NOT NULL DEFAULT 0;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE sales ADD COLUMN IF NOT EXISTS "LoyaltyPointsRedeemed" numeric(18,3) NOT NULL DEFAULT 0;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE INDEX IF NOT EXISTS "IX_sales_StoreId_CustomerId" ON sales("StoreId", "CustomerId");""",
+                cancellationToken);
+        }
+    }
+
     private static async Task EnsureSqliteColumnAsync(
         SmartPosDbContext dbContext,
         string tableName,
@@ -771,6 +971,31 @@ public static class DbSchemaUpdater
                     cancellationToken);
             }
 
+            if (!await ColumnExistsAsync(dbContext, "sales", "CustomerId", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "sales" ADD COLUMN "CustomerId" TEXT NULL;""",
+                    cancellationToken);
+            }
+
+            if (!await ColumnExistsAsync(dbContext, "sales", "LoyaltyPointsEarned", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "sales" ADD COLUMN "LoyaltyPointsEarned" TEXT NOT NULL DEFAULT '0';""",
+                    cancellationToken);
+            }
+
+            if (!await ColumnExistsAsync(dbContext, "sales", "LoyaltyPointsRedeemed", cancellationToken))
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE "sales" ADD COLUMN "LoyaltyPointsRedeemed" TEXT NOT NULL DEFAULT '0';""",
+                    cancellationToken);
+            }
+
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE INDEX IF NOT EXISTS "IX_sales_StoreId_CustomerId" ON "sales" ("StoreId", "CustomerId");""",
+                cancellationToken);
+
             return;
         }
 
@@ -781,6 +1006,18 @@ public static class DbSchemaUpdater
                 cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(
                 """ALTER TABLE sales ADD COLUMN IF NOT EXISTS "CashShortAmount" numeric(18,2) NOT NULL DEFAULT 0;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE sales ADD COLUMN IF NOT EXISTS "CustomerId" uuid NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE sales ADD COLUMN IF NOT EXISTS "LoyaltyPointsEarned" numeric(18,3) NOT NULL DEFAULT 0;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE sales ADD COLUMN IF NOT EXISTS "LoyaltyPointsRedeemed" numeric(18,3) NOT NULL DEFAULT 0;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE INDEX IF NOT EXISTS "IX_sales_StoreId_CustomerId" ON sales("StoreId", "CustomerId");""",
                 cancellationToken);
         }
     }
