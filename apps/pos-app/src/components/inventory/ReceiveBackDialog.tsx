@@ -15,25 +15,20 @@ interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   claim: WarrantyClaim | null;
-  onConfirm: (data: { received_back_date?: string; received_back_person_name?: string }) => void;
+  onConfirm: (data: { received_back_person_name?: string }) => void;
 }
 
-const today = () => new Date().toISOString().slice(0, 10);
-
 export function ReceiveBackDialog({ open, onOpenChange, claim, onConfirm }: Props) {
-  const [receivedDate, setReceivedDate] = useState(today());
   const [receivedBy, setReceivedBy] = useState("");
 
   useEffect(() => {
     if (open) {
-      setReceivedDate(today());
       setReceivedBy("");
     }
   }, [open]);
 
   const submit = () => {
     onConfirm({
-      received_back_date: receivedDate ? new Date(receivedDate).toISOString() : undefined,
       received_back_person_name: receivedBy.trim() || undefined,
     });
     onOpenChange(false);
@@ -53,10 +48,9 @@ export function ReceiveBackDialog({ open, onOpenChange, claim, onConfirm }: Prop
           </DialogTitle>
         </DialogHeader>
         <div className="grid gap-3">
-          <div className="grid gap-1.5">
-            <Label>Received Back Date</Label>
-            <Input type="date" value={receivedDate} onChange={(e) => setReceivedDate(e.target.value)} />
-          </div>
+          <p className="text-xs text-muted-foreground">
+            The receive-back date and time are recorded automatically when you save this step.
+          </p>
           <div className="grid gap-1.5">
             <Label>Received By</Label>
             <Input

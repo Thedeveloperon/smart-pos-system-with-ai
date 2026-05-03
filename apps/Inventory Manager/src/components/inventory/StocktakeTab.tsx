@@ -3,8 +3,10 @@ import { toast } from "sonner";
 import {
   completeStocktakeSession,
   createStocktakeSession,
+  deleteStocktakeSession,
   fetchStocktakeSessions,
   getStocktakeSession,
+  revertStocktakeSession,
   startStocktakeSession,
   updateStocktakeItem,
   type StocktakeItem,
@@ -22,7 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,6 +42,7 @@ const STATUS_TONES: Record<string, string> = {
   Draft: "bg-muted text-muted-foreground",
   InProgress: "bg-info/15 text-info",
   Completed: "bg-success/15 text-success",
+  Reverted: "bg-warning/20 text-warning-foreground",
 };
 
 export default function StocktakeTab() {
@@ -53,6 +56,10 @@ export default function StocktakeTab() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [readonlyMode, setReadonlyMode] = useState(false);
   const [completing, setCompleting] = useState(false);
+  const [cancelSession, setCancelSession] = useState<StocktakeSession | null>(null);
+  const [canceling, setCanceling] = useState(false);
+  const [revertSession, setRevertSession] = useState<StocktakeSession | null>(null);
+  const [reverting, setReverting] = useState(false);
   const itemsRef = useRef<StocktakeItem[]>([]);
 
   useEffect(() => {
@@ -102,6 +109,15 @@ export default function StocktakeTab() {
     itemsRef.current = nextItems;
     setItems(nextItems);
     syncSessionVarianceCount(sessionId, nextItems);
+  };
+
+  const closeSheet = () => {
+    setSheetOpen(false);
+    setActiveSession(null);
+    itemsRef.current = [];
+    setItems([]);
+    setDraftCounts({});
+    setReadonlyMode(false);
   };
 
   const reload = async () => {
@@ -219,12 +235,44 @@ export default function StocktakeTab() {
       if (!countsSaved) return;
       await completeStocktakeSession(activeSession.id);
       setConfirmOpen(false);
-      setSheetOpen(false);
+      closeSheet();
       await reload();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to complete stocktake session.");
     } finally {
       setCompleting(false);
+    }
+  };
+
+  const handleCancelSession = async (session: StocktakeSession) => {
+    setCanceling(true);
+    try {
+      await deleteStocktakeSession(session.id);
+      setCancelSession(null);
+      if (activeSession?.id === session.id) {
+        closeSheet();
+      }
+      await reload();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to remove stocktake session.");
+    } finally {
+      setCanceling(false);
+    }
+  };
+
+  const handleRevertSession = async (session: StocktakeSession) => {
+    setReverting(true);
+    try {
+      await revertStocktakeSession(session.id);
+      setRevertSession(null);
+      if (activeSession?.id === session.id) {
+        closeSheet();
+      }
+      await reload();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to revert stocktake session.");
+    } finally {
+      setReverting(false);
     }
   };
 
@@ -277,19 +325,51 @@ export default function StocktakeTab() {
                     <TableCell className="text-right">{s.variance_count}</TableCell>
                     <TableCell className="text-right space-x-2">
                       {s.status === "Draft" && (
-                        <Button size="sm" onClick={() => handleStart(s)}>
-                          Start
-                        </Button>
+                        <>
+                          <Button size="sm" onClick={() => handleStart(s)}>
+                            Start
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={canceling && cancelSession?.id === s.id}
+                            onClick={() => setCancelSession(s)}
+                          >
+                            Remove
+                          </Button>
+                        </>
                       )}
                       {s.status === "InProgress" && (
-                        <Button size="sm" onClick={() => openSession(s, false)}>
-                          Enter counts
-                        </Button>
+                        <>
+                          <Button size="sm" onClick={() => openSession(s, false)}>
+                            Enter counts
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={canceling && cancelSession?.id === s.id}
+                            onClick={() => setCancelSession(s)}
+                          >
+                            Remove
+                          </Button>
+                        </>
                       )}
-                      {s.status === "Completed" && (
-                        <Button size="sm" variant="outline" onClick={() => openSession(s, true)}>
-                          View report
-                        </Button>
+                      {(s.status === "Completed" || s.status === "Reverted") && (
+                        <>
+                          <Button size="sm" variant="outline" onClick={() => openSession(s, true)}>
+                            View report
+                          </Button>
+                          {s.status === "Completed" && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={reverting && revertSession?.id === s.id}
+                              onClick={() => setRevertSession(s)}
+                            >
+                              Revert
+                            </Button>
+                          )}
+                        </>
                       )}
                     </TableCell>
                   </TableRow>
@@ -307,6 +387,11 @@ export default function StocktakeTab() {
               {readonlyMode ? "Variance report" : "Enter counts"} —{" "}
               <span className="font-mono text-sm">{activeSession?.id}</span>
             </SheetTitle>
+            <SheetDescription>
+              {readonlyMode
+                ? "Review counted quantities and variances for this stocktake session."
+                : "Enter counted quantities, then complete the session or cancel it without applying changes."}
+            </SheetDescription>
           </SheetHeader>
           <div className="mt-4">
             <Table>
@@ -363,8 +448,15 @@ export default function StocktakeTab() {
               </TableBody>
             </Table>
             {!readonlyMode && (
-              <div className="flex justify-end mt-4">
-                <Button disabled={completing} onClick={() => setConfirmOpen(true)}>
+              <div className="flex justify-end gap-2 mt-4">
+                <Button
+                  variant="outline"
+                  disabled={completing || canceling || !activeSession}
+                  onClick={() => activeSession && setCancelSession(activeSession)}
+                >
+                  Cancel session
+                </Button>
+                <Button disabled={completing || canceling} onClick={() => setConfirmOpen(true)}>
                   Complete session
                 </Button>
               </div>
@@ -391,6 +483,70 @@ export default function StocktakeTab() {
               }}
             >
               {completing ? "Completing..." : "Complete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={Boolean(cancelSession)}
+        onOpenChange={(open) => {
+          if (!open && !canceling) {
+            setCancelSession(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this stocktake session?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will discard the current stocktake session and any counted quantities saved in it.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={canceling}>Keep session</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={canceling || !cancelSession}
+              onClick={(event) => {
+                event.preventDefault();
+                if (cancelSession) {
+                  void handleCancelSession(cancelSession);
+                }
+              }}
+            >
+              {canceling ? "Removing..." : "Remove session"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={Boolean(revertSession)}
+        onOpenChange={(open) => {
+          if (!open && !reverting) {
+            setRevertSession(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Revert this stocktake?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will restore the stock levels from before the session was completed. Revert only works if stock has not changed since completion.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={reverting}>Keep completed session</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={reverting || !revertSession}
+              onClick={(event) => {
+                event.preventDefault();
+                if (revertSession) {
+                  void handleRevertSession(revertSession);
+                }
+              }}
+            >
+              {reverting ? "Reverting..." : "Revert session"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

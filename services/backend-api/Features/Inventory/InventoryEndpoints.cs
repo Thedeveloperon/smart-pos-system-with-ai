@@ -62,7 +62,7 @@ public static class InventoryEndpoints
             var openStocktakeSessions = await dbContext.StocktakeSessions
                 .AsNoTracking()
                 .Where(x => !currentStoreId.HasValue || x.StoreId == currentStoreId.Value)
-                .Where(x => x.Status != StocktakeStatus.Completed)
+                .Where(x => x.Status == StocktakeStatus.Draft || x.Status == StocktakeStatus.InProgress)
                 .CountAsync(cancellationToken);
 
             var openWarrantyClaims = await dbContext.WarrantyClaims

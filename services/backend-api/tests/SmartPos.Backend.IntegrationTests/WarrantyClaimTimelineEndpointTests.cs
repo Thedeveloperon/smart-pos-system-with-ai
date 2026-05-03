@@ -121,6 +121,70 @@ public sealed class WarrantyClaimTimelineEndpointTests(CustomWebApplicationFacto
         Assert.Equal("Invalid warranty claim status transition.", TestJson.GetString(payload, "message"));
     }
 
+    [Fact]
+    public async Task WarrantyClaimTimestamps_ShouldDefaultToServerTimeWhenOmitted()
+    {
+        await TestAuth.SignInAsOwnerAsync(client);
+
+        var serialId = await CreateClaimableSerialIdAsync();
+
+        var createStartedAt = DateTimeOffset.UtcNow;
+        var createResponse = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/warranty-claims", new
+            {
+                serial_number_id = serialId,
+                resolution_notes = "Speaker issue"
+            }));
+        var createFinishedAt = DateTimeOffset.UtcNow;
+
+        var claimId = TestJson.GetString(createResponse, "id");
+        var claimDate = DateTimeOffset.Parse(TestJson.GetString(createResponse, "claim_date"));
+        Assert.InRange(claimDate, createStartedAt.AddSeconds(-1), createFinishedAt.AddSeconds(1));
+
+        var handoverStartedAt = DateTimeOffset.UtcNow;
+        var handoverResponse = await TestJson.ReadObjectAsync(
+            await client.PutAsJsonAsync($"/api/warranty-claims/{claimId}", new
+            {
+                status = "InRepair",
+                supplier_name = "Samsung Service Center",
+                pickup_person_name = "Ruwan Perera"
+            }));
+        var handoverFinishedAt = DateTimeOffset.UtcNow;
+
+        var handoverDate = DateTimeOffset.Parse(TestJson.GetString(handoverResponse, "handover_date"));
+        Assert.InRange(handoverDate, handoverStartedAt.AddSeconds(-1), handoverFinishedAt.AddSeconds(1));
+
+        var receivedBackStartedAt = DateTimeOffset.UtcNow;
+        var receivedBackResponse = await TestJson.ReadObjectAsync(
+            await client.PutAsJsonAsync($"/api/warranty-claims/{claimId}", new
+            {
+                status = "InRepair",
+                received_back_person_name = "Nimali Silva"
+            }));
+        var receivedBackFinishedAt = DateTimeOffset.UtcNow;
+
+        var receivedBackDate = DateTimeOffset.Parse(
+            TestJson.GetString(receivedBackResponse, "received_back_date"));
+        Assert.InRange(
+            receivedBackDate,
+            receivedBackStartedAt.AddSeconds(-1),
+            receivedBackFinishedAt.AddSeconds(1));
+        Assert.Equal("Nimali Silva", TestJson.GetString(receivedBackResponse, "received_back_person_name"));
+
+        var resolvedResponse = await TestJson.ReadObjectAsync(
+            await client.PutAsJsonAsync($"/api/warranty-claims/{claimId}", new
+            {
+                status = "Resolved",
+                resolution_notes = "Speaker replaced"
+            }));
+
+        Assert.Equal("Resolved", TestJson.GetString(resolvedResponse, "status"));
+        Assert.StartsWith(
+            receivedBackDate.ToString("O")[..19],
+            TestJson.GetString(resolvedResponse, "received_back_date"));
+        Assert.Equal("Speaker replaced", TestJson.GetString(resolvedResponse, "resolution_notes"));
+    }
+
     private async Task<Guid> CreateClaimableSerialIdAsync()
     {
         using var scope = factory.Services.CreateScope();

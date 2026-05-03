@@ -36,7 +36,7 @@ import {
   deleteProduct,
   fetchBrands,
   fetchCategories,
-  fetchProducts,
+  fetchProductCatalogItems,
   hardDeleteProduct,
   type Brand,
   type Category,
@@ -69,7 +69,7 @@ export default function ProductsTab() {
     setLoading(true);
     try {
       const [productItems, categoryItems, brandItems] = await Promise.all([
-        fetchProducts(),
+        fetchProductCatalogItems(),
         fetchCategories(true),
         fetchBrands(true),
       ]);

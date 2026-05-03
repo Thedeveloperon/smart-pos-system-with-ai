@@ -8,21 +8,28 @@ interface ProductCardProps {
   product: Product;
   onAdd: (product: Product, qty: number) => void;
   showAddButton?: boolean;
+  interactive?: boolean;
 }
 
-const ProductCard = ({ product, onAdd, showAddButton = true }: ProductCardProps) => {
+const ProductCard = ({ product, onAdd, showAddButton = true, interactive = true }: ProductCardProps) => {
   const isLowStock = product.stock > 0 && product.stock <= 5;
   const isOutOfStock = product.stock === 0;
+  const cardStateClass = isOutOfStock ? "opacity-60" : interactive ? "cursor-pointer hover:-translate-y-0.5 hover:pos-shadow-md" : "";
+  const imageStateClass = interactive ? "group-hover:scale-105" : "";
 
   return (
     <div
-      className={`group bg-card rounded-md border border-border pos-shadow hover:pos-shadow-md transition-all duration-200 overflow-hidden flex flex-col ${
-        isOutOfStock ? "opacity-60" : "cursor-pointer hover:-translate-y-0.5"
-      }`}
+      className={`group bg-card rounded-md border border-border pos-shadow transition-all duration-200 overflow-hidden flex flex-col ${cardStateClass}`}
       onPointerDown={() => {
-        void primeCartAddSound();
+        if (interactive) {
+          void primeCartAddSound();
+        }
       }}
-      onClick={() => !isOutOfStock && onAdd(product, 1)}
+      onClick={() => {
+        if (interactive && !isOutOfStock) {
+          onAdd(product, 1);
+        }
+      }}
     >
       {/* Image */}
       <div className="aspect-[5/4] bg-muted relative overflow-hidden">
@@ -30,7 +37,7 @@ const ProductCard = ({ product, onAdd, showAddButton = true }: ProductCardProps)
           <img
             src={product.image}
             alt={product.name}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+            className={`h-full w-full object-cover transition-transform duration-300 ${imageStateClass}`}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center">

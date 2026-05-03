@@ -7,7 +7,6 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { type WarrantyClaim } from "@/lib/api";
@@ -16,25 +15,20 @@ interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   claim: WarrantyClaim | null;
-  onConfirm: (data: { received_back_date?: string; resolution_notes?: string }) => void;
+  onConfirm: (data: { resolution_notes?: string }) => void;
 }
 
-const today = () => new Date().toISOString().slice(0, 10);
-
 export function ResolveDialog({ open, onOpenChange, claim, onConfirm }: Props) {
-  const [receivedDate, setReceivedDate] = useState(today());
   const [notes, setNotes] = useState("");
 
   useEffect(() => {
     if (open) {
-      setReceivedDate(today());
       setNotes("");
     }
   }, [open]);
 
   const submit = () => {
     onConfirm({
-      received_back_date: receivedDate ? new Date(receivedDate).toISOString() : undefined,
       resolution_notes: notes || undefined,
     });
     onOpenChange(false);
@@ -54,14 +48,10 @@ export function ResolveDialog({ open, onOpenChange, claim, onConfirm }: Props) {
           </DialogTitle>
         </DialogHeader>
         <div className="grid gap-3">
-          <div className="grid gap-1.5">
-            <Label>Received Back Date</Label>
-            <Input
-              type="date"
-              value={receivedDate}
-              onChange={(e) => setReceivedDate(e.target.value)}
-            />
-          </div>
+          <p className="text-xs text-muted-foreground">
+            The received-back and resolved timestamps are recorded automatically when you confirm
+            this step.
+          </p>
           <div className="grid gap-1.5">
             <Label>Resolution Notes</Label>
             <Textarea

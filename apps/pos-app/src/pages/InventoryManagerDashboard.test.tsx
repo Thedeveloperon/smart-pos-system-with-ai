@@ -72,15 +72,14 @@ describe("InventoryManagerDashboard", () => {
     render(<InventoryManagerDashboard />);
 
     expect(await screen.findByRole("button", { name: /Back to Dashboard/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Inventory Management" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Products" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "POS Management" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Products" })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Purchases" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Reports" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Manager" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Products" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Product Manager" })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Products" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Current sale" })).toBeInTheDocument();
-    expect(screen.getByText("Browse products and add items to the current sale.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Current sale" })).not.toBeInTheDocument();
+    expect(screen.getByText("Browse the current product list.")).toBeInTheDocument();
     expect(screen.getByText("Rice")).toBeInTheDocument();
 
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Inventory" }));
