@@ -96,7 +96,7 @@ const HeaderBar = ({
   return (
     <header className="mx-2 mt-2 flex h-14 shrink-0 items-center justify-between gap-3 border border-border/60 bg-pos-header/95 px-4 text-pos-header-foreground backdrop-blur-sm">
       <div className="flex items-center gap-2">
-        <img src="/logo.png" alt="SmartPOS Lanka logo" className="h-10 w-auto object-contain" />
+        <img src="/logo.png" alt="Open Lanka POS logo" className="h-10 w-auto object-contain" />
       </div>
 
       <div className="hidden xl:flex items-center gap-2">

@@ -287,7 +287,7 @@ const LicenseAccessSuccess = () => {
             </div>
 
             <div className="rounded-xl border border-border p-4 text-sm text-muted-foreground space-y-1">
-              <p>1. Open your SmartPOS app.</p>
+              <p>1. Open your Open Lanka POS app.</p>
               <p>2. Enter this activation key on the activation screen.</p>
               <p>3. Click Activate to complete setup.</p>
             </div>
