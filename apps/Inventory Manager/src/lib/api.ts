@@ -238,7 +238,7 @@ export type ExpiringBatch = {
 export type StocktakeSession = {
   id: string;
   store_id: string;
-  status: "Draft" | "InProgress" | "Completed";
+  status: "Draft" | "InProgress" | "Completed" | "Reverted";
   started_at: string;
   completed_at?: string;
   created_by_user_id?: string;
@@ -1680,6 +1680,22 @@ export async function completeStocktakeSession(sessionId: string): Promise<Stock
   return mapStocktakeSession(response);
 }
 
+export async function revertStocktakeSession(sessionId: string): Promise<StocktakeSession> {
+  const response = await requestJson<BackendStocktakeSession>(
+    `/api/stocktake/sessions/${sessionId}/revert`,
+    {
+      method: "POST",
+    },
+  );
+  return mapStocktakeSession(response);
+}
+
+export async function deleteStocktakeSession(sessionId: string): Promise<void> {
+  await requestJson<void>(`/api/stocktake/sessions/${sessionId}`, {
+    method: "DELETE",
+  });
+}
+
 // ---------- Warranty Claims ----------
 
 export async function fetchWarrantyClaims(
@@ -1704,7 +1720,7 @@ export async function fetchWarrantyClaims(
 
 export async function createWarrantyClaim(data: {
   serial_number_id: string;
-  claim_date: string;
+  claim_date?: string;
   resolution_notes?: string;
 }): Promise<WarrantyClaim> {
   const response = await requestJson<BackendWarrantyClaim>("/api/warranty-claims", {

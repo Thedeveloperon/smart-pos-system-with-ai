@@ -103,46 +103,48 @@ export default function InventoryManagerDashboard() {
               </div>
             </div>
 
-            <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ModuleTab)}>
-              <TabsList className="inline-flex h-11 w-full gap-1 rounded-xl bg-white/10 p-1 text-pos-header-foreground shadow-inner md:w-auto">
-                <TabsTrigger
-                  value="products"
-                  className="rounded-lg px-4 py-2 text-sm font-semibold text-pos-header-foreground/80 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
-                >
-                  Products
-                </TabsTrigger>
-                <TabsTrigger
-                  value="customers"
-                  className="rounded-lg px-4 py-2 text-sm font-semibold text-pos-header-foreground/80 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
-                >
-                  Customers
-                </TabsTrigger>
-                <TabsTrigger
-                  value="inventory"
-                  className="rounded-lg px-4 py-2 text-sm font-semibold text-pos-header-foreground/80 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
-                >
-                  Inventory
-                </TabsTrigger>
-                <TabsTrigger
-                  value="purchases"
-                  className="rounded-lg px-4 py-2 text-sm font-semibold text-pos-header-foreground/80 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
-                >
-                  Purchases
-                </TabsTrigger>
-                <TabsTrigger
-                  value="reports"
-                  className="rounded-lg px-4 py-2 text-sm font-semibold text-pos-header-foreground/80 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
-                >
-                  Reports
-                </TabsTrigger>
-                <TabsTrigger
-                  value="manager"
-                  className="rounded-lg px-4 py-2 text-sm font-semibold text-pos-header-foreground/80 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
-                >
-                  Manager
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ModuleTab)}>
+                <TabsList className="inline-flex h-11 w-full gap-1 rounded-xl bg-white/10 p-1 text-pos-header-foreground shadow-inner md:w-auto">
+                  <TabsTrigger
+                    value="products"
+                    className="rounded-lg px-4 py-2 text-sm font-semibold text-pos-header-foreground/80 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+                  >
+                    Products
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="customers"
+                    className="rounded-lg px-4 py-2 text-sm font-semibold text-pos-header-foreground/80 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+                  >
+                    Customers
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="inventory"
+                    className="rounded-lg px-4 py-2 text-sm font-semibold text-pos-header-foreground/80 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+                  >
+                    Inventory
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="purchases"
+                    className="rounded-lg px-4 py-2 text-sm font-semibold text-pos-header-foreground/80 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+                  >
+                    Purchases
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="reports"
+                    className="rounded-lg px-4 py-2 text-sm font-semibold text-pos-header-foreground/80 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+                  >
+                    Reports
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="manager"
+                    className="rounded-lg px-4 py-2 text-sm font-semibold text-pos-header-foreground/80 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+                  >
+                    Product Manager
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
           </div>
         </div>
       </header>

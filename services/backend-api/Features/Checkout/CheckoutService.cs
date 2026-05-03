@@ -110,6 +110,17 @@ public sealed class CheckoutService(
 
             sale.CreatedByUserId ??= createdByUserId;
             sale.CashShortAmount = request.CustomPayoutUsed ? request.CashShortAmount : 0m;
+
+            if (request.Items.Count > 0)
+            {
+                var cart = await BuildEditableHeldCartAsync(
+                    sale,
+                    request.Items,
+                    request.DiscountPercent,
+                    request.Role,
+                    cancellationToken);
+                ApplyCartToHeldSale(sale, cart, requestedSerialBySaleItemId);
+            }
         }
         else
         {
@@ -198,11 +209,6 @@ public sealed class CheckoutService(
             .Where(x => productIds.Contains(x.Id))
             .ToDictionaryAsync(x => x.Id, cancellationToken);
         var reservedSerialIds = requestedSerialBySaleItemId.Values.ToHashSet();
-        if (request.SaleId.HasValue && sale.Items.Any(item => loadedProducts[item.ProductId].IsSerialTracked))
-        {
-            throw new InvalidOperationException(
-                "Held bills cannot contain serial-tracked items. Add the item again and validate its serial number.");
-        }
 
         foreach (var saleItem in sale.Items)
         {
@@ -714,6 +720,286 @@ public sealed class CheckoutService(
         };
     }
 
+    private async Task<CartComputation> BuildEditableHeldCartAsync(
+        Sale sale,
+        IReadOnlyCollection<CartItemRequest> requestItems,
+        decimal discountPercent,
+        string role,
+        CancellationToken cancellationToken)
+    {
+        if (requestItems.Count == 0)
+        {
+            throw new InvalidOperationException("Cart cannot be empty.");
+        }
+
+        var normalizedRole = role.Trim().ToLowerInvariant();
+        var maxDiscount = GetDiscountLimitForRole(normalizedRole);
+        if (discountPercent < 0m || discountPercent > maxDiscount)
+        {
+            throw new InvalidOperationException($"Discount exceeds role limit ({maxDiscount}%).");
+        }
+
+        if (requestItems.Any(x => x.Quantity <= 0m))
+        {
+            throw new InvalidOperationException("All quantities must be greater than zero.");
+        }
+
+        var duplicateSaleItemIds = requestItems
+            .Where(x => x.SaleItemId.HasValue)
+            .Select(x => x.SaleItemId!.Value)
+            .GroupBy(x => x)
+            .Where(x => x.Count() > 1)
+            .Select(x => x.Key)
+            .ToList();
+        if (duplicateSaleItemIds.Count > 0)
+        {
+            throw new InvalidOperationException("The same held sale item cannot be added more than once.");
+        }
+
+        var existingSaleItemsById = sale.Items.ToDictionary(x => x.Id);
+        foreach (var requestItem in requestItems.Where(x => x.SaleItemId.HasValue))
+        {
+            if (!existingSaleItemsById.TryGetValue(requestItem.SaleItemId!.Value, out var existingSaleItem))
+            {
+                throw new InvalidOperationException("Some held sale items were not found.");
+            }
+
+            if (existingSaleItem.ProductId != requestItem.ProductId)
+            {
+                throw new InvalidOperationException("Held sale items cannot be reassigned to a different product.");
+            }
+        }
+
+        var serialSpecificItems = requestItems
+            .Where(x => x.SerialNumberId.HasValue)
+            .ToList();
+        if (serialSpecificItems.Any(x => x.Quantity != 1m))
+        {
+            throw new InvalidOperationException("Serial-selected items must use a quantity of 1.");
+        }
+
+        var duplicateSerialIds = serialSpecificItems
+            .Select(x => x.SerialNumberId!.Value)
+            .GroupBy(x => x)
+            .Where(x => x.Count() > 1)
+            .Select(x => x.Key)
+            .ToList();
+        if (duplicateSerialIds.Count > 0)
+        {
+            throw new InvalidOperationException("The same serial number cannot be added to the cart more than once.");
+        }
+
+        var productIds = requestItems
+            .Select(x => x.ProductId)
+            .Distinct()
+            .ToArray();
+        var products = await dbContext.Products
+            .AsNoTracking()
+            .Where(x => productIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+        if (products.Count != productIds.Length)
+        {
+            throw new InvalidOperationException("Some products are missing.");
+        }
+
+        if (requestItems.Any(x => !x.SaleItemId.HasValue && !products[x.ProductId].IsActive))
+        {
+            throw new InvalidOperationException("Some products are missing or inactive.");
+        }
+
+        Dictionary<Guid, SerialNumber> serialsById;
+        if (serialSpecificItems.Count == 0)
+        {
+            serialsById = [];
+        }
+        else
+        {
+            var serialIds = serialSpecificItems
+                .Select(x => x.SerialNumberId!.Value)
+                .Distinct()
+                .ToArray();
+
+            serialsById = await dbContext.SerialNumbers
+                .AsNoTracking()
+                .Where(x => serialIds.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+            if (serialsById.Count != serialIds.Length)
+            {
+                throw new InvalidOperationException("Some selected serial numbers were not found.");
+            }
+        }
+
+        var cartLines = new List<CartLine>();
+        decimal subtotal = 0m;
+
+        foreach (var item in requestItems)
+        {
+            var product = products[item.ProductId];
+            var existingSaleItem = item.SaleItemId.HasValue
+                ? existingSaleItemsById[item.SaleItemId.Value]
+                : null;
+
+            if (item.SerialNumberId.HasValue)
+            {
+                if (!product.IsSerialTracked)
+                {
+                    throw new InvalidOperationException($"'{product.Name}' is not configured for serial tracking.");
+                }
+
+                var serial = serialsById[item.SerialNumberId.Value];
+                if (serial.ProductId != product.Id)
+                {
+                    throw new InvalidOperationException($"Serial number '{serial.SerialValue}' does not belong to '{product.Name}'.");
+                }
+
+                if (serial.Status != SerialNumberStatus.Available)
+                {
+                    throw new InvalidOperationException($"Serial number '{serial.SerialValue}' is not available for sale.");
+                }
+
+                var unitPrice = existingSaleItem?.UnitPrice ?? product.UnitPrice;
+                var lineGross = decimal.Round(unitPrice * item.Quantity, 2, MidpointRounding.AwayFromZero);
+                subtotal += lineGross;
+
+                cartLines.Add(new CartLine
+                {
+                    ExistingSaleItemId = existingSaleItem?.Id,
+                    Product = product,
+                    ProductName = existingSaleItem?.ProductNameSnapshot ?? product.Name,
+                    Quantity = item.Quantity,
+                    UnitPrice = unitPrice,
+                    LineGross = lineGross,
+                    SerialNumberId = serial.Id,
+                    SerialValue = serial.SerialValue
+                });
+
+                continue;
+            }
+
+            if (product.IsSerialTracked)
+            {
+                throw new InvalidOperationException(
+                    $"'{product.Name}' requires a validated serial number before it can be added to the cart.");
+            }
+
+            var genericUnitPrice = existingSaleItem?.UnitPrice ?? product.UnitPrice;
+            var genericLineGross = decimal.Round(genericUnitPrice * item.Quantity, 2, MidpointRounding.AwayFromZero);
+            subtotal += genericLineGross;
+
+            cartLines.Add(new CartLine
+            {
+                ExistingSaleItemId = existingSaleItem?.Id,
+                Product = product,
+                ProductName = existingSaleItem?.ProductNameSnapshot ?? product.Name,
+                Quantity = item.Quantity,
+                UnitPrice = genericUnitPrice,
+                LineGross = genericLineGross
+            });
+        }
+
+        var discountTotal = decimal.Round(subtotal * (discountPercent / 100m), 2, MidpointRounding.AwayFromZero);
+        decimal allocatedDiscount = 0m;
+        for (var i = 0; i < cartLines.Count; i++)
+        {
+            var line = cartLines[i];
+            decimal lineDiscount;
+            if (i == cartLines.Count - 1)
+            {
+                lineDiscount = discountTotal - allocatedDiscount;
+            }
+            else
+            {
+                lineDiscount = decimal.Round(line.LineGross * (discountPercent / 100m), 2, MidpointRounding.AwayFromZero);
+                allocatedDiscount += lineDiscount;
+            }
+
+            line.DiscountAmount = lineDiscount;
+            line.LineTotal = line.LineGross - lineDiscount;
+        }
+
+        var grandTotal = decimal.Round(subtotal - discountTotal, 2, MidpointRounding.AwayFromZero);
+
+        return new CartComputation
+        {
+            Items = cartLines,
+            StoreId = ResolveStoreId(cartLines.Select(x => x.Product.StoreId), "Cart"),
+            Subtotal = subtotal,
+            DiscountTotal = discountTotal,
+            GrandTotal = grandTotal
+        };
+    }
+
+    private void ApplyCartToHeldSale(
+        Sale sale,
+        CartComputation cart,
+        IDictionary<Guid, Guid> requestedSerialBySaleItemId)
+    {
+        var keptSaleItemIds = cart.Items
+            .Where(x => x.ExistingSaleItemId.HasValue)
+            .Select(x => x.ExistingSaleItemId!.Value)
+            .ToHashSet();
+        var saleItemsToRemove = sale.Items
+            .Where(x => !keptSaleItemIds.Contains(x.Id))
+            .ToList();
+
+        foreach (var saleItem in saleItemsToRemove)
+        {
+            sale.Items.Remove(saleItem);
+        }
+
+        var remainingSaleItemsById = sale.Items.ToDictionary(x => x.Id);
+
+        foreach (var line in cart.Items)
+        {
+            if (line.ExistingSaleItemId.HasValue)
+            {
+                var saleItem = remainingSaleItemsById[line.ExistingSaleItemId.Value];
+                saleItem.Quantity = line.Quantity;
+                saleItem.UnitPrice = line.UnitPrice;
+                saleItem.ProductNameSnapshot = line.ProductName;
+                saleItem.DiscountAmount = line.DiscountAmount;
+                saleItem.TaxAmount = 0m;
+                saleItem.LineTotal = line.LineTotal;
+
+                if (line.SerialNumberId.HasValue)
+                {
+                    requestedSerialBySaleItemId[saleItem.Id] = line.SerialNumberId.Value;
+                }
+
+                continue;
+            }
+
+            var saleItemToAdd = new SaleItem
+            {
+                SaleId = sale.Id,
+                ProductId = line.Product.Id,
+                ProductNameSnapshot = line.ProductName,
+                UnitPrice = line.UnitPrice,
+                Quantity = line.Quantity,
+                DiscountAmount = line.DiscountAmount,
+                TaxAmount = 0m,
+                LineTotal = line.LineTotal,
+                Sale = sale,
+                Product = null!
+            };
+
+            dbContext.SaleItems.Add(saleItemToAdd);
+
+            if (line.SerialNumberId.HasValue)
+            {
+                requestedSerialBySaleItemId[saleItemToAdd.Id] = line.SerialNumberId.Value;
+            }
+        }
+
+        sale.StoreId = cart.StoreId;
+        sale.Subtotal = cart.Subtotal;
+        sale.DiscountTotal = cart.DiscountTotal;
+        sale.TaxTotal = 0m;
+        sale.GrandTotal = cart.GrandTotal;
+    }
+
     private async Task<Dictionary<Guid, Guid?>> LoadProductStoreIdsAsync(
         IEnumerable<Guid> productIds,
         CancellationToken cancellationToken)
@@ -1050,7 +1336,9 @@ public sealed class CheckoutService(
 
     private sealed class CartLine
     {
+        public Guid? ExistingSaleItemId { get; set; }
         public required Product Product { get; set; }
+        public string ProductName { get; set; } = string.Empty;
         public decimal Quantity { get; set; }
         public decimal UnitPrice { get; set; }
         public decimal LineGross { get; set; }

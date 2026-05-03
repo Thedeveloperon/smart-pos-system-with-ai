@@ -13,6 +13,9 @@ public sealed class CartItemRequest
 
     [JsonPropertyName("serial_number_id")]
     public Guid? SerialNumberId { get; set; }
+
+    [JsonPropertyName("sale_item_id")]
+    public Guid? SaleItemId { get; set; }
 }
 
 public sealed class PaymentRequest

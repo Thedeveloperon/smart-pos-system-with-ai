@@ -234,6 +234,14 @@ public static class WarrantyClaimEndpoints
                 return Results.BadRequest(new { message = "Invalid warranty claim status transition." });
             }
 
+            var now = DateTimeOffset.UtcNow;
+            var isTransitionToInRepair =
+                claim.Status != WarrantyClaimStatus.InRepair &&
+                request.Status == WarrantyClaimStatus.InRepair;
+            var isTransitionToResolved =
+                claim.Status != WarrantyClaimStatus.Resolved &&
+                request.Status == WarrantyClaimStatus.Resolved;
+
             claim.Status = request.Status;
             if (request.ResolutionNotes is not null)
             {
@@ -249,6 +257,10 @@ public static class WarrantyClaimEndpoints
             {
                 claim.HandoverDate = request.HandoverDate;
             }
+            else if (isTransitionToInRepair && claim.HandoverDate is null)
+            {
+                claim.HandoverDate = now;
+            }
 
             if (request.PickupPersonName is not null)
             {
@@ -259,12 +271,21 @@ public static class WarrantyClaimEndpoints
             {
                 claim.ReceivedBackDate = request.ReceivedBackDate;
             }
+            else if (request.ReceivedBackPersonName is not null && claim.ReceivedBackDate is null)
+            {
+                claim.ReceivedBackDate = now;
+            }
+            else if (isTransitionToResolved && claim.ReceivedBackDate is null)
+            {
+                claim.ReceivedBackDate = now;
+            }
+
             if (request.ReceivedBackPersonName is not null)
             {
                 claim.ReceivedBackPersonName = request.ReceivedBackPersonName;
             }
 
-            claim.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            claim.UpdatedAtUtc = now;
 
             if (request.Status is WarrantyClaimStatus.Resolved or WarrantyClaimStatus.Rejected)
             {

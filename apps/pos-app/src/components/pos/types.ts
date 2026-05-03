@@ -26,6 +26,7 @@ export interface SelectedSerial {
 
 export interface CartItem {
   lineId?: string;
+  saleItemId?: string;
   product: Product;
   quantity: number;
   selectedSerial?: SelectedSerial;

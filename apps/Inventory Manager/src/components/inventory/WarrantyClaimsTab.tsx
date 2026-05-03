@@ -48,7 +48,6 @@ export default function WarrantyClaimsTab() {
   const [serialValue, setSerialValue] = useState("");
   const [serialId, setSerialId] = useState<string | null>(null);
   const [serialError, setSerialError] = useState<string | null>(null);
-  const [claimDate, setClaimDate] = useState(new Date().toISOString().slice(0, 10));
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -121,7 +120,6 @@ export default function WarrantyClaimsTab() {
     try {
       await createWarrantyClaim({
         serial_number_id: serialId,
-        claim_date: claimDate,
         resolution_notes: notes || undefined,
       });
       setOpen(false);
@@ -138,7 +136,6 @@ export default function WarrantyClaimsTab() {
 
   const handleHandover = async (data: {
     supplier_name?: string;
-    handover_date?: string;
     pickup_person_name?: string;
   }) => {
     if (!active) return;
@@ -151,7 +148,6 @@ export default function WarrantyClaimsTab() {
   };
 
   const handleResolve = async (data: {
-    received_back_date?: string;
     resolution_notes?: string;
   }) => {
     if (!active) return;
@@ -257,14 +253,9 @@ export default function WarrantyClaimsTab() {
                     {serialError && <p className="text-xs text-destructive">{serialError}</p>}
                     {serialId && <p className="text-xs text-success">Serial validated</p>}
                   </div>
-                  <div className="grid gap-1">
-                    <Label>Claim date</Label>
-                    <Input
-                      type="date"
-                      value={claimDate}
-                      onChange={(e) => setClaimDate(e.target.value)}
-                    />
-                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    The claim date and time are recorded automatically when you create the claim.
+                  </p>
                   <div className="grid gap-1">
                     <Label>Notes (optional)</Label>
                     <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />

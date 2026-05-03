@@ -331,6 +331,128 @@ public static class StocktakeEndpoints
         .WithName("CompleteStocktakeSession")
         .WithOpenApi();
 
+        group.MapPost("/sessions/{sessionId:guid}/revert", async (
+            Guid sessionId,
+            ClaimsPrincipal user,
+            SmartPosDbContext dbContext,
+            CancellationToken cancellationToken) =>
+        {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
+            var session = await dbContext.StocktakeSessions
+                .Include(x => x.Items)
+                .ThenInclude(x => x.Product)
+                .ThenInclude(x => x.Inventory)
+                .FirstOrDefaultAsync(x => x.Id == sessionId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
+            if (session is null)
+            {
+                return Results.NotFound(new { message = "Stocktake session not found." });
+            }
+
+            if (session.Status != StocktakeStatus.Completed)
+            {
+                return Results.BadRequest(new { message = "Only completed sessions can be reverted." });
+            }
+
+            if (!session.CompletedAtUtc.HasValue)
+            {
+                return Results.Conflict(new { message = "This stocktake cannot be reverted because it has no completion timestamp." });
+            }
+
+            var productIds = session.Items.Select(x => x.ProductId).Distinct().ToHashSet();
+            var stockMovements = await dbContext.StockMovements
+                .AsNoTracking()
+                .Select(movement => new
+                {
+                    movement.ProductId,
+                    movement.StoreId,
+                    movement.CreatedAtUtc
+                })
+                .ToListAsync(cancellationToken);
+            var inventoryChangedSinceCompletion = stockMovements.Any(movement =>
+                productIds.Contains(movement.ProductId) &&
+                movement.CreatedAtUtc > session.CompletedAtUtc.Value &&
+                (!session.StoreId.HasValue || movement.StoreId == session.StoreId.Value));
+            if (inventoryChangedSinceCompletion)
+            {
+                return Results.Conflict(new { message = "This stocktake can no longer be reverted because stock changed after it was completed." });
+            }
+
+            foreach (var item in session.Items)
+            {
+                var completedQuantity = item.CountedQuantity ?? item.SystemQuantity;
+                var currentQuantity = item.Product.Inventory?.QuantityOnHand;
+                if (currentQuantity != completedQuantity)
+                {
+                    return Results.Conflict(new { message = "This stocktake can no longer be reverted because inventory no longer matches the completed counts." });
+                }
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            foreach (var item in session.Items)
+            {
+                var completedQuantity = item.CountedQuantity ?? item.SystemQuantity;
+                var revertedQuantity = item.SystemQuantity;
+                var reversal = decimal.Round(revertedQuantity - completedQuantity, 3, MidpointRounding.AwayFromZero);
+
+                var inventory = item.Product.Inventory;
+                if (inventory is null)
+                {
+                    inventory = new InventoryRecord
+                    {
+                        ProductId = item.ProductId,
+                        StoreId = session.StoreId,
+                        QuantityOnHand = 0m,
+                        InitialStockQuantity = 0m,
+                        ReorderLevel = 0m,
+                        SafetyStock = 0m,
+                        TargetStockLevel = 0m,
+                        AllowNegativeStock = true,
+                        Product = item.Product,
+                        UpdatedAtUtc = now
+                    };
+                    dbContext.Inventory.Add(inventory);
+                    item.Product.Inventory = inventory;
+                }
+
+                inventory.QuantityOnHand = revertedQuantity;
+                inventory.UpdatedAtUtc = now;
+
+                if (reversal != 0m)
+                {
+                    dbContext.StockMovements.Add(new StockMovement
+                    {
+                        StoreId = session.StoreId,
+                        ProductId = item.ProductId,
+                        MovementType = StockMovementType.StocktakeReconciliation,
+                        QuantityBefore = completedQuantity,
+                        QuantityChange = reversal,
+                        QuantityAfter = revertedQuantity,
+                        ReferenceType = StockMovementRef.Stocktake,
+                        ReferenceId = session.Id,
+                        Reason = "stocktake_reversal",
+                        CreatedAtUtc = now,
+                        Product = item.Product,
+                        CreatedByUserId = session.CreatedByUserId
+                    });
+                }
+            }
+
+            session.Status = StocktakeStatus.Reverted;
+            session.UpdatedAtUtc = now;
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                return Results.Conflict(new { message = "Failed to save stocktake changes. Refresh and try again." });
+            }
+
+            return Results.Ok(ToSessionResponse(session));
+        })
+        .WithName("RevertStocktakeSession")
+        .WithOpenApi();
+
         group.MapDelete("/sessions/{sessionId:guid}", async (
             Guid sessionId,
             ClaimsPrincipal user,
@@ -346,9 +468,9 @@ public static class StocktakeEndpoints
                 return Results.NotFound(new { message = "Stocktake session not found." });
             }
 
-            if (session.Status != StocktakeStatus.Draft)
+            if (session.Status is not (StocktakeStatus.Draft or StocktakeStatus.InProgress))
             {
-                return Results.BadRequest(new { message = "Only draft sessions can be deleted." });
+                return Results.BadRequest(new { message = "Only draft or in-progress sessions can be deleted." });
             }
 
             dbContext.StocktakeItems.RemoveRange(session.Items);

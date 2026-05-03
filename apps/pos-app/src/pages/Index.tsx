@@ -18,6 +18,7 @@ import TodaySalesDrawer from "@/components/pos/TodaySalesDrawer";
 import MobileTabBar from "@/components/pos/MobileTabBar";
 import ShopProfileDialog from "@/components/pos/ShopProfileDialog";
 import RefundSaleDialog from "@/components/pos/RefundSaleDialog";
+import { mergeHeldCartWithCurrentProducts } from "@/components/pos/heldCart";
 import { CashSessionProvider, useCashSession } from "@/components/pos/cash-session/CashSessionContext";
 import OpeningCashDialog from "@/components/pos/cash-session/OpeningCashDialog";
 import ClosingCashDialog from "@/components/pos/cash-session/ClosingCashDialog";
@@ -559,8 +560,9 @@ const IndexInner = () => {
   const handleResumeBill = useCallback(
     async (billId: string) => {
       try {
-        const bill = await fetchHeldBill(billId);
-        setCartItems(bill.items);
+        const [bill, currentProducts] = await Promise.all([fetchHeldBill(billId), fetchProducts()]);
+        setProducts(currentProducts);
+        setCartItems(mergeHeldCartWithCurrentProducts(bill.items, currentProducts));
         setActiveHeldSaleId(bill.id);
         setMobileTab("cart");
         toast.success("Bill resumed");

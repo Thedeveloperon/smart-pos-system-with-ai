@@ -190,6 +190,101 @@ public sealed class CheckoutRefundFlowTests(CustomWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task CompleteHeldSale_WithEditedItems_ShouldPersistCartChanges()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var productSearch = await TestJson.ReadObjectAsync(
+            await client.GetAsync("/api/products/search"));
+        var availableProducts = productSearch["items"]?
+            .AsArray()
+            .OfType<JsonObject>()
+            .Where(item => !(item["is_serial_tracked"]?.GetValue<bool>() ?? false))
+            .Take(2)
+            .ToArray()
+            ?? throw new InvalidOperationException("Product search items were missing.");
+
+        Assert.True(availableProducts.Length >= 2, "Expected at least two non-serial products for the held-bill edit test.");
+
+        var firstProduct = availableProducts[0];
+        var secondProduct = availableProducts[1];
+        var firstProductId = Guid.Parse(TestJson.GetString(firstProduct, "id"));
+        var secondProductId = Guid.Parse(TestJson.GetString(secondProduct, "id"));
+        var secondProductUnitPrice = TestJson.GetDecimal(secondProduct, "unitPrice");
+
+        var holdSale = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/checkout/hold", new
+            {
+                items = new[]
+                {
+                    new
+                    {
+                        product_id = firstProductId,
+                        quantity = 1m
+                    }
+                },
+                discount_percent = 0m,
+                role = "cashier"
+            }));
+
+        var saleId = Guid.Parse(TestJson.GetString(holdSale, "sale_id"));
+        var heldLine = FirstObjectFromArray(holdSale, "items");
+        var heldSaleItemId = Guid.Parse(TestJson.GetString(heldLine, "sale_item_id"));
+        var heldUnitPrice = TestJson.GetDecimal(heldLine, "unit_price");
+        var expectedGrandTotal = (heldUnitPrice * 3m) + secondProductUnitPrice;
+
+        var completeSale = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/checkout/complete", new
+            {
+                sale_id = saleId,
+                items = new object[]
+                {
+                    new
+                    {
+                        sale_item_id = heldSaleItemId,
+                        product_id = firstProductId,
+                        quantity = 3m
+                    },
+                    new
+                    {
+                        product_id = secondProductId,
+                        quantity = 1m
+                    }
+                },
+                discount_percent = 0m,
+                role = "cashier",
+                payments = new[]
+                {
+                    new
+                    {
+                        method = "cash",
+                        amount = expectedGrandTotal,
+                        reference_number = (string?)null
+                    }
+                }
+            }));
+
+        Assert.Equal("completed", TestJson.GetString(completeSale, "status"));
+        Assert.Equal(expectedGrandTotal, TestJson.GetDecimal(completeSale, "grand_total"));
+
+        var completedItems = completeSale["items"]?
+            .AsArray()
+            .OfType<JsonObject>()
+            .ToArray()
+            ?? throw new InvalidOperationException("Completed sale items were missing.");
+        Assert.Equal(2, completedItems.Length);
+
+        var editedHeldLine = completedItems.Single(item => Guid.Parse(TestJson.GetString(item, "product_id")) == firstProductId);
+        Assert.Equal(heldSaleItemId, Guid.Parse(TestJson.GetString(editedHeldLine, "sale_item_id")));
+        Assert.Equal(3m, TestJson.GetDecimal(editedHeldLine, "quantity"));
+        Assert.Equal(heldUnitPrice, TestJson.GetDecimal(editedHeldLine, "unit_price"));
+
+        var addedLine = completedItems.Single(item => Guid.Parse(TestJson.GetString(item, "product_id")) == secondProductId);
+        Assert.Equal(1m, TestJson.GetDecimal(addedLine, "quantity"));
+        Assert.Equal(secondProductUnitPrice, TestJson.GetDecimal(addedLine, "unit_price"));
+    }
+
+    [Fact]
     public async Task CompleteSale_WithCustomPayoutShouldPersistCashChangeDifference()
     {
         await TestAuth.SignInAsManagerAsync(client);

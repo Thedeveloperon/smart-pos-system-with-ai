@@ -4,8 +4,10 @@ import StocktakeTab from "./StocktakeTab";
 import {
   completeStocktakeSession,
   createStocktakeSession,
+  deleteStocktakeSession,
   fetchStocktakeSessions,
   getStocktakeSession,
+  revertStocktakeSession,
   startStocktakeSession,
   updateStocktakeItem,
   type StocktakeItem,
@@ -19,8 +21,10 @@ vi.mock("@/lib/api", async () => {
     ...actual,
     completeStocktakeSession: vi.fn(),
     createStocktakeSession: vi.fn(),
+    deleteStocktakeSession: vi.fn(),
     fetchStocktakeSessions: vi.fn(),
     getStocktakeSession: vi.fn(),
+    revertStocktakeSession: vi.fn(),
     startStocktakeSession: vi.fn(),
     updateStocktakeItem: vi.fn(),
   };
@@ -74,6 +78,11 @@ describe("StocktakeTab", () => {
     vi.mocked(createStocktakeSession).mockResolvedValue(inProgressSession);
     vi.mocked(startStocktakeSession).mockResolvedValue(inProgressSession);
     vi.mocked(completeStocktakeSession).mockResolvedValue(completedSession);
+    vi.mocked(deleteStocktakeSession).mockResolvedValue();
+    vi.mocked(revertStocktakeSession).mockResolvedValue({
+      ...completedSession,
+      status: "Reverted",
+    });
   });
 
   it("persists draft counts before completing the session", async () => {
@@ -108,6 +117,41 @@ describe("StocktakeTab", () => {
 
     await waitFor(() => {
       expect(completeStocktakeSession).toHaveBeenCalledWith("session-1");
+    });
+  });
+
+  it("removes an in-progress session when cancel is confirmed", async () => {
+    render(<StocktakeTab />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Enter counts" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel session" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Remove session" }));
+
+    await waitFor(() => {
+      expect(deleteStocktakeSession).toHaveBeenCalledWith("session-1");
+    });
+  });
+
+  it("reverts a completed session from the sessions list", async () => {
+    vi.mocked(fetchStocktakeSessions).mockResolvedValue([completedSession]);
+    vi.mocked(getStocktakeSession).mockResolvedValue({
+      session: completedSession,
+      items: [
+        {
+          ...sessionItem,
+          counted_quantity: 10,
+          variance_quantity: 2,
+        },
+      ],
+    });
+
+    render(<StocktakeTab />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Revert" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Revert session" }));
+
+    await waitFor(() => {
+      expect(revertStocktakeSession).toHaveBeenCalledWith("session-1");
     });
   });
 });

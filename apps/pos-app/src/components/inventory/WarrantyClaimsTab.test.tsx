@@ -135,8 +135,101 @@ describe("WarrantyClaimsTab", () => {
       received_back_person_name?: string;
     };
     expect(receiveBackBody.status).toBe(2);
-    expect(receiveBackBody.received_back_date).toBeDefined();
+    expect(receiveBackBody).not.toHaveProperty("received_back_date");
     expect(receiveBackBody.received_back_person_name).toBe("Nimali Silva");
 
+  });
+
+  it("creates claims without sending a manual claim timestamp", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+
+      if (url.includes("/api/serials/lookup")) {
+        return jsonResponse({
+          serial: {
+            id: "serial-1",
+            serial_value: "SN-001",
+            status: "Sold",
+          },
+          product: {
+            id: "product-1",
+            name: "iPhone 15 Pro",
+          },
+        });
+      }
+
+      if (url.includes("/api/products/product-1/serials")) {
+        return jsonResponse({
+          items: [
+            {
+              id: "serial-1",
+              serial_value: "SN-001",
+            },
+          ],
+        });
+      }
+
+      if (url.endsWith("/api/warranty-claims") && init?.method === "POST") {
+        const body = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
+        return jsonResponse({
+          id: "claim-new",
+          serial_number_id: body.serial_number_id,
+          serial_value: "SN-001",
+          product_name: "iPhone 15 Pro",
+          claim_date: "2026-05-03T08:00:00.000Z",
+          status: 1,
+          resolution_notes: body.resolution_notes ?? null,
+          created_at: "2026-05-03T08:00:00.000Z",
+        });
+      }
+
+      if (url.includes("/api/warranty-claims")) {
+        return jsonResponse({ items: [] });
+      }
+
+      return jsonResponse({ items: [] });
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<WarrantyClaimsTab />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "New claim" }));
+    fireEvent.change(screen.getByPlaceholderText("SN-XXX-001"), { target: { value: "SN-001" } });
+    fireEvent.click(screen.getByRole("button", { name: "Validate" }));
+
+    await screen.findByText("Serial validated");
+    expect(screen.queryByLabelText("Claim date")).not.toBeInTheDocument();
+
+    const [, notesField] = screen.getAllByRole("textbox");
+    fireEvent.change(notesField, {
+      target: { value: "Battery issue" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create claim" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining("/api/warranty-claims"),
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
+    const createCall = fetchMock.mock.calls.find(
+      ([requestUrl, requestInit]) =>
+        requestUrl.toString().endsWith("/api/warranty-claims") &&
+        requestInit?.method === "POST",
+    );
+    expect(createCall).toBeDefined();
+
+    const [, createInit] = createCall ?? [];
+    const createBody = JSON.parse(String(createInit?.body ?? "{}")) as {
+      serial_number_id?: string;
+      claim_date?: string;
+      resolution_notes?: string;
+    };
+
+    expect(createBody.serial_number_id).toBe("serial-1");
+    expect(createBody).not.toHaveProperty("claim_date");
+    expect(createBody.resolution_notes).toBe("Battery issue");
   });
 });

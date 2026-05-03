@@ -648,7 +648,7 @@ export type ExpiringBatch = {
 export type StocktakeSession = {
   id: string;
   store_id: string;
-  status: "Draft" | "InProgress" | "Completed";
+  status: "Draft" | "InProgress" | "Completed" | "Reverted";
   started_at: string;
   completed_at?: string;
   created_by_user_id?: string;
@@ -1881,7 +1881,7 @@ export type SyncEventsRequestOptions = {
 
 type CreateSaleRequest = {
   sale_id?: string;
-  items?: { product_id: string; quantity: number; serial_number_id?: string }[];
+  items?: { product_id: string; quantity: number; serial_number_id?: string; sale_item_id?: string }[];
   discount_percent?: number;
   role: string;
   payments: { method: string; amount: number; reference_number?: string | null }[];
@@ -2618,6 +2618,7 @@ function mapCatalogProduct(item: BackendProductCatalogItem): Product {
 
 function mapSaleItems(items: BackendSaleItem[]): CartItem[] {
   return items.map((item) => ({
+    saleItemId: item.sale_item_id,
     lineId: item.sale_item_id,
     product: {
       id: item.product_id,
@@ -3805,6 +3806,19 @@ export async function completeStocktakeSession(sessionId: string): Promise<Stock
   return mapStocktakeSession(response);
 }
 
+export async function revertStocktakeSession(sessionId: string): Promise<StocktakeSession> {
+  const response = await request<BackendStocktakeSession>(`/api/stocktake/sessions/${sessionId}/revert`, {
+    method: "POST",
+  });
+  return mapStocktakeSession(response);
+}
+
+export async function deleteStocktakeSession(sessionId: string): Promise<void> {
+  await request<void>(`/api/stocktake/sessions/${sessionId}`, {
+    method: "DELETE",
+  });
+}
+
 export async function fetchWarrantyClaims(
   params: {
     status?: string;
@@ -3827,7 +3841,7 @@ export async function fetchWarrantyClaims(
 
 export async function createWarrantyClaim(data: {
   serial_number_id: string;
-  claim_date: string;
+  claim_date?: string;
   resolution_notes?: string;
 }): Promise<WarrantyClaim> {
   const response = await request<BackendWarrantyClaim>("/api/warranty-claims", {
@@ -4610,13 +4624,12 @@ export async function completeSale(
 ) {
   const payload: CreateSaleRequest = {
     sale_id: saleId,
-    items: saleId
-      ? []
-      : items.map((item) => ({
-          product_id: item.product.id,
-          quantity: item.quantity,
-          serial_number_id: item.selectedSerial?.id,
-        })),
+    items: items.map((item) => ({
+      product_id: item.product.id,
+      quantity: item.quantity,
+      serial_number_id: item.selectedSerial?.id,
+      sale_item_id: item.saleItemId,
+    })),
     discount_percent: 0,
     role: toBackendRole(role),
     payments: [

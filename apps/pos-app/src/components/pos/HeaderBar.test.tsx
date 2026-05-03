@@ -66,7 +66,7 @@ describe("HeaderBar", () => {
       onInventoryManager,
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Inventory Manager" }));
+    fireEvent.click(screen.getByRole("button", { name: "POS Management" }));
 
     expect(onInventoryManager).toHaveBeenCalledTimes(1);
   });

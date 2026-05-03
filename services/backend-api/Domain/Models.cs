@@ -1285,7 +1285,8 @@ public enum StocktakeStatus
 {
     Draft = 1,
     InProgress = 2,
-    Completed = 3
+    Completed = 3,
+    Reverted = 4
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]

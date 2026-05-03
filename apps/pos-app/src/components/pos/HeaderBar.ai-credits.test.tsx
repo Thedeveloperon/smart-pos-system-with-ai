@@ -20,31 +20,15 @@ function renderHeaderBar(overrides: Partial<ComponentProps<typeof HeaderBar>> = 
   );
 }
 
-describe("HeaderBar AI credit badge", () => {
-  it("shows low-credit warning badges and top-up link", () => {
+describe("HeaderBar AI credit props", () => {
+  it("does not render AI credit indicators in the header navigation", () => {
     renderHeaderBar({
       aiCredits: 8,
       isAiCreditLow: true,
       cloudPortalUrl: "https://portal.smartpos.test",
     });
 
-    expect(screen.getByText("!")).toHaveClass("bg-amber-500");
-
-    const topUpLink = screen.getByRole("link", { name: "Top Up" });
-    expect(topUpLink).toHaveAttribute("href", "https://portal.smartpos.test/en/account");
-  });
-
-  it("keeps badges green and hides top-up link when credits are healthy", () => {
-    renderHeaderBar({
-      aiCredits: 120,
-      isAiCreditLow: false,
-      cloudPortalUrl: "https://portal.smartpos.test",
-    });
-
-    const numericBadges = screen.getAllByText("120");
-    expect(numericBadges[0]).toHaveClass("bg-emerald-500");
-    expect(screen.queryByText("!")).not.toBeInTheDocument();
-    expect(screen.queryByText("Low")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Low AI credits/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Top Up" })).not.toBeInTheDocument();
   });
 
@@ -76,7 +60,7 @@ describe("HeaderBar AI credit badge", () => {
       onInventoryManager,
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Inventory Manager" }));
+    fireEvent.click(screen.getByRole("button", { name: "POS Management" }));
 
     expect(onInventoryManager).toHaveBeenCalledTimes(1);
   });

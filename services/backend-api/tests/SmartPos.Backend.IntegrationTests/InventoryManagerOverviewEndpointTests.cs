@@ -79,6 +79,86 @@ public sealed class InventoryManagerOverviewEndpointTests(CustomWebApplicationFa
     }
 
     [Fact]
+    public async Task DeleteStocktakeSession_ShouldAllowInProgressSessions()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var createdSession = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/stocktake/sessions", new { }));
+        var sessionId = TestJson.GetString(createdSession, "id");
+
+        await TestJson.ReadObjectAsync(
+            await client.PutAsync($"/api/stocktake/sessions/{sessionId}/start", null));
+
+        var deleteResponse = await client.DeleteAsync($"/api/stocktake/sessions/{sessionId}");
+        Assert.Equal(System.Net.HttpStatusCode.NoContent, deleteResponse.StatusCode);
+
+        var getResponse = await client.GetAsync($"/api/stocktake/sessions/{sessionId}");
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, getResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task RevertStocktakeSession_ShouldRestoreInventoryAndRecordReversalMovement()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var createdSession = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/stocktake/sessions", new { }));
+        var sessionId = TestJson.GetString(createdSession, "id");
+
+        await TestJson.ReadObjectAsync(
+            await client.PutAsync($"/api/stocktake/sessions/{sessionId}/start", null));
+
+        var sessionDetails = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/stocktake/sessions/{sessionId}"));
+        var firstItem = sessionDetails["items"]?.AsArray().OfType<JsonObject>().FirstOrDefault()
+            ?? throw new InvalidOperationException("Expected at least one stocktake item.");
+
+        var itemId = TestJson.GetString(firstItem, "id");
+        var productId = Guid.Parse(TestJson.GetString(firstItem, "product_id"));
+        var systemQuantity = TestJson.GetDecimal(firstItem, "system_quantity");
+        var countedQuantity = systemQuantity + 2m;
+        var expectedReversalQuantity = decimal.Round(systemQuantity - countedQuantity, 3, MidpointRounding.AwayFromZero);
+
+        await TestJson.ReadObjectAsync(
+            await client.PutAsJsonAsync(
+                $"/api/stocktake/sessions/{sessionId}/items/{itemId}",
+                new { counted_quantity = countedQuantity }));
+
+        await TestJson.ReadObjectAsync(
+            await client.PostAsync($"/api/stocktake/sessions/{sessionId}/complete", null));
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+            var inventoryQuantity = await dbContext.Inventory
+                .Where(x => x.ProductId == productId)
+                .Select(x => x.QuantityOnHand)
+                .SingleAsync();
+            Assert.Equal(countedQuantity, inventoryQuantity);
+        }
+
+        var revertedSession = await TestJson.ReadObjectAsync(
+            await client.PostAsync($"/api/stocktake/sessions/{sessionId}/revert", null));
+        Assert.Equal("Reverted", TestJson.GetString(revertedSession, "status"));
+
+        using var verificationScope = factory.Services.CreateScope();
+        var verificationDbContext = verificationScope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+        var revertedQuantity = await verificationDbContext.Inventory
+            .Where(x => x.ProductId == productId)
+            .Select(x => x.QuantityOnHand)
+            .SingleAsync();
+        Assert.Equal(systemQuantity, revertedQuantity);
+
+        var movements = await verificationDbContext.StockMovements
+            .Where(x => x.ReferenceId == Guid.Parse(sessionId) && x.ProductId == productId)
+            .ToListAsync();
+
+        Assert.Contains(movements, x => x.Reason == "stocktake_reconciliation" && x.QuantityChange == countedQuantity - systemQuantity);
+        Assert.Contains(movements, x => x.Reason == "stocktake_reversal" && x.QuantityChange == expectedReversalQuantity);
+    }
+
+    [Fact]
     public async Task StocktakeSessions_ShouldLoadOnSqlite_WhenLegacyRowsContainMalformedVarianceQuantity()
     {
         var sessionId = Guid.NewGuid();
