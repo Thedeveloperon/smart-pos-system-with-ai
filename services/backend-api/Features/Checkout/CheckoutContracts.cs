@@ -35,6 +35,12 @@ public sealed class HoldSaleRequest
     [JsonPropertyName("discount_percent")]
     public decimal DiscountPercent { get; set; }
 
+    [JsonPropertyName("customer_id")]
+    public Guid? CustomerId { get; set; }
+
+    [JsonPropertyName("loyalty_points_to_redeem")]
+    public decimal LoyaltyPointsToRedeem { get; set; }
+
     [JsonPropertyName("role")]
     public string Role { get; set; } = "cashier";
 }
@@ -49,6 +55,12 @@ public sealed class CompleteSaleRequest
 
     [JsonPropertyName("discount_percent")]
     public decimal DiscountPercent { get; set; }
+
+    [JsonPropertyName("customer_id")]
+    public Guid? CustomerId { get; set; }
+
+    [JsonPropertyName("loyalty_points_to_redeem")]
+    public decimal LoyaltyPointsToRedeem { get; set; }
 
     [JsonPropertyName("role")]
     public string Role { get; set; } = "cashier";
@@ -160,6 +172,18 @@ public sealed class SaleResponse
 
     [JsonPropertyName("cash_short_amount")]
     public decimal CashShortAmount { get; set; }
+
+    [JsonPropertyName("customer_id")]
+    public Guid? CustomerId { get; set; }
+
+    [JsonPropertyName("customer_name")]
+    public string? CustomerName { get; set; }
+
+    [JsonPropertyName("loyalty_points_earned")]
+    public decimal LoyaltyPointsEarned { get; set; }
+
+    [JsonPropertyName("loyalty_points_redeemed")]
+    public decimal LoyaltyPointsRedeemed { get; set; }
 
     [JsonPropertyName("items")]
     public List<SaleItemResponse> Items { get; set; } = [];
