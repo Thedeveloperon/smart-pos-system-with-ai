@@ -37,6 +37,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import { ApiError, requestJson } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 type PriceTier = {
@@ -89,161 +90,269 @@ type Customer = {
   ledger: CustomerLedgerEntry[];
 };
 
-const seedTiers: PriceTier[] = [
-  { id: "tier-gold", name: "Gold", code: "GLD", discountPercent: 8, description: "Preferred repeat buyers", isActive: true },
-  { id: "tier-silver", name: "Silver", code: "SLV", discountPercent: 5, description: "Regular customers", isActive: true },
-  { id: "tier-basic", name: "Basic", code: "BSC", discountPercent: 0, description: "Default tier", isActive: true },
-];
+type BackendPriceTierResponse = {
+  price_tier_id: string;
+  name: string;
+  code: string;
+  discount_percent: number;
+  description?: string | null;
+  is_active: boolean;
+  customer_count?: number;
+  created_at?: string;
+  updated_at?: string | null;
+};
 
-const seedCustomers: Customer[] = [
-  {
-    id: "cus-001",
-    name: "Nadeesha Perera",
-    code: "C-1001",
-    phone: "+94 77 123 4567",
-    email: "nadeesha@example.com",
-    address: "Colombo 05",
-    dateOfBirth: "1991-08-12",
-    priceTierId: "tier-gold",
-    fixedDiscountPercent: null,
-    creditLimit: 50000,
-    outstandingBalance: 12500,
-    loyaltyPoints: 840,
-    notes: "Prefers monthly invoicing.",
-    tags: ["wholesale", "priority"],
-    isActive: true,
-    createdAtUtc: "2026-04-12T08:30:00.000Z",
-    sales: [
-      {
-        id: "sale-10021",
-        saleNumber: "10021",
-        date: "2026-05-01T07:15:00.000Z",
-        paymentMethod: "card",
-        status: "completed",
-        loyaltyPointsEarned: 36,
-        loyaltyPointsRedeemed: 0,
-        total: 14500,
-      },
-      {
-        id: "sale-10003",
-        saleNumber: "10003",
-        date: "2026-04-18T10:00:00.000Z",
-        paymentMethod: "cash",
-        status: "completed",
-        loyaltyPointsEarned: 18,
-        loyaltyPointsRedeemed: 10,
-        total: 7200,
-      },
-    ],
-    ledger: [
-      {
-        id: "ledger-1",
-        entryType: "Charge",
-        description: "April bulk order",
-        amount: 15000,
-        balanceAfter: 15000,
-        occurredAtUtc: "2026-04-18T10:00:00.000Z",
-      },
-      {
-        id: "ledger-2",
-        entryType: "Payment",
-        description: "Bank transfer received",
-        amount: -2500,
-        balanceAfter: 12500,
-        occurredAtUtc: "2026-04-20T12:15:00.000Z",
-      },
-    ],
-  },
-  {
-    id: "cus-002",
-    name: "Tharindu Fernando",
-    code: "C-1002",
-    phone: "+94 71 555 8899",
-    email: "tharindu@example.com",
-    address: "Kandy",
-    dateOfBirth: "1987-11-30",
-    priceTierId: "tier-silver",
-    fixedDiscountPercent: 2,
-    creditLimit: 25000,
-    outstandingBalance: 0,
-    loyaltyPoints: 210,
-    notes: "Walk-in retail customer.",
-    tags: ["retail"],
-    isActive: true,
-    createdAtUtc: "2026-04-22T11:10:00.000Z",
-    sales: [
-      {
-        id: "sale-10039",
-        saleNumber: "10039",
-        date: "2026-05-02T09:25:00.000Z",
-        paymentMethod: "cash",
-        status: "completed",
-        loyaltyPointsEarned: 12,
-        loyaltyPointsRedeemed: 0,
-        total: 4800,
-      },
-    ],
-    ledger: [
-      {
-        id: "ledger-3",
-        entryType: "Payment",
-        description: "Previous balance cleared",
-        amount: -8000,
-        balanceAfter: 0,
-        occurredAtUtc: "2026-04-27T13:45:00.000Z",
-      },
-    ],
-  },
-  {
-    id: "cus-003",
-    name: "Sahan Industries",
-    code: "C-1003",
-    phone: "+94 11 234 0000",
-    email: "accounts@sahan-industries.lk",
-    address: "Borella",
-    priceTierId: "tier-basic",
-    fixedDiscountPercent: null,
-    creditLimit: 100000,
-    outstandingBalance: 42000,
-    loyaltyPoints: 1320,
-    notes: "Credit review every Friday.",
-    tags: ["corporate", "credit"],
-    isActive: true,
-    createdAtUtc: "2026-03-28T06:00:00.000Z",
-    sales: [
-      {
-        id: "sale-9988",
-        saleNumber: "9988",
-        date: "2026-04-30T14:05:00.000Z",
-        paymentMethod: "bank_transfer",
-        status: "completed",
-        loyaltyPointsEarned: 55,
-        loyaltyPointsRedeemed: 0,
-        total: 27500,
-      },
-      {
-        id: "sale-9920",
-        saleNumber: "9920",
-        date: "2026-04-11T08:20:00.000Z",
-        paymentMethod: "bank_transfer",
-        status: "voided",
-        loyaltyPointsEarned: 0,
-        loyaltyPointsRedeemed: 0,
-        total: 19000,
-      },
-    ],
-    ledger: [
-      {
-        id: "ledger-4",
-        entryType: "Charge",
-        description: "Monthly supply invoice",
-        amount: 42000,
-        balanceAfter: 42000,
-        occurredAtUtc: "2026-05-01T15:00:00.000Z",
-      },
-    ],
-  },
-];
+type BackendCustomerListItem = {
+  customer_id: string;
+  name: string;
+  code: string;
+  phone?: string | null;
+  email?: string | null;
+  price_tier?: BackendPriceTierResponse | null;
+  fixed_discount_percent?: number | null;
+  credit_limit: number;
+  outstanding_balance: number;
+  loyalty_points: number;
+  tags: string[];
+  is_active: boolean;
+  can_delete?: boolean;
+  delete_block_reason?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+type BackendCustomerListResponse = {
+  items: BackendCustomerListItem[];
+  total: number;
+  page: number;
+  take: number;
+};
+
+type BackendCustomerDetail = {
+  customer_id: string;
+  name: string;
+  code: string;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  date_of_birth?: string | null;
+  price_tier?: BackendPriceTierResponse | null;
+  fixed_discount_percent?: number | null;
+  credit_limit: number;
+  outstanding_balance: number;
+  loyalty_points: number;
+  notes?: string | null;
+  tags: string[];
+  is_active: boolean;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+type BackendCustomerSaleSummaryItem = {
+  sale_id: string;
+  sale_number: string;
+  status: string;
+  payment_method?: string | null;
+  grand_total: number;
+  loyalty_points_earned: number;
+  loyalty_points_redeemed: number;
+  created_at: string;
+  completed_at?: string | null;
+};
+
+type BackendCustomerLedgerItem = {
+  ledger_entry_id: string;
+  customer_id: string;
+  sale_id?: string | null;
+  entry_type: string;
+  amount: number;
+  balance_after: number;
+  description: string;
+  reference?: string | null;
+  recorded_by_user_id?: string | null;
+  occurred_at: string;
+  created_at: string;
+};
+
+type BackendCustomerLedgerResponse = {
+  items: BackendCustomerLedgerItem[];
+  total: number;
+  page: number;
+  take: number;
+};
+
+type BackendCreditLedgerEntry = {
+  ledger_entry_id: string;
+  customer_id: string;
+  sale_id?: string | null;
+  entry_type: string;
+  amount: number;
+  balance_after: number;
+  description: string;
+  reference?: string | null;
+  recorded_by_user_id?: string | null;
+  occurred_at: string;
+  created_at: string;
+};
+
+function mapPriceTierResponse(item: BackendPriceTierResponse): PriceTier {
+  return {
+    id: item.price_tier_id,
+    name: item.name,
+    code: item.code,
+    discountPercent: Number(item.discount_percent) || 0,
+    description: item.description ?? undefined,
+    isActive: item.is_active,
+  };
+}
+
+function mapCustomerSummary(item: BackendCustomerListItem): Customer {
+  return {
+    id: item.customer_id,
+    name: item.name,
+    code: item.code,
+    phone: item.phone ?? undefined,
+    email: item.email ?? undefined,
+    address: undefined,
+    dateOfBirth: undefined,
+    priceTierId: item.price_tier?.price_tier_id,
+    fixedDiscountPercent: item.fixed_discount_percent ?? null,
+    creditLimit: Number(item.credit_limit) || 0,
+    outstandingBalance: Number(item.outstanding_balance) || 0,
+    loyaltyPoints: Number(item.loyalty_points) || 0,
+    notes: undefined,
+    tags: item.tags ?? [],
+    isActive: item.is_active,
+    createdAtUtc: item.created_at,
+    sales: [],
+    ledger: [],
+  };
+}
+
+function mapCustomerDetail(item: BackendCustomerDetail, existing?: Customer | null): Customer {
+  return {
+    id: item.customer_id,
+    name: item.name,
+    code: item.code,
+    phone: item.phone ?? undefined,
+    email: item.email ?? undefined,
+    address: item.address ?? undefined,
+    dateOfBirth: item.date_of_birth ?? undefined,
+    priceTierId: item.price_tier?.price_tier_id ?? existing?.priceTierId,
+    fixedDiscountPercent: item.fixed_discount_percent ?? null,
+    creditLimit: Number(item.credit_limit) || 0,
+    outstandingBalance: Number(item.outstanding_balance) || 0,
+    loyaltyPoints: Number(item.loyalty_points) || 0,
+    notes: item.notes ?? undefined,
+    tags: item.tags ?? [],
+    isActive: item.is_active,
+    createdAtUtc: item.created_at,
+    sales: existing?.sales ?? [],
+    ledger: existing?.ledger ?? [],
+  };
+}
+
+function mapCustomerSale(item: BackendCustomerSaleSummaryItem): CustomerSale {
+  return {
+    id: item.sale_id,
+    saleNumber: item.sale_number,
+    date: item.completed_at ?? item.created_at,
+    paymentMethod: (item.payment_method ?? "cash") as CustomerSale["paymentMethod"],
+    status: (item.status ?? "completed") as CustomerSale["status"],
+    loyaltyPointsEarned: Number(item.loyalty_points_earned) || 0,
+    loyaltyPointsRedeemed: Number(item.loyalty_points_redeemed) || 0,
+    total: Number(item.grand_total) || 0,
+  };
+}
+
+function mapCustomerLedger(item: BackendCustomerLedgerItem): CustomerLedgerEntry {
+  return {
+    id: item.ledger_entry_id,
+    entryType: (item.entry_type.charAt(0).toUpperCase() + item.entry_type.slice(1)) as CustomerLedgerEntry["entryType"],
+    description: item.description,
+    amount: Number(item.amount) || 0,
+    balanceAfter: Number(item.balance_after) || 0,
+    occurredAtUtc: item.occurred_at,
+  };
+}
+
+function normalizeOptionalString(value: string) {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function toCustomerRequestBody(customerInput: CustomerFormValue) {
+  return {
+    name: customerInput.name.trim(),
+    code: normalizeOptionalString(customerInput.code),
+    phone: normalizeOptionalString(customerInput.phone),
+    email: normalizeOptionalString(customerInput.email),
+    address: normalizeOptionalString(customerInput.address),
+    date_of_birth: customerInput.dateOfBirth || null,
+    price_tier_id: customerInput.priceTierId ?? null,
+    fixed_discount_percent: customerInput.fixedDiscountPercent ?? null,
+    credit_limit: customerInput.creditLimit,
+    notes: normalizeOptionalString(customerInput.notes),
+    tags: customerInput.tags,
+    is_active: customerInput.isActive,
+  };
+}
+
+function toTierRequestBody(tierInput: TierFormValue) {
+  return {
+    name: tierInput.name.trim(),
+    code: tierInput.code.trim().toUpperCase(),
+    discount_percent: tierInput.discountPercent,
+    description: normalizeOptionalString(tierInput.description),
+    is_active: tierInput.isActive,
+  };
+}
+
+async function fetchCustomerPriceTiers(): Promise<PriceTier[]> {
+  const response = await requestJson<BackendPriceTierResponse[]>("/api/customer-price-tiers");
+  return response.map(mapPriceTierResponse);
+}
+
+async function fetchCustomerDirectory(): Promise<Customer[]> {
+  const pageSize = 100;
+  const firstPage = await requestJson<BackendCustomerListResponse>(
+    `/api/customers?include_inactive=true&page=1&take=${pageSize}`
+  );
+  const totalPages = Math.max(1, Math.ceil(firstPage.total / firstPage.take));
+  const items = [...firstPage.items];
+
+  if (totalPages > 1) {
+    const remainingPages = await Promise.all(
+      Array.from({ length: totalPages - 1 }, async (_unused, index) =>
+        requestJson<BackendCustomerListResponse>(
+          `/api/customers?include_inactive=true&page=${index + 2}&take=${pageSize}`
+        )
+      )
+    );
+
+    for (const page of remainingPages) {
+      items.push(...page.items);
+    }
+  }
+
+  return items.map(mapCustomerSummary);
+}
+
+async function fetchCustomerDetails(customerId: string, existing?: Customer | null): Promise<Customer> {
+  const [detail, sales, ledger] = await Promise.all([
+    requestJson<BackendCustomerDetail>(`/api/customers/${encodeURIComponent(customerId)}`),
+    requestJson<BackendCustomerSaleSummaryItem[]>(`/api/customers/${encodeURIComponent(customerId)}/sales?take=20`),
+    requestJson<BackendCustomerLedgerResponse>(
+      `/api/customers/${encodeURIComponent(customerId)}/credit-ledger?page=1&take=20`
+    ),
+  ]);
+
+  return {
+    ...mapCustomerDetail(detail, existing),
+    sales: sales.map(mapCustomerSale),
+    ledger: ledger.items.map(mapCustomerLedger),
+  };
+}
 
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat("en-LK", { style: "currency", currency: "LKR", maximumFractionDigits: 0 }).format(value);
@@ -258,8 +367,8 @@ function computeEffectiveDiscount(customer: Customer, tiers: PriceTier[]) {
 }
 
 export default function CustomersWorkspace() {
-  const [tiers, setTiers] = useState(seedTiers);
-  const [customers, setCustomers] = useState(seedCustomers);
+  const [tiers, setTiers] = useState<PriceTier[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [activeTab, setActiveTab] = useState<"directory" | "tiers">("directory");
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
@@ -268,282 +377,444 @@ export default function CustomersWorkspace() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [deleteCustomerTarget, setDeleteCustomerTarget] = useState<Customer | null>(null);
   const [deleteTierTarget, setDeleteTierTarget] = useState<PriceTier | null>(null);
-  const [blockedTierName, setBlockedTierName] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
+  const [loadedDetailIds, setLoadedDetailIds] = useState<Record<string, boolean>>({});
+  const [alertState, setAlertState] = useState<{ title: string; description: string } | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   const selectedCustomer = customers.find((customer) => customer.id === detailId) ?? null;
 
-  const upsertCustomer = (customerInput: CustomerFormValue) => {
-    setCustomers((previous) => {
-      const next = [...previous];
-      const existingIndex = next.findIndex((customer) => customer.id === customerInput.id);
-      const normalizedCustomer: Customer = {
-        id: customerInput.id ?? `cus-${Math.random().toString(36).slice(2, 9)}`,
-        name: customerInput.name,
-        code: customerInput.code || `C-${String(next.length + 1001)}`,
-        phone: customerInput.phone || undefined,
-        email: customerInput.email || undefined,
-        address: customerInput.address || undefined,
-        dateOfBirth: customerInput.dateOfBirth || undefined,
-        priceTierId: customerInput.priceTierId,
-        fixedDiscountPercent: customerInput.fixedDiscountPercent,
-        creditLimit: customerInput.creditLimit,
-        outstandingBalance: customerInput.outstandingBalance,
-        loyaltyPoints: customerInput.loyaltyPoints,
-        notes: customerInput.notes || undefined,
-        tags: customerInput.tags,
-        isActive: customerInput.isActive,
-        createdAtUtc: customerInput.createdAtUtc ?? new Date().toISOString(),
-        sales: customerInput.sales ?? [],
-        ledger: customerInput.ledger ?? [],
-      };
+  useEffect(() => {
+    let cancelled = false;
 
-      if (existingIndex >= 0) {
-        next[existingIndex] = normalizedCustomer;
-        return next;
-      }
+    const loadWorkspace = async () => {
+      setIsLoading(true);
+      setLoadError(null);
 
-      return [normalizedCustomer, ...next];
-    });
-  };
-
-  const deleteCustomer = (id: string) => {
-    setCustomers((previous) => previous.filter((customer) => customer.id !== id));
-    setDetailId((current) => (current === id ? null : current));
-  };
-
-  const toggleCustomerActive = (id: string) => {
-    setCustomers((previous) =>
-      previous.map((customer) =>
-        customer.id === id ? { ...customer, isActive: !customer.isActive } : customer
-      )
-    );
-  };
-
-  const recordCreditPayment = (customerId: string, amount: number, description: string) => {
-    setCustomers((previous) =>
-      previous.map((customer) => {
-        if (customer.id !== customerId) {
-          return customer;
+      try {
+        const [nextTiers, nextCustomers] = await Promise.all([fetchCustomerPriceTiers(), fetchCustomerDirectory()]);
+        if (cancelled) {
+          return;
         }
 
-        const nextBalance = Math.max(0, customer.outstandingBalance - amount);
-        return {
-          ...customer,
-          outstandingBalance: nextBalance,
-          ledger: [
-            {
-              id: `ledger-${Math.random().toString(36).slice(2, 9)}`,
-              entryType: "Payment",
-              description: description.trim() || "Payment received",
-              amount: -Math.abs(amount),
-              balanceAfter: nextBalance,
-              occurredAtUtc: new Date().toISOString(),
-            },
-            ...customer.ledger,
-          ],
-        };
-      })
-    );
-  };
-
-  const applyManualAdjustment = (customerId: string, amount: number, description: string) => {
-    setCustomers((previous) =>
-      previous.map((customer) => {
-        if (customer.id !== customerId) {
-          return customer;
+        setTiers(nextTiers);
+        setCustomers(nextCustomers);
+        setLoadedDetailIds({});
+      } catch (error) {
+        if (cancelled) {
+          return;
         }
 
-        const nextBalance = Math.max(0, customer.outstandingBalance + amount);
-        return {
-          ...customer,
-          outstandingBalance: nextBalance,
-          ledger: [
-            {
-              id: `ledger-${Math.random().toString(36).slice(2, 9)}`,
-              entryType: "Adjustment",
-              description: description.trim() || "Manual adjustment",
-              amount,
-              balanceAfter: nextBalance,
-              occurredAtUtc: new Date().toISOString(),
-            },
-            ...customer.ledger,
-          ],
-        };
-      })
-    );
-  };
-
-  const upsertTier = (tierInput: TierFormValue) => {
-    setTiers((previous) => {
-      const next = [...previous];
-      const existingIndex = next.findIndex((tier) => tier.id === tierInput.id);
-      const normalizedTier: PriceTier = {
-        id: tierInput.id ?? `tier-${Math.random().toString(36).slice(2, 9)}`,
-        name: tierInput.name,
-        code: tierInput.code.toUpperCase(),
-        discountPercent: tierInput.discountPercent,
-        description: tierInput.description || undefined,
-        isActive: tierInput.isActive,
-      };
-
-      if (existingIndex >= 0) {
-        next[existingIndex] = normalizedTier;
-        return next;
+        setLoadError(error instanceof ApiError ? error.message : "Unable to load customer data from the backend.");
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
       }
+    };
 
-      return [normalizedTier, ...next];
-    });
+    void loadWorkspace();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!detailId || loadedDetailIds[detailId]) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadDetails = async () => {
+      setDetailLoadingId(detailId);
+
+      try {
+        const customer = await fetchCustomerDetails(detailId, selectedCustomer);
+        if (cancelled) {
+          return;
+        }
+
+        setCustomers((previous) => previous.map((item) => (item.id === detailId ? customer : item)));
+        setLoadedDetailIds((previous) => ({ ...previous, [detailId]: true }));
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        setLoadError(error instanceof ApiError ? error.message : "Unable to load the selected customer.");
+        setDetailId(null);
+      } finally {
+        if (!cancelled) {
+          setDetailLoadingId(null);
+        }
+      }
+    };
+
+    void loadDetails();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [detailId, loadedDetailIds, selectedCustomer]);
+
+  const upsertCustomer = async (customerInput: CustomerFormValue) => {
+    try {
+      const method = customerInput.id ? "PUT" : "POST";
+      const path = customerInput.id ? `/api/customers/${encodeURIComponent(customerInput.id)}` : "/api/customers";
+      const response = await requestJson<BackendCustomerDetail>(path, {
+        method,
+        body: JSON.stringify(toCustomerRequestBody(customerInput)),
+      });
+
+      const nextCustomer = mapCustomerDetail(response, customers.find((item) => item.id === response.customer_id) ?? null);
+      setCustomers((previous) => {
+        const next = [...previous];
+        const existingIndex = next.findIndex((item) => item.id === nextCustomer.id);
+
+        if (existingIndex >= 0) {
+          const current = next[existingIndex];
+          next[existingIndex] = {
+            ...nextCustomer,
+            sales: current.sales,
+            ledger: current.ledger,
+          };
+          return next;
+        }
+
+        return [nextCustomer, ...next];
+      });
+
+      setLoadedDetailIds((previous) => ({ ...previous, [nextCustomer.id]: true }));
+    } catch (error) {
+      setAlertState({
+        title: customerInput.id ? "Unable to save customer" : "Unable to create customer",
+        description: error instanceof ApiError ? error.message : "The customer request could not be completed.",
+      });
+    }
   };
 
-  const deleteTier = (id: string) => {
-    setTiers((previous) => previous.filter((tier) => tier.id !== id));
+  const openCustomerEditor = async (customer: Customer) => {
+    if (loadedDetailIds[customer.id]) {
+      setEditingCustomer(customer);
+      setEditorOpen(true);
+      return;
+    }
+
+    try {
+      const fullCustomer = await fetchCustomerDetails(customer.id, customer);
+      setCustomers((previous) => previous.map((item) => (item.id === fullCustomer.id ? fullCustomer : item)));
+      setLoadedDetailIds((previous) => ({ ...previous, [fullCustomer.id]: true }));
+      setEditingCustomer(fullCustomer);
+      setEditorOpen(true);
+    } catch (error) {
+      setAlertState({
+        title: "Unable to open customer editor",
+        description: error instanceof ApiError ? error.message : "The customer details could not be loaded.",
+      });
+    }
+  };
+
+  const deleteCustomer = async (id: string) => {
+    try {
+      await requestJson<void>(`/api/customers/${encodeURIComponent(id)}/hard-delete`, {
+        method: "DELETE",
+      });
+      setCustomers((previous) => previous.filter((customer) => customer.id !== id));
+      setDetailId((current) => (current === id ? null : current));
+      setLoadedDetailIds((previous) => {
+        const next = { ...previous };
+        delete next[id];
+        return next;
+      });
+    } catch (error) {
+      setAlertState({
+        title: "Cannot delete customer",
+        description: error instanceof ApiError ? error.message : "The customer could not be deleted.",
+      });
+    }
+  };
+
+  const toggleCustomerActive = async (id: string) => {
+    try {
+      const response = await requestJson<BackendCustomerDetail>(`/api/customers/${encodeURIComponent(id)}/toggle-active`, {
+        method: "PATCH",
+      });
+      const nextCustomer = mapCustomerDetail(response, customers.find((item) => item.id === id) ?? null);
+      setCustomers((previous) => previous.map((customer) => (customer.id === id ? { ...nextCustomer, sales: customer.sales, ledger: customer.ledger } : customer)));
+      setLoadedDetailIds((previous) => ({ ...previous, [id]: true }));
+    } catch (error) {
+      setAlertState({
+        title: "Unable to update customer",
+        description: error instanceof ApiError ? error.message : "The customer status could not be updated.",
+      });
+    }
+  };
+
+  const recordCreditPayment = async (customerId: string, amount: number, description: string) => {
+    try {
+      const entry = await requestJson<BackendCreditLedgerEntry>(`/api/customers/${encodeURIComponent(customerId)}/credit-payments`, {
+        method: "POST",
+        body: JSON.stringify({
+          amount,
+          description,
+          reference: null,
+        }),
+      });
+
+      const mappedEntry = mapCustomerLedger(entry);
+      setCustomers((previous) =>
+        previous.map((customer) =>
+          customer.id === customerId
+            ? {
+                ...customer,
+                outstandingBalance: mappedEntry.balanceAfter,
+                ledger: [mappedEntry, ...customer.ledger],
+              }
+            : customer
+        )
+      );
+      setLoadedDetailIds((previous) => ({ ...previous, [customerId]: true }));
+    } catch (error) {
+      setAlertState({
+        title: "Unable to record payment",
+        description: error instanceof ApiError ? error.message : "The credit payment could not be saved.",
+      });
+    }
+  };
+
+  const applyManualAdjustment = async (customerId: string, amount: number, description: string) => {
+    try {
+      const entry = await requestJson<BackendCreditLedgerEntry>(`/api/customers/${encodeURIComponent(customerId)}/credit-adjustments`, {
+        method: "POST",
+        body: JSON.stringify({
+          amount,
+          description,
+          reference: null,
+        }),
+      });
+
+      const mappedEntry = mapCustomerLedger(entry);
+      setCustomers((previous) =>
+        previous.map((customer) =>
+          customer.id === customerId
+            ? {
+                ...customer,
+                outstandingBalance: mappedEntry.balanceAfter,
+                ledger: [mappedEntry, ...customer.ledger],
+              }
+            : customer
+        )
+      );
+      setLoadedDetailIds((previous) => ({ ...previous, [customerId]: true }));
+    } catch (error) {
+      setAlertState({
+        title: "Unable to apply adjustment",
+        description: error instanceof ApiError ? error.message : "The credit adjustment could not be saved.",
+      });
+    }
+  };
+
+  const upsertTier = async (tierInput: TierFormValue) => {
+    try {
+      const method = tierInput.id ? "PUT" : "POST";
+      const path = tierInput.id ? `/api/customer-price-tiers/${encodeURIComponent(tierInput.id)}` : "/api/customer-price-tiers";
+      const response = await requestJson<BackendPriceTierResponse>(path, {
+        method,
+        body: JSON.stringify(toTierRequestBody(tierInput)),
+      });
+
+      const nextTier = mapPriceTierResponse(response);
+      setTiers((previous) => {
+        const next = [...previous];
+        const existingIndex = next.findIndex((tier) => tier.id === nextTier.id);
+
+        if (existingIndex >= 0) {
+          next[existingIndex] = nextTier;
+          return next;
+        }
+
+        return [nextTier, ...next];
+      });
+    } catch (error) {
+      setAlertState({
+        title: tierInput.id ? "Unable to save tier" : "Unable to create tier",
+        description: error instanceof ApiError ? error.message : "The price tier request could not be completed.",
+      });
+    }
+  };
+
+  const deleteTier = async (id: string) => {
+    try {
+      await requestJson<void>(`/api/customer-price-tiers/${encodeURIComponent(id)}/hard-delete`, {
+        method: "DELETE",
+      });
+      setTiers((previous) => previous.filter((tier) => tier.id !== id));
+    } catch (error) {
+      setAlertState({
+        title: "Cannot delete tier",
+        description: error instanceof ApiError ? error.message : "The price tier could not be deleted.",
+      });
+    }
   };
 
   return (
-    <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)} className="space-y-4">
-      <TabsList className="grid w-full grid-cols-2 border border-border/60 bg-secondary/60 md:w-fit">
-        <TabsTrigger value="directory">Directory</TabsTrigger>
-        <TabsTrigger value="tiers">Price Tiers</TabsTrigger>
-      </TabsList>
+    <>
+      {loadError && (
+        <Card className="border-destructive/30 bg-destructive/5 text-destructive">
+          <CardContent className="py-4 text-sm">{loadError}</CardContent>
+        </Card>
+      )}
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)} className="space-y-4">
+        <TabsList className="grid w-full grid-cols-2 border border-border/60 bg-secondary/60 md:w-fit">
+          <TabsTrigger value="directory">Directory</TabsTrigger>
+          <TabsTrigger value="tiers">Price Tiers</TabsTrigger>
+        </TabsList>
 
-      <TabsContent value="directory" className="mt-0">
-        <DirectoryPanel
-          customers={customers}
+        <TabsContent value="directory" className="mt-0">
+          <DirectoryPanel
+            customers={customers}
+            tiers={tiers}
+            loading={isLoading}
+            onCreate={() => {
+              setEditingCustomer(null);
+              setEditorOpen(true);
+            }}
+            onEdit={(customer) => {
+              void openCustomerEditor(customer);
+            }}
+            onToggleActive={toggleCustomerActive}
+            onDelete={setDeleteCustomerTarget}
+            onOpenDetails={setDetailId}
+          />
+        </TabsContent>
+
+        <TabsContent value="tiers" className="mt-0">
+          <TiersPanel
+            tiers={tiers}
+            customers={customers}
+            loading={isLoading}
+            onCreate={() => {
+              setEditingTier(null);
+              setTierEditorOpen(true);
+            }}
+            onEdit={(tier) => {
+              setEditingTier(tier);
+              setTierEditorOpen(true);
+            }}
+            onDelete={setDeleteTierTarget}
+          />
+        </TabsContent>
+
+        <CustomerEditorDialog
+          open={editorOpen}
+          onOpenChange={setEditorOpen}
+          initial={editingCustomer}
           tiers={tiers}
-          onCreate={() => {
-            setEditingCustomer(null);
-            setEditorOpen(true);
-          }}
-          onEdit={(customer) => {
-            setEditingCustomer(customer);
-            setEditorOpen(true);
-          }}
-          onToggleActive={toggleCustomerActive}
-          onDelete={setDeleteCustomerTarget}
-          onOpenDetails={setDetailId}
+          onSubmit={upsertCustomer}
         />
-      </TabsContent>
 
-      <TabsContent value="tiers" className="mt-0">
-        <TiersPanel
-          tiers={tiers}
-          customers={customers}
-          onCreate={() => {
-            setEditingTier(null);
-            setTierEditorOpen(true);
-          }}
-          onEdit={(tier) => {
-            setEditingTier(tier);
-            setTierEditorOpen(true);
-          }}
-          onDelete={setDeleteTierTarget}
+        <TierEditorDialog
+          open={tierEditorOpen}
+          onOpenChange={setTierEditorOpen}
+          initial={editingTier}
+          onSubmit={upsertTier}
         />
-      </TabsContent>
 
-      <CustomerEditorDialog
-        open={editorOpen}
-        onOpenChange={setEditorOpen}
-        initial={editingCustomer}
-        tiers={tiers}
-        onSubmit={upsertCustomer}
-      />
+        <Sheet open={selectedCustomer !== null} onOpenChange={(open) => !open && setDetailId(null)}>
+          <SheetContent side="right" className="w-full max-w-2xl overflow-y-auto sm:max-w-2xl">
+            {selectedCustomer && detailLoadingId === selectedCustomer.id && (
+              <div className="mb-4 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+                Loading customer details from the backend...
+              </div>
+            )}
+            {selectedCustomer && (
+              <CustomerDetailContent
+                customer={selectedCustomer}
+                tiers={tiers}
+                onRecordPayment={recordCreditPayment}
+                onApplyAdjustment={applyManualAdjustment}
+              />
+            )}
+          </SheetContent>
+        </Sheet>
 
-      <TierEditorDialog
-        open={tierEditorOpen}
-        onOpenChange={setTierEditorOpen}
-        initial={editingTier}
-        onSubmit={upsertTier}
-      />
+        <ConfirmationDialog
+          open={deleteCustomerTarget !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              setDeleteCustomerTarget(null);
+            }
+          }}
+          title="Delete customer?"
+          description={
+            deleteCustomerTarget
+              ? `Delete ${deleteCustomerTarget.name}? This will remove the customer from the directory.`
+              : undefined
+          }
+          confirmLabel="Delete"
+          confirmVariant="destructive"
+          onCancel={() => setDeleteCustomerTarget(null)}
+          onConfirm={() => {
+            if (!deleteCustomerTarget) {
+              setDeleteCustomerTarget(null);
+              return;
+            }
 
-      <Sheet open={selectedCustomer !== null} onOpenChange={(open) => !open && setDetailId(null)}>
-        <SheetContent side="right" className="w-full max-w-2xl overflow-y-auto sm:max-w-2xl">
-          {selectedCustomer && (
-            <CustomerDetailContent
-              customer={selectedCustomer}
-              tiers={tiers}
-              onRecordPayment={recordCreditPayment}
-              onApplyAdjustment={applyManualAdjustment}
-            />
-          )}
-        </SheetContent>
-      </Sheet>
-
-      <ConfirmationDialog
-        open={deleteCustomerTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) {
+            void deleteCustomer(deleteCustomerTarget.id);
             setDeleteCustomerTarget(null);
-          }
-        }}
-        title="Delete customer?"
-        description={
-          deleteCustomerTarget
-            ? `Delete ${deleteCustomerTarget.name}? This will remove the customer from the directory.`
-            : undefined
-        }
-        confirmLabel="Delete"
-        confirmVariant="destructive"
-        onCancel={() => setDeleteCustomerTarget(null)}
-        onConfirm={() => {
-          if (deleteCustomerTarget) {
-            deleteCustomer(deleteCustomerTarget.id);
-          }
-          setDeleteCustomerTarget(null);
-        }}
-      />
+          }}
+        />
 
-      <ConfirmationDialog
-        open={deleteTierTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) {
+        <ConfirmationDialog
+          open={deleteTierTarget !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              setDeleteTierTarget(null);
+            }
+          }}
+          title="Delete price tier?"
+          description={
+            deleteTierTarget
+              ? `Delete ${deleteTierTarget.name}? This action cannot be undone.`
+              : undefined
+          }
+          confirmLabel="Delete"
+          confirmVariant="destructive"
+          onCancel={() => setDeleteTierTarget(null)}
+          onConfirm={() => {
+            if (!deleteTierTarget) {
+              setDeleteTierTarget(null);
+              return;
+            }
+
+            void deleteTier(deleteTierTarget.id);
             setDeleteTierTarget(null);
-          }
-        }}
-        title="Delete price tier?"
-        description={
-          deleteTierTarget
-            ? `Delete ${deleteTierTarget.name}? This action cannot be undone.`
-            : undefined
-        }
-        confirmLabel="Delete"
-        confirmVariant="destructive"
-        onCancel={() => setDeleteTierTarget(null)}
-        onConfirm={() => {
-          if (!deleteTierTarget) {
-            setDeleteTierTarget(null);
-            return;
-          }
+          }}
+        />
 
-          const hasCustomers = customers.some((customer) => customer.priceTierId === deleteTierTarget.id);
-          if (hasCustomers) {
-            setBlockedTierName(deleteTierTarget.name);
-          } else {
-            deleteTier(deleteTierTarget.id);
-          }
-          setDeleteTierTarget(null);
-        }}
-      />
-
-      <AlertDialog open={blockedTierName !== null} onOpenChange={(open) => !open && setBlockedTierName(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Cannot delete tier</AlertDialogTitle>
-            <AlertDialogDescription>
-              {blockedTierName ? `${blockedTierName} has customers assigned to it.` : "This tier has customers assigned to it."}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction onClick={() => setBlockedTierName(null)}>OK</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </Tabs>
+        <AlertDialog open={alertState !== null} onOpenChange={(open) => !open && setAlertState(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{alertState?.title ?? "Action failed"}</AlertDialogTitle>
+              <AlertDialogDescription>{alertState?.description ?? "The operation could not be completed."}</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogAction onClick={() => setAlertState(null)}>OK</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </Tabs>
+    </>
   );
 }
 
 function DirectoryPanel({
   customers,
   tiers,
+  loading,
   onCreate,
   onEdit,
   onToggleActive,
@@ -552,6 +823,7 @@ function DirectoryPanel({
 }: {
   customers: Customer[];
   tiers: PriceTier[];
+  loading: boolean;
   onCreate: () => void;
   onEdit: (customer: Customer) => void;
   onToggleActive: (id: string) => void;
@@ -625,7 +897,14 @@ function DirectoryPanel({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredCustomers.length === 0 && (
+            {loading && filteredCustomers.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={9} className="h-24 text-center text-sm text-muted-foreground">
+                  Loading customers from the backend...
+                </TableCell>
+              </TableRow>
+            )}
+            {!loading && filteredCustomers.length === 0 && (
               <TableRow>
                 <TableCell colSpan={9} className="h-24 text-center text-sm text-muted-foreground">
                   No customers match.
@@ -1006,12 +1285,14 @@ function CustomerCreditPanel({
 function TiersPanel({
   tiers,
   customers,
+  loading,
   onCreate,
   onEdit,
   onDelete,
 }: {
   tiers: PriceTier[];
   customers: Customer[];
+  loading: boolean;
   onCreate: () => void;
   onEdit: (tier: PriceTier) => void;
   onDelete: (tier: PriceTier) => void;
@@ -1038,6 +1319,20 @@ function TiersPanel({
             </TableRow>
           </TableHeader>
           <TableBody>
+            {loading && tiers.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={6} className="h-24 text-center text-sm text-muted-foreground">
+                  Loading price tiers from the backend...
+                </TableCell>
+              </TableRow>
+            )}
+            {!loading && tiers.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={6} className="h-24 text-center text-sm text-muted-foreground">
+                  No price tiers available.
+                </TableCell>
+              </TableRow>
+            )}
             {tiers.map((tier) => {
               const count = customers.filter((customer) => customer.priceTierId === tier.id).length;
 
