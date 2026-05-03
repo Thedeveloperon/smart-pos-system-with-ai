@@ -386,6 +386,7 @@ public static class StocktakeEndpoints
             items = session.Items.Select(item => new
             {
                 id = item.Id,
+                session_id = item.SessionId,
                 product_id = item.ProductId,
                 product_name = item.Product?.Name,
                 system_quantity = item.SystemQuantity,
