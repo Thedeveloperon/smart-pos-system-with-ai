@@ -613,6 +613,7 @@ const IndexInner = () => {
           paymentMethod,
           paidAmount,
           activeHeldSaleId || undefined,
+          undefined,
           cashReceivedCounts,
           cashChangeCounts,
           customPayoutUsed,

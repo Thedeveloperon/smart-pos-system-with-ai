@@ -158,7 +158,6 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
         setSelectedCustomer(null);
         setCustomerQuery("Default Customer");
       }
-      setCustomerOptions([]);
       setCustomerDropdownOpen(false);
       setCashReceivedCounts([]);
       setCashChangeCounts([]);
