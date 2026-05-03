@@ -51,6 +51,7 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   onSaved?: (product: Product) => void;
   onDeleted?: (productId: string) => void;
+  onNavigate?: (tab: "catalogue" | "suppliers") => void;
 };
 
 type ProductFormState = {
@@ -100,6 +101,51 @@ const emptyFormState = (): ProductFormState => ({
 const toNumber = (value: string) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const DEFAULTS_KEY = "pos_product_form_defaults";
+
+const loadFormDefaults = (): Partial<Pick<ProductFormState, "categoryId" | "brandId" | "preferredSupplierId">> => {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(DEFAULTS_KEY);
+    if (!raw) {
+      return {};
+    }
+
+    const parsed = JSON.parse(raw) as Partial<
+      Pick<ProductFormState, "categoryId" | "brandId" | "preferredSupplierId">
+    >;
+    return {
+      categoryId: parsed.categoryId || "",
+      brandId: parsed.brandId || "",
+      preferredSupplierId: parsed.preferredSupplierId || "",
+    };
+  } catch {
+    return {};
+  }
+};
+
+const saveFormDefaults = (form: ProductFormState) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      DEFAULTS_KEY,
+      JSON.stringify({
+        categoryId: form.categoryId,
+        brandId: form.brandId,
+        preferredSupplierId: form.preferredSupplierId,
+      }),
+    );
+  } catch {
+    // Ignore storage failures.
+  }
 };
 
 const toFormState = (product: Product): ProductFormState => ({
@@ -167,6 +213,7 @@ export default function ProductManagementDialog({
   onOpenChange,
   onSaved,
   onDeleted,
+  onNavigate,
 }: Props) {
   const [form, setForm] = useState<ProductFormState>(emptyFormState());
   const [categories, setCategories] = useState<Category[]>([]);
@@ -196,7 +243,7 @@ export default function ProductManagementDialog({
       return;
     }
 
-    setForm(product ? toFormState(product) : emptyFormState());
+    setForm(product ? toFormState(product) : { ...emptyFormState(), ...loadFormDefaults() });
     setCurrentStock(product?.stock_quantity ?? product?.stock ?? 0);
     setBarcodeFeedback("");
     setBarcodeTone("neutral");
@@ -340,6 +387,11 @@ export default function ProductManagementDialog({
       return;
     }
 
+    if (toNumber(form.unitPrice) <= 0) {
+      toast.error("Unit price is required and must be greater than 0.");
+      return;
+    }
+
     setSaving(true);
     try {
       const payload = {
@@ -371,6 +423,9 @@ export default function ProductManagementDialog({
         : await createProduct(payload);
       onSaved?.(saved);
       toast.success(isEditing ? "Product updated." : "Product created.");
+      if (!product?.id) {
+        saveFormDefaults(form);
+      }
       onOpenChange(false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save product.");
@@ -576,6 +631,23 @@ export default function ProductManagementDialog({
                         {item.name}
                       </SelectItem>
                     ))}
+                    {onNavigate ? (
+                      <>
+                        <Separator className="my-1" />
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-1.5 px-2 py-1.5 text-xs text-primary hover:underline"
+                          onPointerDown={(event) => {
+                            event.preventDefault();
+                            onOpenChange(false);
+                            onNavigate("catalogue");
+                          }}
+                        >
+                          <Plus className="h-3 w-3" />
+                          Add new category
+                        </button>
+                      </>
+                    ) : null}
                   </SelectContent>
                 </Select>
                 {selectedCategory ? (
@@ -603,6 +675,23 @@ export default function ProductManagementDialog({
                         {item.name}
                       </SelectItem>
                     ))}
+                    {onNavigate ? (
+                      <>
+                        <Separator className="my-1" />
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-1.5 px-2 py-1.5 text-xs text-primary hover:underline"
+                          onPointerDown={(event) => {
+                            event.preventDefault();
+                            onOpenChange(false);
+                            onNavigate("catalogue");
+                          }}
+                        >
+                          <Plus className="h-3 w-3" />
+                          Add new brand
+                        </button>
+                      </>
+                    ) : null}
                   </SelectContent>
                 </Select>
                 {selectedBrand ? (
@@ -628,6 +717,23 @@ export default function ProductManagementDialog({
                         {item.name}
                       </SelectItem>
                     ))}
+                    {onNavigate ? (
+                      <>
+                        <Separator className="my-1" />
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-1.5 px-2 py-1.5 text-xs text-primary hover:underline"
+                          onPointerDown={(event) => {
+                            event.preventDefault();
+                            onOpenChange(false);
+                            onNavigate("suppliers");
+                          }}
+                        >
+                          <Plus className="h-3 w-3" />
+                          Add new supplier
+                        </button>
+                      </>
+                    ) : null}
                   </SelectContent>
                 </Select>
                 {selectedSupplier ? (
@@ -642,7 +748,9 @@ export default function ProductManagementDialog({
 
             <div className="grid gap-3 md:grid-cols-3">
               <div className="grid gap-1.5">
-                <Label htmlFor="unit-price">Unit price</Label>
+                <Label htmlFor="unit-price">
+                  Unit price <span className="text-destructive">*</span>
+                </Label>
                 <Input
                   id="unit-price"
                   type="number"
