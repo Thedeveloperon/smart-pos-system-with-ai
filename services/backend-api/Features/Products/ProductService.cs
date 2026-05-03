@@ -1010,7 +1010,7 @@ public sealed class ProductService(
         CancellationToken cancellationToken)
     {
         var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
-        var normalizedName = NormalizeRequired(request.Name, "Category name is required.");
+        var normalizedName = NormalizeRequired(request.ResolveName(), "Category name is required.");
         await EnsureUniqueCategoryNameAsync(normalizedName, null, currentStoreId, cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
@@ -1057,7 +1057,7 @@ public sealed class ProductService(
             .FirstOrDefaultAsync(x => x.Id == categoryId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken)
             ?? throw new KeyNotFoundException("Category not found.");
 
-        var normalizedName = NormalizeRequired(request.Name, "Category name is required.");
+        var normalizedName = NormalizeRequired(request.ResolveName(), "Category name is required.");
         await EnsureUniqueCategoryNameAsync(normalizedName, categoryId, currentStoreId, cancellationToken);
 
         var before = new
