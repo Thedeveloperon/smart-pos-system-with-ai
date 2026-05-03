@@ -30,6 +30,17 @@ public sealed class DbSchemaUpdaterPurchasingSchemaTests
                   "Id" TEXT NOT NULL CONSTRAINT "PK_products" PRIMARY KEY
                 );
 
+                CREATE TABLE IF NOT EXISTS "suppliers" (
+                  "Id" TEXT NOT NULL CONSTRAINT "PK_suppliers" PRIMARY KEY,
+                  "StoreId" TEXT NULL,
+                  "Name" TEXT NOT NULL,
+                  "Phone" TEXT NULL,
+                  "Address" TEXT NULL,
+                  "IsActive" INTEGER NOT NULL,
+                  "CreatedAtUtc" TEXT NOT NULL,
+                  "UpdatedAtUtc" TEXT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS "purchase_bills" (
                   "Id" TEXT NOT NULL CONSTRAINT "PK_purchase_bills" PRIMARY KEY,
                   "StoreId" TEXT NULL,
@@ -52,6 +63,8 @@ public sealed class DbSchemaUpdaterPurchasingSchemaTests
 
             await DbSchemaUpdater.EnsurePurchasingSchemaAsync(dbContext);
 
+            Assert.True(await ColumnExistsAsync(dbContext, "suppliers", "CompanyName"));
+            Assert.True(await ColumnExistsAsync(dbContext, "suppliers", "CompanyPhone"));
             Assert.True(await ColumnExistsAsync(dbContext, "purchase_bills", "PurchaseOrderId"));
             Assert.True(await ColumnExistsAsync(dbContext, "purchase_bills", "ImportRequestId"));
             Assert.True(await IndexExistsAsync(dbContext, "purchase_bills", "IX_purchase_bills_PurchaseOrderId"));
