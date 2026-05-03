@@ -397,7 +397,7 @@ public sealed class AiChatFlowTests(CustomWebApplicationFactory factory)
     }
 
     [Fact]
-    public async Task ReportEndpoints_ShouldExposeWorstItems_AndMonthlyForecast()
+    public async Task ReportEndpoints_ShouldExposeExpandedReportingEndpoints()
     {
         await TestAuth.SignInAsManagerAsync(client);
 
@@ -415,6 +415,28 @@ public sealed class AiChatFlowTests(CustomWebApplicationFactory factory)
         Assert.NotNull(forecastPayload);
         Assert.NotNull(forecastPayload!["items"]?.AsArray());
         Assert.False(string.IsNullOrWhiteSpace(forecastPayload["confidence"]?.GetValue<string>()));
+
+        var leaderboardResponse = await client.GetAsync("/api/reports/cashier-leaderboard");
+        leaderboardResponse.EnsureSuccessStatusCode();
+        var leaderboardPayload = await leaderboardResponse.Content.ReadFromJsonAsync<JsonObject>();
+
+        Assert.NotNull(leaderboardPayload);
+        Assert.NotNull(leaderboardPayload!["items"]?.AsArray());
+
+        var marginResponse = await client.GetAsync("/api/reports/margin-summary?take=10");
+        marginResponse.EnsureSuccessStatusCode();
+        var marginPayload = await marginResponse.Content.ReadFromJsonAsync<JsonObject>();
+
+        Assert.NotNull(marginPayload);
+        Assert.NotNull(marginPayload!["items"]?.AsArray());
+
+        var comparisonResponse = await client.GetAsync("/api/reports/sales-comparison");
+        comparisonResponse.EnsureSuccessStatusCode();
+        var comparisonPayload = await comparisonResponse.Content.ReadFromJsonAsync<JsonObject>();
+
+        Assert.NotNull(comparisonPayload);
+        Assert.NotNull(comparisonPayload!["current_items"]?.AsArray());
+        Assert.NotNull(comparisonPayload["prior_items"]?.AsArray());
     }
 
     [Fact]

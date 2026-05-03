@@ -16,6 +16,10 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
     public DbSet<PurchaseOrderLine> PurchaseOrderLines => Set<PurchaseOrderLine>();
     public DbSet<ShopStockSettings> ShopStockSettings => Set<ShopStockSettings>();
     public DbSet<ShopProfile> ShopProfiles => Set<ShopProfile>();
+    public DbSet<CustomerPriceTier> CustomerPriceTiers => Set<CustomerPriceTier>();
+    public DbSet<Customer> Customers => Set<Customer>();
+    public DbSet<CustomerTag> CustomerTags => Set<CustomerTag>();
+    public DbSet<CustomerCreditLedgerEntry> CustomerCreditLedger => Set<CustomerCreditLedgerEntry>();
     public DbSet<PurchaseBill> PurchaseBills => Set<PurchaseBill>();
     public DbSet<PurchaseBillItem> PurchaseBillItems => Set<PurchaseBillItem>();
     public DbSet<BillDocument> BillDocuments => Set<BillDocument>();
@@ -323,6 +327,77 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.ReceiptFooter).HasMaxLength(500);
         });
 
+        modelBuilder.Entity<CustomerPriceTier>(entity =>
+        {
+            entity.ToTable("customer_price_tiers");
+            entity.Property(x => x.Name).HasMaxLength(160);
+            entity.Property(x => x.Code).HasMaxLength(64);
+            entity.Property(x => x.DiscountPercent).HasPrecision(6, 4);
+            entity.Property(x => x.Description).HasMaxLength(500);
+            entity.HasIndex(x => new { x.StoreId, x.Code }).IsUnique();
+            entity.HasIndex(x => new { x.StoreId, x.Name }).IsUnique();
+        });
+
+        modelBuilder.Entity<Customer>(entity =>
+        {
+            entity.ToTable("customers");
+            entity.Property(x => x.Name).HasMaxLength(160);
+            entity.Property(x => x.Code).HasMaxLength(64);
+            entity.Property(x => x.Phone).HasMaxLength(32);
+            entity.Property(x => x.Email).HasMaxLength(120);
+            entity.Property(x => x.Address).HasMaxLength(500);
+            entity.Property(x => x.FixedDiscountPercent).HasPrecision(6, 4);
+            entity.Property(x => x.CreditLimit).HasPrecision(18, 2);
+            entity.Property(x => x.OutstandingBalance).HasPrecision(18, 2);
+            entity.Property(x => x.LoyaltyPoints).HasPrecision(18, 3);
+            entity.Property(x => x.Notes).HasMaxLength(1000);
+            entity.HasIndex(x => new { x.StoreId, x.Code }).IsUnique();
+            entity.HasIndex(x => new { x.StoreId, x.Phone });
+            entity.HasIndex(x => new { x.StoreId, x.Email });
+            entity.HasIndex(x => x.PriceTierId);
+            entity.HasOne(x => x.PriceTier)
+                .WithMany(x => x.Customers)
+                .HasForeignKey(x => x.PriceTierId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<CustomerTag>(entity =>
+        {
+            entity.ToTable("customer_tags");
+            entity.Property(x => x.Tag).HasMaxLength(120);
+            entity.HasIndex(x => new { x.StoreId, x.CustomerId, x.Tag }).IsUnique();
+            entity.HasIndex(x => x.CustomerId);
+            entity.HasOne(x => x.Customer)
+                .WithMany(x => x.Tags)
+                .HasForeignKey(x => x.CustomerId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<CustomerCreditLedgerEntry>(entity =>
+        {
+            entity.ToTable("customer_credit_ledger");
+            entity.Property(x => x.EntryType).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.Amount).HasPrecision(18, 2);
+            entity.Property(x => x.BalanceAfter).HasPrecision(18, 2);
+            entity.Property(x => x.Description).HasMaxLength(500);
+            entity.Property(x => x.Reference).HasMaxLength(160);
+            entity.HasIndex(x => new { x.StoreId, x.CustomerId, x.OccurredAtUtc });
+            entity.HasIndex(x => x.SaleId);
+            entity.HasIndex(x => x.RecordedByUserId);
+            entity.HasOne(x => x.Customer)
+                .WithMany(x => x.CreditLedger)
+                .HasForeignKey(x => x.CustomerId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Sale)
+                .WithMany()
+                .HasForeignKey(x => x.SaleId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(x => x.RecordedByUser)
+                .WithMany()
+                .HasForeignKey(x => x.RecordedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
         modelBuilder.Entity<PurchaseOrder>(entity =>
         {
             entity.ToTable("purchase_orders");
@@ -443,8 +518,15 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.DiscountTotal).HasPrecision(18, 2);
             entity.Property(x => x.TaxTotal).HasPrecision(18, 2);
             entity.Property(x => x.GrandTotal).HasPrecision(18, 2);
+            entity.Property(x => x.LoyaltyPointsEarned).HasPrecision(18, 3);
+            entity.Property(x => x.LoyaltyPointsRedeemed).HasPrecision(18, 3);
             entity.Property(x => x.CashShortAmount).HasPrecision(18, 2);
             entity.HasIndex(x => new { x.StoreId, x.SaleNumber }).IsUnique();
+            entity.HasIndex(x => new { x.StoreId, x.CustomerId });
+            entity.HasOne(x => x.Customer)
+                .WithMany(x => x.Sales)
+                .HasForeignKey(x => x.CustomerId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<SaleItem>(entity =>

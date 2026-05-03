@@ -18,6 +18,19 @@ internal static class TestJson
         return payload ?? throw new InvalidOperationException("Response body was empty.");
     }
 
+    public static async Task<JsonArray> ReadArrayAsync(HttpResponseMessage response)
+    {
+        if (!response.IsSuccessStatusCode)
+        {
+            var raw = await response.Content.ReadAsStringAsync();
+            throw new InvalidOperationException(
+                $"Expected success status but received {(int)response.StatusCode} ({response.StatusCode}). Body: {raw}");
+        }
+
+        var payload = await response.Content.ReadFromJsonAsync<JsonArray>();
+        return payload ?? throw new InvalidOperationException("Response body was empty.");
+    }
+
     public static string GetString(JsonNode node, string propertyName)
     {
         return node[propertyName]?.GetValue<string>()

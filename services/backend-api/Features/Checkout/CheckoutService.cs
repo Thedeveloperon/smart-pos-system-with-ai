@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Features.CashSessions;
@@ -10,6 +11,7 @@ namespace SmartPos.Backend.Features.Checkout;
 
 public sealed class CheckoutService(
     SmartPosDbContext dbContext,
+    IHttpContextAccessor httpContextAccessor,
     AuditLogService auditLogService,
     CashSessionService cashSessionService,
     StockMovementHelper stockMovementHelper,
@@ -20,12 +22,29 @@ public sealed class CheckoutService(
         Guid? createdByUserId,
         CancellationToken cancellationToken)
     {
-        var cart = await BuildCartAsync(request.Items, request.DiscountPercent, request.Role, cancellationToken);
+        var customer = request.CustomerId.HasValue
+            ? await LoadCustomerAsync(request.CustomerId.Value, cancellationToken)
+            : null;
+        var discountPercent = customer is null
+            ? request.DiscountPercent
+            : ResolveCustomerDiscountPercent(customer, request.DiscountPercent);
+        var cart = await BuildCartAsync(
+            request.Items,
+            discountPercent,
+            request.Role,
+            bypassDiscountLimit: customer is not null,
+            cancellationToken);
         if (cart.Items.Any(x => x.SerialNumberId.HasValue))
         {
             throw new InvalidOperationException(
                 "Serial-selected items cannot be held. Complete the sale without holding it.");
         }
+
+        var loyaltyPointsRedeemed = customer is null
+            ? 0m
+            : ResolveLoyaltyRedemption(customer, request.LoyaltyPointsToRedeem, cart.GrandTotal);
+        var finalGrandTotal = RoundMoney(cart.GrandTotal - loyaltyPointsRedeemed);
+        var loyaltyPointsEarned = RoundMoney(Math.Floor(finalGrandTotal));
 
         var sale = new Sale
         {
@@ -35,7 +54,11 @@ public sealed class CheckoutService(
             Subtotal = cart.Subtotal,
             DiscountTotal = cart.DiscountTotal,
             TaxTotal = 0m,
-            GrandTotal = cart.GrandTotal,
+            GrandTotal = finalGrandTotal,
+            CustomerId = customer?.Id,
+            Customer = customer,
+            LoyaltyPointsRedeemed = loyaltyPointsRedeemed,
+            LoyaltyPointsEarned = loyaltyPointsEarned,
             CreatedByUserId = createdByUserId,
             CreatedAtUtc = DateTimeOffset.UtcNow,
             Items = cart.Items.Select(x => new SaleItem
@@ -76,6 +99,7 @@ public sealed class CheckoutService(
             sale = await dbContext.Sales
                 .Include(x => x.Items)
                 .Include(x => x.Payments)
+                .Include(x => x.Customer)
                 .FirstOrDefaultAsync(x => x.Id == request.SaleId.Value, cancellationToken)
                 ?? throw new InvalidOperationException("Held sale not found.");
 
@@ -100,7 +124,23 @@ public sealed class CheckoutService(
         }
         else
         {
-            var cart = await BuildCartAsync(request.Items, request.DiscountPercent, request.Role, cancellationToken);
+            var saleCustomer = request.CustomerId.HasValue
+                ? await LoadCustomerAsync(request.CustomerId.Value, cancellationToken)
+                : null;
+            var discountPercent = saleCustomer is null
+                ? request.DiscountPercent
+                : ResolveCustomerDiscountPercent(saleCustomer, request.DiscountPercent);
+            var cart = await BuildCartAsync(
+                request.Items,
+                discountPercent,
+                request.Role,
+                bypassDiscountLimit: saleCustomer is not null,
+                cancellationToken);
+            var loyaltyPointsRedeemed = saleCustomer is null
+                ? 0m
+                : ResolveLoyaltyRedemption(saleCustomer, request.LoyaltyPointsToRedeem, cart.GrandTotal);
+            var finalGrandTotal = RoundMoney(cart.GrandTotal - loyaltyPointsRedeemed);
+            var loyaltyPointsEarned = RoundMoney(Math.Floor(finalGrandTotal));
             var saleItems = new List<SaleItem>();
             foreach (var line in cart.Items)
             {
@@ -132,9 +172,13 @@ public sealed class CheckoutService(
                 Subtotal = cart.Subtotal,
                 DiscountTotal = cart.DiscountTotal,
                 TaxTotal = 0m,
-                GrandTotal = cart.GrandTotal,
+                GrandTotal = finalGrandTotal,
                 CustomPayoutUsed = request.CustomPayoutUsed,
                 CashShortAmount = request.CashShortAmount,
+                CustomerId = saleCustomer?.Id,
+                Customer = saleCustomer,
+                LoyaltyPointsRedeemed = loyaltyPointsRedeemed,
+                LoyaltyPointsEarned = loyaltyPointsEarned,
                 CreatedByUserId = createdByUserId,
                 CreatedAtUtc = DateTimeOffset.UtcNow,
                 Items = saleItems
@@ -226,6 +270,65 @@ public sealed class CheckoutService(
             }
         }
 
+        var cashPaidTotal = paymentRecords
+            .Where(x => x.Method == PaymentMethod.Cash)
+            .Sum(x => x.Amount);
+        var creditPaidTotal = paymentRecords
+            .Where(x => x.Method == PaymentMethod.Credit)
+            .Sum(x => x.Amount);
+        if (creditPaidTotal > 0m && paidTotal != sale.GrandTotal)
+        {
+            throw new InvalidOperationException("Credit payments must exactly match the bill total.");
+        }
+
+        var customerId = sale.CustomerId;
+        Customer? customer = null;
+        if (customerId.HasValue)
+        {
+            customer = sale.Customer ?? await LoadCustomerAsync(customerId.Value, cancellationToken);
+            sale.Customer = customer;
+
+            if (sale.LoyaltyPointsRedeemed > 0m)
+            {
+                if (customer.LoyaltyPoints < sale.LoyaltyPointsRedeemed)
+                {
+                    throw new InvalidOperationException("Customer does not have enough loyalty points.");
+                }
+
+                customer.LoyaltyPoints = RoundMoney(customer.LoyaltyPoints - sale.LoyaltyPointsRedeemed);
+            }
+
+            sale.LoyaltyPointsEarned = RoundMoney(Math.Floor(sale.GrandTotal));
+            customer.LoyaltyPoints = RoundMoney(customer.LoyaltyPoints + sale.LoyaltyPointsEarned);
+
+            if (creditPaidTotal > 0m)
+            {
+                var nextOutstandingBalance = RoundMoney(customer.OutstandingBalance + creditPaidTotal);
+                if (nextOutstandingBalance > customer.CreditLimit)
+                {
+                    throw new InvalidOperationException("Customer credit limit exceeded.");
+                }
+
+                customer.OutstandingBalance = nextOutstandingBalance;
+                customer.UpdatedAtUtc = now;
+                dbContext.CustomerCreditLedger.Add(new CustomerCreditLedgerEntry
+                {
+                    StoreId = customer.StoreId,
+                    CustomerId = customer.Id,
+                    SaleId = sale.Id,
+                    EntryType = CustomerCreditEntryType.Charge,
+                    Amount = creditPaidTotal,
+                    BalanceAfter = nextOutstandingBalance,
+                    Description = $"Credit sale {sale.SaleNumber}",
+                    Reference = sale.SaleNumber,
+                    RecordedByUserId = createdByUserId,
+                    OccurredAtUtc = now,
+                    CreatedAtUtc = now,
+                    Customer = customer
+                });
+            }
+        }
+
         dbContext.Payments.AddRange(paymentRecords);
         dbContext.Ledger.Add(new LedgerEntry
         {
@@ -272,9 +375,6 @@ public sealed class CheckoutService(
                 change
             });
 
-        var cashPaidTotal = paymentRecords
-            .Where(x => x.Method == PaymentMethod.Cash)
-            .Sum(x => x.Amount);
         if (cashPaidTotal > 0m)
         {
             var cashNetTotal = decimal.Round(
@@ -380,6 +480,7 @@ public sealed class CheckoutService(
             .AsNoTracking()
             .Include(x => x.Items)
             .Include(x => x.Payments)
+            .Include(x => x.Customer)
             .FirstOrDefaultAsync(x => x.Id == saleId, cancellationToken);
 
         if (sale is null)
@@ -406,6 +507,7 @@ public sealed class CheckoutService(
         var sale = await dbContext.Sales
             .Include(x => x.Items)
             .Include(x => x.Payments)
+            .Include(x => x.Customer)
             .FirstOrDefaultAsync(x => x.Id == saleId, cancellationToken)
             ?? throw new InvalidOperationException("Sale not found.");
 
@@ -442,6 +544,7 @@ public sealed class CheckoutService(
         IReadOnlyCollection<CartItemRequest> requestItems,
         decimal discountPercent,
         string role,
+        bool bypassDiscountLimit,
         CancellationToken cancellationToken)
     {
         if (requestItems.Count == 0)
@@ -451,7 +554,12 @@ public sealed class CheckoutService(
 
         var normalizedRole = role.Trim().ToLowerInvariant();
         var maxDiscount = GetDiscountLimitForRole(normalizedRole);
-        if (discountPercent < 0m || discountPercent > maxDiscount)
+        if (discountPercent < 0m || discountPercent > 100m)
+        {
+            throw new InvalidOperationException("Discount percent must be between 0 and 100.");
+        }
+
+        if (!bypassDiscountLimit && discountPercent > maxDiscount)
         {
             throw new InvalidOperationException($"Discount exceeds role limit ({maxDiscount}%).");
         }
@@ -970,6 +1078,7 @@ public sealed class CheckoutService(
             "card" => PaymentMethod.Card,
             "lankaqr" => PaymentMethod.LankaQr,
             "qr" => PaymentMethod.LankaQr,
+            "credit" => PaymentMethod.Credit,
             _ => throw new InvalidOperationException("Invalid payment method.")
         };
     }
@@ -1012,6 +1121,10 @@ public sealed class CheckoutService(
             CompletedAt = sale.CompletedAtUtc,
             CustomPayoutUsed = sale.CustomPayoutUsed,
             CashShortAmount = sale.CashShortAmount,
+            CustomerId = sale.CustomerId,
+            CustomerName = sale.Customer?.Name,
+            LoyaltyPointsEarned = sale.LoyaltyPointsEarned,
+            LoyaltyPointsRedeemed = sale.LoyaltyPointsRedeemed,
             Items = sale.Items.Select(x => new SaleItemResponse
             {
                 SaleItemId = x.Id,
@@ -1078,6 +1191,90 @@ public sealed class CheckoutService(
     private static decimal RoundMoney(decimal value)
     {
         return decimal.Round(value, 2, MidpointRounding.AwayFromZero);
+    }
+
+    private static decimal NormalizeDiscountPercent(decimal value)
+    {
+        if (value < 0m || value > 100m)
+        {
+            throw new InvalidOperationException("Discount percent must be between 0 and 100.");
+        }
+
+        return RoundMoney(value);
+    }
+
+    private async Task<Customer> LoadCustomerAsync(Guid customerId, CancellationToken cancellationToken)
+    {
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
+        var customer = await dbContext.Customers
+            .Include(x => x.PriceTier)
+            .Include(x => x.Tags)
+            .FirstOrDefaultAsync(x => x.Id == customerId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken)
+            ?? throw new KeyNotFoundException("Customer not found.");
+
+        return customer;
+    }
+
+    private async Task<Guid?> GetCurrentStoreIdAsync(CancellationToken cancellationToken)
+    {
+        var user = httpContextAccessor.HttpContext?.User;
+        if (user is null)
+        {
+            return null;
+        }
+
+        var userIdValue = user.FindFirstValue(ClaimTypes.NameIdentifier) ?? user.FindFirstValue("sub");
+        if (!Guid.TryParse(userIdValue, out var userId))
+        {
+            return null;
+        }
+
+        return await dbContext.Users
+            .AsNoTracking()
+            .Where(x => x.Id == userId)
+            .Select(x => x.StoreId)
+            .SingleOrDefaultAsync(cancellationToken);
+    }
+
+    private static decimal ResolveCustomerDiscountPercent(
+        Customer customer,
+        decimal requestedDiscountPercent)
+    {
+        if (customer.FixedDiscountPercent.HasValue)
+        {
+            return NormalizeDiscountPercent(customer.FixedDiscountPercent.Value);
+        }
+
+        if (customer.PriceTier is not null)
+        {
+            return NormalizeDiscountPercent(customer.PriceTier.DiscountPercent);
+        }
+
+        return NormalizeDiscountPercent(requestedDiscountPercent);
+    }
+
+    private static decimal ResolveLoyaltyRedemption(
+        Customer customer,
+        decimal requestedPointsToRedeem,
+        decimal billTotal)
+    {
+        var pointsToRedeem = RoundMoney(requestedPointsToRedeem);
+        if (pointsToRedeem <= 0m)
+        {
+            return 0m;
+        }
+
+        if (pointsToRedeem > customer.LoyaltyPoints)
+        {
+            throw new InvalidOperationException("Customer does not have enough loyalty points.");
+        }
+
+        if (pointsToRedeem > billTotal)
+        {
+            throw new InvalidOperationException("Loyalty points to redeem cannot exceed the bill total.");
+        }
+
+        return pointsToRedeem;
     }
 
     private static List<SerialNumber> ResolveSerialAssignmentsForSaleItem(

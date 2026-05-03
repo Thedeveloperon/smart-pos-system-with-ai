@@ -8,15 +8,22 @@ const fetchWarrantyClaimsMock = vi.fn();
 const fetchProductsMock = vi.fn();
 const fetchCategoriesMock = vi.fn();
 const fetchBrandsMock = vi.fn();
+const requestJsonMock = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  fetchInventoryDashboard: (...args: unknown[]) => fetchInventoryDashboardMock(...args),
-  fetchStockMovements: (...args: unknown[]) => fetchStockMovementsMock(...args),
-  fetchWarrantyClaims: (...args: unknown[]) => fetchWarrantyClaimsMock(...args),
-  fetchProducts: (...args: unknown[]) => fetchProductsMock(...args),
-  fetchCategories: (...args: unknown[]) => fetchCategoriesMock(...args),
-  fetchBrands: (...args: unknown[]) => fetchBrandsMock(...args),
-}));
+vi.mock("@/lib/api", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
+
+  return {
+    ...actual,
+    requestJson: (...args: unknown[]) => requestJsonMock(...args),
+    fetchInventoryDashboard: (...args: unknown[]) => fetchInventoryDashboardMock(...args),
+    fetchStockMovements: (...args: unknown[]) => fetchStockMovementsMock(...args),
+    fetchWarrantyClaims: (...args: unknown[]) => fetchWarrantyClaimsMock(...args),
+    fetchProducts: (...args: unknown[]) => fetchProductsMock(...args),
+    fetchCategories: (...args: unknown[]) => fetchCategoriesMock(...args),
+    fetchBrands: (...args: unknown[]) => fetchBrandsMock(...args),
+  };
+});
 
 describe("InventoryManagerDashboard", () => {
   beforeEach(() => {
@@ -26,6 +33,7 @@ describe("InventoryManagerDashboard", () => {
     fetchProductsMock.mockReset();
     fetchCategoriesMock.mockReset();
     fetchBrandsMock.mockReset();
+    requestJsonMock.mockReset();
     fetchInventoryDashboardMock.mockResolvedValue({
       expiry_alert_count: 2,
       open_warranty_claims: 1,
@@ -64,6 +72,22 @@ describe("InventoryManagerDashboard", () => {
     ]);
     fetchCategoriesMock.mockResolvedValue([]);
     fetchBrandsMock.mockResolvedValue([]);
+    requestJsonMock.mockImplementation((path: string) => {
+      if (path === "/api/customer-price-tiers") {
+        return Promise.resolve([]);
+      }
+
+      if (path === "/api/customers?include_inactive=true&page=1&take=100") {
+        return Promise.resolve({
+          items: [],
+          total: 0,
+          page: 1,
+          take: 100,
+        });
+      }
+
+      return Promise.reject(new Error(`Unhandled requestJson path in test: ${path}`));
+    });
 
     window.history.replaceState({}, "", "/inventory-manager?returnTo=%2F");
   });
@@ -72,11 +96,13 @@ describe("InventoryManagerDashboard", () => {
     render(<InventoryManagerDashboard />);
 
     expect(await screen.findByRole("button", { name: /Back to Dashboard/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "POS Management" })).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "Products" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Inventory Management" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Products" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Customers" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Purchases" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Reports" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Product Manager" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Products" })).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByRole("heading", { name: "Products" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Current sale" })).not.toBeInTheDocument();
     expect(screen.getByText("Browse the current product list.")).toBeInTheDocument();
@@ -86,5 +112,10 @@ describe("InventoryManagerDashboard", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Inventory" }));
     expect(await screen.findByText("Low stock")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Inventory" })).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Customers" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Customers" }));
+    expect(await screen.findByRole("heading", { name: "Customer Directory" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Customers" })).toHaveAttribute("aria-selected", "true");
   });
 });

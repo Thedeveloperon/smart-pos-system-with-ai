@@ -389,22 +389,98 @@ public sealed class ShopStockSettings
     public DateTimeOffset? UpdatedAtUtc { get; set; }
 }
 
+public sealed class CustomerPriceTier
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? StoreId { get; set; }
+    public required string Name { get; set; }
+    public required string Code { get; set; }
+    public decimal DiscountPercent { get; set; }
+    public string? Description { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public ICollection<Customer> Customers { get; set; } = [];
+}
+
+public sealed class Customer
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? StoreId { get; set; }
+    public Guid? PriceTierId { get; set; }
+    public required string Name { get; set; }
+    public string? Code { get; set; }
+    public string? Phone { get; set; }
+    public string? Email { get; set; }
+    public string? Address { get; set; }
+    public DateOnly? DateOfBirth { get; set; }
+    public decimal? FixedDiscountPercent { get; set; }
+    public decimal CreditLimit { get; set; }
+    public decimal OutstandingBalance { get; set; }
+    public decimal LoyaltyPoints { get; set; }
+    public string? Notes { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public CustomerPriceTier? PriceTier { get; set; }
+    public ICollection<Sale> Sales { get; set; } = [];
+    public ICollection<CustomerCreditLedgerEntry> CreditLedger { get; set; } = [];
+    public ICollection<CustomerTag> Tags { get; set; } = [];
+}
+
+public sealed class CustomerTag
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? StoreId { get; set; }
+    public Guid CustomerId { get; set; }
+    public required string Tag { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+
+    public required Customer Customer { get; set; }
+}
+
+public sealed class CustomerCreditLedgerEntry
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? StoreId { get; set; }
+    public Guid CustomerId { get; set; }
+    public Guid? SaleId { get; set; }
+    public CustomerCreditEntryType EntryType { get; set; }
+    public decimal Amount { get; set; }
+    public decimal BalanceAfter { get; set; }
+    public required string Description { get; set; }
+    public string? Reference { get; set; }
+    public Guid? RecordedByUserId { get; set; }
+    public DateTimeOffset OccurredAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+
+    public required Customer Customer { get; set; }
+    public Sale? Sale { get; set; }
+    public AppUser? RecordedByUser { get; set; }
+}
+
 public sealed class Sale
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid? StoreId { get; set; }
+    public Guid? CustomerId { get; set; }
     public required string SaleNumber { get; set; }
     public SaleStatus Status { get; set; } = SaleStatus.Held;
     public decimal Subtotal { get; set; }
     public decimal DiscountTotal { get; set; }
     public decimal TaxTotal { get; set; }
     public decimal GrandTotal { get; set; }
+    public decimal LoyaltyPointsEarned { get; set; }
+    public decimal LoyaltyPointsRedeemed { get; set; }
     public bool CustomPayoutUsed { get; set; }
     public decimal CashShortAmount { get; set; }
     public Guid? CreatedByUserId { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? CompletedAtUtc { get; set; }
 
+    public Customer? Customer { get; set; }
     public ICollection<SaleItem> Items { get; set; } = [];
     public ICollection<Payment> Payments { get; set; } = [];
     public ICollection<Refund> Refunds { get; set; } = [];
@@ -1145,7 +1221,16 @@ public enum PaymentMethod
 {
     Cash = 1,
     Card = 2,
-    LankaQr = 3
+    LankaQr = 3,
+    Credit = 4
+}
+
+public enum CustomerCreditEntryType
+{
+    Charge = 1,
+    Payment = 2,
+    Adjustment = 3,
+    Refund = 4
 }
 
 public enum LedgerEntryType

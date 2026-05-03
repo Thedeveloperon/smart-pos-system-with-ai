@@ -120,6 +120,18 @@ public sealed class CheckoutRefundFlowTests(CustomWebApplicationFactory factory)
 
         Assert.Equal(productId, Guid.Parse(TestJson.GetString(reportLineItem, "product_id")));
         Assert.Equal(2m, TestJson.GetDecimal(reportLineItem, "quantity"));
+
+        var paymentBreakdownReport = await TestJson.ReadObjectAsync(
+            await client.GetAsync("/api/reports/payment-breakdown"));
+        var cashMethod = paymentBreakdownReport["items"]!
+            .AsArray()
+            .OfType<JsonObject>()
+            .FirstOrDefault(item => string.Equals(
+                item["method"]?.GetValue<string>(),
+                "cash",
+                StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException("Cash payment method was not found in payment breakdown report.");
+        Assert.True(TestJson.GetInt32(cashMethod, "count") >= 1);
     }
 
     [Fact]

@@ -193,6 +193,9 @@ public sealed class ReportPaymentBreakdownRow
     [JsonPropertyName("method")]
     public string Method { get; set; } = string.Empty;
 
+    [JsonPropertyName("count")]
+    public int Count { get; set; }
+
     [JsonPropertyName("paid_amount")]
     public decimal PaidAmount { get; set; }
 
@@ -441,6 +444,123 @@ public sealed class LowStockBySupplierReportRow
 
     [JsonPropertyName("estimated_reorder_value")]
     public decimal EstimatedReorderValue { get; set; }
+}
+
+public sealed class CashierLeaderboardReportResponse
+{
+    [JsonPropertyName("from_date")]
+    public DateOnly FromDate { get; set; }
+
+    [JsonPropertyName("to_date")]
+    public DateOnly ToDate { get; set; }
+
+    [JsonPropertyName("items")]
+    public List<CashierLeaderboardReportRow> Items { get; set; } = [];
+}
+
+public sealed class CashierLeaderboardReportRow
+{
+    [JsonPropertyName("cashier_user_id")]
+    public Guid? CashierUserId { get; set; }
+
+    [JsonPropertyName("cashier_name")]
+    public string CashierName { get; set; } = string.Empty;
+
+    [JsonPropertyName("transaction_count")]
+    public int TransactionCount { get; set; }
+
+    [JsonPropertyName("items_sold")]
+    public decimal ItemsSold { get; set; }
+
+    [JsonPropertyName("gross_sales")]
+    public decimal GrossSales { get; set; }
+
+    [JsonPropertyName("refund_count")]
+    public int RefundCount { get; set; }
+
+    [JsonPropertyName("average_basket")]
+    public decimal AverageBasket { get; set; }
+}
+
+public sealed class MarginSummaryReportResponse
+{
+    [JsonPropertyName("from_date")]
+    public DateOnly FromDate { get; set; }
+
+    [JsonPropertyName("to_date")]
+    public DateOnly ToDate { get; set; }
+
+    [JsonPropertyName("take")]
+    public int Take { get; set; }
+
+    [JsonPropertyName("items")]
+    public List<MarginSummaryReportRow> Items { get; set; } = [];
+}
+
+public sealed class MarginSummaryReportRow
+{
+    [JsonPropertyName("product_id")]
+    public Guid ProductId { get; set; }
+
+    [JsonPropertyName("product_name")]
+    public string ProductName { get; set; } = string.Empty;
+
+    [JsonPropertyName("net_quantity")]
+    public decimal NetQuantity { get; set; }
+
+    [JsonPropertyName("net_sales")]
+    public decimal NetSales { get; set; }
+
+    [JsonPropertyName("cost_of_goods")]
+    public decimal CostOfGoods { get; set; }
+
+    [JsonPropertyName("gross_profit")]
+    public decimal GrossProfit { get; set; }
+
+    [JsonPropertyName("margin_percent")]
+    public decimal MarginPercent { get; set; }
+}
+
+public sealed class SalesComparisonReportResponse
+{
+    [JsonPropertyName("current_from")]
+    public DateOnly CurrentFrom { get; set; }
+
+    [JsonPropertyName("current_to")]
+    public DateOnly CurrentTo { get; set; }
+
+    [JsonPropertyName("prior_from")]
+    public DateOnly PriorFrom { get; set; }
+
+    [JsonPropertyName("prior_to")]
+    public DateOnly PriorTo { get; set; }
+
+    [JsonPropertyName("current_net_sales")]
+    public decimal CurrentNetSales { get; set; }
+
+    [JsonPropertyName("prior_net_sales")]
+    public decimal PriorNetSales { get; set; }
+
+    [JsonPropertyName("change_percent")]
+    public decimal ChangePercent { get; set; }
+
+    [JsonPropertyName("current_items")]
+    public List<SalesComparisonReportRow> CurrentItems { get; set; } = [];
+
+    [JsonPropertyName("prior_items")]
+    public List<SalesComparisonReportRow> PriorItems { get; set; } = [];
+}
+
+public sealed class SalesComparisonReportRow
+{
+    [JsonPropertyName("date")]
+    public DateOnly Date { get; set; }
+
+    [JsonPropertyName("net_sales")]
+    public decimal NetSales { get; set; }
+
+    [JsonPropertyName("sales_count")]
+    public int SalesCount { get; set; }
 }
 
 public sealed class SupportTriageReportResponse
