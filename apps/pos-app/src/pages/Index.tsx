@@ -596,7 +596,7 @@ const IndexInner = () => {
     async (
       paymentMethod: PaymentMethod,
       cashReceived: number,
-      customerMobile: string,
+      customerId: string | undefined,
       cashReceivedCounts?: DenominationCount[],
       cashChangeCounts?: DenominationCount[],
       customPayoutUsed?: boolean,
@@ -604,7 +604,6 @@ const IndexInner = () => {
     ) => {
       const total = cartItems.reduce((a, i) => a + i.product.price * i.quantity, 0);
       const paidAmount = paymentMethod === "cash" ? cashReceived || total : total;
-      const referenceNumber = customerMobile.trim() || undefined;
       const receiptWindow = window.open("", "_blank", "width=420,height=760");
 
       try {
@@ -614,11 +613,11 @@ const IndexInner = () => {
           paymentMethod,
           paidAmount,
           activeHeldSaleId || undefined,
-          referenceNumber,
           cashReceivedCounts,
           cashChangeCounts,
           customPayoutUsed,
-          cashShortAmount
+          cashShortAmount,
+          customerId
         );
 
         setCartItems([]);

@@ -151,6 +151,8 @@ public static class DbSeeder
             storeId: seedShop.Id,
             cancellationToken);
 
+        await EnsureDefaultCustomerAsync(dbContext, seedShop.Id, cancellationToken);
+
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
@@ -220,6 +222,48 @@ public static class DbSeeder
             RoleId = role.Id,
             User = null!,
             Role = null!
+        });
+    }
+
+    private static async Task EnsureDefaultCustomerAsync(
+        SmartPosDbContext dbContext,
+        Guid? storeId,
+        CancellationToken cancellationToken)
+    {
+        var normalizedName = "default customer";
+        var existing = await dbContext.Customers
+            .FirstOrDefaultAsync(x => x.Name.ToLower() == normalizedName, cancellationToken);
+
+        if (existing is not null)
+        {
+            if (storeId.HasValue && existing.StoreId != storeId.Value)
+            {
+                existing.StoreId = storeId.Value;
+            }
+
+            existing.IsActive = true;
+            existing.Code ??= "C-0000";
+            return;
+        }
+
+        dbContext.Customers.Add(new Customer
+        {
+            StoreId = storeId,
+            Name = "Default Customer",
+            Code = "C-0000",
+            Phone = null,
+            Email = null,
+            Address = null,
+            DateOfBirth = null,
+            FixedDiscountPercent = null,
+            CreditLimit = 0m,
+            OutstandingBalance = 0m,
+            LoyaltyPoints = 0m,
+            Notes = "Automatically available default customer for sales.",
+            IsActive = true,
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+            UpdatedAtUtc = DateTimeOffset.UtcNow,
+            Tags = []
         });
     }
 }

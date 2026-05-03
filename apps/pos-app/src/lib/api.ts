@@ -1883,6 +1883,7 @@ type CreateSaleRequest = {
   sale_id?: string;
   items?: { product_id: string; quantity: number; serial_number_id?: string; sale_item_id?: string }[];
   discount_percent?: number;
+  customer_id?: string;
   role: string;
   payments: { method: string; amount: number; reference_number?: string | null }[];
   cash_received_counts?: { denomination: number; quantity: number }[];
@@ -3052,6 +3053,163 @@ export async function fetchCategories(includeInactive = false) {
   const query = `?include_inactive=${includeInactive ? "true" : "false"}`;
   const response = await request<BackendCategoryListResponse>(`/api/categories${query}`);
   return response.items;
+}
+
+type BackendCustomerPriceTierItem = {
+  price_tier_id: string;
+  name: string;
+  code: string;
+  discount_percent: number;
+  description?: string | null;
+  is_active: boolean;
+  customer_count: number;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+type BackendCustomerSearchItem = {
+  customer_id: string;
+  name: string;
+  code: string;
+  phone?: string | null;
+  email?: string | null;
+  is_active: boolean;
+  price_tier?: {
+    price_tier_id: string;
+    name: string;
+    code: string;
+    discount_percent: number;
+  } | null;
+};
+
+type BackendCustomerSearchResponse = {
+  items: BackendCustomerSearchItem[];
+  total: number;
+  page: number;
+  take: number;
+};
+
+type BackendCustomerDetail = {
+  customer_id: string;
+  name: string;
+  code: string;
+  phone?: string | null;
+  email?: string | null;
+};
+
+export type CustomerLookupItem = {
+  id: string;
+  name: string;
+  code: string;
+  phone?: string | null;
+  email?: string | null;
+};
+
+export type CreateCustomerRequest = {
+  name: string;
+  code?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  dateOfBirth?: string | null;
+  priceTierId?: string | null;
+  fixedDiscountPercent?: number | null;
+  creditLimit?: number;
+  notes?: string | null;
+  tags?: string[];
+  isActive?: boolean;
+};
+
+function mapCustomerLookupItem(item: BackendCustomerSearchItem): CustomerLookupItem {
+  return {
+    id: item.customer_id,
+    name: item.name,
+    code: item.code,
+    phone: item.phone ?? null,
+    email: item.email ?? null,
+  };
+}
+
+export async function searchCustomers(query = "", take = 10) {
+  const params = new URLSearchParams();
+  if (query.trim()) {
+    params.set("q", query.trim());
+  }
+  params.set("take", String(Math.max(1, Math.min(50, Math.trunc(take) || 10))));
+
+  const response = await request<BackendCustomerSearchResponse>(`/api/customers/search?${params.toString()}`);
+  return response.items.map(mapCustomerLookupItem);
+}
+
+export async function fetchCustomerDirectoryLookup() {
+  const pageSize = 100;
+  const firstPage = await request<BackendCustomerSearchResponse>(`/api/customers?include_inactive=false&page=1&take=${pageSize}`);
+  const totalPages = Math.max(1, Math.ceil(firstPage.total / firstPage.take));
+  const items = [...firstPage.items];
+
+  if (totalPages > 1) {
+    const remainingPages = await Promise.all(
+      Array.from({ length: totalPages - 1 }, async (_unused, index) =>
+        request<BackendCustomerSearchResponse>(`/api/customers?include_inactive=false&page=${index + 2}&take=${pageSize}`)
+      )
+    );
+
+    for (const page of remainingPages) {
+      items.push(...page.items);
+    }
+  }
+
+  return items.map(mapCustomerLookupItem);
+}
+
+export async function fetchCustomer(customerId: string) {
+  const response = await request<BackendCustomerDetail>(`/api/customers/${encodeURIComponent(customerId)}`);
+  return mapCustomerLookupItem({
+    customer_id: response.customer_id,
+    name: response.name,
+    code: response.code,
+    phone: response.phone ?? null,
+    email: response.email ?? null,
+    is_active: true,
+    price_tier: null,
+  });
+}
+
+export async function fetchCustomerPriceTiers() {
+  const response = await request<BackendCustomerPriceTierItem[]>("/api/customer-price-tiers");
+  return response.map((item) => ({
+    id: item.price_tier_id,
+    name: item.name,
+    code: item.code,
+    discountPercent: Number(item.discount_percent) || 0,
+    description: item.description ?? "",
+    isActive: item.is_active,
+    customerCount: item.customer_count,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+  }));
+}
+
+export async function createCustomer(requestBody: CreateCustomerRequest) {
+  const response = await request<BackendCustomerSearchItem>("/api/customers", {
+    method: "POST",
+    body: JSON.stringify({
+      name: requestBody.name.trim(),
+      code: normalizeOptionalString(requestBody.code),
+      phone: normalizeOptionalString(requestBody.phone),
+      email: normalizeOptionalString(requestBody.email),
+      address: normalizeOptionalString(requestBody.address),
+      date_of_birth: requestBody.dateOfBirth || null,
+      price_tier_id: requestBody.priceTierId || null,
+      fixed_discount_percent: requestBody.fixedDiscountPercent ?? null,
+      credit_limit: requestBody.creditLimit ?? 0,
+      notes: normalizeOptionalString(requestBody.notes),
+      tags: requestBody.tags ?? [],
+      is_active: requestBody.isActive ?? true,
+    }),
+  });
+
+  return mapCustomerLookupItem(response);
 }
 
 function mapBrand(item: BackendBrandItem): Brand {
@@ -4620,7 +4778,8 @@ export async function completeSale(
   cashReceivedCounts?: DenominationCount[],
   cashChangeCounts?: DenominationCount[],
   customPayoutUsed?: boolean,
-  cashShortAmount?: number
+  cashShortAmount?: number,
+  customerId?: string
 ) {
   const payload: CreateSaleRequest = {
     sale_id: saleId,
@@ -4632,6 +4791,7 @@ export async function completeSale(
     })),
     discount_percent: 0,
     role: toBackendRole(role),
+    customer_id: customerId || undefined,
     payments: [
       {
         method: paymentMethod,
