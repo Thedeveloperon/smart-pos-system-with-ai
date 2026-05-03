@@ -20,7 +20,7 @@ internal static class DeterministicIntegrationDataSeeder
             .FirstAsync(x => x.Username == "cashier", cancellationToken);
 
         var category = await EnsureCategoryAsync(dbContext, shop.Id, "Stationery", cancellationToken);
-        var supplier = await EnsureSupplierAsync(dbContext, shop.Id, "Acme Traders", "ACME-001", cancellationToken);
+        var supplier = await EnsureSupplierAsync(dbContext, shop.Id, "Acme Traders", cancellationToken);
 
         var ruler = await EnsureProductAsync(
             dbContext,
@@ -209,7 +209,6 @@ internal static class DeterministicIntegrationDataSeeder
         SmartPosDbContext dbContext,
         Guid shopId,
         string name,
-        string code,
         CancellationToken cancellationToken)
     {
         var supplier = await dbContext.Suppliers
@@ -223,10 +222,9 @@ internal static class DeterministicIntegrationDataSeeder
         {
             StoreId = shopId,
             Name = name,
-            Code = code,
-            ContactName = "Integration Procurement",
+            CompanyName = "Integration Procurement",
+            CompanyPhone = "+94 11 000 0000",
             Phone = "+94 11 000 0000",
-            Email = "procurement@acme.test",
             Address = "Integration Test Road, Colombo",
             IsActive = true,
             CreatedAtUtc = DateTimeOffset.UtcNow

@@ -27,6 +27,7 @@ public sealed class Brand
     public DateTimeOffset? UpdatedAtUtc { get; set; }
 
     public ICollection<Product> Products { get; set; } = [];
+    public ICollection<SupplierBrand> SupplierBrands { get; set; } = [];
 }
 
 public sealed class Product
@@ -66,10 +67,9 @@ public sealed class Supplier
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid? StoreId { get; set; }
     public required string Name { get; set; }
-    public string? Code { get; set; }
-    public string? ContactName { get; set; }
     public string? Phone { get; set; }
-    public string? Email { get; set; }
+    public string? CompanyName { get; set; }
+    public string? CompanyPhone { get; set; }
     public string? Address { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
@@ -79,6 +79,18 @@ public sealed class Supplier
     public ICollection<PurchaseOrder> PurchaseOrders { get; set; } = [];
     public ICollection<ProductSupplier> ProductSuppliers { get; set; } = [];
     public ICollection<ProductBatch> ProductBatches { get; set; } = [];
+    public ICollection<SupplierBrand> SupplierBrands { get; set; } = [];
+}
+
+public sealed class SupplierBrand
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? StoreId { get; set; }
+    public Guid SupplierId { get; set; }
+    public Guid BrandId { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public required Supplier Supplier { get; set; }
+    public required Brand Brand { get; set; }
 }
 
 public sealed class PurchaseOrder

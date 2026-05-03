@@ -10,6 +10,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
     public DbSet<Product> Products => Set<Product>();
     public DbSet<InventoryRecord> Inventory => Set<InventoryRecord>();
     public DbSet<Supplier> Suppliers => Set<Supplier>();
+    public DbSet<SupplierBrand> SupplierBrands => Set<SupplierBrand>();
     public DbSet<ProductSupplier> ProductSuppliers => Set<ProductSupplier>();
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
     public DbSet<PurchaseOrderLine> PurchaseOrderLines => Set<PurchaseOrderLine>();
@@ -255,13 +256,26 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
         {
             entity.ToTable("suppliers");
             entity.Property(x => x.Name).HasMaxLength(160);
-            entity.Property(x => x.Code).HasMaxLength(64);
-            entity.Property(x => x.ContactName).HasMaxLength(120);
             entity.Property(x => x.Phone).HasMaxLength(32);
-            entity.Property(x => x.Email).HasMaxLength(120);
+            entity.Property(x => x.CompanyName).HasMaxLength(160);
+            entity.Property(x => x.CompanyPhone).HasMaxLength(32);
             entity.Property(x => x.Address).HasMaxLength(500);
             entity.HasIndex(x => new { x.StoreId, x.Name }).IsUnique();
-            entity.HasIndex(x => new { x.StoreId, x.Code }).IsUnique();
+        });
+
+        modelBuilder.Entity<SupplierBrand>(entity =>
+        {
+            entity.ToTable("supplier_brands");
+            entity.HasIndex(x => new { x.SupplierId, x.BrandId }).IsUnique();
+            entity.HasIndex(x => x.StoreId);
+            entity.HasOne(x => x.Supplier)
+                .WithMany(x => x.SupplierBrands)
+                .HasForeignKey(x => x.SupplierId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Brand)
+                .WithMany(x => x.SupplierBrands)
+                .HasForeignKey(x => x.BrandId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<ProductSupplier>(entity =>

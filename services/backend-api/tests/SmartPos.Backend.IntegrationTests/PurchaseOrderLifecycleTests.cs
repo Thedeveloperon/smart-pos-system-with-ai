@@ -19,12 +19,12 @@ public sealed class PurchaseOrderLifecycleTests(CustomWebApplicationFactory fact
             await client.PostAsJsonAsync("/api/suppliers", new
             {
                 name = $"PO Supplier {runId}",
-                code = $"SUP-{runId}",
-                contact_name = "Procurement",
                 phone = "0712345678",
-                email = $"supplier-{runId}@example.com",
+                company_name = $"PO Supplier Co {runId}",
+                company_phone = "0112345678",
                 address = "Integration Test Road",
-                is_active = true
+                is_active = true,
+                brand_ids = Array.Empty<Guid>()
             }));
 
         var supplierId = Guid.Parse(TestJson.GetString(supplier, "supplier_id"));
@@ -79,8 +79,8 @@ public sealed class PurchaseOrderLifecycleTests(CustomWebApplicationFactory fact
             await client.PostAsJsonAsync("/api/suppliers", new
             {
                 name = $"PO Date Supplier {runId}",
-                code = $"POD-{runId}",
-                is_active = true
+                is_active = true,
+                brand_ids = Array.Empty<Guid>()
             }));
 
         var supplierId = Guid.Parse(TestJson.GetString(supplier, "supplier_id"));
@@ -131,8 +131,8 @@ public sealed class PurchaseOrderLifecycleTests(CustomWebApplicationFactory fact
             await client.PostAsJsonAsync("/api/suppliers", new
             {
                 name = $"PO Update Supplier {runId}",
-                code = $"PO-UPD-SUP-{runId}",
-                is_active = true
+                is_active = true,
+                brand_ids = Array.Empty<Guid>()
             }));
         var supplierId = Guid.Parse(TestJson.GetString(supplier, "supplier_id"));
 
@@ -236,8 +236,8 @@ public sealed class PurchaseOrderLifecycleTests(CustomWebApplicationFactory fact
             await client.PostAsJsonAsync("/api/suppliers", new
             {
                 name = $"PO Filter Supplier {runId}",
-                code = $"PO-FLT-SUP-{runId}",
-                is_active = true
+                is_active = true,
+                brand_ids = Array.Empty<Guid>()
             }));
         var supplierId = Guid.Parse(TestJson.GetString(supplier, "supplier_id"));
 
@@ -318,8 +318,8 @@ public sealed class PurchaseOrderLifecycleTests(CustomWebApplicationFactory fact
             await client.PostAsJsonAsync("/api/suppliers", new
             {
                 name = $"PO Serial Supplier {runId}",
-                code = $"PO-SER-SUP-{runId}",
-                is_active = true
+                is_active = true,
+                brand_ids = Array.Empty<Guid>()
             }));
         var supplierId = Guid.Parse(TestJson.GetString(supplier, "supplier_id"));
 

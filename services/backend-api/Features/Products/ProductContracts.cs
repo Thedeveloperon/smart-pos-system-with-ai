@@ -102,20 +102,20 @@ public sealed class SupplierItemResponse
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
 
-    [JsonPropertyName("code")]
-    public string? Code { get; set; }
-
-    [JsonPropertyName("contact_name")]
-    public string? ContactName { get; set; }
-
     [JsonPropertyName("phone")]
     public string? Phone { get; set; }
 
-    [JsonPropertyName("email")]
-    public string? Email { get; set; }
+    [JsonPropertyName("company_name")]
+    public string? CompanyName { get; set; }
+
+    [JsonPropertyName("company_phone")]
+    public string? CompanyPhone { get; set; }
 
     [JsonPropertyName("address")]
     public string? Address { get; set; }
+
+    [JsonPropertyName("brands")]
+    public List<SupplierBrandItem> Brands { get; set; } = [];
 
     [JsonPropertyName("is_active")]
     public bool IsActive { get; set; }
@@ -136,28 +136,37 @@ public sealed class SupplierItemResponse
     public DateTimeOffset? UpdatedAt { get; set; }
 }
 
+public sealed class SupplierBrandItem
+{
+    [JsonPropertyName("brand_id")]
+    public Guid BrandId { get; set; }
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+}
+
 public sealed class UpsertSupplierRequest
 {
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
 
-    [JsonPropertyName("code")]
-    public string? Code { get; set; }
-
-    [JsonPropertyName("contact_name")]
-    public string? ContactName { get; set; }
-
     [JsonPropertyName("phone")]
     public string? Phone { get; set; }
 
-    [JsonPropertyName("email")]
-    public string? Email { get; set; }
+    [JsonPropertyName("company_name")]
+    public string? CompanyName { get; set; }
+
+    [JsonPropertyName("company_phone")]
+    public string? CompanyPhone { get; set; }
 
     [JsonPropertyName("address")]
     public string? Address { get; set; }
 
     [JsonPropertyName("is_active")]
     public bool IsActive { get; set; } = true;
+
+    [JsonPropertyName("brand_ids")]
+    public List<Guid> BrandIds { get; set; } = [];
 }
 
 public sealed class ProductSupplierListResponse
