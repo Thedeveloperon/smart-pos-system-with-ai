@@ -73,6 +73,7 @@ public static class WarrantyClaimEndpoints
                         handover_date = x.HandoverDate,
                         pickup_person_name = x.PickupPersonName,
                         received_back_date = x.ReceivedBackDate,
+                        received_back_person_name = x.ReceivedBackPersonName,
                         created_by_user_id = x.CreatedByUserId,
                         created_at = x.CreatedAtUtc,
                         updated_at = x.UpdatedAtUtc
@@ -107,6 +108,7 @@ public static class WarrantyClaimEndpoints
                         handover_date = x.HandoverDate,
                         pickup_person_name = x.PickupPersonName,
                         received_back_date = x.ReceivedBackDate,
+                        received_back_person_name = x.ReceivedBackPersonName,
                         created_by_user_id = x.CreatedByUserId,
                         created_at = x.CreatedAtUtc,
                         updated_at = x.UpdatedAtUtc
@@ -201,6 +203,7 @@ public static class WarrantyClaimEndpoints
                 handover_date = claim.HandoverDate,
                 pickup_person_name = claim.PickupPersonName,
                 received_back_date = claim.ReceivedBackDate,
+                received_back_person_name = claim.ReceivedBackPersonName,
                 created_by_user_id = claim.CreatedByUserId,
                 created_at = claim.CreatedAtUtc,
                 updated_at = claim.UpdatedAtUtc
@@ -255,6 +258,10 @@ public static class WarrantyClaimEndpoints
             if (request.ReceivedBackDate.HasValue)
             {
                 claim.ReceivedBackDate = request.ReceivedBackDate;
+            }
+            if (request.ReceivedBackPersonName is not null)
+            {
+                claim.ReceivedBackPersonName = request.ReceivedBackPersonName;
             }
 
             claim.UpdatedAtUtc = DateTimeOffset.UtcNow;
@@ -317,6 +324,7 @@ public static class WarrantyClaimEndpoints
             handover_date = claim.HandoverDate,
             pickup_person_name = claim.PickupPersonName,
             received_back_date = claim.ReceivedBackDate,
+            received_back_person_name = claim.ReceivedBackPersonName,
             created_by_user_id = claim.CreatedByUserId,
             created_at = claim.CreatedAtUtc,
             updated_at = claim.UpdatedAtUtc
@@ -361,4 +369,7 @@ public sealed class UpdateWarrantyClaimRequest
     [JsonPropertyName("received_back_date")]
     [JsonConverter(typeof(FlexibleNullableDateTimeOffsetJsonConverter))]
     public DateTimeOffset? ReceivedBackDate { get; set; }
+
+    [JsonPropertyName("received_back_person_name")]
+    public string? ReceivedBackPersonName { get; set; }
 }

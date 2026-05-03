@@ -1,4 +1,4 @@
-import { History, Wrench, Check, XCircle } from "lucide-react";
+import { History, Wrench, Check, XCircle, PackageCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "./StatusBadge";
 import { type WarrantyClaim } from "@/lib/api";
@@ -16,6 +16,7 @@ interface Props {
   claims: WarrantyClaim[];
   onTimeline: (c: WarrantyClaim) => void;
   onHandover: (c: WarrantyClaim) => void;
+  onReceiveBack: (c: WarrantyClaim) => void;
   onResolve: (c: WarrantyClaim) => void;
   onReject: (c: WarrantyClaim) => void;
 }
@@ -40,7 +41,7 @@ function gradientFor(id: string) {
   return AVATAR_GRADIENTS[h % AVATAR_GRADIENTS.length];
 }
 
-export function ClaimsTable({ claims, onTimeline, onHandover, onResolve, onReject }: Props) {
+export function ClaimsTable({ claims, onTimeline, onHandover, onReceiveBack, onResolve, onReject }: Props) {
   if (claims.length === 0) {
     return (
       <div className="rounded-lg border border-border bg-background py-16 text-center">
@@ -112,7 +113,19 @@ export function ClaimsTable({ claims, onTimeline, onHandover, onResolve, onRejec
                 </Button>
               )}
 
-              {c.status === "InRepair" && (
+              {c.status === "InRepair" && !c.received_back_date && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 px-2 text-status-repair hover:text-status-repair"
+                  onClick={() => onReceiveBack(c)}
+                >
+                  <PackageCheck className="mr-1 h-4 w-4" />
+                  Receive Back
+                </Button>
+              )}
+
+              {c.status === "InRepair" && !!c.received_back_date && (
                 <Button
                   variant="ghost"
                   size="sm"

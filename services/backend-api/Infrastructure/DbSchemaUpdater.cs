@@ -145,6 +145,12 @@ public static class DbSchemaUpdater
                 "ReceivedBackDate",
                 """ALTER TABLE "warranty_claims" ADD COLUMN "ReceivedBackDate" TEXT NULL;""",
                 cancellationToken);
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "warranty_claims",
+                "ReceivedBackPersonName",
+                """ALTER TABLE "warranty_claims" ADD COLUMN "ReceivedBackPersonName" TEXT NULL;""",
+                cancellationToken);
             return;
         }
 
@@ -161,6 +167,9 @@ public static class DbSchemaUpdater
                 cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(
                 """ALTER TABLE warranty_claims ADD COLUMN IF NOT EXISTS "ReceivedBackDate" timestamptz NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE warranty_claims ADD COLUMN IF NOT EXISTS "ReceivedBackPersonName" varchar(200) NULL;""",
                 cancellationToken);
         }
     }

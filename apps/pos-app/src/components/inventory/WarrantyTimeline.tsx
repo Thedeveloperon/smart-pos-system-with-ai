@@ -46,9 +46,7 @@ function buildSteps(claim: WarrantyClaim): Step[] {
     Icon: Clock,
   });
 
-  const handoverDone =
-    claim.status === "InRepair" || claim.status === "Resolved" || !!claim.handover_date;
-
+  const handoverDone = claim.status !== "Open" || !!claim.handover_date;
   steps.push({
     key: "handover",
     title: "Handed to Supplier",
@@ -62,7 +60,21 @@ function buildSteps(claim: WarrantyClaim): Step[] {
     Icon: Wrench,
   });
 
-  if (claim.status === "Rejected") {
+  const isRejected = claim.status === "Rejected";
+  const receivedBackDone = !!claim.received_back_date || claim.status === "Resolved";
+  if (!isRejected || receivedBackDone) {
+    steps.push({
+      key: "received_back",
+      title: "Received Back by Shop",
+      date: claim.received_back_date ?? (claim.status === "Resolved" ? claim.updated_at : undefined),
+      details: claim.received_back_person_name ? [`Received by: ${claim.received_back_person_name}`] : [],
+      completed: receivedBackDone,
+      variant: receivedBackDone ? "success" : "muted",
+      Icon: PackageCheck,
+    });
+  }
+
+  if (isRejected) {
     steps.push({
       key: "rejected",
       title: "Rejected",
@@ -78,8 +90,8 @@ function buildSteps(claim: WarrantyClaim): Step[] {
   const resolved = claim.status === "Resolved";
   steps.push({
     key: "resolved",
-    title: "Received Back / Resolved",
-    date: claim.received_back_date ?? (resolved ? claim.updated_at : undefined),
+    title: "Resolved",
+    date: resolved ? claim.updated_at : undefined,
     details: resolved && claim.resolution_notes ? [`Notes: ${claim.resolution_notes}`] : [],
     completed: resolved,
     variant: resolved ? "success" : "muted",

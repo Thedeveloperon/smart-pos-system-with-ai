@@ -42,11 +42,22 @@ public sealed class WarrantyClaimTimelineEndpointTests(CustomWebApplicationFacto
         Assert.Equal("Ruwan Perera", TestJson.GetString(inRepairResponse, "pickup_person_name"));
         Assert.StartsWith("2026-04-18T09:00:00", TestJson.GetString(inRepairResponse, "handover_date"));
 
+        var receivedBackResponse = await TestJson.ReadObjectAsync(
+            await client.PutAsJsonAsync($"/api/warranty-claims/{claimId}", new
+            {
+                status = "InRepair",
+                received_back_date = "2026-04-25T16:30:00Z",
+                received_back_person_name = "Nimali Silva"
+            }));
+
+        Assert.Equal("InRepair", TestJson.GetString(receivedBackResponse, "status"));
+        Assert.StartsWith("2026-04-25T16:30:00", TestJson.GetString(receivedBackResponse, "received_back_date"));
+        Assert.Equal("Nimali Silva", TestJson.GetString(receivedBackResponse, "received_back_person_name"));
+
         var resolvedResponse = await TestJson.ReadObjectAsync(
             await client.PutAsJsonAsync($"/api/warranty-claims/{claimId}", new
             {
-                status = "Resolved",
-                received_back_date = "2026-04-25T16:30:00Z"
+                status = "Resolved"
             }));
 
         Assert.Equal("Resolved", TestJson.GetString(resolvedResponse, "status"));
@@ -54,6 +65,7 @@ public sealed class WarrantyClaimTimelineEndpointTests(CustomWebApplicationFacto
         Assert.Equal("Ruwan Perera", TestJson.GetString(resolvedResponse, "pickup_person_name"));
         Assert.StartsWith("2026-04-18T09:00:00", TestJson.GetString(resolvedResponse, "handover_date"));
         Assert.StartsWith("2026-04-25T16:30:00", TestJson.GetString(resolvedResponse, "received_back_date"));
+        Assert.Equal("Nimali Silva", TestJson.GetString(resolvedResponse, "received_back_person_name"));
         Assert.Equal("Screen cracked on left corner", TestJson.GetString(resolvedResponse, "resolution_notes"));
 
         var claimResponse = await TestJson.ReadObjectAsync(
@@ -62,6 +74,7 @@ public sealed class WarrantyClaimTimelineEndpointTests(CustomWebApplicationFacto
         Assert.StartsWith("2026-04-18T09:00:00", TestJson.GetString(claimResponse, "handover_date"));
         Assert.Equal("Ruwan Perera", TestJson.GetString(claimResponse, "pickup_person_name"));
         Assert.StartsWith("2026-04-25T16:30:00", TestJson.GetString(claimResponse, "received_back_date"));
+        Assert.Equal("Nimali Silva", TestJson.GetString(claimResponse, "received_back_person_name"));
 
         var claimsResponse = await TestJson.ReadObjectAsync(await client.GetAsync("/api/warranty-claims"));
         var item = claimsResponse["items"]?.AsArray()
@@ -74,6 +87,7 @@ public sealed class WarrantyClaimTimelineEndpointTests(CustomWebApplicationFacto
         Assert.StartsWith("2026-04-18T09:00:00", TestJson.GetString(item, "handover_date"));
         Assert.Equal("Ruwan Perera", TestJson.GetString(item, "pickup_person_name"));
         Assert.StartsWith("2026-04-25T16:30:00", TestJson.GetString(item, "received_back_date"));
+        Assert.Equal("Nimali Silva", TestJson.GetString(item, "received_back_person_name"));
     }
 
     [Fact]

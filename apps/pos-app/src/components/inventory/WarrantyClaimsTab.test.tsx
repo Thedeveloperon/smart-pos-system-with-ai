@@ -20,7 +20,7 @@ describe("WarrantyClaimsTab", () => {
     vi.unstubAllGlobals();
   });
 
-  it("shows claim actions for backend enum statuses and sends enum codes on updates", async () => {
+  it("shows receive-back and resolve actions by stage and sends expected update payloads", async () => {
     const claims = [
       {
         id: "claim-1",
@@ -40,6 +40,7 @@ describe("WarrantyClaimsTab", () => {
         claim_date: "2026-05-02T00:00:00.000Z",
         status: 2,
         resolution_notes: null,
+        supplier_name: "Samsung Service Center",
         created_at: "2026-05-02T00:00:00.000Z",
       },
       {
@@ -50,6 +51,8 @@ describe("WarrantyClaimsTab", () => {
         claim_date: "2026-05-03T00:00:00.000Z",
         status: 3,
         resolution_notes: "Replaced battery.",
+        received_back_date: "2026-05-03T09:00:00.000Z",
+        received_back_person_name: "Nimali Silva",
         created_at: "2026-05-03T00:00:00.000Z",
       },
     ];
@@ -58,11 +61,12 @@ describe("WarrantyClaimsTab", () => {
       const url = input.toString();
 
       if (url.includes("/api/warranty-claims/") && init?.method === "PUT") {
-        const body = JSON.parse(String(init.body ?? "{}")) as { status?: number };
+        const body = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
         const claimId = url.split("/api/warranty-claims/")[1];
         const currentClaim = claims.find((claim) => claim.id === claimId);
         return jsonResponse({
           ...currentClaim,
+          ...body,
           status: body.status ?? currentClaim?.status,
         });
       }
@@ -98,32 +102,41 @@ describe("WarrantyClaimsTab", () => {
     expect(within(openRowItem).getByRole("button", { name: "Reject" })).toBeInTheDocument();
     expect(within(openRowItem).queryByRole("button", { name: "Resolve" })).not.toBeInTheDocument();
 
-    expect(within(inRepairRowItem).getByRole("button", { name: "Resolve" })).toBeInTheDocument();
+    expect(within(inRepairRowItem).getByRole("button", { name: "Receive Back" })).toBeInTheDocument();
     expect(within(inRepairRowItem).getByRole("button", { name: "Reject" })).toBeInTheDocument();
+    expect(within(inRepairRowItem).queryByRole("button", { name: "Resolve" })).not.toBeInTheDocument();
 
     expect(within(resolvedRowItem).queryByRole("button", { name: "Resolve" })).not.toBeInTheDocument();
     expect(within(resolvedRowItem).queryByRole("button", { name: "Reject" })).not.toBeInTheDocument();
     expect(within(resolvedRowItem).queryByRole("button", { name: "In Repair" })).not.toBeInTheDocument();
 
-    fireEvent.click(within(openRowItem).getByRole("button", { name: "Reject" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Reject Claim" }));
+    fireEvent.click(within(inRepairRowItem).getByRole("button", { name: "Receive Back" }));
+    fireEvent.change(screen.getByPlaceholderText("e.g. Nimal Perera"), { target: { value: "Nimali Silva" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Save Receive Back" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("/api/warranty-claims/claim-1"),
+        expect.stringContaining("/api/warranty-claims/claim-2"),
         expect.objectContaining({ method: "PUT" }),
       );
     });
 
-    const putCall = fetchMock.mock.calls.find(
+    const receiveBackCall = fetchMock.mock.calls.find(
       ([requestUrl, requestInit]) =>
-        requestUrl.toString().includes("/api/warranty-claims/claim-1") &&
+        requestUrl.toString().includes("/api/warranty-claims/claim-2") &&
         requestInit?.method === "PUT",
     );
-    expect(putCall).toBeDefined();
+    expect(receiveBackCall).toBeDefined();
 
-    const [, putInit] = putCall ?? [];
-    const serializedBody = JSON.parse(String(putInit?.body ?? "{}")) as { status?: number };
-    expect(serializedBody.status).toBe(4);
+    const [, receiveBackInit] = receiveBackCall ?? [];
+    const receiveBackBody = JSON.parse(String(receiveBackInit?.body ?? "{}")) as {
+      status?: number;
+      received_back_date?: string;
+      received_back_person_name?: string;
+    };
+    expect(receiveBackBody.status).toBe(2);
+    expect(receiveBackBody.received_back_date).toBeDefined();
+    expect(receiveBackBody.received_back_person_name).toBe("Nimali Silva");
+
   });
 });

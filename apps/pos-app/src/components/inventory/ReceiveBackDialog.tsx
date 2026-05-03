@@ -2,34 +2,39 @@ import { useEffect, useState } from "react";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { type WarrantyClaim } from "@/lib/api";
 
 interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   claim: WarrantyClaim | null;
-  onConfirm: (data: { resolution_notes?: string }) => void;
+  onConfirm: (data: { received_back_date?: string; received_back_person_name?: string }) => void;
 }
 
-export function ResolveDialog({ open, onOpenChange, claim, onConfirm }: Props) {
-  const [notes, setNotes] = useState("");
+const today = () => new Date().toISOString().slice(0, 10);
+
+export function ReceiveBackDialog({ open, onOpenChange, claim, onConfirm }: Props) {
+  const [receivedDate, setReceivedDate] = useState(today());
+  const [receivedBy, setReceivedBy] = useState("");
 
   useEffect(() => {
     if (open) {
-      setNotes("");
+      setReceivedDate(today());
+      setReceivedBy("");
     }
   }, [open]);
 
   const submit = () => {
     onConfirm({
-      resolution_notes: notes || undefined,
+      received_back_date: receivedDate ? new Date(receivedDate).toISOString() : undefined,
+      received_back_person_name: receivedBy.trim() || undefined,
     });
     onOpenChange(false);
   };
@@ -39,7 +44,7 @@ export function ResolveDialog({ open, onOpenChange, claim, onConfirm }: Props) {
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            Resolve Claim
+            Receive Back
             {claim && (
               <span className="ml-2 font-mono text-sm font-normal text-muted-foreground">
                 {claim.serial_value}
@@ -49,12 +54,15 @@ export function ResolveDialog({ open, onOpenChange, claim, onConfirm }: Props) {
         </DialogHeader>
         <div className="grid gap-3">
           <div className="grid gap-1.5">
-            <Label>Resolution Notes</Label>
-            <Textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="What was repaired or replaced?"
-              rows={4}
+            <Label>Received Back Date</Label>
+            <Input type="date" value={receivedDate} onChange={(e) => setReceivedDate(e.target.value)} />
+          </div>
+          <div className="grid gap-1.5">
+            <Label>Received By</Label>
+            <Input
+              value={receivedBy}
+              onChange={(e) => setReceivedBy(e.target.value)}
+              placeholder="e.g. Nimal Perera"
             />
           </div>
         </div>
@@ -63,7 +71,7 @@ export function ResolveDialog({ open, onOpenChange, claim, onConfirm }: Props) {
             Cancel
           </Button>
           <Button onClick={submit} className="bg-brand text-brand-foreground hover:bg-brand/90">
-            Mark as Resolved
+            Save Receive Back
           </Button>
         </DialogFooter>
       </DialogContent>

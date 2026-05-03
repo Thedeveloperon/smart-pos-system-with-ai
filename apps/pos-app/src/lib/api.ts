@@ -675,7 +675,13 @@ export type WarrantyClaim = {
   claim_date: string;
   status: "Open" | "InRepair" | "Resolved" | "Rejected";
   resolution_notes?: string;
+  supplier_name?: string;
+  handover_date?: string;
+  pickup_person_name?: string;
+  received_back_date?: string;
+  received_back_person_name?: string;
   created_at: string;
+  updated_at?: string;
 };
 
 export type GenerateProductBarcodeRequest = {
@@ -3315,7 +3321,13 @@ type BackendWarrantyClaim = {
   claim_date: string;
   status: WarrantyClaim["status"] | number | string;
   resolution_notes?: string | null;
+  supplier_name?: string | null;
+  handover_date?: string | null;
+  pickup_person_name?: string | null;
+  received_back_date?: string | null;
+  received_back_person_name?: string | null;
   created_at: string;
+  updated_at?: string | null;
 };
 
 const WARRANTY_CLAIM_STATUS_CODES: Record<WarrantyClaim["status"], number> = {
@@ -3453,6 +3465,7 @@ function mapWarrantyClaim(item: BackendWarrantyClaim): WarrantyClaim {
     handover_date: item.handover_date ?? undefined,
     pickup_person_name: item.pickup_person_name ?? undefined,
     received_back_date: item.received_back_date ?? undefined,
+    received_back_person_name: item.received_back_person_name ?? undefined,
     created_at: item.created_at,
     updated_at: item.updated_at ?? undefined,
   };
@@ -3708,6 +3721,7 @@ export async function updateWarrantyClaim(
     handover_date?: string;
     pickup_person_name?: string;
     received_back_date?: string;
+    received_back_person_name?: string;
   },
 ): Promise<WarrantyClaim> {
   const response = await request<BackendWarrantyClaim>(`/api/warranty-claims/${claimId}`, {
@@ -3719,6 +3733,7 @@ export async function updateWarrantyClaim(
       handover_date: data.handover_date,
       pickup_person_name: data.pickup_person_name,
       received_back_date: data.received_back_date,
+      received_back_person_name: data.received_back_person_name,
     }),
   });
   return mapWarrantyClaim(response);

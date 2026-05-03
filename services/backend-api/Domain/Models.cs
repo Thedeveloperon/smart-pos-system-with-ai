@@ -280,6 +280,7 @@ public sealed class WarrantyClaim
     public DateTimeOffset? HandoverDate { get; set; }
     public string? PickupPersonName { get; set; }
     public DateTimeOffset? ReceivedBackDate { get; set; }
+    public string? ReceivedBackPersonName { get; set; }
     public Guid? CreatedByUserId { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAtUtc { get; set; }

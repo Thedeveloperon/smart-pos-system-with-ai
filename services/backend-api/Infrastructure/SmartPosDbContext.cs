@@ -159,6 +159,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.ResolutionNotes).HasMaxLength(1000);
             entity.Property(x => x.SupplierName).HasMaxLength(200);
             entity.Property(x => x.PickupPersonName).HasMaxLength(200);
+            entity.Property(x => x.ReceivedBackPersonName).HasMaxLength(200);
             entity.HasIndex(x => new { x.StoreId, x.Status });
             entity.HasIndex(x => x.SerialNumberId);
             entity.HasOne(x => x.SerialNumber)

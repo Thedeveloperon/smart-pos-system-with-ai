@@ -33,6 +33,7 @@ import { Search } from "lucide-react";
 import { ClaimsTable } from "./ClaimsTable";
 import { TimelineDialog } from "./TimelineDialog";
 import { HandoverDialog } from "./HandoverDialog";
+import { ReceiveBackDialog } from "./ReceiveBackDialog";
 import { ResolveDialog } from "./ResolveDialog";
 import { RejectDialog } from "./RejectDialog";
 
@@ -56,6 +57,7 @@ export default function WarrantyClaimsTab() {
   const [active, setActive] = useState<WarrantyClaim | null>(null);
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [handoverOpen, setHandoverOpen] = useState(false);
+  const [receiveBackOpen, setReceiveBackOpen] = useState(false);
   const [resolveOpen, setResolveOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
 
@@ -149,8 +151,20 @@ export default function WarrantyClaimsTab() {
     }
   };
 
-  const handleResolve = async (data: {
+  const handleReceiveBack = async (data: {
     received_back_date?: string;
+    received_back_person_name?: string;
+  }) => {
+    if (!active) return;
+    try {
+      await updateWarrantyClaim(active.id, { status: "InRepair", ...data });
+      await reload();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update receive back details.");
+    }
+  };
+
+  const handleResolve = async (data: {
     resolution_notes?: string;
   }) => {
     if (!active) return;
@@ -299,6 +313,10 @@ export default function WarrantyClaimsTab() {
                 setActive(claim);
                 setHandoverOpen(true);
               }}
+              onReceiveBack={(claim) => {
+                setActive(claim);
+                setReceiveBackOpen(true);
+              }}
               onResolve={(claim) => {
                 setActive(claim);
                 setResolveOpen(true);
@@ -318,6 +336,12 @@ export default function WarrantyClaimsTab() {
         onOpenChange={setHandoverOpen}
         claim={active}
         onConfirm={handleHandover}
+      />
+      <ReceiveBackDialog
+        open={receiveBackOpen}
+        onOpenChange={setReceiveBackOpen}
+        claim={active}
+        onConfirm={handleReceiveBack}
       />
       <ResolveDialog
         open={resolveOpen}
