@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   completeStocktakeSession,
@@ -47,9 +47,62 @@ export default function StocktakeTab() {
   const [loading, setLoading] = useState(true);
   const [activeSession, setActiveSession] = useState<StocktakeSession | null>(null);
   const [items, setItems] = useState<StocktakeItem[]>([]);
+  const [draftCounts, setDraftCounts] = useState<Record<string, string>>({});
+  const [savingItemIds, setSavingItemIds] = useState<Record<string, boolean>>({});
   const [sheetOpen, setSheetOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [readonlyMode, setReadonlyMode] = useState(false);
+  const [completing, setCompleting] = useState(false);
+  const itemsRef = useRef<StocktakeItem[]>([]);
+
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+
+  const getPersistedCountValue = (countedQuantity?: number) =>
+    countedQuantity == null ? "" : String(countedQuantity);
+
+  const parseDraftCount = (value: string) => {
+    if (value.trim() === "") return null;
+    const qty = Number(value);
+    return Number.isFinite(qty) ? qty : null;
+  };
+
+  const roundVariance = (countedQuantity: number, systemQuantity: number) =>
+    Math.round((countedQuantity - systemQuantity) * 1000) / 1000;
+
+  const syncSessionVarianceCount = (sessionId: string, nextItems: StocktakeItem[]) => {
+    const varianceCount = nextItems.filter(
+      (item) => item.variance_quantity != null && item.variance_quantity !== 0,
+    ).length;
+    setSessions((prev) =>
+      prev.map((session) =>
+        session.id === sessionId ? { ...session, variance_count: varianceCount } : session,
+      ),
+    );
+  };
+
+  const loadSessionItems = (loadedItems: StocktakeItem[]) => {
+    itemsRef.current = loadedItems;
+    setItems(loadedItems);
+    setDraftCounts(
+      Object.fromEntries(
+        loadedItems.map((item) => [item.id, getPersistedCountValue(item.counted_quantity)]),
+      ),
+    );
+  };
+
+  const applyItemUpdate = (
+    sessionId: string,
+    updatedItem: Pick<StocktakeItem, "id" | "counted_quantity" | "variance_quantity">,
+  ) => {
+    const nextItems = itemsRef.current.map((item) =>
+      item.id === updatedItem.id ? { ...item, ...updatedItem } : item,
+    );
+    itemsRef.current = nextItems;
+    setItems(nextItems);
+    syncSessionVarianceCount(sessionId, nextItems);
+  };
 
   const reload = async () => {
     setLoading(true);
@@ -68,9 +121,9 @@ export default function StocktakeTab() {
 
   const openSession = async (s: StocktakeSession, readonly: boolean) => {
     try {
-      const { session, items } = await getStocktakeSession(s.id);
+      const { session, items: loadedItems } = await getStocktakeSession(s.id);
       setActiveSession(session);
-      setItems(items);
+      loadSessionItems(loadedItems);
       setReadonlyMode(readonly);
       setSheetOpen(true);
     } catch (error) {
@@ -99,25 +152,79 @@ export default function StocktakeTab() {
   };
 
   const handleCount = async (item: StocktakeItem, value: string) => {
-    const qty = Number(value);
-    if (Number.isNaN(qty)) return;
+    const currentItem = itemsRef.current.find((entry) => entry.id === item.id);
+    if (!currentItem) return true;
+
+    const persistedValue = getPersistedCountValue(currentItem.counted_quantity);
+    const qty = parseDraftCount(value);
+    if (qty == null) {
+      if (value.trim() !== "") {
+        toast.error("Enter a valid counted quantity.");
+      }
+      setDraftCounts((prev) => ({ ...prev, [item.id]: persistedValue }));
+      return value.trim() === "";
+    }
+
+    if (!currentItem.session_id) {
+      toast.error("Failed to update stocktake count. Refresh and try again.");
+      setDraftCounts((prev) => ({ ...prev, [item.id]: persistedValue }));
+      return false;
+    }
+
+    if (currentItem.counted_quantity === qty) {
+      setDraftCounts((prev) => ({ ...prev, [item.id]: String(qty) }));
+      return true;
+    }
+
+    setSavingItemIds((prev) => ({ ...prev, [item.id]: true }));
     try {
-      const updated = await updateStocktakeItem(item.session_id, item.id, qty);
-      setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, ...updated } : i)));
+      const updated = await updateStocktakeItem(currentItem.session_id, item.id, qty);
+      applyItemUpdate(currentItem.session_id, updated);
+      setDraftCounts((prev) => ({
+        ...prev,
+        [item.id]: getPersistedCountValue(updated.counted_quantity),
+      }));
+      return true;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to update stocktake count.");
+      setDraftCounts((prev) => ({ ...prev, [item.id]: persistedValue }));
+      return false;
+    } finally {
+      setSavingItemIds((prev) => {
+        const next = { ...prev };
+        delete next[item.id];
+        return next;
+      });
     }
+  };
+
+  const handleCountChange = (itemId: string, value: string) => {
+    setDraftCounts((prev) => ({ ...prev, [itemId]: value }));
+  };
+
+  const flushDraftCounts = async () => {
+    const results = await Promise.all(
+      itemsRef.current.map((item) =>
+        handleCount(item, draftCounts[item.id] ?? getPersistedCountValue(item.counted_quantity)),
+      ),
+    );
+    return results.every(Boolean);
   };
 
   const handleComplete = async () => {
     if (!activeSession) return;
+    setCompleting(true);
     try {
+      const countsSaved = await flushDraftCounts();
+      if (!countsSaved) return;
       await completeStocktakeSession(activeSession.id);
       setConfirmOpen(false);
       setSheetOpen(false);
       await reload();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to complete stocktake session.");
+    } finally {
+      setCompleting(false);
     }
   };
 
@@ -213,33 +320,42 @@ export default function StocktakeTab() {
               </TableHeader>
               <TableBody>
                 {items.map((it) => {
-                  const variance = it.variance_quantity ?? 0;
+                  const draftCount = draftCounts[it.id] ?? getPersistedCountValue(it.counted_quantity);
+                  const parsedDraftCount = parseDraftCount(draftCount);
+                  const countedQuantity = parsedDraftCount ?? it.counted_quantity ?? null;
+                  const variance =
+                    countedQuantity == null
+                      ? null
+                      : roundVariance(countedQuantity, it.system_quantity);
                   return (
                     <TableRow key={it.id}>
                       <TableCell>{it.product_name}</TableCell>
                       <TableCell className="text-right">{it.system_quantity}</TableCell>
                       <TableCell className="text-right w-32">
                         {readonlyMode ? (
-                          (it.counted_quantity ?? "—")
+                          countedQuantity ?? "—"
                         ) : (
                           <Input
                             type="number"
+                            step="0.001"
                             className="text-right"
-                            defaultValue={it.counted_quantity ?? ""}
-                            onBlur={(e) => handleCount(it, e.target.value)}
+                            value={draftCount}
+                            disabled={Boolean(savingItemIds[it.id]) || completing}
+                            onChange={(e) => handleCountChange(it.id, e.target.value)}
+                            onBlur={(e) => void handleCount(it, e.target.value)}
                           />
                         )}
                       </TableCell>
                       <TableCell
                         className={`text-right font-medium ${
-                          variance > 0 ? "text-success" : variance < 0 ? "text-destructive" : ""
+                          variance != null && variance > 0
+                            ? "text-success"
+                            : variance != null && variance < 0
+                              ? "text-destructive"
+                              : ""
                         }`}
                       >
-                        {it.counted_quantity == null
-                          ? "—"
-                          : variance > 0
-                            ? `+${variance}`
-                            : variance}
+                        {countedQuantity == null ? "—" : variance != null && variance > 0 ? `+${variance}` : variance}
                       </TableCell>
                     </TableRow>
                   );
@@ -248,7 +364,9 @@ export default function StocktakeTab() {
             </Table>
             {!readonlyMode && (
               <div className="flex justify-end mt-4">
-                <Button onClick={() => setConfirmOpen(true)}>Complete session</Button>
+                <Button disabled={completing} onClick={() => setConfirmOpen(true)}>
+                  Complete session
+                </Button>
               </div>
             )}
           </div>
@@ -265,7 +383,15 @@ export default function StocktakeTab() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleComplete}>Complete</AlertDialogAction>
+            <AlertDialogAction
+              disabled={completing}
+              onClick={(event) => {
+                event.preventDefault();
+                void handleComplete();
+              }}
+            >
+              {completing ? "Completing..." : "Complete"}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -59,6 +59,26 @@ public sealed class InventoryManagerOverviewEndpointTests(CustomWebApplicationFa
     }
 
     [Fact]
+    public async Task StocktakeSessionItems_ShouldIncludeSessionId_WhenLoadingSessionDetails()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var createdSession = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/stocktake/sessions", new { }));
+        var sessionId = TestJson.GetString(createdSession, "id");
+
+        await TestJson.ReadObjectAsync(
+            await client.PutAsync($"/api/stocktake/sessions/{sessionId}/start", null));
+
+        var sessionDetails = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/stocktake/sessions/{sessionId}"));
+        var firstItem = sessionDetails["items"]?.AsArray().OfType<JsonObject>().FirstOrDefault()
+            ?? throw new InvalidOperationException("Expected at least one stocktake item.");
+
+        Assert.Equal(sessionId, TestJson.GetString(firstItem, "session_id"));
+    }
+
+    [Fact]
     public async Task StocktakeSessions_ShouldLoadOnSqlite_WhenLegacyRowsContainMalformedVarianceQuantity()
     {
         var sessionId = Guid.NewGuid();
