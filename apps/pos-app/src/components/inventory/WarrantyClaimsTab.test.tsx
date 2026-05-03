@@ -82,28 +82,31 @@ describe("WarrantyClaimsTab", () => {
     const inRepairRow = screen.getByText("SN-002");
     const resolvedRow = screen.getByText("SN-003");
 
-    const openTr = openRow.closest("tr");
-    const inRepairTr = inRepairRow.closest("tr");
-    const resolvedTr = resolvedRow.closest("tr");
+    const openRowItem = openRow.closest("li");
+    const inRepairRowItem = inRepairRow.closest("li");
+    const resolvedRowItem = resolvedRow.closest("li");
 
-    expect(openTr).not.toBeNull();
-    expect(inRepairTr).not.toBeNull();
-    expect(resolvedTr).not.toBeNull();
+    expect(openRowItem).not.toBeNull();
+    expect(inRepairRowItem).not.toBeNull();
+    expect(resolvedRowItem).not.toBeNull();
 
-    if (!openTr || !inRepairTr || !resolvedTr) {
+    if (!openRowItem || !inRepairRowItem || !resolvedRowItem) {
       throw new Error("Expected claim rows to render.");
     }
 
-    expect(within(openTr).getByRole("button", { name: "In repair" })).toBeInTheDocument();
-    expect(within(openTr).getByRole("button", { name: "Reject" })).toBeInTheDocument();
-    expect(within(openTr).queryByRole("button", { name: "Resolve" })).not.toBeInTheDocument();
+    expect(within(openRowItem).getByRole("button", { name: "In Repair" })).toBeInTheDocument();
+    expect(within(openRowItem).getByRole("button", { name: "Reject" })).toBeInTheDocument();
+    expect(within(openRowItem).queryByRole("button", { name: "Resolve" })).not.toBeInTheDocument();
 
-    expect(within(inRepairTr).getByRole("button", { name: "Resolve" })).toBeInTheDocument();
-    expect(within(inRepairTr).queryByRole("button", { name: "Reject" })).not.toBeInTheDocument();
+    expect(within(inRepairRowItem).getByRole("button", { name: "Resolve" })).toBeInTheDocument();
+    expect(within(inRepairRowItem).getByRole("button", { name: "Reject" })).toBeInTheDocument();
 
-    expect(within(resolvedTr).queryByRole("button")).not.toBeInTheDocument();
+    expect(within(resolvedRowItem).queryByRole("button", { name: "Resolve" })).not.toBeInTheDocument();
+    expect(within(resolvedRowItem).queryByRole("button", { name: "Reject" })).not.toBeInTheDocument();
+    expect(within(resolvedRowItem).queryByRole("button", { name: "In Repair" })).not.toBeInTheDocument();
 
-    fireEvent.click(within(openTr).getByRole("button", { name: "Reject" }));
+    fireEvent.click(within(openRowItem).getByRole("button", { name: "Reject" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Reject Claim" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(

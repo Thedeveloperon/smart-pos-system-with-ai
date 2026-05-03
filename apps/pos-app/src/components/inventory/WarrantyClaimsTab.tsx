@@ -1,44 +1,47 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { ShieldAlert } from "lucide-react";
 import {
   createWarrantyClaim,
   fetchSerialNumbers,
   fetchWarrantyClaims,
-  formatWarrantyClaimStatus,
   lookupSerial,
   updateWarrantyClaim,
   type WarrantyClaim,
 } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-
-const STATUS_TONES: Record<string, string> = {
-  Open: "bg-warning/15 text-warning-foreground",
-  InRepair: "bg-info/15 text-info",
-  Resolved: "bg-success/15 text-success",
-  Rejected: "bg-destructive/15 text-destructive",
-};
+import { Search } from "lucide-react";
+import { ClaimsTable } from "./ClaimsTable";
+import { TimelineDialog } from "./TimelineDialog";
+import { HandoverDialog } from "./HandoverDialog";
+import { ResolveDialog } from "./ResolveDialog";
+import { RejectDialog } from "./RejectDialog";
 
 export default function WarrantyClaimsTab() {
   const [status, setStatus] = useState("all");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [search, setSearch] = useState("");
+  const [supplierFilter, setSupplierFilter] = useState("all");
   const [claims, setClaims] = useState<WarrantyClaim[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -50,9 +53,11 @@ export default function WarrantyClaimsTab() {
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
 
+  const [active, setActive] = useState<WarrantyClaim | null>(null);
+  const [timelineOpen, setTimelineOpen] = useState(false);
+  const [handoverOpen, setHandoverOpen] = useState(false);
   const [resolveOpen, setResolveOpen] = useState(false);
-  const [resolveTarget, setResolveTarget] = useState<WarrantyClaim | null>(null);
-  const [resolveNotes, setResolveNotes] = useState("");
+  const [rejectOpen, setRejectOpen] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -75,14 +80,32 @@ export default function WarrantyClaimsTab() {
     void reload();
   }, [reload]);
 
+  const suppliers = useMemo(() => {
+    const supplierSet = new Set<string>();
+    claims.forEach((claim) => {
+      if (claim.supplier_name) supplierSet.add(claim.supplier_name);
+    });
+    return Array.from(supplierSet).sort();
+  }, [claims]);
+
+  const filtered = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return claims.filter((claim) => {
+      if (supplierFilter !== "all" && claim.supplier_name !== supplierFilter) return false;
+      if (!query) return true;
+      const haystack = `${claim.product_name} ${claim.serial_value}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [claims, search, supplierFilter]);
+
   const validateSerial = async () => {
     setSerialError(null);
     setSerialId(null);
     try {
-      const result = await lookupSerial(serialValue.trim());
-      const serials = await fetchSerialNumbers(result.product_id);
+      const res = await lookupSerial(serialValue.trim());
+      const serials = await fetchSerialNumbers(res.product_id);
       const match = serials.find(
-        (serial) => serial.serial_value.toLowerCase() === serialValue.trim().toLowerCase(),
+        (s) => s.serial_value.toLowerCase() === serialValue.trim().toLowerCase(),
       );
       if (!match) throw new Error("Serial not found");
       setSerialId(match.id);
@@ -112,41 +135,61 @@ export default function WarrantyClaimsTab() {
     }
   };
 
-  const transition = async (claim: WarrantyClaim, next: WarrantyClaim["status"]) => {
+  const handleHandover = async (data: {
+    supplier_name?: string;
+    handover_date?: string;
+    pickup_person_name?: string;
+  }) => {
+    if (!active) return;
     try {
-      await updateWarrantyClaim(claim.id, { status: next });
+      await updateWarrantyClaim(active.id, { status: "InRepair", ...data });
       await reload();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to update warranty claim.");
     }
   };
 
-  const openResolve = (claim: WarrantyClaim) => {
-    setResolveTarget(claim);
-    setResolveNotes("");
-    setResolveOpen(true);
-  };
-
-  const submitResolve = async () => {
-    if (!resolveTarget) return;
+  const handleResolve = async (data: {
+    received_back_date?: string;
+    resolution_notes?: string;
+  }) => {
+    if (!active) return;
     try {
-      await updateWarrantyClaim(resolveTarget.id, {
-        status: "Resolved",
-        resolution_notes: resolveNotes || undefined,
-      });
-      setResolveOpen(false);
+      await updateWarrantyClaim(active.id, { status: "Resolved", ...data });
       await reload();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to resolve warranty claim.");
     }
   };
 
+  const handleReject = async (data: { resolution_notes?: string }) => {
+    if (!active) return;
+    try {
+      await updateWarrantyClaim(active.id, { status: "Rejected", ...data });
+      await reload();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to reject warranty claim.");
+    }
+  };
+
   return (
     <>
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-3 flex-wrap">
+        <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-3">
           <CardTitle className="text-base">Warranty claims</CardTitle>
           <div className="flex flex-wrap items-end gap-2">
+            <div className="grid gap-1">
+              <Label className="text-xs">Search</Label>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Product or serial..."
+                  className="pl-9 w-[200px]"
+                />
+              </div>
+            </div>
             <div className="grid gap-1">
               <Label className="text-xs">Status</Label>
               <Select value={status} onValueChange={setStatus}>
@@ -169,6 +212,22 @@ export default function WarrantyClaimsTab() {
             <div className="grid gap-1">
               <Label className="text-xs">To</Label>
               <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+            </div>
+            <div className="grid gap-1">
+              <Label className="text-xs">Supplier</Label>
+              <Select value={supplierFilter} onValueChange={setSupplierFilter}>
+                <SelectTrigger className="w-[160px]">
+                  <SelectValue placeholder="All suppliers" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All suppliers</SelectItem>
+                  {suppliers.map((supplier) => (
+                    <SelectItem key={supplier} value={supplier}>
+                      {supplier}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild>
@@ -199,7 +258,11 @@ export default function WarrantyClaimsTab() {
                   </div>
                   <div className="grid gap-1">
                     <Label>Claim date</Label>
-                    <Input type="date" value={claimDate} onChange={(e) => setClaimDate(e.target.value)} />
+                    <Input
+                      type="date"
+                      value={claimDate}
+                      onChange={(e) => setClaimDate(e.target.value)}
+                    />
                   </div>
                   <div className="grid gap-1">
                     <Label>Notes (optional)</Label>
@@ -221,83 +284,53 @@ export default function WarrantyClaimsTab() {
         <CardContent>
           {loading ? (
             <div className="space-y-2">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <Skeleton key={i} className="h-10" />
+              {Array.from({ length: 3 }).map((_, index) => (
+                <Skeleton key={index} className="h-10" />
               ))}
             </div>
-          ) : claims.length === 0 ? (
-            <div className="py-12 text-center text-muted-foreground">
-              <ShieldAlert className="mx-auto mb-2 h-8 w-8 opacity-50" />
-              No warranty claims found.
-            </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Serial</TableHead>
-                  <TableHead>Product</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Claim date</TableHead>
-                  <TableHead>Notes</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {claims.map((claim) => (
-                  <TableRow key={claim.id}>
-                    <TableCell className="font-mono text-xs">{claim.serial_value}</TableCell>
-                    <TableCell>{claim.product_name}</TableCell>
-                    <TableCell>
-                      <Badge className={STATUS_TONES[claim.status]}>{formatWarrantyClaimStatus(claim.status)}</Badge>
-                    </TableCell>
-                    <TableCell>{new Date(claim.claim_date).toLocaleDateString()}</TableCell>
-                    <TableCell className="max-w-xs truncate text-xs text-muted-foreground">
-                      {claim.resolution_notes ?? "-"}
-                    </TableCell>
-                    <TableCell className="space-x-2 text-right">
-                      {claim.status === "Open" && (
-                        <>
-                          <Button size="sm" variant="outline" onClick={() => transition(claim, "InRepair")}>
-                            In repair
-                          </Button>
-                          <Button size="sm" variant="destructive" onClick={() => transition(claim, "Rejected")}>
-                            Reject
-                          </Button>
-                        </>
-                      )}
-                      {claim.status === "InRepair" && (
-                        <Button size="sm" onClick={() => openResolve(claim)}>
-                          Resolve
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <ClaimsTable
+              claims={filtered}
+              onTimeline={(claim) => {
+                setActive(claim);
+                setTimelineOpen(true);
+              }}
+              onHandover={(claim) => {
+                setActive(claim);
+                setHandoverOpen(true);
+              }}
+              onResolve={(claim) => {
+                setActive(claim);
+                setResolveOpen(true);
+              }}
+              onReject={(claim) => {
+                setActive(claim);
+                setRejectOpen(true);
+              }}
+            />
           )}
         </CardContent>
       </Card>
 
-      <Dialog open={resolveOpen} onOpenChange={setResolveOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Resolve claim</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-3">
-            <div className="grid gap-1">
-              <Label>Resolution notes</Label>
-              <Textarea value={resolveNotes} onChange={(e) => setResolveNotes(e.target.value)} rows={4} />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setResolveOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={submitResolve}>Save resolution</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <TimelineDialog open={timelineOpen} onOpenChange={setTimelineOpen} claim={active} />
+      <HandoverDialog
+        open={handoverOpen}
+        onOpenChange={setHandoverOpen}
+        claim={active}
+        onConfirm={handleHandover}
+      />
+      <ResolveDialog
+        open={resolveOpen}
+        onOpenChange={setResolveOpen}
+        claim={active}
+        onConfirm={handleResolve}
+      />
+      <RejectDialog
+        open={rejectOpen}
+        onOpenChange={setRejectOpen}
+        claim={active}
+        onConfirm={handleReject}
+      />
     </>
   );
 }

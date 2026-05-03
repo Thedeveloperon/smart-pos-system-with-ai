@@ -3449,7 +3449,12 @@ function mapWarrantyClaim(item: BackendWarrantyClaim): WarrantyClaim {
     claim_date: item.claim_date,
     status: normalizeWarrantyClaimStatus(item.status),
     resolution_notes: item.resolution_notes ?? undefined,
+    supplier_name: item.supplier_name ?? undefined,
+    handover_date: item.handover_date ?? undefined,
+    pickup_person_name: item.pickup_person_name ?? undefined,
+    received_back_date: item.received_back_date ?? undefined,
     created_at: item.created_at,
+    updated_at: item.updated_at ?? undefined,
   };
 }
 
@@ -3696,13 +3701,24 @@ export async function createWarrantyClaim(data: {
 
 export async function updateWarrantyClaim(
   claimId: string,
-  data: { status: WarrantyClaim["status"]; resolution_notes?: string },
+  data: {
+    status: WarrantyClaim["status"];
+    resolution_notes?: string;
+    supplier_name?: string;
+    handover_date?: string;
+    pickup_person_name?: string;
+    received_back_date?: string;
+  },
 ): Promise<WarrantyClaim> {
   const response = await request<BackendWarrantyClaim>(`/api/warranty-claims/${claimId}`, {
     method: "PUT",
     body: JSON.stringify({
       status: serializeWarrantyClaimStatus(data.status),
       resolution_notes: data.resolution_notes,
+      supplier_name: data.supplier_name,
+      handover_date: data.handover_date,
+      pickup_person_name: data.pickup_person_name,
+      received_back_date: data.received_back_date,
     }),
   });
   return mapWarrantyClaim(response);

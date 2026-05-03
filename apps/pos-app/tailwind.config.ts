@@ -63,6 +63,26 @@ export default {
           DEFAULT: "hsl(var(--info))",
           foreground: "hsl(var(--info-foreground))",
         },
+        brand: {
+          DEFAULT: "hsl(var(--brand))",
+          foreground: "hsl(var(--brand-foreground))",
+        },
+        "status-open": {
+          DEFAULT: "hsl(var(--status-open))",
+          bg: "hsl(var(--status-open-bg))",
+        },
+        "status-repair": {
+          DEFAULT: "hsl(var(--status-repair))",
+          bg: "hsl(var(--status-repair-bg))",
+        },
+        "status-resolved": {
+          DEFAULT: "hsl(var(--status-resolved))",
+          bg: "hsl(var(--status-resolved-bg))",
+        },
+        "status-rejected": {
+          DEFAULT: "hsl(var(--status-rejected))",
+          bg: "hsl(var(--status-rejected-bg))",
+        },
         surface: {
           DEFAULT: "hsl(var(--surface))",
           muted: "hsl(var(--surface-muted))",
