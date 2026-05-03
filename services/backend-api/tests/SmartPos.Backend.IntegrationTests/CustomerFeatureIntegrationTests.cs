@@ -60,6 +60,10 @@ public sealed class CustomerFeatureIntegrationTests
         Assert.Equal(tierId, Guid.Parse(TestJson.GetString(detail["price_tier"]!, "price_tier_id")));
         Assert.Contains("vip", detail["tags"]!.AsArray().Select(tag => tag!.GetValue<string>()));
 
+        var sales = await TestJson.ReadArrayAsync(
+            await client.GetAsync($"/api/customers/{customerId}/sales?take=20"));
+        Assert.Empty(sales);
+
         var list = await TestJson.ReadObjectAsync(
             await client.GetAsync("/api/customers?page=1&take=20"));
         var listItem = FirstObjectFromArray(list["items"]!.AsArray());

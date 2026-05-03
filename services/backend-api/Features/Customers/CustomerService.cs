@@ -451,6 +451,11 @@ public sealed class CustomerService(
             .AsNoTracking()
             .Include(x => x.Payments)
             .Where(x => x.CustomerId == customer.Id)
+            .ToListAsync(cancellationToken);
+
+        return sales
+            .OrderByDescending(x => x.CompletedAtUtc ?? x.CreatedAtUtc)
+            .Take(normalizedTake)
             .Select(x => new CustomerSaleSummaryItem
             {
                 SaleId = x.Id,
@@ -467,11 +472,6 @@ public sealed class CustomerService(
                 CreatedAt = x.CreatedAtUtc,
                 CompletedAt = x.CompletedAtUtc
             })
-            .ToListAsync(cancellationToken);
-
-        return sales
-            .OrderByDescending(x => x.CompletedAt ?? x.CreatedAt)
-            .Take(normalizedTake)
             .ToList();
     }
 
@@ -490,29 +490,28 @@ public sealed class CustomerService(
             .Where(x => x.CustomerId == customer.Id);
 
         var total = await query.CountAsync(cancellationToken);
-        var items = await query
-            .Select(x => new CreditLedgerEntry
-            {
-                LedgerEntryId = x.Id,
-                CustomerId = x.CustomerId,
-                SaleId = x.SaleId,
-                EntryType = x.EntryType.ToString().ToLowerInvariant(),
-                Amount = x.Amount,
-                BalanceAfter = x.BalanceAfter,
-                Description = x.Description,
-                Reference = x.Reference,
-                RecordedByUserId = x.RecordedByUserId,
-                OccurredAt = x.OccurredAtUtc,
-                CreatedAt = x.CreatedAtUtc
-            })
-            .ToListAsync(cancellationToken);
+        var items = await query.ToListAsync(cancellationToken);
 
         return new CustomerCreditLedgerResponse
         {
             Items = items
-                .OrderByDescending(x => x.OccurredAt)
+                .OrderByDescending(x => x.OccurredAtUtc)
                 .Skip((normalizedPage - 1) * normalizedTake)
                 .Take(normalizedTake)
+                .Select(x => new CreditLedgerEntry
+                {
+                    LedgerEntryId = x.Id,
+                    CustomerId = x.CustomerId,
+                    SaleId = x.SaleId,
+                    EntryType = x.EntryType.ToString().ToLowerInvariant(),
+                    Amount = x.Amount,
+                    BalanceAfter = x.BalanceAfter,
+                    Description = x.Description,
+                    Reference = x.Reference,
+                    RecordedByUserId = x.RecordedByUserId,
+                    OccurredAt = x.OccurredAtUtc,
+                    CreatedAt = x.CreatedAtUtc
+                })
                 .ToList(),
             Total = total,
             Page = normalizedPage,
