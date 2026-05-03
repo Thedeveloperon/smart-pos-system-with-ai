@@ -171,6 +171,64 @@ public static class ReportEndpoints
         .WithName("GetLowStockBySupplierReport")
         .WithOpenApi();
 
+        group.MapGet("/cashier-leaderboard", async (
+            DateOnly? from,
+            DateOnly? to,
+            ReportService reportService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var result = await reportService.GetCashierLeaderboardReportAsync(from, to, cancellationToken);
+                return Results.Ok(result);
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .WithName("GetCashierLeaderboardReport")
+        .WithOpenApi();
+
+        group.MapGet("/margin-summary", async (
+            DateOnly? from,
+            DateOnly? to,
+            int? take,
+            ReportService reportService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var result = await reportService.GetMarginSummaryReportAsync(from, to, take ?? 25, cancellationToken);
+                return Results.Ok(result);
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .WithName("GetMarginSummaryReport")
+        .WithOpenApi();
+
+        group.MapGet("/sales-comparison", async (
+            DateOnly? from,
+            DateOnly? to,
+            ReportService reportService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var result = await reportService.GetSalesComparisonReportAsync(from, to, cancellationToken);
+                return Results.Ok(result);
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .WithName("GetSalesComparisonReport")
+        .WithOpenApi();
+
         group.MapGet("/support-triage", async (
             int? window_minutes,
             ReportService reportService,

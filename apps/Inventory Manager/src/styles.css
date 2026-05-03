@@ -68,6 +68,7 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-primary-soft: var(--primary-soft);
 }
 
 :root {
@@ -100,6 +101,7 @@
   --border: oklch(0.92 0.009 220);
   --input: oklch(0.92 0.009 220);
   --ring: oklch(0.54 0.13 152);
+  --primary-soft: oklch(0.95 0.05 152);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
@@ -146,6 +148,7 @@
   --border: oklch(0.21 0.022 225);
   --input: oklch(0.21 0.022 225);
   --ring: oklch(0.59 0.13 152);
+  --primary-soft: oklch(0.2 0.07 152);
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);

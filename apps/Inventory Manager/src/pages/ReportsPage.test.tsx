@@ -3,10 +3,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import ReportsPage from "./ReportsPage";
 import {
   fetchDailySalesReport,
+  fetchLowStockByBrandReport,
+  fetchLowStockBySupplierReport,
+  fetchLowStockReport,
+  fetchMonthlySalesForecastReport,
   fetchPaymentBreakdownReport,
   fetchProducts,
   fetchTopItemsReport,
   fetchTransactionsReport,
+  fetchWorstItemsReport,
 } from "@/lib/api";
 
 vi.mock("@/lib/api", async () => {
@@ -19,6 +24,11 @@ vi.mock("@/lib/api", async () => {
     fetchTransactionsReport: vi.fn(),
     fetchPaymentBreakdownReport: vi.fn(),
     fetchTopItemsReport: vi.fn(),
+    fetchWorstItemsReport: vi.fn(),
+    fetchMonthlySalesForecastReport: vi.fn(),
+    fetchLowStockReport: vi.fn(),
+    fetchLowStockByBrandReport: vi.fn(),
+    fetchLowStockBySupplierReport: vi.fn(),
   };
 });
 
@@ -48,11 +58,48 @@ describe("ReportsPage", () => {
     vi.mocked(fetchPaymentBreakdownReport).mockResolvedValue({
       from_date: "2026-04-24",
       to_date: "2026-04-30",
+      paid_total: 0,
+      reversed_total: 0,
+      net_total: 0,
       items: [],
     });
     vi.mocked(fetchTopItemsReport).mockResolvedValue({
       from_date: "2026-04-24",
       to_date: "2026-04-30",
+      take: 25,
+      items: [],
+    });
+    vi.mocked(fetchWorstItemsReport).mockResolvedValue({
+      from_date: "2026-04-24",
+      to_date: "2026-04-30",
+      take: 25,
+      items: [],
+    });
+    vi.mocked(fetchMonthlySalesForecastReport).mockResolvedValue({
+      generated_at: new Date().toISOString(),
+      months: 6,
+      average_monthly_net_sales: 0,
+      trend_percent: 0,
+      forecast_next_month_net_sales: 0,
+      confidence: "low",
+      items: [],
+    });
+    vi.mocked(fetchLowStockReport).mockResolvedValue({
+      generated_at: new Date().toISOString(),
+      threshold: 5,
+      take: 100,
+      items: [],
+    });
+    vi.mocked(fetchLowStockByBrandReport).mockResolvedValue({
+      generated_at: new Date().toISOString(),
+      threshold: 5,
+      take: 20,
+      items: [],
+    });
+    vi.mocked(fetchLowStockBySupplierReport).mockResolvedValue({
+      generated_at: new Date().toISOString(),
+      threshold: 5,
+      take: 20,
       items: [],
     });
   });
@@ -73,6 +120,11 @@ describe("ReportsPage", () => {
       expect(fetchTransactionsReport).toHaveBeenCalledTimes(1);
       expect(fetchPaymentBreakdownReport).toHaveBeenCalledTimes(1);
       expect(fetchTopItemsReport).toHaveBeenCalledTimes(1);
+      expect(fetchWorstItemsReport).toHaveBeenCalledTimes(1);
+      expect(fetchMonthlySalesForecastReport).toHaveBeenCalledTimes(1);
+      expect(fetchLowStockReport).toHaveBeenCalledTimes(1);
+      expect(fetchLowStockByBrandReport).toHaveBeenCalledTimes(1);
+      expect(fetchLowStockBySupplierReport).toHaveBeenCalledTimes(1);
     });
 
     expect(fetchProducts).toHaveBeenCalledTimes(1);
@@ -80,6 +132,11 @@ describe("ReportsPage", () => {
     expect(fetchTransactionsReport).toHaveBeenCalledTimes(1);
     expect(fetchPaymentBreakdownReport).toHaveBeenCalledTimes(1);
     expect(fetchTopItemsReport).toHaveBeenCalledTimes(1);
+    expect(fetchWorstItemsReport).toHaveBeenCalledTimes(1);
+    expect(fetchMonthlySalesForecastReport).toHaveBeenCalledTimes(1);
+    expect(fetchLowStockReport).toHaveBeenCalledTimes(1);
+    expect(fetchLowStockByBrandReport).toHaveBeenCalledTimes(1);
+    expect(fetchLowStockBySupplierReport).toHaveBeenCalledTimes(1);
     expect(setIntervalSpy).not.toHaveBeenCalled();
   });
 });

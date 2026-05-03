@@ -543,6 +543,236 @@ public sealed class ReportService(
         };
     }
 
+    public async Task<CashierLeaderboardReportResponse> GetCashierLeaderboardReportAsync(
+        DateOnly? fromDate,
+        DateOnly? toDate,
+        CancellationToken cancellationToken)
+    {
+        var range = NormalizeDateRange(fromDate, toDate, defaultDays: 7);
+
+        var sales = await dbContext.Sales
+            .AsNoTracking()
+            .Include(x => x.Items)
+            .ToListAsync(cancellationToken);
+
+        var scopedSales = sales
+            .Where(x => IsFinancialSaleStatus(x.Status) && IsInRange(GetSaleTimestamp(x), range))
+            .ToList();
+
+        var cashierIds = scopedSales
+            .Select(x => x.CreatedByUserId)
+            .Where(x => x.HasValue)
+            .Select(x => x!.Value)
+            .Distinct()
+            .ToArray();
+
+        var cashiersById = cashierIds.Length == 0
+            ? new Dictionary<Guid, CashierLookupRow>()
+            : await dbContext.Users
+                .AsNoTracking()
+                .Where(x => cashierIds.Contains(x.Id))
+                .Select(x => new CashierLookupRow(x.Id, x.Username, x.FullName))
+                .ToDictionaryAsync(x => x.UserId, cancellationToken);
+
+        var rows = scopedSales
+            .GroupBy(x => x.CreatedByUserId)
+            .Select(group =>
+            {
+                CashierLookupRow? cashier = null;
+                if (group.Key.HasValue)
+                {
+                    cashiersById.TryGetValue(group.Key.Value, out cashier);
+                }
+
+                var cashierName = cashier is null
+                    ? "Unassigned"
+                    : $"{cashier.FullName} ({cashier.Username})";
+                var transactionCount = group.Count(x => x.Status != SaleStatus.RefundedFully);
+                var grossSales = RoundMoney(group.Sum(x => x.GrandTotal));
+
+                return new CashierLeaderboardReportRow
+                {
+                    CashierUserId = group.Key,
+                    CashierName = cashierName,
+                    TransactionCount = transactionCount,
+                    ItemsSold = RoundQuantity(group.Sum(x => x.Items.Sum(i => i.Quantity))),
+                    GrossSales = grossSales,
+                    RefundCount = group.Count(x => x.Status is SaleStatus.RefundedPartially or SaleStatus.RefundedFully),
+                    AverageBasket = transactionCount > 0
+                        ? RoundMoney(grossSales / transactionCount)
+                        : 0m
+                };
+            })
+            .OrderByDescending(x => x.GrossSales)
+            .ThenByDescending(x => x.TransactionCount)
+            .ToList();
+
+        return new CashierLeaderboardReportResponse
+        {
+            FromDate = range.FromDate,
+            ToDate = range.ToDate,
+            Items = rows
+        };
+    }
+
+    public async Task<MarginSummaryReportResponse> GetMarginSummaryReportAsync(
+        DateOnly? fromDate,
+        DateOnly? toDate,
+        int take,
+        CancellationToken cancellationToken)
+    {
+        var normalizedTake = Math.Clamp(take, 1, 100);
+        var range = NormalizeDateRange(fromDate, toDate, defaultDays: 7);
+
+        var products = await dbContext.Products
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+        var productNamesById = products.ToDictionary(x => x.Id, x => x.Name);
+        var productCostsById = products.ToDictionary(x => x.Id, x => x.CostPrice);
+
+        var sales = await dbContext.Sales
+            .AsNoTracking()
+            .Include(x => x.Items)
+            .ToListAsync(cancellationToken);
+        var refunds = await dbContext.Refunds
+            .AsNoTracking()
+            .Include(x => x.Items)
+            .ToListAsync(cancellationToken);
+
+        var soldByProduct = sales
+            .Where(x => IsFinancialSaleStatus(x.Status) && IsInRange(GetSaleTimestamp(x), range))
+            .SelectMany(x => x.Items)
+            .GroupBy(x => x.ProductId)
+            .ToDictionary(
+                x => x.Key,
+                x => new ItemAgg(
+                    ProductName: x.Select(y => y.ProductNameSnapshot).FirstOrDefault() ?? string.Empty,
+                    Quantity: x.Sum(y => y.Quantity),
+                    Amount: x.Sum(y => y.LineTotal)));
+        var refundedByProduct = refunds
+            .Where(x => IsInRange(x.CreatedAtUtc, range))
+            .SelectMany(x => x.Items)
+            .GroupBy(x => x.ProductId)
+            .ToDictionary(
+                x => x.Key,
+                x => new ItemAgg(
+                    ProductName: x.Select(y => y.ProductNameSnapshot).FirstOrDefault() ?? string.Empty,
+                    Quantity: x.Sum(y => y.Quantity),
+                    Amount: x.Sum(y => y.TotalAmount)));
+
+        var productIds = soldByProduct.Keys
+            .Union(refundedByProduct.Keys)
+            .ToList();
+
+        var rows = productIds
+            .Select(productId =>
+            {
+                var sold = soldByProduct.GetValueOrDefault(productId, ItemAgg.Empty);
+                var refunded = refundedByProduct.GetValueOrDefault(productId, ItemAgg.Empty);
+                var productName = productNamesById.GetValueOrDefault(productId) ??
+                                  sold.ProductName ??
+                                  refunded.ProductName ??
+                                  string.Empty;
+                var cost = productCostsById.GetValueOrDefault(productId);
+                var netQuantity = RoundQuantity(sold.Quantity - refunded.Quantity);
+                var netSales = RoundMoney(sold.Amount - refunded.Amount);
+                var costOfGoods = RoundMoney(netQuantity * cost);
+                var grossProfit = RoundMoney(netSales - costOfGoods);
+
+                return new MarginSummaryReportRow
+                {
+                    ProductId = productId,
+                    ProductName = productName,
+                    NetQuantity = netQuantity,
+                    NetSales = netSales,
+                    CostOfGoods = costOfGoods,
+                    GrossProfit = grossProfit,
+                    MarginPercent = netSales > 0m
+                        ? RoundMoney((grossProfit / netSales) * 100m)
+                        : 0m
+                };
+            })
+            .OrderByDescending(x => x.GrossProfit)
+            .ThenByDescending(x => x.NetSales)
+            .Take(normalizedTake)
+            .ToList();
+
+        return new MarginSummaryReportResponse
+        {
+            FromDate = range.FromDate,
+            ToDate = range.ToDate,
+            Take = normalizedTake,
+            Items = rows
+        };
+    }
+
+    public async Task<SalesComparisonReportResponse> GetSalesComparisonReportAsync(
+        DateOnly? fromDate,
+        DateOnly? toDate,
+        CancellationToken cancellationToken)
+    {
+        var currentRange = NormalizeDateRange(fromDate, toDate, defaultDays: 7);
+        var periodLengthDays = currentRange.ToDate.DayNumber - currentRange.FromDate.DayNumber + 1;
+        var priorToDate = currentRange.FromDate.AddDays(-1);
+        var priorFromDate = priorToDate.AddDays(-(periodLengthDays - 1));
+        var priorRange = NormalizeDateRange(priorFromDate, priorToDate, defaultDays: periodLengthDays);
+
+        var sales = await dbContext.Sales
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+        var refunds = await dbContext.Refunds
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        List<SalesComparisonReportRow> BuildRows(DateRange range)
+        {
+            var rows = new List<SalesComparisonReportRow>(periodLengthDays);
+            for (var offset = 0; offset < periodLengthDays; offset++)
+            {
+                var date = range.FromDate.AddDays(offset);
+                var gross = sales
+                    .Where(x => IsFinancialSaleStatus(x.Status) &&
+                                DateOnly.FromDateTime(GetSaleTimestamp(x).UtcDateTime) == date)
+                    .Sum(x => x.GrandTotal);
+                var refunded = refunds
+                    .Where(x => DateOnly.FromDateTime(x.CreatedAtUtc.UtcDateTime) == date)
+                    .Sum(x => x.GrandTotal);
+
+                rows.Add(new SalesComparisonReportRow
+                {
+                    Date = date,
+                    SalesCount = sales.Count(x =>
+                        IsFinancialSaleStatus(x.Status) &&
+                        DateOnly.FromDateTime(GetSaleTimestamp(x).UtcDateTime) == date),
+                    NetSales = RoundMoney(gross - refunded)
+                });
+            }
+
+            return rows;
+        }
+
+        var currentItems = BuildRows(currentRange);
+        var priorItems = BuildRows(priorRange);
+        var currentNetSales = RoundMoney(currentItems.Sum(x => x.NetSales));
+        var priorNetSales = RoundMoney(priorItems.Sum(x => x.NetSales));
+        var changePercent = priorNetSales == 0m
+            ? (currentNetSales == 0m ? 0m : 100m)
+            : RoundMoney(((currentNetSales - priorNetSales) / priorNetSales) * 100m);
+
+        return new SalesComparisonReportResponse
+        {
+            CurrentFrom = currentRange.FromDate,
+            CurrentTo = currentRange.ToDate,
+            PriorFrom = priorRange.FromDate,
+            PriorTo = priorRange.ToDate,
+            CurrentNetSales = currentNetSales,
+            PriorNetSales = priorNetSales,
+            ChangePercent = changePercent,
+            CurrentItems = currentItems,
+            PriorItems = priorItems
+        };
+    }
+
     public async Task<AiChatStockItemSnapshot?> GetStockItemSnapshotAsync(
         Guid productId,
         CancellationToken cancellationToken)
@@ -1273,6 +1503,7 @@ public sealed class ReportService(
                 return new ReportPaymentBreakdownRow
                 {
                     Method = x.Key.ToString().ToLowerInvariant(),
+                    Count = x.Count(y => !y.IsReversal),
                     PaidAmount = paidAmount,
                     ReversedAmount = reversedAmount,
                     NetAmount = RoundMoney(paidAmount - reversedAmount)

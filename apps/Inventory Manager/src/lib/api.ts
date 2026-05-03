@@ -539,6 +539,7 @@ type TransactionsReportResponse = {
     cash_movement_amount?: number | null;
     payment_breakdown: {
       method: string;
+      count: number;
       paid_amount: number;
       reversed_amount: number;
       net_amount: number;
@@ -564,6 +565,7 @@ type PaymentBreakdownReportResponse = {
   net_total: number;
   items: {
     method: string;
+    count: number;
     paid_amount: number;
     reversed_amount: number;
     net_amount: number;
@@ -582,6 +584,124 @@ type TopItemsReportResponse = {
     net_quantity: number;
     net_sales: number;
   }[];
+};
+
+type WorstItemsReportResponse = {
+  from_date: string;
+  to_date: string;
+  take: number;
+  items: {
+    product_id: string;
+    product_name: string;
+    sold_quantity: number;
+    refunded_quantity: number;
+    net_quantity: number;
+    net_sales: number;
+  }[];
+};
+
+type MonthlySalesForecastReportResponse = {
+  generated_at: string;
+  months: number;
+  average_monthly_net_sales: number;
+  trend_percent: number;
+  forecast_next_month_net_sales: number;
+  confidence: "low" | "medium" | "high";
+  items: {
+    month: string;
+    sales_count: number;
+    refund_count: number;
+    net_sales: number;
+  }[];
+};
+
+type LowStockReportResponse = {
+  generated_at: string;
+  threshold: number;
+  take: number;
+  items: {
+    product_id: string;
+    product_name: string;
+    sku?: string | null;
+    barcode?: string | null;
+    brand_id?: string | null;
+    brand_name?: string | null;
+    preferred_supplier_id?: string | null;
+    preferred_supplier_name?: string | null;
+    quantity_on_hand: number;
+    reorder_level: number;
+    safety_stock: number;
+    target_stock_level: number;
+    alert_level: number;
+    deficit: number;
+  }[];
+};
+
+type LowStockByBrandReportResponse = {
+  generated_at: string;
+  threshold: number;
+  take: number;
+  items: {
+    brand_id?: string | null;
+    brand_name?: string | null;
+    low_stock_count: number;
+    total_deficit: number;
+    estimated_reorder_value: number;
+  }[];
+};
+
+type LowStockBySupplierReportResponse = {
+  generated_at: string;
+  threshold: number;
+  take: number;
+  items: {
+    supplier_id?: string | null;
+    supplier_name?: string | null;
+    low_stock_count: number;
+    total_deficit: number;
+    estimated_reorder_value: number;
+  }[];
+};
+
+type CashierLeaderboardReportResponse = {
+  from_date: string;
+  to_date: string;
+  items: {
+    cashier_user_id?: string | null;
+    cashier_name: string;
+    transaction_count: number;
+    items_sold: number;
+    gross_sales: number;
+    refund_count: number;
+    average_basket: number;
+  }[];
+};
+
+type MarginSummaryReportResponse = {
+  from_date: string;
+  to_date: string;
+  take: number;
+  items: {
+    product_id: string;
+    product_name: string;
+    net_quantity: number;
+    net_sales: number;
+    cost_of_goods: number;
+    gross_profit: number;
+    margin_percent: number;
+  }[];
+};
+
+type SalesComparisonReportResponse = {
+  current_from: string;
+  current_to: string;
+  prior_from: string;
+  prior_to: string;
+  current_net_sales: number;
+  prior_net_sales: number;
+  change_percent: number;
+  current_items: { date: string; net_sales: number; sales_count: number }[];
+  prior_items: { date: string; net_sales: number; sales_count: number }[];
 };
 
 function getDefaultApiBaseUrl() {
@@ -1653,5 +1773,75 @@ export async function fetchTopItemsReport(
   const to = formatDateQueryValue(toDate);
   return requestJson<TopItemsReportResponse>(
     `/api/reports/top-items?from=${from}&to=${to}&take=${take}`,
+  );
+}
+
+export async function fetchWorstItemsReport(
+  fromDate: Date | string = new Date(),
+  toDate: Date | string = fromDate,
+  take = 25,
+) {
+  const from = formatDateQueryValue(fromDate);
+  const to = formatDateQueryValue(toDate);
+  return requestJson<WorstItemsReportResponse>(
+    `/api/reports/worst-items?from=${from}&to=${to}&take=${take}`,
+  );
+}
+
+export async function fetchMonthlySalesForecastReport(months = 6) {
+  return requestJson<MonthlySalesForecastReportResponse>(
+    `/api/reports/monthly-forecast?months=${months}`,
+  );
+}
+
+export async function fetchLowStockReport(take = 100, threshold = 5) {
+  return requestJson<LowStockReportResponse>(
+    `/api/reports/low-stock?take=${take}&threshold=${threshold}`,
+  );
+}
+
+export async function fetchLowStockByBrandReport(take = 20, threshold = 5) {
+  return requestJson<LowStockByBrandReportResponse>(
+    `/api/reports/low-stock/by-brand?take=${take}&threshold=${threshold}`,
+  );
+}
+
+export async function fetchLowStockBySupplierReport(take = 20, threshold = 5) {
+  return requestJson<LowStockBySupplierReportResponse>(
+    `/api/reports/low-stock/by-supplier?take=${take}&threshold=${threshold}`,
+  );
+}
+
+export async function fetchCashierLeaderboardReport(
+  fromDate: Date | string = new Date(),
+  toDate: Date | string = fromDate,
+) {
+  const from = formatDateQueryValue(fromDate);
+  const to = formatDateQueryValue(toDate);
+  return requestJson<CashierLeaderboardReportResponse>(
+    `/api/reports/cashier-leaderboard?from=${from}&to=${to}`,
+  );
+}
+
+export async function fetchMarginSummaryReport(
+  fromDate: Date | string = new Date(),
+  toDate: Date | string = fromDate,
+  take = 25,
+) {
+  const from = formatDateQueryValue(fromDate);
+  const to = formatDateQueryValue(toDate);
+  return requestJson<MarginSummaryReportResponse>(
+    `/api/reports/margin-summary?from=${from}&to=${to}&take=${take}`,
+  );
+}
+
+export async function fetchSalesComparisonReport(
+  fromDate: Date | string = new Date(),
+  toDate: Date | string = fromDate,
+) {
+  const from = formatDateQueryValue(fromDate);
+  const to = formatDateQueryValue(toDate);
+  return requestJson<SalesComparisonReportResponse>(
+    `/api/reports/sales-comparison?from=${from}&to=${to}`,
   );
 }
