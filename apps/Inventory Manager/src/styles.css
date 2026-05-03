@@ -36,6 +36,16 @@
   --color-success-foreground: var(--success-foreground);
   --color-info: var(--info);
   --color-info-foreground: var(--info-foreground);
+  --color-status-open: var(--warning);
+  --color-status-open-bg: color-mix(in oklch, var(--warning) 12%, var(--background));
+  --color-status-repair: var(--info);
+  --color-status-repair-bg: color-mix(in oklch, var(--info) 10%, var(--background));
+  --color-status-resolved: var(--success);
+  --color-status-resolved-bg: color-mix(in oklch, var(--success) 10%, var(--background));
+  --color-status-rejected: var(--destructive);
+  --color-status-rejected-bg: color-mix(in oklch, var(--destructive) 10%, var(--background));
+  --color-brand: var(--primary);
+  --color-brand-foreground: var(--primary-foreground);
   --color-surface: var(--surface);
   --color-surface-muted: var(--surface-muted);
   --color-surface-elevated: var(--surface-elevated);

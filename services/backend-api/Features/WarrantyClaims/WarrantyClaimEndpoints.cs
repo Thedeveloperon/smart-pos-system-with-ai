@@ -69,6 +69,10 @@ public static class WarrantyClaimEndpoints
                         claim_date = x.ClaimDate,
                         status = x.Status,
                         resolution_notes = x.ResolutionNotes,
+                        supplier_name = x.SupplierName,
+                        handover_date = x.HandoverDate,
+                        pickup_person_name = x.PickupPersonName,
+                        received_back_date = x.ReceivedBackDate,
                         created_by_user_id = x.CreatedByUserId,
                         created_at = x.CreatedAtUtc,
                         updated_at = x.UpdatedAtUtc
@@ -99,6 +103,10 @@ public static class WarrantyClaimEndpoints
                         claim_date = x.ClaimDate,
                         status = x.Status,
                         resolution_notes = x.ResolutionNotes,
+                        supplier_name = x.SupplierName,
+                        handover_date = x.HandoverDate,
+                        pickup_person_name = x.PickupPersonName,
+                        received_back_date = x.ReceivedBackDate,
                         created_by_user_id = x.CreatedByUserId,
                         created_at = x.CreatedAtUtc,
                         updated_at = x.UpdatedAtUtc
@@ -189,6 +197,10 @@ public static class WarrantyClaimEndpoints
                 claim_date = claim.ClaimDate,
                 status = claim.Status,
                 resolution_notes = claim.ResolutionNotes,
+                supplier_name = claim.SupplierName,
+                handover_date = claim.HandoverDate,
+                pickup_person_name = claim.PickupPersonName,
+                received_back_date = claim.ReceivedBackDate,
                 created_by_user_id = claim.CreatedByUserId,
                 created_at = claim.CreatedAtUtc,
                 updated_at = claim.UpdatedAtUtc
@@ -220,7 +232,31 @@ public static class WarrantyClaimEndpoints
             }
 
             claim.Status = request.Status;
-            claim.ResolutionNotes = request.ResolutionNotes;
+            if (request.ResolutionNotes is not null)
+            {
+                claim.ResolutionNotes = request.ResolutionNotes;
+            }
+
+            if (request.SupplierName is not null)
+            {
+                claim.SupplierName = request.SupplierName;
+            }
+
+            if (request.HandoverDate.HasValue)
+            {
+                claim.HandoverDate = request.HandoverDate;
+            }
+
+            if (request.PickupPersonName is not null)
+            {
+                claim.PickupPersonName = request.PickupPersonName;
+            }
+
+            if (request.ReceivedBackDate.HasValue)
+            {
+                claim.ReceivedBackDate = request.ReceivedBackDate;
+            }
+
             claim.UpdatedAtUtc = DateTimeOffset.UtcNow;
 
             if (request.Status is WarrantyClaimStatus.Resolved or WarrantyClaimStatus.Rejected)
@@ -277,6 +313,10 @@ public static class WarrantyClaimEndpoints
             claim_date = claim.ClaimDate,
             status = claim.Status,
             resolution_notes = claim.ResolutionNotes,
+            supplier_name = claim.SupplierName,
+            handover_date = claim.HandoverDate,
+            pickup_person_name = claim.PickupPersonName,
+            received_back_date = claim.ReceivedBackDate,
             created_by_user_id = claim.CreatedByUserId,
             created_at = claim.CreatedAtUtc,
             updated_at = claim.UpdatedAtUtc
@@ -307,4 +347,18 @@ public sealed class UpdateWarrantyClaimRequest
 
     [JsonPropertyName("resolution_notes")]
     public string? ResolutionNotes { get; set; }
+
+    [JsonPropertyName("supplier_name")]
+    public string? SupplierName { get; set; }
+
+    [JsonPropertyName("handover_date")]
+    [JsonConverter(typeof(FlexibleNullableDateTimeOffsetJsonConverter))]
+    public DateTimeOffset? HandoverDate { get; set; }
+
+    [JsonPropertyName("pickup_person_name")]
+    public string? PickupPersonName { get; set; }
+
+    [JsonPropertyName("received_back_date")]
+    [JsonConverter(typeof(FlexibleNullableDateTimeOffsetJsonConverter))]
+    public DateTimeOffset? ReceivedBackDate { get; set; }
 }

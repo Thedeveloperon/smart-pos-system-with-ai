@@ -276,6 +276,10 @@ public sealed class WarrantyClaim
     public DateTimeOffset ClaimDate { get; set; } = DateTimeOffset.UtcNow;
     public WarrantyClaimStatus Status { get; set; } = WarrantyClaimStatus.Open;
     public string? ResolutionNotes { get; set; }
+    public string? SupplierName { get; set; }
+    public DateTimeOffset? HandoverDate { get; set; }
+    public string? PickupPersonName { get; set; }
+    public DateTimeOffset? ReceivedBackDate { get; set; }
     public Guid? CreatedByUserId { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAtUtc { get; set; }
@@ -1186,6 +1190,7 @@ public enum StocktakeStatus
     Completed = 3
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum WarrantyClaimStatus
 {
     Open = 1,

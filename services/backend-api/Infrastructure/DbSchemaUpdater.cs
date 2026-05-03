@@ -113,6 +113,58 @@ public static class DbSchemaUpdater
         }
     }
 
+    public static async Task EnsureWarrantyTimelineSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken = default)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+
+        if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "warranty_claims",
+                "SupplierName",
+                """ALTER TABLE "warranty_claims" ADD COLUMN "SupplierName" TEXT NULL;""",
+                cancellationToken);
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "warranty_claims",
+                "HandoverDate",
+                """ALTER TABLE "warranty_claims" ADD COLUMN "HandoverDate" TEXT NULL;""",
+                cancellationToken);
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "warranty_claims",
+                "PickupPersonName",
+                """ALTER TABLE "warranty_claims" ADD COLUMN "PickupPersonName" TEXT NULL;""",
+                cancellationToken);
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "warranty_claims",
+                "ReceivedBackDate",
+                """ALTER TABLE "warranty_claims" ADD COLUMN "ReceivedBackDate" TEXT NULL;""",
+                cancellationToken);
+            return;
+        }
+
+        if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE warranty_claims ADD COLUMN IF NOT EXISTS "SupplierName" varchar(200) NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE warranty_claims ADD COLUMN IF NOT EXISTS "HandoverDate" timestamptz NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE warranty_claims ADD COLUMN IF NOT EXISTS "PickupPersonName" varchar(200) NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE warranty_claims ADD COLUMN IF NOT EXISTS "ReceivedBackDate" timestamptz NULL;""",
+                cancellationToken);
+        }
+    }
+
     public static async Task EnsureShopProfileSchemaAsync(
         SmartPosDbContext dbContext,
         CancellationToken cancellationToken = default)
