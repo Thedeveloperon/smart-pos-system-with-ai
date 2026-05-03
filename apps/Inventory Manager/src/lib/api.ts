@@ -38,18 +38,30 @@ export type CreateCategoryRequest = {
 
 export type Supplier = {
   supplier_id: string;
+  id: string;
   name: string;
-  code?: string | null;
-  contact_name?: string | null;
   phone?: string | null;
-  email?: string | null;
+  company_name?: string | null;
+  companyName?: string | null;
+  company_phone?: string | null;
+  companyPhone?: string | null;
   address?: string | null;
   is_active: boolean;
+  isActive: boolean;
+  brands: SupplierBrand[];
   linked_product_count: number;
+  linkedProductCount: number;
   can_delete: boolean;
   delete_block_reason?: string | null;
   created_at: string;
+  createdAt: string;
   updated_at?: string | null;
+  updatedAt?: string | null;
+};
+
+export type SupplierBrand = {
+  brand_id: string;
+  name: string;
 };
 
 export type ProductSupplier = {
@@ -341,17 +353,22 @@ type BackendBrandItem = {
 type BackendSupplierItem = {
   supplier_id: string;
   name: string;
-  code?: string | null;
-  contact_name?: string | null;
   phone?: string | null;
-  email?: string | null;
+  company_name?: string | null;
+  company_phone?: string | null;
   address?: string | null;
   is_active: boolean;
+  brands: BackendSupplierBrandItem[];
   linked_product_count: number;
   can_delete: boolean;
   delete_block_reason?: string | null;
   created_at: string;
   updated_at?: string | null;
+};
+
+type BackendSupplierBrandItem = {
+  brand_id: string;
+  name: string;
 };
 
 type BackendProductSupplierItem = {
@@ -732,18 +749,28 @@ function mapBrand(item: BackendBrandItem): Brand {
 function mapSupplier(item: BackendSupplierItem): Supplier {
   return {
     supplier_id: item.supplier_id,
+    id: item.supplier_id,
     name: item.name,
-    code: item.code ?? undefined,
-    contact_name: item.contact_name ?? undefined,
     phone: item.phone ?? undefined,
-    email: item.email ?? undefined,
+    company_name: item.company_name ?? undefined,
+    companyName: item.company_name ?? undefined,
+    company_phone: item.company_phone ?? undefined,
+    companyPhone: item.company_phone ?? undefined,
     address: item.address ?? undefined,
     is_active: item.is_active,
+    isActive: item.is_active,
+    brands: (item.brands ?? []).map((brand) => ({
+      brand_id: brand.brand_id,
+      name: brand.name,
+    })),
     linked_product_count: item.linked_product_count,
+    linkedProductCount: item.linked_product_count,
     can_delete: item.can_delete,
     delete_block_reason: item.delete_block_reason ?? undefined,
     created_at: item.created_at,
+    createdAt: item.created_at,
     updated_at: item.updated_at,
+    updatedAt: item.updated_at,
   };
 }
 
@@ -1088,23 +1115,23 @@ export async function fetchSuppliers(includeInactive = false): Promise<Supplier[
 
 export async function createSupplier(payload: {
   name: string;
-  code?: string;
-  contact_name?: string;
   phone?: string;
-  email?: string;
+  company_name?: string;
+  company_phone?: string;
   address?: string;
   is_active?: boolean;
+  brand_ids?: string[];
 }): Promise<Supplier> {
   const response = await requestJson<BackendSupplierItem>("/api/suppliers", {
     method: "POST",
     body: JSON.stringify({
       name: payload.name,
-      code: payload.code?.trim() || null,
-      contact_name: payload.contact_name?.trim() || null,
       phone: payload.phone?.trim() || null,
-      email: payload.email?.trim() || null,
+      company_name: payload.company_name?.trim() || null,
+      company_phone: payload.company_phone?.trim() || null,
       address: payload.address?.trim() || null,
       is_active: payload.is_active ?? true,
+      brand_ids: payload.brand_ids ?? [],
     }),
   });
   return mapSupplier(response);
@@ -1114,24 +1141,24 @@ export async function updateSupplier(
   supplierId: string,
   payload: Partial<{
     name: string;
-    code: string;
-    contact_name: string;
     phone: string;
-    email: string;
+    company_name: string;
+    company_phone: string;
     address: string;
     is_active: boolean;
+    brand_ids: string[];
   }>,
 ): Promise<Supplier> {
   const response = await requestJson<BackendSupplierItem>(`/api/suppliers/${supplierId}`, {
     method: "PUT",
     body: JSON.stringify({
       name: payload.name,
-      code: payload.code?.trim() || null,
-      contact_name: payload.contact_name?.trim() || null,
       phone: payload.phone?.trim() || null,
-      email: payload.email?.trim() || null,
+      company_name: payload.company_name?.trim() || null,
+      company_phone: payload.company_phone?.trim() || null,
       address: payload.address?.trim() || null,
       is_active: payload.is_active ?? true,
+      brand_ids: payload.brand_ids ?? [],
     }),
   });
   return mapSupplier(response);

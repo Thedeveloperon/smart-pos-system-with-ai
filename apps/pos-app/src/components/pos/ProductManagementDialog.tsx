@@ -632,7 +632,7 @@ export default function ProductManagementDialog({
                 </Select>
                 {selectedSupplier ? (
                   <p className="text-xs text-muted-foreground">
-                    {selectedSupplier.contact_name || " "}
+                    {selectedSupplier.name || " "}
                   </p>
                 ) : null}
               </div>

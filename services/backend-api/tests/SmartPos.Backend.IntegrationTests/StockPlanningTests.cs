@@ -30,12 +30,12 @@ public sealed class StockPlanningTests(CustomWebApplicationFactory factory)
             await client.PostAsJsonAsync("/api/suppliers", new
             {
                 name = $"Supplier {runId}",
-                code = $"S-{runId}",
-                contact_name = "Integration Contact",
                 phone = "+94-000-0000",
-                email = "supplier@example.test",
+                company_name = $"Supplier Co {runId}",
+                company_phone = "+94-000-0001",
                 address = "Integration Address",
-                is_active = true
+                is_active = true,
+                brand_ids = Array.Empty<Guid>()
             }));
         var supplierId = Guid.Parse(TestJson.GetString(supplier, "supplier_id"));
 
@@ -134,8 +134,8 @@ public sealed class StockPlanningTests(CustomWebApplicationFactory factory)
             await client.PostAsJsonAsync("/api/suppliers", new
             {
                 name = $"Delete Supplier {runId}",
-                code = $"DS-{runId}",
-                is_active = true
+                is_active = true,
+                brand_ids = Array.Empty<Guid>()
             }));
         var supplierId = Guid.Parse(TestJson.GetString(supplier, "supplier_id"));
 
@@ -151,8 +151,8 @@ public sealed class StockPlanningTests(CustomWebApplicationFactory factory)
             await client.PutAsJsonAsync($"/api/suppliers/{supplierId}", new
             {
                 name = $"Delete Supplier {runId}",
-                code = $"DS-{runId}",
-                is_active = false
+                is_active = false,
+                brand_ids = Array.Empty<Guid>()
             }));
         Assert.False(deactivatedSupplier["is_active"]?.GetValue<bool>() ?? true);
 
@@ -183,8 +183,8 @@ public sealed class StockPlanningTests(CustomWebApplicationFactory factory)
             await client.PostAsJsonAsync("/api/suppliers", new
             {
                 name = $"Linked Supplier {runId}",
-                code = $"LS-{runId}",
-                is_active = true
+                is_active = true,
+                brand_ids = Array.Empty<Guid>()
             }));
         var supplierId = Guid.Parse(TestJson.GetString(supplier, "supplier_id"));
 
@@ -218,8 +218,8 @@ public sealed class StockPlanningTests(CustomWebApplicationFactory factory)
         var deactivateResponse = await client.PutAsJsonAsync($"/api/suppliers/{supplierId}", new
         {
             name = $"Linked Supplier {runId}",
-            code = $"LS-{runId}",
-            is_active = false
+            is_active = false,
+            brand_ids = Array.Empty<Guid>()
         });
         Assert.Equal(HttpStatusCode.OK, deactivateResponse.StatusCode);
 

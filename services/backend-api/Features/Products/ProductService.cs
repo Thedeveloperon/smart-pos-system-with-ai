@@ -1292,17 +1292,27 @@ public sealed class ProductService(
         var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
         var suppliers = await dbContext.Suppliers
             .AsNoTracking()
+            .Include(x => x.SupplierBrands)
+                .ThenInclude(x => x.Brand)
             .Where(x => (includeInactive || x.IsActive) && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value))
             .OrderBy(x => x.Name)
             .Select(x => new SupplierItemResponse
             {
                 SupplierId = x.Id,
                 Name = x.Name,
-                Code = x.Code,
-                ContactName = x.ContactName,
                 Phone = x.Phone,
-                Email = x.Email,
+                CompanyName = x.CompanyName,
+                CompanyPhone = x.CompanyPhone,
                 Address = x.Address,
+                Brands = x.SupplierBrands
+                    .Where(y => y.Brand != null)
+                    .OrderBy(y => y.Brand.Name)
+                    .Select(y => new SupplierBrandItem
+                    {
+                        BrandId = y.BrandId,
+                        Name = y.Brand.Name
+                    })
+                    .ToList(),
                 IsActive = x.IsActive,
                 LinkedProductCount = x.ProductSuppliers.Count(y => y.IsActive),
                 CanDelete = !x.IsActive &&
@@ -1332,19 +1342,18 @@ public sealed class ProductService(
     {
         var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
         var normalizedName = NormalizeRequired(request.Name, "Supplier name is required.");
-        var normalizedCode = NormalizeOptional(request.Code);
+        var brandIds = NormalizeBrandIds(request.BrandIds ?? []);
         await EnsureUniqueSupplierNameAsync(normalizedName, null, currentStoreId, cancellationToken);
-        await EnsureUniqueSupplierCodeAsync(normalizedCode, null, currentStoreId, cancellationToken);
+        await ValidateBrandIdsAsync(brandIds, currentStoreId, cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
         var supplier = new Supplier
         {
             StoreId = currentStoreId,
             Name = normalizedName,
-            Code = normalizedCode,
-            ContactName = NormalizeOptional(request.ContactName),
             Phone = NormalizeOptional(request.Phone),
-            Email = NormalizeOptional(request.Email),
+            CompanyName = NormalizeOptional(request.CompanyName),
+            CompanyPhone = NormalizeOptional(request.CompanyPhone),
             Address = NormalizeOptional(request.Address),
             IsActive = request.IsActive,
             CreatedAtUtc = now,
@@ -1353,15 +1362,17 @@ public sealed class ProductService(
 
         dbContext.Suppliers.Add(supplier);
         await dbContext.SaveChangesAsync(cancellationToken);
+        await SyncSupplierBrandsAsync(supplier.Id, brandIds, currentStoreId, cancellationToken);
         var deleteAvailability = await GetSupplierDeleteAvailabilityAsync(
             supplier.Id,
             supplier.IsActive,
             cancellationToken);
-        return ToSupplierItemResponse(
-            supplier,
-            linkedProductCount: 0,
-            canDelete: deleteAvailability.CanDelete,
-            deleteBlockReason: deleteAvailability.BlockReason);
+        return await BuildSupplierItemResponseAsync(
+            supplier.Id,
+            currentStoreId,
+            deleteAvailability.CanDelete,
+            deleteAvailability.BlockReason,
+            cancellationToken);
     }
 
     public async Task<SupplierItemResponse> UpdateSupplierAsync(
@@ -1374,34 +1385,32 @@ public sealed class ProductService(
             ?? throw new KeyNotFoundException("Supplier not found.");
 
         var normalizedName = NormalizeRequired(request.Name, "Supplier name is required.");
-        var normalizedCode = NormalizeOptional(request.Code);
+        var brandIds = NormalizeBrandIds(request.BrandIds ?? []);
         await EnsureUniqueSupplierNameAsync(normalizedName, supplierId, currentStoreId, cancellationToken);
-        await EnsureUniqueSupplierCodeAsync(normalizedCode, supplierId, currentStoreId, cancellationToken);
+        await ValidateBrandIdsAsync(brandIds, currentStoreId, cancellationToken);
 
         supplier.Name = normalizedName;
-        supplier.Code = normalizedCode;
-        supplier.ContactName = NormalizeOptional(request.ContactName);
         supplier.Phone = NormalizeOptional(request.Phone);
-        supplier.Email = NormalizeOptional(request.Email);
+        supplier.CompanyName = NormalizeOptional(request.CompanyName);
+        supplier.CompanyPhone = NormalizeOptional(request.CompanyPhone);
         supplier.Address = NormalizeOptional(request.Address);
         supplier.IsActive = request.IsActive;
         supplier.UpdatedAtUtc = DateTimeOffset.UtcNow;
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        await SyncSupplierBrandsAsync(supplier.Id, brandIds, currentStoreId, cancellationToken);
 
-        var linkedProductCount = await dbContext.ProductSuppliers
-            .AsNoTracking()
-            .CountAsync(x => x.SupplierId == supplierId && x.IsActive && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
         var deleteAvailability = await GetSupplierDeleteAvailabilityAsync(
             supplierId,
             supplier.IsActive,
             cancellationToken);
 
-        return ToSupplierItemResponse(
-            supplier,
-            linkedProductCount,
-            canDelete: deleteAvailability.CanDelete,
-            deleteBlockReason: deleteAvailability.BlockReason);
+        return await BuildSupplierItemResponseAsync(
+            supplierId,
+            currentStoreId,
+            deleteAvailability.CanDelete,
+            deleteAvailability.BlockReason,
+            cancellationToken);
     }
 
     public async Task HardDeleteSupplierAsync(Guid supplierId, CancellationToken cancellationToken)
@@ -1432,7 +1441,6 @@ public sealed class ProductService(
         var before = new
         {
             supplier.Name,
-            supplier.Code,
             supplier.IsActive
         };
 
@@ -1980,33 +1988,6 @@ public sealed class ProductService(
         }
     }
 
-    private async Task EnsureUniqueSupplierCodeAsync(
-        string? code,
-        Guid? supplierId,
-        Guid? storeId,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(code))
-        {
-            return;
-        }
-
-        var normalized = code.Trim().ToLowerInvariant();
-        var exists = await dbContext.Suppliers
-            .AsNoTracking()
-            .AnyAsync(
-                x => x.Code != null &&
-                     x.Code.ToLower() == normalized &&
-                     (!storeId.HasValue || x.StoreId == storeId.Value) &&
-                     (!supplierId.HasValue || x.Id != supplierId.Value),
-                cancellationToken);
-
-        if (exists)
-        {
-            throw new InvalidOperationException("Supplier code already exists.");
-        }
-    }
-
     private static void ValidateOptionalQuantityValue(decimal? value, string errorMessage)
     {
         if (value.HasValue && value.Value < 0m)
@@ -2207,11 +2188,19 @@ public sealed class ProductService(
         {
             SupplierId = supplier.Id,
             Name = supplier.Name,
-            Code = supplier.Code,
-            ContactName = supplier.ContactName,
             Phone = supplier.Phone,
-            Email = supplier.Email,
+            CompanyName = supplier.CompanyName,
+            CompanyPhone = supplier.CompanyPhone,
             Address = supplier.Address,
+            Brands = supplier.SupplierBrands
+                .Where(x => x.Brand != null)
+                .OrderBy(x => x.Brand.Name)
+                .Select(x => new SupplierBrandItem
+                {
+                    BrandId = x.BrandId,
+                    Name = x.Brand.Name
+                })
+                .ToList(),
             IsActive = supplier.IsActive,
             LinkedProductCount = linkedProductCount,
             CanDelete = canDelete,
@@ -2219,6 +2208,104 @@ public sealed class ProductService(
             CreatedAt = supplier.CreatedAtUtc,
             UpdatedAt = supplier.UpdatedAtUtc
         };
+    }
+
+    private async Task<SupplierItemResponse> BuildSupplierItemResponseAsync(
+        Guid supplierId,
+        Guid? storeId,
+        bool canDelete,
+        string? deleteBlockReason,
+        CancellationToken cancellationToken)
+    {
+        var supplier = await dbContext.Suppliers
+            .AsNoTracking()
+            .Include(x => x.SupplierBrands)
+                .ThenInclude(x => x.Brand)
+            .FirstAsync(
+                x => x.Id == supplierId && (!storeId.HasValue || x.StoreId == storeId.Value),
+                cancellationToken);
+
+        var linkedProductCount = await dbContext.ProductSuppliers
+            .AsNoTracking()
+            .CountAsync(x => x.SupplierId == supplierId && x.IsActive && (!storeId.HasValue || x.StoreId == storeId.Value), cancellationToken);
+
+        return ToSupplierItemResponse(supplier, linkedProductCount, canDelete, deleteBlockReason);
+    }
+
+    private List<Guid> NormalizeBrandIds(IEnumerable<Guid> brandIds)
+    {
+        return brandIds
+            .Where(x => x != Guid.Empty)
+            .Distinct()
+            .ToList();
+    }
+
+    private async Task ValidateBrandIdsAsync(
+        IReadOnlyCollection<Guid> brandIds,
+        Guid? storeId,
+        CancellationToken cancellationToken)
+    {
+        if (brandIds.Count == 0)
+        {
+            return;
+        }
+
+        var availableBrandIds = await dbContext.Brands
+            .AsNoTracking()
+            .Where(x => brandIds.Contains(x.Id) && (!storeId.HasValue || x.StoreId == storeId.Value))
+            .Select(x => x.Id)
+            .ToListAsync(cancellationToken);
+
+        if (availableBrandIds.Count != brandIds.Count)
+        {
+            throw new KeyNotFoundException("One or more brands were not found.");
+        }
+    }
+
+    private async Task SyncSupplierBrandsAsync(
+        Guid supplierId,
+        IReadOnlyCollection<Guid> desiredBrandIds,
+        Guid? storeId,
+        CancellationToken cancellationToken)
+    {
+        var desired = desiredBrandIds.ToHashSet();
+        var currentBrandIds = await dbContext.SupplierBrands
+            .AsNoTracking()
+            .Where(x => x.SupplierId == supplierId && (!storeId.HasValue || x.StoreId == storeId.Value))
+            .Select(x => x.BrandId)
+            .ToListAsync(cancellationToken);
+
+        var current = currentBrandIds.ToHashSet();
+        var toRemove = current.Except(desired).ToList();
+        var toAdd = desired.Except(current).ToList();
+
+        if (toRemove.Count > 0)
+        {
+            var entitiesToRemove = await dbContext.SupplierBrands
+                .Where(x => x.SupplierId == supplierId && toRemove.Contains(x.BrandId) && (!storeId.HasValue || x.StoreId == storeId.Value))
+                .ToListAsync(cancellationToken);
+            dbContext.SupplierBrands.RemoveRange(entitiesToRemove);
+        }
+
+        if (toAdd.Count > 0)
+        {
+            var newLinks = toAdd.Select(brandId => new SupplierBrand
+            {
+                StoreId = storeId,
+                SupplierId = supplierId,
+                BrandId = brandId,
+                CreatedAtUtc = DateTimeOffset.UtcNow,
+                Supplier = null!, // populated by EF when tracked through the relationship
+                Brand = null!
+            });
+
+            dbContext.SupplierBrands.AddRange(newLinks);
+        }
+
+        if (toAdd.Count > 0 || toRemove.Count > 0)
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
     }
 
     private sealed record SupplierDeleteAvailability(bool CanDelete, string? BlockReason);

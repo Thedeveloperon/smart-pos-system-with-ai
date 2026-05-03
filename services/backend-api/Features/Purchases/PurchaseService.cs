@@ -738,28 +738,6 @@ public sealed class PurchaseService(
                 {
                     throw new InvalidOperationException($"Duplicate serial numbers were provided for {product.Name}.");
                 }
-
-                var nowSerial = now;
-                foreach (var serialValue in normalizedSerials)
-                {
-                    var duplicateSerial = await dbContext.SerialNumbers.AnyAsync(
-                        x => x.StoreId == currentStoreId && x.SerialValue == serialValue,
-                        cancellationToken);
-                    if (duplicateSerial)
-                    {
-                        throw new InvalidOperationException($"Serial number {serialValue} already exists.");
-                    }
-
-                    dbContext.SerialNumbers.Add(new SerialNumber
-                    {
-                        StoreId = currentStoreId,
-                        Product = product,
-                        ProductId = product.Id,
-                        SerialValue = serialValue,
-                        Status = SerialNumberStatus.Available,
-                        CreatedAtUtc = nowSerial
-                    });
-                }
             }
 
             if (product.IsBatchTracked)

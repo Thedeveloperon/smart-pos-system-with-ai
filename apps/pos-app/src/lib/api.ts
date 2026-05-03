@@ -750,17 +750,22 @@ export type CreateCategoryRequest = {
 type BackendSupplierItem = {
   supplier_id: string;
   name: string;
-  code?: string | null;
-  contact_name?: string | null;
   phone?: string | null;
-  email?: string | null;
+  company_name?: string | null;
+  company_phone?: string | null;
   address?: string | null;
   is_active: boolean;
+  brands: BackendSupplierBrandItem[];
   linked_product_count: number;
   can_delete?: boolean;
   delete_block_reason?: string | null;
   created_at: string;
   updated_at?: string | null;
+};
+
+type BackendSupplierBrandItem = {
+  brand_id: string;
+  name: string;
 };
 
 type BackendSupplierListResponse = {
@@ -769,37 +774,42 @@ type BackendSupplierListResponse = {
 
 export type SupplierRecord = {
   id: string;
-  name: string;
-  code: string;
-  contactPerson: string;
-  phone: string;
-  email: string;
-  address: string;
-  isActive: boolean;
-  linkedProductCount: number;
-  createdAt: string;
-  updatedAt?: string | null;
-};
-
-export type Supplier = SupplierRecord & {
   supplier_id: string;
-  contact_name: string;
+  name: string;
+  phone: string;
+  companyName: string;
+  company_name: string;
+  companyPhone: string;
+  company_phone: string;
+  address: string;
+  brands: SupplierBrand[];
+  isActive: boolean;
   is_active: boolean;
+  linkedProductCount: number;
   linked_product_count: number;
   can_delete: boolean;
   delete_block_reason?: string | null;
+  createdAt: string;
   created_at: string;
+  updatedAt?: string | null;
   updated_at?: string | null;
 };
 
+export type SupplierBrand = {
+  brand_id: string;
+  name: string;
+};
+
+export type Supplier = SupplierRecord;
+
 export type CreateSupplierRequest = {
   name: string;
-  code?: string | null;
-  contactPerson?: string | null;
   phone?: string | null;
-  email?: string | null;
+  company_name?: string | null;
+  company_phone?: string | null;
   address?: string | null;
   isActive?: boolean;
+  brand_ids?: string[];
 };
 
 type BackendProductSupplierItem = {
@@ -3022,16 +3032,21 @@ export async function hardDeleteCategory(categoryId: string) {
 }
 
 function mapSupplier(item: BackendSupplierItem): SupplierRecord {
+  const brands = item.brands ?? [];
   return {
     id: item.supplier_id,
     supplier_id: item.supplier_id,
     name: item.name,
-    code: item.code ?? "",
-    contactPerson: item.contact_name ?? "",
-    contact_name: item.contact_name ?? "",
     phone: item.phone ?? "",
-    email: item.email ?? "",
+    companyName: item.company_name ?? "",
+    company_name: item.company_name ?? "",
+    companyPhone: item.company_phone ?? "",
+    company_phone: item.company_phone ?? "",
     address: item.address ?? "",
+    brands: brands.map((brand) => ({
+      brand_id: brand.brand_id,
+      name: brand.name,
+    })),
     isActive: item.is_active,
     is_active: item.is_active,
     linkedProductCount: item.linked_product_count,
@@ -3056,12 +3071,12 @@ export async function createSupplier(requestBody: CreateSupplierRequest) {
     method: "POST",
     body: JSON.stringify({
       name: requestBody.name,
-      code: normalizeOptionalString(requestBody.code),
-      contact_name: normalizeOptionalString(requestBody.contactPerson),
       phone: normalizeOptionalString(requestBody.phone),
-      email: normalizeOptionalString(requestBody.email),
+      company_name: normalizeOptionalString(requestBody.company_name),
+      company_phone: normalizeOptionalString(requestBody.company_phone),
       address: normalizeOptionalString(requestBody.address),
       is_active: requestBody.isActive ?? true,
+      brand_ids: requestBody.brand_ids ?? [],
     }),
   });
 
@@ -3107,12 +3122,12 @@ export async function updateSupplier(supplierId: string, requestBody: CreateSupp
     method: "PUT",
     body: JSON.stringify({
       name: requestBody.name,
-      code: normalizeOptionalString(requestBody.code),
-      contact_name: normalizeOptionalString(requestBody.contactPerson),
       phone: normalizeOptionalString(requestBody.phone),
-      email: normalizeOptionalString(requestBody.email),
+      company_name: normalizeOptionalString(requestBody.company_name),
+      company_phone: normalizeOptionalString(requestBody.company_phone),
       address: normalizeOptionalString(requestBody.address),
       is_active: requestBody.isActive ?? true,
+      brand_ids: requestBody.brand_ids ?? [],
     }),
   });
 

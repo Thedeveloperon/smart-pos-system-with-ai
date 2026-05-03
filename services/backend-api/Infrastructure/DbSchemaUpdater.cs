@@ -1758,14 +1758,23 @@ public static class DbSchemaUpdater
               "Id" TEXT NOT NULL CONSTRAINT "PK_suppliers" PRIMARY KEY,
               "StoreId" TEXT NULL,
               "Name" TEXT NOT NULL,
-              "Code" TEXT NULL,
-              "ContactName" TEXT NULL,
               "Phone" TEXT NULL,
-              "Email" TEXT NULL,
+              "CompanyName" TEXT NULL,
+              "CompanyPhone" TEXT NULL,
               "Address" TEXT NULL,
               "IsActive" INTEGER NOT NULL,
               "CreatedAtUtc" TEXT NOT NULL,
               "UpdatedAtUtc" TEXT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS "supplier_brands" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_supplier_brands" PRIMARY KEY,
+              "StoreId" TEXT NULL,
+              "SupplierId" TEXT NOT NULL,
+              "BrandId" TEXT NOT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              CONSTRAINT "FK_supplier_brands_suppliers_SupplierId" FOREIGN KEY ("SupplierId") REFERENCES "suppliers" ("Id") ON DELETE CASCADE,
+              CONSTRAINT "FK_supplier_brands_brands_BrandId" FOREIGN KEY ("BrandId") REFERENCES "brands" ("Id") ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS "purchase_orders" (
@@ -1855,7 +1864,6 @@ public static class DbSchemaUpdater
             );
 
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_suppliers_StoreId_Name" ON "suppliers" ("StoreId", "Name");
-            CREATE UNIQUE INDEX IF NOT EXISTS "IX_suppliers_StoreId_Code" ON "suppliers" ("StoreId", "Code");
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_orders_StoreId_PoNumber" ON "purchase_orders" ("StoreId", "PoNumber");
             CREATE INDEX IF NOT EXISTS "IX_purchase_orders_SupplierId" ON "purchase_orders" ("SupplierId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_orders_Status" ON "purchase_orders" ("Status");
@@ -1864,6 +1872,9 @@ public static class DbSchemaUpdater
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_StoreId_SupplierId_InvoiceNumber" ON "purchase_bills" ("StoreId", "SupplierId", "InvoiceNumber");
             CREATE INDEX IF NOT EXISTS "IX_purchase_bills_SupplierId" ON "purchase_bills" ("SupplierId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_bills_CreatedByUserId" ON "purchase_bills" ("CreatedByUserId");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_supplier_brands_SupplierId_BrandId" ON "supplier_brands" ("SupplierId", "BrandId");
+            CREATE INDEX IF NOT EXISTS "IX_supplier_brands_SupplierId" ON "supplier_brands" ("SupplierId");
+            CREATE INDEX IF NOT EXISTS "IX_supplier_brands_BrandId" ON "supplier_brands" ("BrandId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_bill_items_PurchaseBillId" ON "purchase_bill_items" ("PurchaseBillId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_bill_items_ProductId" ON "purchase_bill_items" ("ProductId");
             CREATE INDEX IF NOT EXISTS "IX_bill_documents_PurchaseBillId" ON "bill_documents" ("PurchaseBillId");
@@ -2353,14 +2364,21 @@ public static class DbSchemaUpdater
               "Id" uuid NOT NULL PRIMARY KEY,
               "StoreId" uuid NULL,
               "Name" varchar(160) NOT NULL,
-              "Code" varchar(64) NULL,
-              "ContactName" varchar(120) NULL,
               "Phone" varchar(32) NULL,
-              "Email" varchar(120) NULL,
+              "CompanyName" varchar(160) NULL,
+              "CompanyPhone" varchar(32) NULL,
               "Address" varchar(500) NULL,
               "IsActive" boolean NOT NULL,
               "CreatedAtUtc" timestamptz NOT NULL,
               "UpdatedAtUtc" timestamptz NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS supplier_brands (
+              "Id" uuid NOT NULL PRIMARY KEY,
+              "StoreId" uuid NULL,
+              "SupplierId" uuid NOT NULL REFERENCES suppliers("Id") ON DELETE CASCADE,
+              "BrandId" uuid NOT NULL REFERENCES brands("Id") ON DELETE CASCADE,
+              "CreatedAtUtc" timestamptz NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS purchase_orders (
@@ -2440,7 +2458,6 @@ public static class DbSchemaUpdater
             );
 
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_suppliers_StoreId_Name" ON suppliers("StoreId", "Name");
-            CREATE UNIQUE INDEX IF NOT EXISTS "IX_suppliers_StoreId_Code" ON suppliers("StoreId", "Code");
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_orders_StoreId_PoNumber" ON purchase_orders("StoreId", "PoNumber");
             CREATE INDEX IF NOT EXISTS "IX_purchase_orders_SupplierId" ON purchase_orders("SupplierId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_orders_Status" ON purchase_orders("Status");
@@ -2449,6 +2466,9 @@ public static class DbSchemaUpdater
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_purchase_bills_StoreId_SupplierId_InvoiceNumber" ON purchase_bills("StoreId", "SupplierId", "InvoiceNumber");
             CREATE INDEX IF NOT EXISTS "IX_purchase_bills_SupplierId" ON purchase_bills("SupplierId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_bills_CreatedByUserId" ON purchase_bills("CreatedByUserId");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_supplier_brands_SupplierId_BrandId" ON supplier_brands("SupplierId", "BrandId");
+            CREATE INDEX IF NOT EXISTS "IX_supplier_brands_SupplierId" ON supplier_brands("SupplierId");
+            CREATE INDEX IF NOT EXISTS "IX_supplier_brands_BrandId" ON supplier_brands("BrandId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_bill_items_PurchaseBillId" ON purchase_bill_items("PurchaseBillId");
             CREATE INDEX IF NOT EXISTS "IX_purchase_bill_items_ProductId" ON purchase_bill_items("ProductId");
             CREATE INDEX IF NOT EXISTS "IX_bill_documents_PurchaseBillId" ON bill_documents("PurchaseBillId");
