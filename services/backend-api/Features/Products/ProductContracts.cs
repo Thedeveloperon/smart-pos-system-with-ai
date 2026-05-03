@@ -294,11 +294,21 @@ public sealed class UpsertCategoryRequest
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
 
+    [JsonPropertyName("category_name")]
+    public string? LegacyCategoryName { get; set; }
+
     [JsonPropertyName("description")]
     public string? Description { get; set; }
 
     [JsonPropertyName("is_active")]
     public bool IsActive { get; set; } = true;
+
+    public string ResolveName()
+    {
+        return string.IsNullOrWhiteSpace(Name)
+            ? LegacyCategoryName ?? string.Empty
+            : Name;
+    }
 }
 
 public sealed class ProductCatalogResponse

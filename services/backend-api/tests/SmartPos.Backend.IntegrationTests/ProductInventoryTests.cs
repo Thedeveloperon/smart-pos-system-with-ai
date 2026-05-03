@@ -183,6 +183,39 @@ public sealed class ProductInventoryTests(CustomWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task CategoryEndpoints_ShouldAcceptLegacyCategoryNameField()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+        var createdName = $"Legacy Category {runId}";
+        var updatedName = $"Legacy Category Updated {runId}";
+
+        var createdCategory = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/categories", new
+            {
+                category_name = createdName,
+                description = "Created from legacy alias",
+                is_active = true
+            }));
+
+        var categoryId = Guid.Parse(TestJson.GetString(createdCategory, "category_id"));
+        Assert.Equal(createdName, TestJson.GetString(createdCategory, "name"));
+
+        var updatedCategory = await TestJson.ReadObjectAsync(
+            await client.PutAsJsonAsync($"/api/categories/{categoryId}", new
+            {
+                category_name = updatedName,
+                description = "Updated from legacy alias",
+                is_active = false
+            }));
+
+        Assert.Equal(updatedName, TestJson.GetString(updatedCategory, "name"));
+        Assert.Equal("Updated from legacy alias", TestJson.GetString(updatedCategory, "description"));
+        Assert.False(updatedCategory["is_active"]?.GetValue<bool>() ?? true);
+    }
+
+    [Fact]
     public async Task ProductSerialNumbers_ShouldListPersistedSerialsAfterReload()
     {
         await TestAuth.SignInAsManagerAsync(client);
