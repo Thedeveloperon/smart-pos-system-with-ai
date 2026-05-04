@@ -43,6 +43,12 @@ Database configuration is already wired in `render.yaml`:
 - Backend receives `ConnectionStrings__Postgres` from that database
 - Backend uses `Database__Provider=Postgres`
 
+Important:
+- The Blueprint `fromDatabase.property: connectionString` value is Render's internal Postgres URL.
+- Render internal database URLs only work when the backend service and database are in the same Render workspace and region.
+- If an existing Render service was created in a different region, the backend can fail at startup with DNS errors such as `Name or service not known`.
+- In that case, either recreate the backend/database so they share a region, or temporarily override `ConnectionStrings__Postgres` in the Render dashboard with the database's External Database URL.
+
 ## 3. Configure POS app upstream
 
 The frontend `BACKEND_UPSTREAM` is wired in `render.yaml` from backend

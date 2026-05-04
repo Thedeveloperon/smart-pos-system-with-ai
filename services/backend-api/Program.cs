@@ -1,4 +1,6 @@
 using System.Text;
+using System.Net.Sockets;
+using System.Runtime.ExceptionServices;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.Extensions.Options;
@@ -25,6 +27,7 @@ using SmartPos.Backend.Features.Stocktake;
 using SmartPos.Backend.Features.Settings;
 using SmartPos.Backend.Features.WarrantyClaims;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using SmartPos.Backend.Features.Sync;
 using SmartPos.Backend.Infrastructure;
 using SmartPos.Backend.Security;
@@ -591,6 +594,37 @@ static bool IsPurchasingOpenAiKeyConfigured(IConfiguration configuration, Purcha
     return !string.IsNullOrWhiteSpace(configuredValue);
 }
 
+static string GetDatabaseProvider(IConfiguration configuration)
+{
+    var provider = configuration.GetValue<string>("Database:Provider");
+    return string.IsNullOrWhiteSpace(provider)
+        ? "Postgres"
+        : provider.Trim();
+}
+
+static string? ResolvePostgresConnectionString(IConfiguration configuration)
+{
+    var explicitConnectionString = Environment.GetEnvironmentVariable("ConnectionStrings__Postgres");
+    if (!string.IsNullOrWhiteSpace(explicitConnectionString))
+    {
+        return explicitConnectionString.Trim();
+    }
+
+    foreach (var key in new[] { "DATABASE_URL", "POSTGRES_URL" })
+    {
+        var value = Environment.GetEnvironmentVariable(key) ?? configuration[key];
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            return value.Trim();
+        }
+    }
+
+    var configuredConnectionString = configuration.GetConnectionString("Postgres");
+    return string.IsNullOrWhiteSpace(configuredConnectionString)
+        ? null
+        : configuredConnectionString.Trim();
+}
+
 string NormalizePostgresConnectionString(string connectionString)
 {
     var normalized = connectionString.Trim();
@@ -675,13 +709,152 @@ string NormalizePostgresConnectionString(string connectionString)
     return builder.ConnectionString;
 }
 
+static string DescribePostgresTarget(string? connectionString)
+{
+    if (string.IsNullOrWhiteSpace(connectionString))
+    {
+        return "host=(unset), database=(unset)";
+    }
+
+    try
+    {
+        var builder = new NpgsqlConnectionStringBuilder(connectionString);
+        var host = string.IsNullOrWhiteSpace(builder.Host) ? "(unset)" : builder.Host;
+        var database = string.IsNullOrWhiteSpace(builder.Database) ? "(unset)" : builder.Database;
+        return $"host={host}, database={database}, port={builder.Port}";
+    }
+    catch
+    {
+        return "host=(unparseable), database=(unparseable)";
+    }
+}
+
+static bool IsTransientDatabaseInitializationFailure(Exception exception)
+{
+    return exception switch
+    {
+        SocketException => true,
+        TimeoutException => true,
+        NpgsqlException { InnerException: { } innerException } =>
+            IsTransientDatabaseInitializationFailure(innerException),
+        { InnerException: { } innerException } =>
+            IsTransientDatabaseInitializationFailure(innerException),
+        _ => false
+    };
+}
+
+static bool TryGetHostResolutionFailure(Exception exception, out SocketException? socketException)
+{
+    switch (exception)
+    {
+        case SocketException directSocketException when
+            directSocketException.SocketErrorCode is SocketError.HostNotFound or SocketError.NoData or SocketError.TryAgain:
+            socketException = directSocketException;
+            return true;
+        case { InnerException: not null }:
+            return TryGetHostResolutionFailure(exception.InnerException, out socketException);
+        default:
+            socketException = null;
+            return false;
+    }
+}
+
+static async Task InitializeDatabaseAsync(
+    IServiceProvider services,
+    ILogger logger,
+    string provider,
+    string? normalizedPostgresConnectionString,
+    CancellationToken cancellationToken)
+{
+    var useSqlite = provider.Equals("Sqlite", StringComparison.OrdinalIgnoreCase);
+    var maxAttempts = useSqlite ? 1 : 6;
+    var delay = TimeSpan.FromSeconds(2);
+    var targetDescription = useSqlite
+        ? "provider Sqlite"
+        : $"provider Postgres ({DescribePostgresTarget(normalizedPostgresConnectionString)})";
+    Exception? lastException = null;
+
+    for (var attempt = 1; attempt <= maxAttempts; attempt++)
+    {
+        try
+        {
+            using var scope = services.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+            await dbContext.Database.EnsureCreatedAsync(cancellationToken);
+            await DbSchemaUpdater.EnsureProductImageSchemaAsync(dbContext);
+            await DbSchemaUpdater.EnsureProductBarcodeSchemaAsync(dbContext);
+            await DbSchemaUpdater.EnsureStockPlanningSchemaAsync(dbContext);
+            await DbSchemaUpdater.EnsureInventoryManagementSchemaAsync(dbContext);
+            await DbSchemaUpdater.EnsureWarrantyTimelineSchemaAsync(dbContext);
+            await DbSchemaUpdater.EnsureShopProfileSchemaAsync(dbContext);
+            await DbSchemaUpdater.EnsureRefundSchemaAsync(dbContext);
+            await DbSchemaUpdater.EnsureSaleSchemaAsync(dbContext);
+            await DbSchemaUpdater.EnsureCustomerSchemaAsync(dbContext);
+            await DbSchemaUpdater.EnsureCashSessionSchemaAsync(dbContext);
+            await DbSchemaUpdater.EnsurePurchasingSchemaAsync(dbContext);
+            await DbSchemaUpdater.EnsureLicensingSchemaAsync(dbContext);
+            await DbSchemaUpdater.EnsureAuthSecuritySchemaAsync(dbContext);
+            await DbSchemaUpdater.EnsureAiInsightsSchemaAsync(dbContext);
+            await DbSchemaUpdater.EnsureCloudApiReliabilitySchemaAsync(dbContext);
+            await DbSchemaUpdater.EnsureCloudAccountLinkSchemaAsync(dbContext);
+            await DbSeeder.SeedAsync(dbContext);
+
+            logger.LogInformation("Database initialization succeeded for {TargetDescription}.", targetDescription);
+            return;
+        }
+        catch (Exception exception) when (attempt < maxAttempts && IsTransientDatabaseInitializationFailure(exception))
+        {
+            lastException = exception;
+            logger.LogWarning(
+                exception,
+                "Database initialization attempt {Attempt} of {MaxAttempts} failed for {TargetDescription}. Retrying in {DelaySeconds}s.",
+                attempt,
+                maxAttempts,
+                targetDescription,
+                delay.TotalSeconds);
+            await Task.Delay(delay, cancellationToken);
+            delay = TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * 2, 15));
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "Database initialization failed for {TargetDescription}.", targetDescription);
+            throw;
+        }
+    }
+
+    if (lastException is not null &&
+        TryGetHostResolutionFailure(lastException, out _))
+    {
+        throw new InvalidOperationException(
+            $"Database host resolution failed while initializing {targetDescription}. If this service is deployed on Render, ensure the backend service and Postgres database are in the same region when using the internal Render connection string, or override the app to use the database's external URL.",
+            lastException);
+    }
+
+    if (lastException is not null)
+    {
+        ExceptionDispatchInfo.Capture(lastException).Throw();
+    }
+}
+
+var databaseProvider = GetDatabaseProvider(builder.Configuration);
+var sqliteConnectionString = builder.Configuration.GetConnectionString("Sqlite");
+string? normalizedPostgresConnectionString = null;
+if (!databaseProvider.Equals("Sqlite", StringComparison.OrdinalIgnoreCase))
+{
+    var postgresConnectionString = ResolvePostgresConnectionString(builder.Configuration);
+    if (string.IsNullOrWhiteSpace(postgresConnectionString))
+    {
+        throw new InvalidOperationException(
+            "Connection string 'Postgres' is not configured. Set 'ConnectionStrings:Postgres', 'ConnectionStrings__Postgres', 'DATABASE_URL', or 'POSTGRES_URL'.");
+    }
+
+    normalizedPostgresConnectionString = NormalizePostgresConnectionString(postgresConnectionString);
+}
+
 builder.Services.AddDbContext<SmartPosDbContext>(options =>
 {
-    var provider = builder.Configuration.GetValue<string>("Database:Provider") ?? "Postgres";
-
-    if (provider.Equals("Sqlite", StringComparison.OrdinalIgnoreCase))
+    if (databaseProvider.Equals("Sqlite", StringComparison.OrdinalIgnoreCase))
     {
-        var sqliteConnectionString = builder.Configuration.GetConnectionString("Sqlite");
         if (string.IsNullOrWhiteSpace(sqliteConnectionString))
         {
             throw new InvalidOperationException("Connection string 'Sqlite' is not configured.");
@@ -691,13 +864,7 @@ builder.Services.AddDbContext<SmartPosDbContext>(options =>
         return;
     }
 
-    var postgresConnectionString = builder.Configuration.GetConnectionString("Postgres");
-    if (string.IsNullOrWhiteSpace(postgresConnectionString))
-    {
-        throw new InvalidOperationException("Connection string 'Postgres' is not configured.");
-    }
-
-    options.UseNpgsql(NormalizePostgresConnectionString(postgresConnectionString));
+    options.UseNpgsql(normalizedPostgresConnectionString!);
 });
 
 var app = builder.Build();
@@ -711,28 +878,15 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-using (var scope = app.Services.CreateScope())
-{
-    var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
-    dbContext.Database.EnsureCreated();
-    await DbSchemaUpdater.EnsureProductImageSchemaAsync(dbContext);
-    await DbSchemaUpdater.EnsureProductBarcodeSchemaAsync(dbContext);
-    await DbSchemaUpdater.EnsureStockPlanningSchemaAsync(dbContext);
-    await DbSchemaUpdater.EnsureInventoryManagementSchemaAsync(dbContext);
-    await DbSchemaUpdater.EnsureWarrantyTimelineSchemaAsync(dbContext);
-    await DbSchemaUpdater.EnsureShopProfileSchemaAsync(dbContext);
-    await DbSchemaUpdater.EnsureRefundSchemaAsync(dbContext);
-    await DbSchemaUpdater.EnsureSaleSchemaAsync(dbContext);
-    await DbSchemaUpdater.EnsureCustomerSchemaAsync(dbContext);
-    await DbSchemaUpdater.EnsureCashSessionSchemaAsync(dbContext);
-    await DbSchemaUpdater.EnsurePurchasingSchemaAsync(dbContext);
-    await DbSchemaUpdater.EnsureLicensingSchemaAsync(dbContext);
-    await DbSchemaUpdater.EnsureAuthSecuritySchemaAsync(dbContext);
-    await DbSchemaUpdater.EnsureAiInsightsSchemaAsync(dbContext);
-    await DbSchemaUpdater.EnsureCloudApiReliabilitySchemaAsync(dbContext);
-    await DbSchemaUpdater.EnsureCloudAccountLinkSchemaAsync(dbContext);
-    await DbSeeder.SeedAsync(dbContext);
-}
+var startupLogger = app.Services
+    .GetRequiredService<ILoggerFactory>()
+    .CreateLogger("Startup");
+await InitializeDatabaseAsync(
+    app.Services,
+    startupLogger,
+    databaseProvider,
+    normalizedPostgresConnectionString,
+    app.Lifetime.ApplicationStopping);
 
 if (staticFilesAvailable)
 {
