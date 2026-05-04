@@ -110,6 +110,12 @@ public sealed class CheckoutService(
 
             sale.CreatedByUserId ??= createdByUserId;
             sale.CashShortAmount = request.CustomPayoutUsed ? request.CashShortAmount : 0m;
+            if (request.CustomerId.HasValue)
+            {
+                var saleCustomer = await LoadCustomerAsync(request.CustomerId.Value, cancellationToken);
+                sale.CustomerId = saleCustomer.Id;
+                sale.Customer = saleCustomer;
+            }
 
             if (request.Items.Count > 0)
             {
@@ -282,6 +288,11 @@ public sealed class CheckoutService(
         }
 
         var customerId = sale.CustomerId;
+        if (creditPaidTotal > 0m && !customerId.HasValue)
+        {
+            throw new InvalidOperationException("Credit sales require a customer.");
+        }
+
         Customer? customer = null;
         if (customerId.HasValue)
         {

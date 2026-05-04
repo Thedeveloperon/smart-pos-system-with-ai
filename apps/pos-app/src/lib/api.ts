@@ -2654,6 +2654,8 @@ function mapSaleItems(items: BackendSaleItem[]): CartItem[] {
 
 function normalizePaymentMethod(method: string): PaymentMethod {
   switch (method.toLowerCase()) {
+    case "credit":
+      return "credit";
     case "card":
       return "card";
     case "qr":
@@ -3090,6 +3092,8 @@ type BackendCustomerSearchItem = {
   code: string;
   phone?: string | null;
   email?: string | null;
+  credit_limit?: number;
+  outstanding_balance?: number;
   is_active: boolean;
   price_tier?: {
     price_tier_id: string;
@@ -3112,6 +3116,8 @@ type BackendCustomerDetail = {
   code: string;
   phone?: string | null;
   email?: string | null;
+  credit_limit?: number;
+  outstanding_balance?: number;
 };
 
 export type CustomerLookupItem = {
@@ -3120,6 +3126,8 @@ export type CustomerLookupItem = {
   code: string;
   phone?: string | null;
   email?: string | null;
+  creditLimit?: number;
+  outstandingBalance?: number;
 };
 
 export type CreateCustomerRequest = {
@@ -3145,6 +3153,8 @@ function mapCustomerLookupItem(item: BackendCustomerSearchItem): CustomerLookupI
     code: item.code,
     phone: item.phone ?? null,
     email: item.email ?? null,
+    creditLimit: item.credit_limit == null ? undefined : Number(item.credit_limit),
+    outstandingBalance: item.outstanding_balance == null ? undefined : Number(item.outstanding_balance),
   };
 }
 
@@ -3188,6 +3198,8 @@ export async function fetchCustomer(customerId: string) {
     code: response.code,
     phone: response.phone ?? null,
     email: response.email ?? null,
+    credit_limit: response.credit_limit,
+    outstanding_balance: response.outstanding_balance,
     is_active: true,
     price_tier: null,
   });
