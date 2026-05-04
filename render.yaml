@@ -17,6 +17,8 @@ services:
         value: Production
       - key: Database__Provider
         value: Postgres
+      # Render injects the database's internal Postgres URL here.
+      # The backend service and database must be in the same region for this to resolve.
       - key: ConnectionStrings__Postgres
         fromDatabase:
           name: smartpos-postgres
