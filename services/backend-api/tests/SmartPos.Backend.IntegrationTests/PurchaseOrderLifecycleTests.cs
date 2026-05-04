@@ -393,4 +393,162 @@ public sealed class PurchaseOrderLifecycleTests(CustomWebApplicationFactory fact
 
         Assert.Equal(2m, TestJson.GetDecimal(catalogItem, "stock_quantity"));
     }
+
+    [Fact]
+    public async Task ReversePurchaseOrder_ShouldAllowOwnerToUndoReceivedStock()
+    {
+        await TestAuth.SignInAsOwnerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/suppliers", new
+            {
+                name = $"PO Reverse Supplier {runId}",
+                is_active = true,
+                brand_ids = Array.Empty<Guid>()
+            }));
+        var supplierId = Guid.Parse(TestJson.GetString(supplier, "supplier_id"));
+
+        var product = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"PO Reverse Product {runId}",
+                sku = $"PO-REV-{runId}",
+                unit_price = 250m,
+                cost_price = 200m,
+                initial_stock_quantity = 0m,
+                allow_negative_stock = false,
+                is_active = true
+            }));
+        var productId = Guid.Parse(TestJson.GetString(product, "product_id"));
+
+        var purchaseOrder = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/purchase-orders", new
+            {
+                supplier_id = supplierId,
+                po_number = $"PO-REV-{runId}",
+                lines = new[]
+                {
+                    new
+                    {
+                        product_id = productId,
+                        quantity_ordered = 3m,
+                        unit_cost_estimate = 180m
+                    }
+                }
+            }));
+        var purchaseOrderId = Guid.Parse(TestJson.GetString(purchaseOrder, "id"));
+
+        await TestJson.ReadObjectAsync(
+            await client.PostAsync($"/api/purchase-orders/{purchaseOrderId}/send", null));
+
+        var receivedOrder = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync($"/api/purchase-orders/{purchaseOrderId}/receive", new
+            {
+                invoice_number = $"INV-REV-{runId}",
+                invoice_date = DateTimeOffset.UtcNow,
+                update_cost_price = false,
+                lines = new[]
+                {
+                    new
+                    {
+                        product_id = productId,
+                        quantity_received = 3m,
+                        unit_cost = 180m
+                    }
+                }
+            }));
+        Assert.Equal("Received", TestJson.GetString(receivedOrder["purchase_order"]!, "status"));
+
+        var reversedOrder = await TestJson.ReadObjectAsync(
+            await client.PostAsync($"/api/purchase-orders/{purchaseOrderId}/reverse", null));
+
+        Assert.Equal("Sent", TestJson.GetString(reversedOrder, "status"));
+        Assert.Equal(0m, TestJson.GetDecimal(reversedOrder["lines"]![0]!, "quantity_received"));
+        Assert.Equal(3m, TestJson.GetDecimal(reversedOrder["lines"]![0]!, "quantity_pending"));
+
+        var reversedBill = reversedOrder["bills"]?.AsArray().OfType<JsonObject>().Single()
+                           ?? throw new InvalidOperationException("Missing reversed purchase bill.");
+        Assert.Equal("po_receipt_reversed", TestJson.GetString(reversedBill, "source_type"));
+
+        var catalog = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/products/catalog?q={Uri.EscapeDataString($"PO-REV-{runId}")}&take=20"));
+        var catalogItem = catalog["items"]?.AsArray().OfType<JsonObject>()
+            .FirstOrDefault(item => TestJson.GetString(item, "product_id") == productId.ToString())
+            ?? throw new InvalidOperationException("Reversed product was not returned in the product catalog.");
+
+        Assert.Equal(0m, TestJson.GetDecimal(catalogItem, "stock_quantity"));
+    }
+
+    [Fact]
+    public async Task ReversePurchaseOrder_ShouldRejectSerialTrackedReceipts()
+    {
+        await TestAuth.SignInAsOwnerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/suppliers", new
+            {
+                name = $"PO Reverse Serial Supplier {runId}",
+                is_active = true,
+                brand_ids = Array.Empty<Guid>()
+            }));
+        var supplierId = Guid.Parse(TestJson.GetString(supplier, "supplier_id"));
+
+        var product = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"PO Reverse Serial Product {runId}",
+                sku = $"PO-REV-SER-{runId}",
+                unit_price = 900m,
+                cost_price = 750m,
+                initial_stock_quantity = 0m,
+                allow_negative_stock = false,
+                is_active = true,
+                is_serial_tracked = true,
+                warranty_months = 6
+            }));
+        var productId = Guid.Parse(TestJson.GetString(product, "product_id"));
+
+        var purchaseOrder = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/purchase-orders", new
+            {
+                supplier_id = supplierId,
+                po_number = $"PO-REV-SER-{runId}",
+                lines = new[]
+                {
+                    new
+                    {
+                        product_id = productId,
+                        quantity_ordered = 2m,
+                        unit_cost_estimate = 700m
+                    }
+                }
+            }));
+        var purchaseOrderId = Guid.Parse(TestJson.GetString(purchaseOrder, "id"));
+
+        await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync($"/api/purchase-orders/{purchaseOrderId}/receive", new
+            {
+                invoice_number = $"INV-REV-SER-{runId}",
+                invoice_date = DateTimeOffset.UtcNow,
+                update_cost_price = false,
+                lines = new[]
+                {
+                    new
+                    {
+                        product_id = productId,
+                        quantity_received = 2m,
+                        unit_cost = 700m,
+                        serials = new[] { $"REV-SER-{runId}-001", $"REV-SER-{runId}-002" }
+                    }
+                }
+            }));
+
+        var reverseResponse = await client.PostAsync($"/api/purchase-orders/{purchaseOrderId}/reverse", null);
+        var reverseBody = await reverseResponse.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.BadRequest, reverseResponse.StatusCode);
+        Assert.Contains("serial-tracked product", reverseBody, StringComparison.OrdinalIgnoreCase);
+    }
 }

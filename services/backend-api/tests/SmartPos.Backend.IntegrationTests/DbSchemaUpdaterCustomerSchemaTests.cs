@@ -3,12 +3,12 @@ using SmartPos.Backend.Infrastructure;
 
 namespace SmartPos.Backend.IntegrationTests;
 
-public sealed class DbSchemaUpdaterWarrantyTimelineSchemaTests
+public sealed class DbSchemaUpdaterCustomerSchemaTests
 {
     [Fact]
-    public async Task EnsureWarrantyTimelineSchemaAsync_Sqlite_BackfillsLegacyWarrantyColumns()
+    public async Task EnsureCustomerSchemaAsync_Sqlite_BackfillsLegacyCustomerIdNumberColumn()
     {
-        var dbPath = Path.Combine(Path.GetTempPath(), $"smartpos-warranty-schema-it-{Guid.NewGuid():N}.db");
+        var dbPath = Path.Combine(Path.GetTempPath(), $"smartpos-customer-schema-it-{Guid.NewGuid():N}.db");
 
         try
         {
@@ -21,28 +21,42 @@ public sealed class DbSchemaUpdaterWarrantyTimelineSchemaTests
 
             await dbContext.Database.ExecuteSqlRawAsync(
                 """
-                CREATE TABLE IF NOT EXISTS "warranty_claims" (
-                  "Id" TEXT NOT NULL CONSTRAINT "PK_warranty_claims" PRIMARY KEY,
+                CREATE TABLE IF NOT EXISTS "users" (
+                  "Id" TEXT NOT NULL CONSTRAINT "PK_users" PRIMARY KEY
+                );
+
+                CREATE TABLE IF NOT EXISTS "sales" (
+                  "Id" TEXT NOT NULL CONSTRAINT "PK_sales" PRIMARY KEY
+                );
+
+                CREATE TABLE IF NOT EXISTS "customer_price_tiers" (
+                  "Id" TEXT NOT NULL CONSTRAINT "PK_customer_price_tiers" PRIMARY KEY
+                );
+
+                CREATE TABLE IF NOT EXISTS "customers" (
+                  "Id" TEXT NOT NULL CONSTRAINT "PK_customers" PRIMARY KEY,
                   "StoreId" TEXT NULL,
-                  "SerialNumberId" TEXT NOT NULL,
-                  "ClaimDate" TEXT NOT NULL,
-                  "Status" TEXT NOT NULL DEFAULT 'Open',
-                  "ResolutionNotes" TEXT NULL,
-                  "CreatedByUserId" TEXT NULL,
+                  "PriceTierId" TEXT NULL,
+                  "Name" TEXT NOT NULL,
+                  "Code" TEXT NULL,
+                  "Phone" TEXT NULL,
+                  "Email" TEXT NULL,
+                  "Address" TEXT NULL,
+                  "DateOfBirth" TEXT NULL,
+                  "FixedDiscountPercent" TEXT NULL,
+                  "CreditLimit" TEXT NOT NULL DEFAULT '0',
+                  "OutstandingBalance" TEXT NOT NULL DEFAULT '0',
+                  "LoyaltyPoints" TEXT NOT NULL DEFAULT '0',
+                  "Notes" TEXT NULL,
+                  "IsActive" INTEGER NOT NULL DEFAULT 1,
                   "CreatedAtUtc" TEXT NOT NULL,
                   "UpdatedAtUtc" TEXT NULL
                 );
                 """);
 
-            await DbSchemaUpdater.EnsureWarrantyTimelineSchemaAsync(dbContext);
+            await DbSchemaUpdater.EnsureCustomerSchemaAsync(dbContext);
 
-            Assert.True(await ColumnExistsAsync(dbContext, "warranty_claims", "SupplierName"));
-            Assert.True(await ColumnExistsAsync(dbContext, "warranty_claims", "HandoverDate"));
-            Assert.True(await ColumnExistsAsync(dbContext, "warranty_claims", "PickupPersonName"));
-            Assert.True(await ColumnExistsAsync(dbContext, "warranty_claims", "ReceivedBackDate"));
-            Assert.True(await ColumnExistsAsync(dbContext, "warranty_claims", "ReceivedBackPersonName"));
-            Assert.True(await ColumnExistsAsync(dbContext, "warranty_claims", "ReplacementSerialNumberId"));
-            Assert.True(await ColumnExistsAsync(dbContext, "warranty_claims", "ReplacementDate"));
+            Assert.True(await ColumnExistsAsync(dbContext, "customers", "IdNumber"));
         }
         finally
         {

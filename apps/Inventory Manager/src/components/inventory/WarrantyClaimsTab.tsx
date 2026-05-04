@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   createWarrantyClaim,
+  fetchSerialNumbers,
   fetchWarrantyClaims,
   lookupSerial,
+  replaceWarrantyClaim,
   updateWarrantyClaim,
   type WarrantyClaim,
 } from "@/lib/api";
@@ -34,6 +36,7 @@ import { TimelineDialog } from "./TimelineDialog";
 import { HandoverDialog } from "./HandoverDialog";
 import { ResolveDialog } from "./ResolveDialog";
 import { RejectDialog } from "./RejectDialog";
+import { ReplaceDialog } from "./ReplaceDialog";
 
 export default function WarrantyClaimsTab() {
   const [status, setStatus] = useState("all");
@@ -56,6 +59,7 @@ export default function WarrantyClaimsTab() {
   const [handoverOpen, setHandoverOpen] = useState(false);
   const [resolveOpen, setResolveOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
+  const [replaceOpen, setReplaceOpen] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -101,9 +105,7 @@ export default function WarrantyClaimsTab() {
     setSerialId(null);
     try {
       const res = await lookupSerial(serialValue.trim());
-      const { serials } = await import("@/lib/api").then(async (m) => ({
-        serials: await m.fetchSerialNumbers(res.product_id),
-      }));
+      const serials = await fetchSerialNumbers(res.product_id);
       const match = serials.find(
         (s) => s.serial_value.toLowerCase() === serialValue.trim().toLowerCase(),
       );
@@ -166,6 +168,19 @@ export default function WarrantyClaimsTab() {
       await reload();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to reject warranty claim.");
+    }
+  };
+
+  const handleReplace = async (data: {
+    replacement_serial_number_id: string;
+    resolution_notes?: string;
+  }) => {
+    if (!active) return;
+    try {
+      await replaceWarrantyClaim(active.id, data);
+      await reload();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to replace warranty claim.");
     }
   };
 
@@ -287,6 +302,10 @@ export default function WarrantyClaimsTab() {
                 setActive(claim);
                 setTimelineOpen(true);
               }}
+              onReplace={(claim) => {
+                setActive(claim);
+                setReplaceOpen(true);
+              }}
               onHandover={(claim) => {
                 setActive(claim);
                 setHandoverOpen(true);
@@ -305,6 +324,12 @@ export default function WarrantyClaimsTab() {
       </Card>
 
       <TimelineDialog open={timelineOpen} onOpenChange={setTimelineOpen} claim={active} />
+      <ReplaceDialog
+        open={replaceOpen}
+        onOpenChange={setReplaceOpen}
+        claim={active}
+        onConfirm={handleReplace}
+      />
       <HandoverDialog
         open={handoverOpen}
         onOpenChange={setHandoverOpen}

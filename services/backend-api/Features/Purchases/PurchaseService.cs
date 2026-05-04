@@ -856,6 +856,152 @@ public sealed class PurchaseService(
         return inventoryUpdates;
     }
 
+    internal async Task<IReadOnlyList<PurchaseInventoryUpdateResponse>> ReversePurchaseBillInventoryAsync(
+        PurchaseBill purchaseBill,
+        IReadOnlyCollection<PurchaseBillItem> items,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(purchaseBill.SourceType, "po_receipt", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Only receipted purchase bills can be reversed.");
+        }
+
+        if (items.Count == 0)
+        {
+            throw new InvalidOperationException("This purchase receipt has no items to reverse.");
+        }
+
+        var currentStoreId = purchaseBill.StoreId;
+        var productIds = items.Select(x => x.ProductId).Distinct().ToArray();
+        var products = await dbContext.Products
+            .Include(x => x.Inventory)
+            .Where(x => productIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+        if (products.Count != productIds.Length)
+        {
+            throw new InvalidOperationException("One or more purchase receipt products were not found.");
+        }
+
+        var itemGroups = items
+            .GroupBy(x => x.ProductId)
+            .ToDictionary(x => x.Key, x => x.ToList());
+        var trackedBatches = await dbContext.ProductBatches
+            .Where(x => x.PurchaseBillId == purchaseBill.Id)
+            .ToListAsync(cancellationToken);
+        var createdByUserId = ParseGuid(
+            httpContextAccessor.HttpContext?.User?.FindFirstValue(ClaimTypes.NameIdentifier));
+
+        foreach (var (productId, billItems) in itemGroups)
+        {
+            var product = products[productId];
+            var reverseQuantity = RoundQuantity(billItems.Sum(x => x.Quantity));
+            if (reverseQuantity <= 0m)
+            {
+                throw new InvalidOperationException("Purchase reversal quantity must be greater than zero.");
+            }
+
+            if (product.IsSerialTracked)
+            {
+                throw new InvalidOperationException(
+                    $"Purchase reversal is not supported for serial-tracked product '{product.Name}'.");
+            }
+
+            var inventory = product.Inventory;
+            if (inventory is null || RoundQuantity(inventory.QuantityOnHand) < reverseQuantity)
+            {
+                throw new InvalidOperationException(
+                    $"Insufficient stock is available to reverse '{product.Name}'.");
+            }
+
+            if (!product.IsBatchTracked)
+            {
+                continue;
+            }
+
+            var productBatches = trackedBatches
+                .Where(x => x.ProductId == productId)
+                .ToList();
+            var batchQuantity = RoundQuantity(productBatches.Sum(x => x.InitialQuantity));
+            if (productBatches.Count == 0 || batchQuantity != reverseQuantity)
+            {
+                throw new InvalidOperationException(
+                    $"Purchase reversal is not supported for batch-tracked product '{product.Name}' because the receipt was merged or edited.");
+            }
+
+            if (productBatches.Any(x => RoundQuantity(x.RemainingQuantity) != RoundQuantity(x.InitialQuantity)))
+            {
+                throw new InvalidOperationException(
+                    $"Purchase reversal is not supported for '{product.Name}' because part of the received batch has already been consumed.");
+            }
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var inventoryUpdates = new List<PurchaseInventoryUpdateResponse>();
+        foreach (var (productId, billItems) in itemGroups)
+        {
+            var product = products[productId];
+            var inventory = product.Inventory
+                ?? throw new InvalidOperationException($"Inventory record was not found for '{product.Name}'.");
+            var previousQty = RoundQuantity(inventory.QuantityOnHand);
+            var reverseQuantity = RoundQuantity(billItems.Sum(x => x.Quantity));
+            var nextQty = RoundQuantity(previousQty - reverseQuantity);
+
+            inventory.StoreId = currentStoreId;
+            inventory.QuantityOnHand = nextQty;
+            inventory.UpdatedAtUtc = now;
+
+            await stockMovementHelper.RecordMovementAsync(
+                storeId: currentStoreId,
+                productId: product.Id,
+                type: StockMovementType.Purchase,
+                quantityChange: -reverseQuantity,
+                refType: StockMovementRef.Purchase,
+                refId: purchaseBill.Id,
+                batchId: null,
+                serialNumber: null,
+                reason: "purchase_reversal",
+                userId: createdByUserId,
+                cancellationToken,
+                quantityBeforeOverride: previousQty,
+                updateInventory: false);
+
+            if (product.IsBatchTracked)
+            {
+                var productBatches = trackedBatches
+                    .Where(x => x.ProductId == productId)
+                    .ToList();
+                dbContext.ProductBatches.RemoveRange(productBatches);
+            }
+
+            inventoryUpdates.Add(new PurchaseInventoryUpdateResponse
+            {
+                ProductId = product.Id,
+                ProductName = product.Name,
+                PreviousQuantity = previousQty,
+                DeltaQuantity = -reverseQuantity,
+                NewQuantity = nextQty
+            });
+        }
+
+        purchaseBill.SourceType = "po_receipt_reversed";
+        purchaseBill.Notes = AppendReversalNote(purchaseBill.Notes, now);
+        purchaseBill.UpdatedAtUtc = now;
+
+        dbContext.Ledger.Add(new LedgerEntry
+        {
+            StoreId = currentStoreId,
+            EntryType = LedgerEntryType.Reversal,
+            Description = $"Purchase reversal {purchaseBill.InvoiceNumber}",
+            Debit = 0m,
+            Credit = RoundMoney(purchaseBill.GrandTotal),
+            OccurredAtUtc = now,
+            CreatedAtUtc = now
+        });
+
+        return inventoryUpdates;
+    }
+
     private async Task<PurchaseImportConfirmResponse> ConfirmImportInternalAsync(
         string importRequestId,
         PurchaseImportConfirmRequest request,
@@ -1653,6 +1799,18 @@ public sealed class PurchaseService(
 
         var normalized = value.Trim();
         return normalized.Length == 0 ? null : normalized;
+    }
+
+    private static string AppendReversalNote(string? existingNotes, DateTimeOffset reversedAtUtc)
+    {
+        var reversalNote = $"Reversed on {reversedAtUtc:O}.";
+        var normalized = NormalizeOptional(existingNotes);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return reversalNote;
+        }
+
+        return $"{normalized}\n{reversalNote}";
     }
 
     private static string NormalizeRequired(string? value, string errorMessage)

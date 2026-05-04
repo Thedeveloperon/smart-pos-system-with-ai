@@ -76,6 +76,9 @@ public sealed class CustomerListItem
     [JsonPropertyName("code")]
     public string Code { get; set; } = string.Empty;
 
+    [JsonPropertyName("id_number")]
+    public string? IdNumber { get; set; }
+
     [JsonPropertyName("phone")]
     public string? Phone { get; set; }
 
@@ -127,6 +130,9 @@ public sealed class CustomerDetail
     [JsonPropertyName("code")]
     public string Code { get; set; } = string.Empty;
 
+    [JsonPropertyName("id_number")]
+    public string? IdNumber { get; set; }
+
     [JsonPropertyName("phone")]
     public string? Phone { get; set; }
 
@@ -177,6 +183,9 @@ public sealed class UpsertCustomerRequest
 
     [JsonPropertyName("code")]
     public string? Code { get; set; }
+
+    [JsonPropertyName("id_number")]
+    public string? IdNumber { get; set; }
 
     [JsonPropertyName("phone")]
     public string? Phone { get; set; }

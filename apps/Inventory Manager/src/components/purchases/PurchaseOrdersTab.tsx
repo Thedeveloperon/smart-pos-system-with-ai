@@ -32,6 +32,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   cancelPurchaseOrder,
   fetchPurchaseOrders,
+  reversePurchaseOrder,
   sendPurchaseOrder,
   type PurchaseOrder,
 } from "@/lib/purchases";
@@ -53,6 +54,7 @@ export default function PurchaseOrdersTab() {
   const [receiveOpen, setReceiveOpen] = useState(false);
   const [receivePO, setReceivePO] = useState<PurchaseOrder | null>(null);
   const [confirmCancel, setConfirmCancel] = useState<PurchaseOrder | null>(null);
+  const [confirmReverse, setConfirmReverse] = useState<PurchaseOrder | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -97,6 +99,18 @@ export default function PurchaseOrdersTab() {
       toast.error(e instanceof Error ? e.message : "Failed to cancel PO.");
     } finally {
       setConfirmCancel(null);
+    }
+  };
+
+  const handleReverse = async (po: PurchaseOrder) => {
+    try {
+      await reversePurchaseOrder(po.id);
+      toast.success(`PO ${po.po_number} reversed.`);
+      void load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to reverse PO.");
+    } finally {
+      setConfirmReverse(null);
     }
   };
 
@@ -154,7 +168,7 @@ export default function PurchaseOrdersTab() {
         );
       case "PartiallyReceived":
         return (
-          <div className="flex gap-1 justify-end">
+          <div className="flex gap-1 justify-end flex-wrap">
             <Button
               size="sm"
               onClick={() => {
@@ -163,6 +177,18 @@ export default function PurchaseOrdersTab() {
               }}
             >
               Receive More
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setConfirmReverse(po)}>
+              Reverse
+            </Button>
+            {view}
+          </div>
+        );
+      case "Received":
+        return (
+          <div className="flex gap-1 justify-end flex-wrap">
+            <Button size="sm" variant="outline" onClick={() => setConfirmReverse(po)}>
+              Reverse
             </Button>
             {view}
           </div>
@@ -305,6 +331,24 @@ export default function PurchaseOrdersTab() {
             <AlertDialogCancel>Keep PO</AlertDialogCancel>
             <AlertDialogAction onClick={() => confirmCancel && handleCancel(confirmCancel)}>
               Cancel PO
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!confirmReverse} onOpenChange={(o) => !o && setConfirmReverse(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reverse purchase order?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will undo the received stock for PO {confirmReverse?.po_number}. Use this
+              only when the receipt was posted by mistake.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep receipt</AlertDialogCancel>
+            <AlertDialogAction onClick={() => confirmReverse && handleReverse(confirmReverse)}>
+              Reverse PO
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

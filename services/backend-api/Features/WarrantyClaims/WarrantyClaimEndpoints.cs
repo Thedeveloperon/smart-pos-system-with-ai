@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
+using SmartPos.Backend.Features.Inventory;
 using SmartPos.Backend.Infrastructure;
 using SmartPos.Backend.Infrastructure.Json;
 using SmartPos.Backend.Security;
@@ -29,6 +30,7 @@ public static class WarrantyClaimEndpoints
                 .AsNoTracking()
                 .Include(x => x.SerialNumber)
                 .ThenInclude(x => x.Product)
+                .Include(x => x.ReplacementSerialNumber)
                 .AsQueryable();
 
             if (currentStoreId.HasValue)
@@ -66,6 +68,9 @@ public static class WarrantyClaimEndpoints
                         serial_value = x.SerialNumber?.SerialValue ?? string.Empty,
                         product_id = x.SerialNumber?.ProductId,
                         product_name = x.SerialNumber?.Product?.Name ?? string.Empty,
+                        replacement_serial_number_id = x.ReplacementSerialNumberId,
+                        replacement_serial_value = x.ReplacementSerialNumber?.SerialValue,
+                        replacement_date = x.ReplacementDate,
                         claim_date = x.ClaimDate,
                         status = x.Status,
                         resolution_notes = x.ResolutionNotes,
@@ -101,6 +106,11 @@ public static class WarrantyClaimEndpoints
                         serial_value = x.SerialNumber.SerialValue,
                         product_id = x.SerialNumber.ProductId,
                         product_name = x.SerialNumber.Product.Name,
+                        replacement_serial_number_id = x.ReplacementSerialNumberId,
+                        replacement_serial_value = x.ReplacementSerialNumber != null
+                            ? x.ReplacementSerialNumber.SerialValue
+                            : null,
+                        replacement_date = x.ReplacementDate,
                         claim_date = x.ClaimDate,
                         status = x.Status,
                         resolution_notes = x.ResolutionNotes,
@@ -183,6 +193,7 @@ public static class WarrantyClaimEndpoints
                 .AsNoTracking()
                 .Include(x => x.SerialNumber)
                 .ThenInclude(x => x.Product)
+                .Include(x => x.ReplacementSerialNumber)
                 .FirstOrDefaultAsync(x => x.Id == claimId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
             if (claim is null)
             {
@@ -196,6 +207,9 @@ public static class WarrantyClaimEndpoints
                 serial_value = claim.SerialNumber.SerialValue,
                 product_id = claim.SerialNumber.ProductId,
                 product_name = claim.SerialNumber.Product.Name,
+                replacement_serial_number_id = claim.ReplacementSerialNumberId,
+                replacement_serial_value = claim.ReplacementSerialNumber?.SerialValue,
+                replacement_date = claim.ReplacementDate,
                 claim_date = claim.ClaimDate,
                 status = claim.Status,
                 resolution_notes = claim.ResolutionNotes,
@@ -309,6 +323,122 @@ public static class WarrantyClaimEndpoints
         .WithName("UpdateWarrantyClaim")
         .WithOpenApi();
 
+        group.MapPost("/{claimId:guid}/replace", async (
+            Guid claimId,
+            ReplaceWarrantyClaimRequest request,
+            ClaimsPrincipal user,
+            SmartPosDbContext dbContext,
+            StockMovementHelper stockMovementHelper,
+            CancellationToken cancellationToken) =>
+        {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
+            var claim = await dbContext.WarrantyClaims
+                .Include(x => x.SerialNumber)
+                .ThenInclude(x => x.Product)
+                .Include(x => x.ReplacementSerialNumber)
+                .FirstOrDefaultAsync(
+                    x => x.Id == claimId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value),
+                    cancellationToken);
+            if (claim is null)
+            {
+                return Results.NotFound(new { message = "Warranty claim not found." });
+            }
+
+            if (claim.Status != WarrantyClaimStatus.Open)
+            {
+                return Results.BadRequest(new { message = "Only open warranty claims can be replaced directly." });
+            }
+
+            if (claim.ReplacementSerialNumberId.HasValue)
+            {
+                return Results.BadRequest(new { message = "This warranty claim already has a replacement serial." });
+            }
+
+            if (request.ReplacementSerialNumberId == Guid.Empty)
+            {
+                return Results.BadRequest(new { message = "replacement_serial_number_id is required." });
+            }
+
+            if (request.ReplacementSerialNumberId == claim.SerialNumberId)
+            {
+                return Results.BadRequest(new { message = "Replacement serial must be different from the claimed serial." });
+            }
+
+            var replacementSerial = await dbContext.SerialNumbers
+                .FirstOrDefaultAsync(
+                    x => x.Id == request.ReplacementSerialNumberId &&
+                         (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value),
+                    cancellationToken);
+            if (replacementSerial is null)
+            {
+                return Results.NotFound(new { message = "Replacement serial number not found." });
+            }
+
+            if (replacementSerial.ProductId != claim.SerialNumber.ProductId)
+            {
+                return Results.BadRequest(new { message = "Replacement serial must belong to the same product." });
+            }
+
+            if (replacementSerial.Status != SerialNumberStatus.Available)
+            {
+                return Results.BadRequest(new { message = "Only available serial numbers can be used for direct replacement." });
+            }
+
+            var now = request.ReplacementDate ?? DateTimeOffset.UtcNow;
+            claim.Status = WarrantyClaimStatus.Resolved;
+            claim.ReplacementSerialNumberId = replacementSerial.Id;
+            claim.ReplacementSerialNumber = replacementSerial;
+            claim.ReplacementDate = now;
+            if (request.ResolutionNotes is not null)
+            {
+                claim.ResolutionNotes = request.ResolutionNotes;
+            }
+
+            claim.UpdatedAtUtc = now;
+
+            claim.SerialNumber.Status = SerialNumberStatus.Defective;
+            claim.SerialNumber.UpdatedAtUtc = now;
+
+            replacementSerial.Status = SerialNumberStatus.Sold;
+            replacementSerial.SaleId = claim.SerialNumber.SaleId;
+            replacementSerial.SaleItemId = claim.SerialNumber.SaleItemId;
+            replacementSerial.WarrantyExpiryDate = claim.SerialNumber.WarrantyExpiryDate;
+            replacementSerial.UpdatedAtUtc = now;
+
+            try
+            {
+                await stockMovementHelper.RecordMovementAsync(
+                    storeId: replacementSerial.StoreId ?? claim.StoreId,
+                    productId: replacementSerial.ProductId,
+                    type: StockMovementType.Adjustment,
+                    quantityChange: -1m,
+                    refType: StockMovementRef.Adjustment,
+                    refId: claim.Id,
+                    batchId: null,
+                    serialNumber: replacementSerial.SerialValue,
+                    reason: "warranty replacement",
+                    userId: ParseUserId(user),
+                    cancellationToken: cancellationToken);
+            }
+            catch (InvalidOperationException error)
+            {
+                return Results.BadRequest(new { message = error.Message });
+            }
+
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                return Results.Conflict(new { message = "Failed to save warranty claim changes. Refresh and try again." });
+            }
+
+            return Results.Ok(ToWarrantyClaimResponse(claim));
+        })
+        .WithName("ReplaceWarrantyClaim")
+        .WithOpenApi();
+
         return app;
     }
 
@@ -338,6 +468,9 @@ public static class WarrantyClaimEndpoints
             serial_value = claim.SerialNumber.SerialValue,
             product_id = claim.SerialNumber.ProductId,
             product_name = claim.SerialNumber.Product.Name,
+            replacement_serial_number_id = claim.ReplacementSerialNumberId,
+            replacement_serial_value = claim.ReplacementSerialNumber?.SerialValue,
+            replacement_date = claim.ReplacementDate,
             claim_date = claim.ClaimDate,
             status = claim.Status,
             resolution_notes = claim.ResolutionNotes,
@@ -350,6 +483,12 @@ public static class WarrantyClaimEndpoints
             created_at = claim.CreatedAtUtc,
             updated_at = claim.UpdatedAtUtc
         };
+    }
+
+    private static Guid? ParseUserId(ClaimsPrincipal user)
+    {
+        var value = user.FindFirstValue(ClaimTypes.NameIdentifier) ?? user.FindFirstValue("sub");
+        return Guid.TryParse(value, out var parsed) ? parsed : null;
     }
 }
 
@@ -393,4 +532,17 @@ public sealed class UpdateWarrantyClaimRequest
 
     [JsonPropertyName("received_back_person_name")]
     public string? ReceivedBackPersonName { get; set; }
+}
+
+public sealed class ReplaceWarrantyClaimRequest
+{
+    [JsonPropertyName("replacement_serial_number_id")]
+    public Guid ReplacementSerialNumberId { get; set; }
+
+    [JsonPropertyName("replacement_date")]
+    [JsonConverter(typeof(FlexibleNullableDateTimeOffsetJsonConverter))]
+    public DateTimeOffset? ReplacementDate { get; set; }
+
+    [JsonPropertyName("resolution_notes")]
+    public string? ResolutionNotes { get; set; }
 }

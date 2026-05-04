@@ -177,6 +177,7 @@ type BackendProductSearchItem = {
   brand_id?: string | null;
   brand_name?: string | null;
   unitPrice: number;
+  costPrice: number;
   stockQuantity: number;
   is_low_stock?: boolean;
   is_serial_tracked?: boolean;
@@ -661,6 +662,7 @@ export type StocktakeItem = {
   session_id: string;
   product_id: string;
   product_name: string;
+  is_serial_tracked: boolean;
   system_quantity: number;
   counted_quantity?: number;
   variance_quantity?: number;
@@ -670,8 +672,12 @@ export type StocktakeItem = {
 export type WarrantyClaim = {
   id: string;
   serial_number_id: string;
+  product_id: string;
   serial_value: string;
   product_name: string;
+  replacement_serial_number_id?: string;
+  replacement_serial_value?: string;
+  replacement_date?: string;
   claim_date: string;
   status: "Open" | "InRepair" | "Resolved" | "Rejected";
   resolution_notes?: string;
@@ -2498,9 +2504,12 @@ function mapProduct(item: BackendProductSearchItem): Product {
     name: item.name,
     sku: item.sku || item.id.slice(0, 8),
     barcode: item.barcode || undefined,
+    imageUrl: item.image_url || null,
     image_url: item.image_url || null,
     price: Number(item.unitPrice),
+    unitPrice: Number(item.unitPrice),
     unit_price: Number(item.unitPrice),
+    costPrice: Number(item.costPrice),
     category: item.category_name || undefined,
     category_id: item.category_id || null,
     categoryId: item.category_id || undefined,
@@ -2514,19 +2523,27 @@ function mapProduct(item: BackendProductSearchItem): Product {
     is_low_stock: item.is_low_stock ?? false,
     isSerialTracked: item.is_serial_tracked ?? false,
     is_serial_tracked: item.is_serial_tracked ?? false,
+    stockQuantity: Number(item.stockQuantity),
     stock: Number(item.stockQuantity),
     stock_quantity: Number(item.stockQuantity),
-    cost_price: Number(item.unitPrice),
+    cost_price: Number(item.costPrice),
     initial_stock_quantity: Number(item.stockQuantity),
+    reorderLevel: 0,
     reorder_level: 0,
+    safetyStock: 0,
     safety_stock: 0,
+    targetStockLevel: 0,
     target_stock_level: 0,
+    alertLevel: 0,
     alert_level: 0,
+    allowNegativeStock: false,
     allow_negative_stock: false,
     warranty_months: null,
     is_batch_tracked: false,
     expiry_alert_days: null,
+    isActive: true,
     is_active: true,
+    createdAt: "",
     created_at: "",
     image: resolveImageUrl(item.image_url) || sampleImage || createProductImage(item.name, accent),
   };
@@ -3108,6 +3125,7 @@ export type CustomerLookupItem = {
 export type CreateCustomerRequest = {
   name: string;
   code?: string | null;
+  idNumber?: string | null;
   phone?: string | null;
   email?: string | null;
   address?: string | null;
@@ -3196,6 +3214,7 @@ export async function createCustomer(requestBody: CreateCustomerRequest) {
     body: JSON.stringify({
       name: requestBody.name.trim(),
       code: normalizeOptionalString(requestBody.code),
+      id_number: normalizeOptionalString(requestBody.idNumber),
       phone: normalizeOptionalString(requestBody.phone),
       email: normalizeOptionalString(requestBody.email),
       address: normalizeOptionalString(requestBody.address),
@@ -3591,6 +3610,7 @@ type BackendStocktakeItem = {
   session_id: string;
   product_id: string;
   product_name: string;
+  is_serial_tracked?: boolean;
   system_quantity: number;
   counted_quantity?: number | null;
   variance_quantity?: number | null;
@@ -3600,8 +3620,12 @@ type BackendStocktakeItem = {
 type BackendWarrantyClaim = {
   id: string;
   serial_number_id: string;
+  product_id: string;
   serial_value: string;
   product_name: string;
+  replacement_serial_number_id?: string | null;
+  replacement_serial_value?: string | null;
+  replacement_date?: string | null;
   claim_date: string;
   status: WarrantyClaim["status"] | number | string;
   resolution_notes?: string | null;
@@ -3729,6 +3753,7 @@ function mapStocktakeItem(item: BackendStocktakeItem): StocktakeItem {
     session_id: item.session_id,
     product_id: item.product_id,
     product_name: item.product_name,
+    is_serial_tracked: item.is_serial_tracked ?? false,
     system_quantity: item.system_quantity,
     counted_quantity: item.counted_quantity ?? undefined,
     variance_quantity: item.variance_quantity ?? undefined,
@@ -3736,12 +3761,23 @@ function mapStocktakeItem(item: BackendStocktakeItem): StocktakeItem {
   };
 }
 
+type CompleteStocktakeSessionInput = {
+  serial_reconciliations?: Array<{
+    item_id: string;
+    serials: string[];
+  }>;
+};
+
 function mapWarrantyClaim(item: BackendWarrantyClaim): WarrantyClaim {
   return {
     id: item.id,
     serial_number_id: item.serial_number_id,
+    product_id: item.product_id,
     serial_value: item.serial_value,
     product_name: item.product_name,
+    replacement_serial_number_id: item.replacement_serial_number_id ?? undefined,
+    replacement_serial_value: item.replacement_serial_value ?? undefined,
+    replacement_date: item.replacement_date ?? undefined,
     claim_date: item.claim_date,
     status: normalizeWarrantyClaimStatus(item.status),
     resolution_notes: item.resolution_notes ?? undefined,
@@ -3957,9 +3993,13 @@ export async function updateStocktakeItem(
   };
 }
 
-export async function completeStocktakeSession(sessionId: string): Promise<StocktakeSession> {
+export async function completeStocktakeSession(
+  sessionId: string,
+  data: CompleteStocktakeSessionInput = {},
+): Promise<StocktakeSession> {
   const response = await request<BackendStocktakeSession>(`/api/stocktake/sessions/${sessionId}/complete`, {
     method: "POST",
+    body: JSON.stringify(data),
   });
   return mapStocktakeSession(response);
 }
@@ -4031,6 +4071,25 @@ export async function updateWarrantyClaim(
       pickup_person_name: data.pickup_person_name,
       received_back_date: data.received_back_date,
       received_back_person_name: data.received_back_person_name,
+    }),
+  });
+  return mapWarrantyClaim(response);
+}
+
+export async function replaceWarrantyClaim(
+  claimId: string,
+  data: {
+    replacement_serial_number_id: string;
+    replacement_date?: string;
+    resolution_notes?: string;
+  },
+): Promise<WarrantyClaim> {
+  const response = await request<BackendWarrantyClaim>(`/api/warranty-claims/${claimId}/replace`, {
+    method: "POST",
+    body: JSON.stringify({
+      replacement_serial_number_id: data.replacement_serial_number_id,
+      replacement_date: data.replacement_date,
+      resolution_notes: data.resolution_notes,
     }),
   });
   return mapWarrantyClaim(response);

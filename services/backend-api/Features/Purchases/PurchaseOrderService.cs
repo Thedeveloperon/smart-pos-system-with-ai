@@ -299,6 +299,99 @@ public sealed class PurchaseOrderService(
             cancellationToken);
     }
 
+    public async Task<PurchaseOrderResponse> ReversePurchaseOrderAsync(
+        Guid purchaseOrderId,
+        CancellationToken cancellationToken)
+    {
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
+        var order = await dbContext.PurchaseOrders
+            .Include(x => x.Supplier)
+            .Include(x => x.Lines)
+                .ThenInclude(x => x.Product)
+            .Include(x => x.Bills)
+                .ThenInclude(x => x.Items)
+            .FirstOrDefaultAsync(x => x.Id == purchaseOrderId, cancellationToken)
+            ?? throw new KeyNotFoundException("Purchase order not found.");
+
+        if (currentStoreId.HasValue && order.StoreId != currentStoreId.Value)
+        {
+            throw new KeyNotFoundException("Purchase order not found.");
+        }
+
+        if (order.Status is not PurchaseOrderStatus.PartiallyReceived and not PurchaseOrderStatus.Received)
+        {
+            throw new InvalidOperationException("Only received purchase orders can be reversed.");
+        }
+
+        var activeReceiptBills = order.Bills
+            .Where(x => string.Equals(x.SourceType, "po_receipt", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .ThenByDescending(x => x.InvoiceDateUtc)
+            .ToList();
+
+        if (activeReceiptBills.Count == 0)
+        {
+            throw new InvalidOperationException("This purchase order has no receipted stock to reverse.");
+        }
+
+        var reversedQuantitiesByProductId = new Dictionary<Guid, decimal>();
+        var now = DateTimeOffset.UtcNow;
+
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            foreach (var bill in activeReceiptBills)
+            {
+                await purchaseService.ReversePurchaseBillInventoryAsync(
+                    bill,
+                    bill.Items.ToList(),
+                    cancellationToken);
+
+                foreach (var item in bill.Items)
+                {
+                    reversedQuantitiesByProductId[item.ProductId] = RoundQuantity(
+                        reversedQuantitiesByProductId.GetValueOrDefault(item.ProductId) + item.Quantity);
+                }
+            }
+
+            foreach (var orderLine in order.Lines)
+            {
+                var reversedQuantity = reversedQuantitiesByProductId.GetValueOrDefault(orderLine.ProductId);
+                if (reversedQuantity <= 0m)
+                {
+                    continue;
+                }
+
+                if (reversedQuantity > orderLine.QuantityReceived)
+                {
+                    throw new InvalidOperationException("Received quantity is inconsistent with linked purchase receipts.");
+                }
+
+                orderLine.QuantityReceived = RoundQuantity(orderLine.QuantityReceived - reversedQuantity);
+            }
+
+            order.Status = order.Lines.Any(x => RoundQuantity(x.QuantityReceived) > 0m)
+                ? PurchaseOrderStatus.PartiallyReceived
+                : PurchaseOrderStatus.Sent;
+            order.UpdatedAtUtc = now;
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            logger.LogInformation(
+                "Purchase order reversed. PurchaseOrderId={PurchaseOrderId}, ReversedBillCount={ReversedBillCount}.",
+                order.Id,
+                activeReceiptBills.Count);
+
+            return await GetPurchaseOrderAsync(order.Id, cancellationToken);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
+    }
+
     public async Task<PurchaseOrderReceiveResponse> ReceivePurchaseOrderAsync(
         Guid purchaseOrderId,
         ReceivePurchaseOrderRequest request,

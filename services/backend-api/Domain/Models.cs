@@ -285,6 +285,7 @@ public sealed class WarrantyClaim
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid? StoreId { get; set; }
     public Guid SerialNumberId { get; set; }
+    public Guid? ReplacementSerialNumberId { get; set; }
     public DateTimeOffset ClaimDate { get; set; } = DateTimeOffset.UtcNow;
     public WarrantyClaimStatus Status { get; set; } = WarrantyClaimStatus.Open;
     public string? ResolutionNotes { get; set; }
@@ -293,11 +294,13 @@ public sealed class WarrantyClaim
     public string? PickupPersonName { get; set; }
     public DateTimeOffset? ReceivedBackDate { get; set; }
     public string? ReceivedBackPersonName { get; set; }
+    public DateTimeOffset? ReplacementDate { get; set; }
     public Guid? CreatedByUserId { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAtUtc { get; set; }
 
     public required SerialNumber SerialNumber { get; set; }
+    public SerialNumber? ReplacementSerialNumber { get; set; }
     public AppUser? CreatedByUser { get; set; }
 }
 
@@ -411,6 +414,7 @@ public sealed class Customer
     public Guid? PriceTierId { get; set; }
     public required string Name { get; set; }
     public string? Code { get; set; }
+    public string? IdNumber { get; set; }
     public string? Phone { get; set; }
     public string? Email { get; set; }
     public string? Address { get; set; }

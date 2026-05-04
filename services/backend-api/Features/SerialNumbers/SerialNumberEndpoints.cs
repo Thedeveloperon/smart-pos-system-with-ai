@@ -250,7 +250,9 @@ public static class SerialNumberEndpoints
             var isReferenced = serial.SaleId.HasValue
                 || serial.SaleItemId.HasValue
                 || serial.RefundId.HasValue
-                || await dbContext.WarrantyClaims.AnyAsync(x => x.SerialNumberId == serial.Id, cancellationToken);
+                || await dbContext.WarrantyClaims.AnyAsync(
+                    x => x.SerialNumberId == serial.Id || x.ReplacementSerialNumberId == serial.Id,
+                    cancellationToken);
 
             if (isReferenced)
             {

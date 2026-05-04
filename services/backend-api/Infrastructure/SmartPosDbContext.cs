@@ -167,10 +167,15 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.ReceivedBackPersonName).HasMaxLength(200);
             entity.HasIndex(x => new { x.StoreId, x.Status });
             entity.HasIndex(x => x.SerialNumberId);
+            entity.HasIndex(x => x.ReplacementSerialNumberId);
             entity.HasOne(x => x.SerialNumber)
                 .WithMany(x => x.WarrantyClaims)
                 .HasForeignKey(x => x.SerialNumberId)
                 .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.ReplacementSerialNumber)
+                .WithMany()
+                .HasForeignKey(x => x.ReplacementSerialNumberId)
+                .OnDelete(DeleteBehavior.SetNull);
             entity.HasOne(x => x.CreatedByUser)
                 .WithMany(x => x.WarrantyClaims)
                 .HasForeignKey(x => x.CreatedByUserId)
@@ -343,6 +348,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.ToTable("customers");
             entity.Property(x => x.Name).HasMaxLength(160);
             entity.Property(x => x.Code).HasMaxLength(64);
+            entity.Property(x => x.IdNumber).HasMaxLength(64);
             entity.Property(x => x.Phone).HasMaxLength(32);
             entity.Property(x => x.Email).HasMaxLength(120);
             entity.Property(x => x.Address).HasMaxLength(500);

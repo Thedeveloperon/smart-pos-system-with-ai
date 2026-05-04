@@ -1,4 +1,4 @@
-import { History, Wrench, Check, XCircle, PackageCheck } from "lucide-react";
+import { History, Wrench, Check, XCircle, PackageCheck, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "./StatusBadge";
 import { type WarrantyClaim } from "@/lib/api";
@@ -15,6 +15,7 @@ function formatDate(iso: string | undefined): string {
 interface Props {
   claims: WarrantyClaim[];
   onTimeline: (c: WarrantyClaim) => void;
+  onReplace: (c: WarrantyClaim) => void;
   onHandover: (c: WarrantyClaim) => void;
   onReceiveBack: (c: WarrantyClaim) => void;
   onResolve: (c: WarrantyClaim) => void;
@@ -41,7 +42,15 @@ function gradientFor(id: string) {
   return AVATAR_GRADIENTS[h % AVATAR_GRADIENTS.length];
 }
 
-export function ClaimsTable({ claims, onTimeline, onHandover, onReceiveBack, onResolve, onReject }: Props) {
+export function ClaimsTable({
+  claims,
+  onTimeline,
+  onReplace,
+  onHandover,
+  onReceiveBack,
+  onResolve,
+  onReject,
+}: Props) {
   if (claims.length === 0) {
     return (
       <div className="rounded-lg border border-border bg-background py-16 text-center">
@@ -100,6 +109,18 @@ export function ClaimsTable({ claims, onTimeline, onHandover, onReceiveBack, onR
                 <History className="mr-1 h-4 w-4" />
                 Timeline
               </Button>
+
+              {c.status === "Open" && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 px-2 text-brand hover:text-brand"
+                  onClick={() => onReplace(c)}
+                >
+                  <RefreshCw className="mr-1 h-4 w-4" />
+                  Replace
+                </Button>
+              )}
 
               {c.status === "Open" && (
                 <Button

@@ -1,4 +1,4 @@
-import { Clock, Wrench, PackageCheck, XCircle, Check } from "lucide-react";
+import { Clock, Wrench, PackageCheck, XCircle, Check, RefreshCw } from "lucide-react";
 import { type WarrantyClaim } from "@/lib/api";
 
 function formatDt(iso: string | undefined): string {
@@ -34,6 +34,7 @@ const CIRCLE_COLORS: Record<Variant, string> = {
 
 function buildSteps(claim: WarrantyClaim): Step[] {
   const steps: Step[] = [];
+  const replacedDirectly = !!claim.replacement_serial_number_id;
 
   steps.push({
     key: "opened",
@@ -45,6 +46,22 @@ function buildSteps(claim: WarrantyClaim): Step[] {
     variant: "warning",
     Icon: Clock,
   });
+
+  if (replacedDirectly) {
+    steps.push({
+      key: "replaced",
+      title: "Replaced from Shop",
+      date: claim.replacement_date ?? claim.updated_at,
+      details: [
+        claim.replacement_serial_value ? `Replacement serial: ${claim.replacement_serial_value}` : "",
+        claim.resolution_notes ? `Notes: ${claim.resolution_notes}` : "",
+      ].filter(Boolean),
+      completed: true,
+      variant: "success",
+      Icon: RefreshCw,
+    });
+    return steps;
+  }
 
   const handoverDone =
     claim.status === "InRepair" || claim.status === "Resolved" || !!claim.handover_date;

@@ -151,6 +151,21 @@ public static class DbSchemaUpdater
                 "ReceivedBackPersonName",
                 """ALTER TABLE "warranty_claims" ADD COLUMN "ReceivedBackPersonName" TEXT NULL;""",
                 cancellationToken);
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "warranty_claims",
+                "ReplacementSerialNumberId",
+                """ALTER TABLE "warranty_claims" ADD COLUMN "ReplacementSerialNumberId" TEXT NULL;""",
+                cancellationToken);
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "warranty_claims",
+                "ReplacementDate",
+                """ALTER TABLE "warranty_claims" ADD COLUMN "ReplacementDate" TEXT NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE INDEX IF NOT EXISTS "IX_warranty_claims_ReplacementSerialNumberId" ON "warranty_claims" ("ReplacementSerialNumberId");""",
+                cancellationToken);
             return;
         }
 
@@ -170,6 +185,15 @@ public static class DbSchemaUpdater
                 cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(
                 """ALTER TABLE warranty_claims ADD COLUMN IF NOT EXISTS "ReceivedBackPersonName" varchar(200) NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE warranty_claims ADD COLUMN IF NOT EXISTS "ReplacementSerialNumberId" uuid NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE warranty_claims ADD COLUMN IF NOT EXISTS "ReplacementDate" timestamptz NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE INDEX IF NOT EXISTS "IX_warranty_claims_ReplacementSerialNumberId" ON warranty_claims ("ReplacementSerialNumberId");""",
                 cancellationToken);
         }
     }
@@ -310,6 +334,7 @@ public static class DbSchemaUpdater
                   "PriceTierId" TEXT NULL,
                   "Name" TEXT NOT NULL,
                   "Code" TEXT NULL,
+                  "IdNumber" TEXT NULL,
                   "Phone" TEXT NULL,
                   "Email" TEXT NULL,
                   "Address" TEXT NULL,
@@ -385,6 +410,12 @@ public static class DbSchemaUpdater
                 "LoyaltyPointsRedeemed",
                 """ALTER TABLE "sales" ADD COLUMN "LoyaltyPointsRedeemed" TEXT NOT NULL DEFAULT '0';""",
                 cancellationToken);
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "customers",
+                "IdNumber",
+                """ALTER TABLE "customers" ADD COLUMN "IdNumber" TEXT NULL;""",
+                cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(
                 """CREATE INDEX IF NOT EXISTS "IX_sales_StoreId_CustomerId" ON "sales" ("StoreId", "CustomerId");""",
                 cancellationToken);
@@ -412,6 +443,7 @@ public static class DbSchemaUpdater
                   "PriceTierId" uuid NULL,
                   "Name" varchar(160) NOT NULL,
                   "Code" varchar(64) NULL,
+                  "IdNumber" varchar(64) NULL,
                   "Phone" varchar(32) NULL,
                   "Email" varchar(120) NULL,
                   "Address" varchar(500) NULL,
@@ -476,6 +508,9 @@ public static class DbSchemaUpdater
                 cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(
                 """ALTER TABLE sales ADD COLUMN IF NOT EXISTS "LoyaltyPointsRedeemed" numeric(18,3) NOT NULL DEFAULT 0;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE customers ADD COLUMN IF NOT EXISTS "IdNumber" varchar(64) NULL;""",
                 cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(
                 """CREATE INDEX IF NOT EXISTS "IX_sales_StoreId_CustomerId" ON sales("StoreId", "CustomerId");""",

@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ClipboardList } from "lucide-react";
 import {
   completeStocktakeSession,
   createStocktakeSession,
   deleteStocktakeSession,
+  fetchSerialNumbers,
   fetchStocktakeSessions,
   getStocktakeSession,
   revertStocktakeSession,
@@ -20,6 +20,14 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -30,6 +38,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ClipboardList } from "lucide-react";
+import SerialInputList from "./SerialInputList";
 
 const STATUS_TONES: Record<string, string> = {
   Draft: "bg-muted text-muted-foreground",
@@ -44,8 +54,12 @@ export default function StocktakeTab() {
   const [activeSession, setActiveSession] = useState<StocktakeSession | null>(null);
   const [items, setItems] = useState<StocktakeItem[]>([]);
   const [draftCounts, setDraftCounts] = useState<Record<string, string>>({});
+  const [serialDrafts, setSerialDrafts] = useState<Record<string, string[]>>({});
   const [savingItemIds, setSavingItemIds] = useState<Record<string, boolean>>({});
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [serialDialogItem, setSerialDialogItem] = useState<StocktakeItem | null>(null);
+  const [serialDialogValues, setSerialDialogValues] = useState<string[]>([]);
+  const [loadingSerialItemId, setLoadingSerialItemId] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [readonlyMode, setReadonlyMode] = useState(false);
   const [completing, setCompleting] = useState(false);
@@ -71,6 +85,22 @@ export default function StocktakeTab() {
   const roundVariance = (countedQuantity: number, systemQuantity: number) =>
     Math.round((countedQuantity - systemQuantity) * 1000) / 1000;
 
+  const getPersistedOrSystemCount = (item: StocktakeItem) =>
+    item.counted_quantity ?? item.system_quantity;
+
+  const getExpectedSerialCount = (item: StocktakeItem) => {
+    const countedQuantity = getPersistedOrSystemCount(item);
+    return Number.isInteger(countedQuantity) && countedQuantity >= 0 ? countedQuantity : null;
+  };
+
+  const needsSerialReconciliation = (item: StocktakeItem) =>
+    item.is_serial_tracked && getPersistedOrSystemCount(item) !== item.system_quantity;
+
+  const hasMatchingSerialDraft = (item: StocktakeItem) => {
+    const expectedSerialCount = getExpectedSerialCount(item);
+    return expectedSerialCount != null && (serialDrafts[item.id]?.length ?? -1) === expectedSerialCount;
+  };
+
   const syncSessionVarianceCount = (sessionId: string, nextItems: StocktakeItem[]) => {
     const varianceCount = nextItems.filter(
       (item) => item.variance_quantity != null && item.variance_quantity !== 0,
@@ -90,6 +120,7 @@ export default function StocktakeTab() {
         loadedItems.map((item) => [item.id, getPersistedCountValue(item.counted_quantity)]),
       ),
     );
+    setSerialDrafts({});
   };
 
   const applyItemUpdate = (
@@ -110,6 +141,10 @@ export default function StocktakeTab() {
     itemsRef.current = [];
     setItems([]);
     setDraftCounts({});
+    setSerialDrafts({});
+    setSerialDialogItem(null);
+    setSerialDialogValues([]);
+    setLoadingSerialItemId(null);
     setReadonlyMode(false);
   };
 
@@ -211,6 +246,36 @@ export default function StocktakeTab() {
     setDraftCounts((prev) => ({ ...prev, [itemId]: value }));
   };
 
+  const openSerialDialog = async (item: StocktakeItem) => {
+    const currentItem = itemsRef.current.find((entry) => entry.id === item.id) ?? item;
+    setLoadingSerialItemId(currentItem.id);
+    try {
+      const existingDraft = serialDrafts[currentItem.id];
+      if (existingDraft) {
+        setSerialDialogValues(existingDraft);
+        setSerialDialogItem(currentItem);
+        return;
+      }
+
+      const serials = await fetchSerialNumbers(currentItem.product_id);
+      setSerialDialogValues(
+        serials
+          .filter((serial) => serial.status === "Available")
+          .map((serial) => serial.serial_value),
+      );
+      setSerialDialogItem(currentItem);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load serial numbers.");
+    } finally {
+      setLoadingSerialItemId((current) => (current === currentItem.id ? null : current));
+    }
+  };
+
+  const closeSerialDialog = () => {
+    setSerialDialogItem(null);
+    setSerialDialogValues([]);
+  };
+
   const flushDraftCounts = async () => {
     const results = await Promise.all(
       itemsRef.current.map((item) =>
@@ -226,7 +291,29 @@ export default function StocktakeTab() {
     try {
       const countsSaved = await flushDraftCounts();
       if (!countsSaved) return;
-      await completeStocktakeSession(activeSession.id);
+      const serialItemWithMissingDraft = itemsRef.current.find(
+        (item) => needsSerialReconciliation(item) && !hasMatchingSerialDraft(item),
+      );
+      if (serialItemWithMissingDraft) {
+        const expectedSerialCount = getExpectedSerialCount(serialItemWithMissingDraft);
+        setConfirmOpen(false);
+        toast.error(
+          expectedSerialCount == null
+            ? `'${serialItemWithMissingDraft.product_name}' requires a whole-number counted quantity before serials can be reconciled.`
+            : `Enter exactly ${expectedSerialCount} serial number(s) for '${serialItemWithMissingDraft.product_name}' before completing this stocktake.`,
+        );
+        await openSerialDialog(serialItemWithMissingDraft);
+        return;
+      }
+
+      await completeStocktakeSession(activeSession.id, {
+        serial_reconciliations: itemsRef.current
+          .filter((item) => needsSerialReconciliation(item))
+          .map((item) => ({
+            item_id: item.id,
+            serials: serialDrafts[item.id] ?? [],
+          })),
+      });
       setConfirmOpen(false);
       closeSheet();
       await reload();
@@ -268,6 +355,21 @@ export default function StocktakeTab() {
       setReverting(false);
     }
   };
+
+  const currentSerialDialogItem = serialDialogItem
+    ? itemsRef.current.find((entry) => entry.id === serialDialogItem.id) ?? serialDialogItem
+    : null;
+  const serialDialogExpectedCount = currentSerialDialogItem
+    ? getExpectedSerialCount(currentSerialDialogItem)
+    : null;
+  const serialDialogCountError =
+    currentSerialDialogItem == null
+      ? null
+      : serialDialogExpectedCount == null
+        ? "Serial-tracked items require a whole-number counted quantity."
+        : serialDialogValues.length !== serialDialogExpectedCount
+          ? `Enter exactly ${serialDialogExpectedCount} serial number(s) to match the counted quantity.`
+          : null;
 
   return (
     <>
@@ -399,13 +501,54 @@ export default function StocktakeTab() {
                   const draftCount = draftCounts[item.id] ?? getPersistedCountValue(item.counted_quantity);
                   const parsedDraftCount = parseDraftCount(draftCount);
                   const countedQuantity = parsedDraftCount ?? item.counted_quantity ?? null;
+                  const serialDraftCount = serialDrafts[item.id]?.length ?? 0;
+                  const expectedSerialCount =
+                    countedQuantity != null && Number.isInteger(countedQuantity) && countedQuantity >= 0
+                      ? countedQuantity
+                      : null;
+                  const requiresSerials =
+                    !readonlyMode && item.is_serial_tracked && countedQuantity != null && countedQuantity !== item.system_quantity;
+                  const serialsReady =
+                    requiresSerials && expectedSerialCount != null && serialDraftCount === expectedSerialCount;
                   const variance =
                     countedQuantity == null
                       ? null
                       : roundVariance(countedQuantity, item.system_quantity);
                   return (
                     <TableRow key={item.id}>
-                      <TableCell>{item.product_name}</TableCell>
+                      <TableCell>
+                        <div className="space-y-1">
+                          <div>{item.product_name}</div>
+                          {item.is_serial_tracked && (
+                            <div className="flex flex-wrap items-center gap-2 text-xs">
+                              <Badge variant="secondary">Serial tracked</Badge>
+                              {!readonlyMode && (
+                                <>
+                                  <Button
+                                    type="button"
+                                    variant="link"
+                                    size="sm"
+                                    className="h-auto p-0 text-xs"
+                                    disabled={loadingSerialItemId === item.id || completing}
+                                    onClick={() => void openSerialDialog(item)}
+                                  >
+                                    {loadingSerialItemId === item.id
+                                      ? "Loading serials..."
+                                      : serialDrafts[item.id]
+                                        ? "Review serials"
+                                        : "Enter serials"}
+                                  </Button>
+                                  {requiresSerials && (
+                                    <span className={serialsReady ? "text-muted-foreground" : "text-destructive"}>
+                                      {serialDraftCount}/{expectedSerialCount ?? "?"} serials
+                                    </span>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell className="text-right">{item.system_quantity}</TableCell>
                       <TableCell className="w-32 text-right">
                         {readonlyMode ? (
@@ -413,7 +556,7 @@ export default function StocktakeTab() {
                         ) : (
                           <Input
                             type="number"
-                            step="0.001"
+                            step={item.is_serial_tracked ? "1" : "0.001"}
                             className="text-right"
                             value={draftCount}
                             disabled={Boolean(savingItemIds[item.id]) || completing}
@@ -478,6 +621,64 @@ export default function StocktakeTab() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog
+        open={Boolean(currentSerialDialogItem)}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeSerialDialog();
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Reconcile serials</DialogTitle>
+            <DialogDescription>
+              {currentSerialDialogItem ? (
+                <>
+                  Enter the exact serial numbers currently counted for{" "}
+                  <span className="font-medium">{currentSerialDialogItem.product_name}</span>.
+                </>
+              ) : (
+                "Enter the exact serial numbers currently counted for this product."
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            {currentSerialDialogItem && (
+              <p className="text-sm text-muted-foreground">
+                Counted quantity:{" "}
+                <span className="font-medium">
+                  {getPersistedOrSystemCount(currentSerialDialogItem)}
+                </span>
+              </p>
+            )}
+            <SerialInputList value={serialDialogValues} onChange={setSerialDialogValues} />
+            {serialDialogCountError && <p className="text-sm text-destructive">{serialDialogCountError}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={closeSerialDialog}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (!currentSerialDialogItem || serialDialogCountError) {
+                  return;
+                }
+
+                setSerialDrafts((prev) => ({
+                  ...prev,
+                  [currentSerialDialogItem.id]: serialDialogValues,
+                }));
+                closeSerialDialog();
+              }}
+              disabled={Boolean(serialDialogCountError) || !currentSerialDialogItem}
+            >
+              Save serials
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog
         open={Boolean(cancelSession)}

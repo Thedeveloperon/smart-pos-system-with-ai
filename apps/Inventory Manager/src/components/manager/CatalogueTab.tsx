@@ -22,12 +22,15 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   createBrand,
   createCategory,
+  fetchProductCatalogItems,
   fetchBrands,
   fetchCategories,
   hardDeleteCategory,
   hardDeleteBrand,
   type Brand,
   type Category,
+  type Product,
+  updateProduct,
   updateBrand,
   updateCategory,
 } from "@/lib/api";
@@ -84,9 +87,32 @@ const toBrandUpdatePayload = (brand: Brand, isActive = brand.is_active) => ({
   is_active: isActive,
 });
 
+const toProductStatusUpdatePayload = (product: Product, isActive: boolean) => ({
+  name: product.name,
+  sku: product.sku || null,
+  barcode: product.barcode || null,
+  image_url: product.image_url ?? null,
+  category_id: product.category_id ?? null,
+  brand_id: product.brand_id ?? null,
+  unit_price: product.unit_price ?? product.price ?? 0,
+  cost_price: product.cost_price ?? product.price ?? product.unit_price ?? 0,
+  initial_stock_quantity: product.initial_stock_quantity ?? product.stock_quantity ?? 0,
+  reorder_level: product.reorder_level ?? 0,
+  safety_stock: product.safety_stock ?? 0,
+  target_stock_level: product.target_stock_level ?? 0,
+  allow_negative_stock: product.allow_negative_stock ?? false,
+  is_serial_tracked: product.is_serial_tracked ?? false,
+  warranty_months: product.warranty_months ?? 0,
+  is_batch_tracked: product.is_batch_tracked ?? false,
+  expiry_alert_days: product.expiry_alert_days ?? 30,
+  is_active: isActive,
+  product_suppliers: product.product_suppliers,
+});
+
 export default function CatalogueTab() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [editor, setEditor] = useState<EditorState>(null);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -97,13 +123,19 @@ export default function CatalogueTab() {
   const [categoryActionState, setCategoryActionState] = useState<CategoryActionState>(null);
   const [actionPending, setActionPending] = useState(false);
   const [categoryActionPending, setCategoryActionPending] = useState(false);
+  const [productActionProductId, setProductActionProductId] = useState<string | null>(null);
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const [categoryItems, brandItems] = await Promise.all([fetchCategories(true), fetchBrands(true)]);
+      const [categoryItems, brandItems, productItems] = await Promise.all([
+        fetchCategories(true),
+        fetchBrands(true),
+        fetchProductCatalogItems(200, true),
+      ]);
       setCategories(categoryItems);
       setBrands(brandItems);
+      setProducts(productItems);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load catalogue data.");
     } finally {
@@ -275,6 +307,32 @@ export default function CatalogueTab() {
     }
   };
 
+  const handleProductStatusToggle = async (product: Product, isActive: boolean) => {
+    setProductActionProductId(product.id);
+    try {
+      await updateProduct(product.id, toProductStatusUpdatePayload(product, isActive));
+      toast.success(isActive ? "Product activated." : "Product deactivated.");
+      await loadData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update product.");
+    } finally {
+      setProductActionProductId(null);
+    }
+  };
+
+  const productsByBrand = products.reduce<Record<string, Product[]>>((accumulator, product) => {
+    if (!product.brand_id) {
+      return accumulator;
+    }
+
+    if (!accumulator[product.brand_id]) {
+      accumulator[product.brand_id] = [];
+    }
+
+    accumulator[product.brand_id].push(product);
+    return accumulator;
+  }, {});
+
   return (
     <>
       <Card>
@@ -370,14 +428,25 @@ export default function CatalogueTab() {
               <SectionTable
                 loading={loading}
                 emptyText="No brands found."
-                columns={["Name", "Code", "Description", "Products", "Status", "Actions"]}
+                columns={["Name", "Code", "Description", "Product list", "Status", "Actions"]}
                 rows={brands.map((item) => ({
                   key: item.brand_id,
                   cells: [
-                    item.name,
+                    <div key="brand-name" className="space-y-1">
+                      <div className="font-medium">{item.name}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {item.product_count === 1 ? "1 linked product" : `${item.product_count} linked products`}
+                      </div>
+                    </div>,
                     item.code || "—",
                     item.description || "—",
-                    String(item.product_count),
+                    <BrandProductList
+                      key="products"
+                      products={productsByBrand[item.brand_id] ?? []}
+                      totalProducts={item.product_count}
+                      pendingProductId={productActionProductId}
+                      onToggleStatus={(product, isActive) => void handleProductStatusToggle(product, isActive)}
+                    />,
                     <Badge key="badge" variant={item.is_active ? "default" : "secondary"}>
                       {item.is_active ? "Active" : "Inactive"}
                     </Badge>,
@@ -565,6 +634,65 @@ function SectionHeader({
         <Plus className="h-4 w-4" />
         Add {singularTitle}
       </Button>
+    </div>
+  );
+}
+
+function BrandProductList({
+  products,
+  totalProducts,
+  pendingProductId,
+  onToggleStatus,
+}: {
+  products: Product[];
+  totalProducts: number;
+  pendingProductId: string | null;
+  onToggleStatus: (product: Product, isActive: boolean) => void;
+}) {
+  if (products.length === 0) {
+    return <span className="text-sm text-muted-foreground">No products linked to this brand.</span>;
+  }
+
+  return (
+    <div className="min-w-[18rem] space-y-2">
+      {products.length !== totalProducts ? (
+        <p className="text-xs text-muted-foreground">
+          Showing {products.length} of {totalProducts} linked products.
+        </p>
+      ) : null}
+      {products.map((product) => {
+        const isPending = pendingProductId === product.id;
+        const nextIsActive = !product.is_active;
+        return (
+          <div
+            key={product.id}
+            className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/10 px-3 py-2"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-medium">{product.name}</div>
+              <div className="truncate text-xs text-muted-foreground">
+                {[product.sku || null, product.barcode || null].filter(Boolean).join(" • ") || "No SKU or barcode"}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge variant={product.is_active ? "default" : "secondary"}>
+                {product.is_active ? "Active" : "Inactive"}
+              </Badge>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={isPending}
+                aria-label={`${nextIsActive ? "Activate" : "Deactivate"} ${product.name}`}
+                onClick={() => onToggleStatus(product, nextIsActive)}
+              >
+                {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Power className="h-4 w-4" />}
+                {nextIsActive ? "Activate" : "Deactivate"}
+              </Button>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

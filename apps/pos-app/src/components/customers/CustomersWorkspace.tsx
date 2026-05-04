@@ -5,6 +5,7 @@ import {
   ArrowUp,
   Cake,
   Eye,
+  IdCard,
   Mail,
   MapPin,
   Pencil,
@@ -73,6 +74,7 @@ type Customer = {
   id: string;
   name: string;
   code: string;
+  idNumber?: string;
   phone?: string;
   email?: string;
   address?: string;
@@ -106,6 +108,7 @@ type BackendCustomerListItem = {
   customer_id: string;
   name: string;
   code: string;
+  id_number?: string | null;
   phone?: string | null;
   email?: string | null;
   price_tier?: BackendPriceTierResponse | null;
@@ -132,6 +135,7 @@ type BackendCustomerDetail = {
   customer_id: string;
   name: string;
   code: string;
+  id_number?: string | null;
   phone?: string | null;
   email?: string | null;
   address?: string | null;
@@ -211,6 +215,7 @@ function mapCustomerSummary(item: BackendCustomerListItem): Customer {
     id: item.customer_id,
     name: item.name,
     code: item.code,
+    idNumber: item.id_number ?? undefined,
     phone: item.phone ?? undefined,
     email: item.email ?? undefined,
     address: undefined,
@@ -234,6 +239,7 @@ function mapCustomerDetail(item: BackendCustomerDetail, existing?: Customer | nu
     id: item.customer_id,
     name: item.name,
     code: item.code,
+    idNumber: item.id_number ?? undefined,
     phone: item.phone ?? undefined,
     email: item.email ?? undefined,
     address: item.address ?? undefined,
@@ -285,6 +291,7 @@ function toCustomerRequestBody(customerInput: CustomerFormValue) {
   return {
     name: customerInput.name.trim(),
     code: normalizeOptionalString(customerInput.code),
+    id_number: normalizeOptionalString(customerInput.idNumber),
     phone: normalizeOptionalString(customerInput.phone),
     email: normalizeOptionalString(customerInput.email),
     address: normalizeOptionalString(customerInput.address),
@@ -844,7 +851,7 @@ function DirectoryPanel({
         return true;
       }
 
-      return [customer.name, customer.code, customer.phone ?? "", customer.email ?? ""].some((field) =>
+      return [customer.name, customer.code, customer.idNumber ?? "", customer.phone ?? "", customer.email ?? ""].some((field) =>
         field.toLowerCase().includes(query)
       );
     });
@@ -864,7 +871,7 @@ function DirectoryPanel({
           <CustomerSearchInput
             value={search}
             onChange={setSearch}
-            placeholder="Search name, code, phone, email..."
+            placeholder="Search name, code, ID, phone, email..."
             wrapperClassName="max-w-sm flex-1"
             className="pl-8"
           />
@@ -1031,6 +1038,7 @@ function CustomerDetailContent({
         <TabsContent value="profile" className="space-y-3">
           <div className="grid gap-2 rounded-lg border border-border bg-card p-4 text-sm">
             <InfoRow icon={ArrowLeft} label="Customer code" value={customer.code} />
+            <InfoRow icon={IdCard} label="ID number" value={customer.idNumber ?? "-"} />
             <InfoRow icon={Mail} label="Email" value={customer.email ?? "-"} />
             <InfoRow icon={MapPin} label="Address" value={customer.address ?? "-"} />
             <InfoRow icon={Cake} label="Birthday" value={customer.dateOfBirth ?? "-"} />
@@ -1390,6 +1398,7 @@ function CustomerEditorDialog({
 }) {
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
+  const [idNumber, setIdNumber] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
@@ -1409,6 +1418,7 @@ function CustomerEditorDialog({
 
     setName(initial?.name ?? "");
     setCode(initial?.code ?? "");
+    setIdNumber(initial?.idNumber ?? "");
     setPhone(initial?.phone ?? "");
     setEmail(initial?.email ?? "");
     setAddress(initial?.address ?? "");
@@ -1442,6 +1452,7 @@ function CustomerEditorDialog({
       id: initial?.id,
       name: trimmedName,
       code: code.trim(),
+      idNumber: idNumber.trim(),
       phone: phone.trim(),
       email: email.trim(),
       address: address.trim(),
@@ -1474,6 +1485,9 @@ function CustomerEditorDialog({
           </Field>
           <Field label="Code (auto if blank)">
             <Input value={code} onChange={(event) => setCode(event.target.value)} placeholder="C-0005" />
+          </Field>
+          <Field label="ID number" className="sm:col-span-2">
+            <Input value={idNumber} onChange={(event) => setIdNumber(event.target.value)} />
           </Field>
           <Field label="Phone">
             <Input value={phone} onChange={(event) => setPhone(event.target.value)} />
