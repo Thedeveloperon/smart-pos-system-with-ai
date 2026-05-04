@@ -212,6 +212,19 @@ public static class StocktakeEndpoints
                 return Results.BadRequest(new { message = "Only in-progress sessions can be updated." });
             }
 
+            if (item.Product.IsSerialTracked)
+            {
+                if (request.CountedQuantity < 0m)
+                {
+                    return Results.BadRequest(new { message = $"'{item.Product.Name}' cannot use a negative counted quantity because it is serial tracked." });
+                }
+
+                if (request.CountedQuantity != decimal.Truncate(request.CountedQuantity))
+                {
+                    return Results.BadRequest(new { message = $"'{item.Product.Name}' must use a whole-number counted quantity because it is serial tracked." });
+                }
+            }
+
             item.CountedQuantity = request.CountedQuantity;
             item.VarianceQuantity = decimal.Round(request.CountedQuantity - item.SystemQuantity, 3, MidpointRounding.AwayFromZero);
             item.Notes = request.Notes;
@@ -231,6 +244,7 @@ public static class StocktakeEndpoints
                 session_id = item.SessionId,
                 product_id = item.ProductId,
                 product_name = item.Product.Name,
+                is_serial_tracked = item.Product.IsSerialTracked,
                 system_quantity = item.SystemQuantity,
                 counted_quantity = item.CountedQuantity,
                 variance_quantity = item.VarianceQuantity,
@@ -242,10 +256,13 @@ public static class StocktakeEndpoints
 
         group.MapPost("/sessions/{sessionId:guid}/complete", async (
             Guid sessionId,
+            CompleteStocktakeSessionRequest? request,
             ClaimsPrincipal user,
             SmartPosDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
+            request ??= new CompleteStocktakeSessionRequest();
+            request.SerialReconciliations ??= [];
             var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var session = await dbContext.StocktakeSessions
                 .Include(x => x.Items)
@@ -263,6 +280,115 @@ public static class StocktakeEndpoints
             }
 
             var now = DateTimeOffset.UtcNow;
+            var duplicateReconciliationItemIds = request.SerialReconciliations
+                .GroupBy(x => x.ItemId)
+                .Where(x => x.Count() > 1)
+                .Select(x => x.Key)
+                .ToList();
+            if (duplicateReconciliationItemIds.Count > 0)
+            {
+                return Results.BadRequest(new { message = "Serial reconciliation was submitted more than once for the same stocktake item." });
+            }
+
+            var sessionItemIds = session.Items.Select(x => x.Id).ToHashSet();
+            var unknownReconciliationItemIds = request.SerialReconciliations
+                .Where(x => !sessionItemIds.Contains(x.ItemId))
+                .Select(x => x.ItemId)
+                .Distinct()
+                .ToList();
+            if (unknownReconciliationItemIds.Count > 0)
+            {
+                return Results.BadRequest(new { message = "Serial reconciliation was submitted for an item that does not belong to this stocktake session." });
+            }
+
+            var normalizedSerialsByItemId = new Dictionary<Guid, List<string>>();
+            foreach (var reconciliation in request.SerialReconciliations)
+            {
+                reconciliation.Serials ??= [];
+                var normalizedSerials = reconciliation.Serials
+                    .Select(NormalizeSerialValue)
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Select(x => x!)
+                    .ToList();
+
+                var duplicateSerials = normalizedSerials
+                    .GroupBy(x => x, StringComparer.OrdinalIgnoreCase)
+                    .Where(x => x.Count() > 1)
+                    .Select(x => x.Key)
+                    .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (duplicateSerials.Count > 0)
+                {
+                    return Results.BadRequest(new
+                    {
+                        message = $"Duplicate serial numbers were provided: {string.Join(", ", duplicateSerials)}"
+                    });
+                }
+
+                normalizedSerialsByItemId[reconciliation.ItemId] = normalizedSerials;
+            }
+
+            var duplicateSerialsAcrossItems = normalizedSerialsByItemId
+                .Values
+                .SelectMany(x => x)
+                .GroupBy(x => x, StringComparer.OrdinalIgnoreCase)
+                .Where(x => x.Count() > 1)
+                .Select(x => x.Key)
+                .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (duplicateSerialsAcrossItems.Count > 0)
+            {
+                return Results.BadRequest(new
+                {
+                    message = $"The same serial number cannot be counted more than once: {string.Join(", ", duplicateSerialsAcrossItems)}"
+                });
+            }
+
+            var serialTrackedItemsNeedingValidation = session.Items
+                .Where(item =>
+                {
+                    var counted = item.CountedQuantity ?? item.SystemQuantity;
+                    var variance = decimal.Round(counted - item.SystemQuantity, 3, MidpointRounding.AwayFromZero);
+                    return item.Product.IsSerialTracked &&
+                           (variance != 0m || normalizedSerialsByItemId.ContainsKey(item.Id));
+                })
+                .ToList();
+
+            var serialsByProductId = new Dictionary<Guid, List<SerialNumber>>();
+            var existingSerialsByValue = new Dictionary<string, SerialNumber>(StringComparer.OrdinalIgnoreCase);
+            if (serialTrackedItemsNeedingValidation.Count > 0)
+            {
+                var trackedProductIds = serialTrackedItemsNeedingValidation
+                    .Select(x => x.ProductId)
+                    .Distinct()
+                    .ToArray();
+                var existingProductSerials = await dbContext.SerialNumbers
+                    .Where(x =>
+                        trackedProductIds.Contains(x.ProductId) &&
+                        (!session.StoreId.HasValue || x.StoreId == session.StoreId.Value))
+                    .ToListAsync(cancellationToken);
+                serialsByProductId = existingProductSerials
+                    .GroupBy(x => x.ProductId)
+                    .ToDictionary(x => x.Key, x => x.ToList());
+
+                var requestedSerialValues = normalizedSerialsByItemId
+                    .Values
+                    .SelectMany(x => x)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                if (requestedSerialValues.Length > 0)
+                {
+                    var existingRequestedSerials = await dbContext.SerialNumbers
+                        .Where(x =>
+                            requestedSerialValues.Contains(x.SerialValue) &&
+                            (!session.StoreId.HasValue || x.StoreId == session.StoreId.Value))
+                        .ToListAsync(cancellationToken);
+                    existingSerialsByValue = existingRequestedSerials.ToDictionary(
+                        x => x.SerialValue,
+                        StringComparer.OrdinalIgnoreCase);
+                }
+            }
+
             foreach (var item in session.Items)
             {
                 var counted = item.CountedQuantity ?? item.SystemQuantity;
@@ -270,6 +396,128 @@ public static class StocktakeEndpoints
                 item.CountedQuantity = counted;
                 item.VarianceQuantity = variance;
                 item.UpdatedAtUtc = now;
+
+                if (item.Product.IsSerialTracked)
+                {
+                    if (counted < 0m)
+                    {
+                        return Results.BadRequest(new { message = $"'{item.Product.Name}' cannot use a negative counted quantity because it is serial tracked." });
+                    }
+
+                    if (counted != decimal.Truncate(counted))
+                    {
+                        return Results.BadRequest(new { message = $"'{item.Product.Name}' must use a whole-number counted quantity because it is serial tracked." });
+                    }
+
+                    var hasSerialReconciliation = normalizedSerialsByItemId.TryGetValue(item.Id, out var countedSerials);
+                    if (variance != 0m && !hasSerialReconciliation)
+                    {
+                        return Results.BadRequest(new
+                        {
+                            message = $"'{item.Product.Name}' requires serial reconciliation before this stocktake can be completed."
+                        });
+                    }
+
+                    if (hasSerialReconciliation)
+                    {
+                        var expectedSerialCount = (int)counted;
+                        countedSerials ??= [];
+                        if (countedSerials.Count != expectedSerialCount)
+                        {
+                            return Results.BadRequest(new
+                            {
+                                message = $"'{item.Product.Name}' requires exactly {expectedSerialCount} serial number(s) to match the counted quantity."
+                            });
+                        }
+
+                        var productSerials = serialsByProductId.GetValueOrDefault(item.ProductId, []);
+                        var availableSerials = productSerials
+                            .Where(x => x.Status == SerialNumberStatus.Available)
+                            .ToList();
+                        var requestedSerialValues = countedSerials.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                        foreach (var serialValue in countedSerials)
+                        {
+                            if (!existingSerialsByValue.TryGetValue(serialValue, out var existingSerial))
+                            {
+                                continue;
+                            }
+
+                            if (existingSerial.ProductId != item.ProductId)
+                            {
+                                return Results.BadRequest(new
+                                {
+                                    message = $"Serial number '{serialValue}' is already assigned to another product."
+                                });
+                            }
+
+                            if (existingSerial.Status is SerialNumberStatus.Sold or SerialNumberStatus.UnderWarranty)
+                            {
+                                return Results.BadRequest(new
+                                {
+                                    message = $"Serial number '{serialValue}' cannot be added to stock because it is already marked as {existingSerial.Status}."
+                                });
+                            }
+
+                            if (existingSerial.Status is SerialNumberStatus.Returned or SerialNumberStatus.Defective)
+                            {
+                                existingSerial.Status = SerialNumberStatus.Available;
+                                existingSerial.UpdatedAtUtc = now;
+                            }
+                        }
+
+                        var availableSerialsByValue = availableSerials.ToDictionary(
+                            x => x.SerialValue,
+                            StringComparer.OrdinalIgnoreCase);
+                        var serialsToRemove = availableSerials
+                            .Where(x => !requestedSerialValues.Contains(x.SerialValue))
+                            .ToList();
+
+                        foreach (var serial in serialsToRemove)
+                        {
+                            var isReferenced = serial.SaleId.HasValue ||
+                                               serial.SaleItemId.HasValue ||
+                                               serial.RefundId.HasValue ||
+                                               await dbContext.WarrantyClaims.AnyAsync(
+                                                   x => x.SerialNumberId == serial.Id || x.ReplacementSerialNumberId == serial.Id,
+                                                   cancellationToken);
+                            if (isReferenced)
+                            {
+                                return Results.BadRequest(new
+                                {
+                                    message = $"Serial number '{serial.SerialValue}' for '{item.Product.Name}' cannot be removed by stocktake because it is referenced by prior activity."
+                                });
+                            }
+                        }
+
+                        if (serialsToRemove.Count > 0)
+                        {
+                            dbContext.SerialNumbers.RemoveRange(serialsToRemove);
+                        }
+
+                        var newSerialValues = countedSerials
+                            .Where(serialValue =>
+                                !availableSerialsByValue.ContainsKey(serialValue) &&
+                                !existingSerialsByValue.ContainsKey(serialValue))
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .ToList();
+
+                        foreach (var serialValue in newSerialValues)
+                        {
+                            var createdSerial = new SerialNumber
+                            {
+                                StoreId = session.StoreId,
+                                ProductId = item.ProductId,
+                                SerialValue = serialValue,
+                                Status = SerialNumberStatus.Available,
+                                CreatedAtUtc = now,
+                                UpdatedAtUtc = now,
+                                Product = item.Product
+                            };
+                            dbContext.SerialNumbers.Add(createdSerial);
+                        }
+                    }
+                }
 
                 var inventory = item.Product.Inventory;
                 if (inventory is null)
@@ -511,6 +759,7 @@ public static class StocktakeEndpoints
                 session_id = item.SessionId,
                 product_id = item.ProductId,
                 product_name = item.Product?.Name,
+                is_serial_tracked = item.Product?.IsSerialTracked ?? false,
                 system_quantity = item.SystemQuantity,
                 counted_quantity = item.CountedQuantity,
                 variance_quantity = item.VarianceQuantity,
@@ -692,6 +941,16 @@ public static class StocktakeEndpoints
     {
         return Convert.ToString(reader.GetValue(ordinal), CultureInfo.InvariantCulture) ?? string.Empty;
     }
+
+    private static string? NormalizeSerialValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return value.Trim();
+    }
 }
 
 public sealed class CreateStocktakeSessionRequest
@@ -710,4 +969,19 @@ public sealed class UpdateStocktakeItemRequest
 
     [JsonPropertyName("notes")]
     public string? Notes { get; set; }
+}
+
+public sealed class CompleteStocktakeSessionRequest
+{
+    [JsonPropertyName("serial_reconciliations")]
+    public List<CompleteStocktakeSerialReconciliationRequest> SerialReconciliations { get; set; } = [];
+}
+
+public sealed class CompleteStocktakeSerialReconciliationRequest
+{
+    [JsonPropertyName("item_id")]
+    public Guid ItemId { get; set; }
+
+    [JsonPropertyName("serials")]
+    public List<string> Serials { get; set; } = [];
 }

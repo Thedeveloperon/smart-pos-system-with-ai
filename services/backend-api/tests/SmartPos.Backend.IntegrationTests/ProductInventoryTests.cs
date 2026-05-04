@@ -57,6 +57,7 @@ public sealed class ProductInventoryTests(CustomWebApplicationFactory factory)
             ignoreCase: true,
             ignoreLineEndingDifferences: false,
             ignoreWhiteSpaceDifferences: false);
+        Assert.Equal(80m, TestJson.GetDecimal(barcodeHit, "costPrice"));
 
         var updateProduct = await TestJson.ReadObjectAsync(
             await client.PutAsJsonAsync($"/api/products/{productId}", new
@@ -72,6 +73,11 @@ public sealed class ProductInventoryTests(CustomWebApplicationFactory factory)
                 is_active = true
             }));
         Assert.Equal(130m, TestJson.GetDecimal(updateProduct, "unit_price"));
+
+        var updatedSearch = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/products/search?q={Uri.EscapeDataString(barcode)}"));
+        var updatedSearchHit = FindObjectInArray(updatedSearch, "items", "id", productId.ToString());
+        Assert.Equal(82m, TestJson.GetDecimal(updatedSearchHit, "costPrice"));
 
         var stockAdjust = await TestJson.ReadObjectAsync(
             await client.PostAsJsonAsync($"/api/products/{productId}/stock-adjustments", new
@@ -213,6 +219,75 @@ public sealed class ProductInventoryTests(CustomWebApplicationFactory factory)
         Assert.Equal(updatedName, TestJson.GetString(updatedCategory, "name"));
         Assert.Equal("Updated from legacy alias", TestJson.GetString(updatedCategory, "description"));
         Assert.False(updatedCategory["is_active"]?.GetValue<bool>() ?? true);
+    }
+
+    [Fact]
+    public async Task CategoryHardDelete_ShouldAllowInactiveCategoryWithOnlyInactiveLinkedProducts()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+
+        var category = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/categories", new
+            {
+                name = $"Delete Category {runId}",
+                description = "Inactive link regression",
+                is_active = true
+            }));
+        var categoryId = Guid.Parse(TestJson.GetString(category, "category_id"));
+
+        var product = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"Category Linked Product {runId}",
+                sku = $"CLP-{runId}",
+                barcode = (string?)null,
+                category_id = categoryId,
+                brand_id = (Guid?)null,
+                unit_price = 100m,
+                cost_price = 60m,
+                initial_stock_quantity = 2m,
+                reorder_level = 1m,
+                safety_stock = 0m,
+                target_stock_level = 4m,
+                allow_negative_stock = false,
+                is_active = true
+            }));
+        var productId = Guid.Parse(TestJson.GetString(product, "product_id"));
+
+        var deactivateProductResponse = await client.DeleteAsync($"/api/products/{productId}");
+        Assert.Equal(HttpStatusCode.NoContent, deactivateProductResponse.StatusCode);
+
+        var deactivateCategory = await TestJson.ReadObjectAsync(
+            await client.PutAsJsonAsync($"/api/categories/{categoryId}", new
+            {
+                name = $"Delete Category {runId}",
+                description = "Inactive link regression",
+                is_active = false
+            }));
+        Assert.False(deactivateCategory["is_active"]?.GetValue<bool>() ?? true);
+
+        var categoryList = await TestJson.ReadObjectAsync(
+            await client.GetAsync("/api/categories?include_inactive=true"));
+        var listItem = FindObjectInArray(categoryList, "items", "category_id", categoryId.ToString());
+        Assert.Equal(0, TestJson.GetInt32(listItem, "product_count"));
+        Assert.True(listItem["can_delete"]?.GetValue<bool>() ?? false);
+
+        var hardDeleteResponse = await client.DeleteAsync($"/api/categories/{categoryId}/hard-delete");
+        Assert.Equal(HttpStatusCode.NoContent, hardDeleteResponse.StatusCode);
+
+        var refreshedList = await TestJson.ReadObjectAsync(
+            await client.GetAsync("/api/categories?include_inactive=true"));
+        var items = refreshedList["items"]?.AsArray()
+                    ?? throw new InvalidOperationException("Missing array 'items'.");
+
+        Assert.DoesNotContain(
+            items.OfType<JsonObject>(),
+            item => string.Equals(
+                item["category_id"]?.GetValue<string>(),
+                categoryId.ToString(),
+                StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

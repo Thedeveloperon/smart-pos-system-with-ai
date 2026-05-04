@@ -11,6 +11,13 @@ namespace SmartPos.Backend.IntegrationTests;
 public sealed class WarrantyClaimTimelineEndpointTests(CustomWebApplicationFactory factory)
     : IClassFixture<CustomWebApplicationFactory>
 {
+    private sealed record DirectReplacementFixture(
+        Guid ProductId,
+        Guid OriginalSerialId,
+        Guid ReplacementSerialId,
+        Guid SaleId,
+        Guid SaleItemId);
+
     private readonly HttpClient client = factory.CreateClient();
 
     [Fact]
@@ -185,6 +192,91 @@ public sealed class WarrantyClaimTimelineEndpointTests(CustomWebApplicationFacto
         Assert.Equal("Speaker replaced", TestJson.GetString(resolvedResponse, "resolution_notes"));
     }
 
+    [Fact]
+    public async Task OpenWarrantyClaim_ShouldSupportDirectReplacementWithAvailableSerial()
+    {
+        await TestAuth.SignInAsOwnerAsync(client);
+
+        var fixture = await CreateDirectReplacementFixtureAsync();
+        var createResponse = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/warranty-claims", new
+            {
+                serial_number_id = fixture.OriginalSerialId,
+                resolution_notes = "Customer reported display issue"
+            }));
+        var claimId = Guid.Parse(TestJson.GetString(createResponse, "id"));
+
+        var replaceResponse = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync($"/api/warranty-claims/{claimId}/replace", new
+            {
+                replacement_serial_number_id = fixture.ReplacementSerialId,
+                replacement_date = "2026-04-22T11:15:00Z",
+                resolution_notes = "Replaced directly from shop stock"
+            }));
+
+        Assert.Equal("Resolved", TestJson.GetString(replaceResponse, "status"));
+        Assert.Equal(fixture.ReplacementSerialId.ToString(), TestJson.GetString(replaceResponse, "replacement_serial_number_id"));
+        Assert.StartsWith("2026-04-22T11:15:00", TestJson.GetString(replaceResponse, "replacement_date"));
+        Assert.Equal("Replaced directly from shop stock", TestJson.GetString(replaceResponse, "resolution_notes"));
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+
+            var claim = await dbContext.WarrantyClaims
+                .AsNoTracking()
+                .FirstAsync(x => x.Id == claimId);
+            var originalSerial = await dbContext.SerialNumbers
+                .AsNoTracking()
+                .FirstAsync(x => x.Id == fixture.OriginalSerialId);
+            var replacementSerial = await dbContext.SerialNumbers
+                .AsNoTracking()
+                .FirstAsync(x => x.Id == fixture.ReplacementSerialId);
+            var inventory = await dbContext.Inventory
+                .AsNoTracking()
+                .FirstAsync(x => x.ProductId == fixture.ProductId);
+            var movement = await dbContext.StockMovements
+                .AsNoTracking()
+                .FirstAsync(x =>
+                    x.ReferenceId == claimId &&
+                    x.SerialNumber == replacementSerial.SerialValue &&
+                    x.Reason == "warranty replacement");
+
+            Assert.Equal(WarrantyClaimStatus.Resolved, claim.Status);
+            Assert.Equal(fixture.ReplacementSerialId, claim.ReplacementSerialNumberId);
+            Assert.Equal(DateTimeOffset.Parse("2026-04-22T11:15:00Z"), claim.ReplacementDate);
+            Assert.Equal("Replaced directly from shop stock", claim.ResolutionNotes);
+
+            Assert.Equal(SerialNumberStatus.Defective, originalSerial.Status);
+            Assert.Equal(SerialNumberStatus.Sold, replacementSerial.Status);
+            Assert.Equal(fixture.SaleId, replacementSerial.SaleId);
+            Assert.Equal(fixture.SaleItemId, replacementSerial.SaleItemId);
+            Assert.Equal(originalSerial.WarrantyExpiryDate, replacementSerial.WarrantyExpiryDate);
+
+            Assert.Equal(0m, inventory.QuantityOnHand);
+            Assert.Equal(StockMovementType.Adjustment, movement.MovementType);
+            Assert.Equal(StockMovementRef.Adjustment, movement.ReferenceType);
+            Assert.Equal(-1m, movement.QuantityChange);
+        }
+
+        var claimResponse = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/warranty-claims/{claimId}"));
+        Assert.Equal(fixture.ReplacementSerialId.ToString(), TestJson.GetString(claimResponse, "replacement_serial_number_id"));
+        Assert.StartsWith("SHOP-REP-", TestJson.GetString(claimResponse, "replacement_serial_value"));
+        Assert.StartsWith("2026-04-22T11:15:00", TestJson.GetString(claimResponse, "replacement_date"));
+
+        var claimsResponse = await TestJson.ReadObjectAsync(await client.GetAsync("/api/warranty-claims"));
+        var item = claimsResponse["items"]?.AsArray()
+            .OfType<JsonObject>()
+            .FirstOrDefault(entry =>
+                string.Equals(TestJson.GetString(entry, "id"), claimId.ToString(), StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException("Expected replacement claim to be present in listing.");
+
+        Assert.Equal(fixture.ReplacementSerialId.ToString(), TestJson.GetString(item, "replacement_serial_number_id"));
+        Assert.StartsWith("SHOP-REP-", TestJson.GetString(item, "replacement_serial_value"));
+        Assert.StartsWith("2026-04-22T11:15:00", TestJson.GetString(item, "replacement_date"));
+    }
+
     private async Task<Guid> CreateClaimableSerialIdAsync()
     {
         using var scope = factory.Services.CreateScope();
@@ -226,5 +318,107 @@ public sealed class WarrantyClaimTimelineEndpointTests(CustomWebApplicationFacto
         dbContext.SerialNumbers.Add(serial);
         await dbContext.SaveChangesAsync();
         return serial.Id;
+    }
+
+    private async Task<DirectReplacementFixture> CreateDirectReplacementFixtureAsync()
+    {
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+        var storeId = await dbContext.Shops
+            .AsNoTracking()
+            .Select(x => x.Id)
+            .FirstAsync();
+        var now = DateTimeOffset.UtcNow;
+        var runId = Guid.NewGuid().ToString("N")[..8];
+
+        var product = new Product
+        {
+            StoreId = storeId,
+            Name = $"Warranty Replacement Product {runId}",
+            Sku = $"WARRANTY-REP-{runId}",
+            UnitPrice = 1250m,
+            CostPrice = 900m,
+            IsActive = true,
+            IsSerialTracked = true,
+            WarrantyMonths = 12,
+            IsBatchTracked = false,
+            ExpiryAlertDays = 30,
+            CreatedAtUtc = now
+        };
+
+        var inventory = new InventoryRecord
+        {
+            StoreId = storeId,
+            Product = product,
+            InitialStockQuantity = 1m,
+            QuantityOnHand = 1m,
+            ReorderLevel = 0m,
+            SafetyStock = 0m,
+            TargetStockLevel = 0m,
+            AllowNegativeStock = false,
+            UpdatedAtUtc = now
+        };
+
+        var sale = new Sale
+        {
+            StoreId = storeId,
+            SaleNumber = $"SALE-WARRANTY-{runId}",
+            Status = SaleStatus.Completed,
+            Subtotal = 1250m,
+            DiscountTotal = 0m,
+            TaxTotal = 0m,
+            GrandTotal = 1250m,
+            CreatedAtUtc = now,
+            CompletedAtUtc = now
+        };
+
+        var saleItem = new SaleItem
+        {
+            Sale = sale,
+            Product = product,
+            ProductNameSnapshot = product.Name,
+            UnitPrice = product.UnitPrice,
+            Quantity = 1m,
+            DiscountAmount = 0m,
+            TaxAmount = 0m,
+            LineTotal = product.UnitPrice
+        };
+
+        var originalSerial = new SerialNumber
+        {
+            StoreId = storeId,
+            Product = product,
+            Sale = sale,
+            SaleItem = saleItem,
+            SerialValue = $"SHOP-CLM-{runId}",
+            Status = SerialNumberStatus.Sold,
+            WarrantyExpiryDate = now.AddMonths(12),
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+
+        var replacementSerial = new SerialNumber
+        {
+            StoreId = storeId,
+            Product = product,
+            SerialValue = $"SHOP-REP-{runId}",
+            Status = SerialNumberStatus.Available,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+
+        dbContext.Products.Add(product);
+        dbContext.Inventory.Add(inventory);
+        dbContext.Sales.Add(sale);
+        dbContext.SaleItems.Add(saleItem);
+        dbContext.SerialNumbers.AddRange(originalSerial, replacementSerial);
+        await dbContext.SaveChangesAsync();
+
+        return new DirectReplacementFixture(
+            product.Id,
+            originalSerial.Id,
+            replacementSerial.Id,
+            sale.Id,
+            saleItem.Id);
     }
 }

@@ -41,6 +41,13 @@ type Props = {
   onSaved: () => void;
 };
 
+export function getDefaultUnitCostEstimate(
+  product?: Pick<Product, "cost_price" | "unit_price" | "price">,
+) {
+  const unitCost = product?.cost_price ?? product?.unit_price ?? product?.price ?? 0;
+  return Math.round(unitCost * 100) / 100;
+}
+
 export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }: Props) {
   const [supplierId, setSupplierId] = useState("");
   const [poNumber, setPoNumber] = useState("");
@@ -105,8 +112,7 @@ export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }:
     updateLine(idx, {
       product_id: productId,
       product_name: p?.name ?? "",
-      unit_cost_estimate:
-        lines[idx].unit_cost_estimate || (p ? Math.round(p.price * 0.6 * 100) / 100 : 0),
+      unit_cost_estimate: getDefaultUnitCostEstimate(p),
     });
   };
 

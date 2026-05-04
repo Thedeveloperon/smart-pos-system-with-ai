@@ -20,6 +20,7 @@ public sealed class ProductService(
     private const string BrandDeleteRequiresDeactivateMessage = "Deactivate the brand before deleting.";
     private const string BrandDeleteOnlyInactiveMessage = "Only inactive brands can be permanently deleted.";
     private const string BrandDeleteProductLinksMessage = "This brand is linked to products and cannot be permanently deleted.";
+    private const string BrandDeleteSupplierLinksMessage = "This brand is linked to suppliers and cannot be permanently deleted.";
     private const string CategoryDeleteRequiresDeactivateMessage = "Deactivate the category before deleting.";
     private const string CategoryDeleteOnlyInactiveMessage = "Only inactive categories can be permanently deleted.";
     private const string CategoryDeleteProductLinksMessage = "This category is linked to products and cannot be permanently deleted.";
@@ -73,6 +74,7 @@ public sealed class ProductService(
                 BrandId = x.BrandId,
                 BrandName = x.Brand != null ? x.Brand.Name : null,
                 UnitPrice = x.UnitPrice,
+                CostPrice = x.CostPrice,
                 StockQuantity = x.Inventory != null ? x.Inventory.QuantityOnHand : 0m,
                 ReorderLevel = x.Inventory != null ? x.Inventory.ReorderLevel : 0m,
                 IsSerialTracked = x.IsSerialTracked
@@ -97,6 +99,7 @@ public sealed class ProductService(
                     BrandId = item.BrandId,
                     BrandName = item.BrandName,
                     UnitPrice = RoundMoney(item.UnitPrice),
+                    CostPrice = RoundMoney(item.CostPrice),
                     StockQuantity = stockQuantity,
                     IsLowStock = stockQuantity <= alertLevel,
                     IsSerialTracked = item.IsSerialTracked
@@ -990,11 +993,11 @@ public sealed class ProductService(
                 Name = x.Name,
                 Description = x.Description,
                 IsActive = x.IsActive,
-                ProductCount = x.Products.Count(y => y.IsActive),
-                CanDelete = !x.IsActive && !x.Products.Any(y => !currentStoreId.HasValue || y.StoreId == currentStoreId.Value),
+                ProductCount = x.Products.Count(y => y.IsActive && (!currentStoreId.HasValue || y.StoreId == currentStoreId.Value)),
+                CanDelete = !x.IsActive && !x.Products.Any(y => y.IsActive && (!currentStoreId.HasValue || y.StoreId == currentStoreId.Value)),
                 DeleteBlockReason = x.IsActive
                     ? CategoryDeleteRequiresDeactivateMessage
-                    : x.Products.Any(y => !currentStoreId.HasValue || y.StoreId == currentStoreId.Value)
+                    : x.Products.Any(y => y.IsActive && (!currentStoreId.HasValue || y.StoreId == currentStoreId.Value))
                         ? CategoryDeleteProductLinksMessage
                         : null,
                 CreatedAt = x.CreatedAtUtc,
@@ -1039,6 +1042,7 @@ public sealed class ProductService(
         var deleteAvailability = await GetCategoryDeleteAvailabilityAsync(
             category.Id,
             category.IsActive,
+            currentStoreId,
             cancellationToken);
         return ToCategoryItemResponse(
             category,
@@ -1092,6 +1096,7 @@ public sealed class ProductService(
         var deleteAvailability = await GetCategoryDeleteAvailabilityAsync(
             category.Id,
             category.IsActive,
+            currentStoreId,
             cancellationToken);
         return ToCategoryItemResponse(
             category,
@@ -1112,7 +1117,11 @@ public sealed class ProductService(
             throw new InvalidOperationException(CategoryDeleteOnlyInactiveMessage);
         }
 
-        var deleteAvailability = await GetCategoryDeleteAvailabilityAsync(categoryId, false, cancellationToken);
+        var deleteAvailability = await GetCategoryDeleteAvailabilityAsync(
+            categoryId,
+            isActive: false,
+            currentStoreId,
+            cancellationToken);
         if (!deleteAvailability.CanDelete)
         {
             throw new InvalidOperationException(deleteAvailability.BlockReason ?? "This category cannot be permanently deleted.");
@@ -1153,11 +1162,14 @@ public sealed class ProductService(
                 IsActive = x.IsActive,
                 ProductCount = x.Products.Count(y => y.IsActive && (!currentStoreId.HasValue || y.StoreId == currentStoreId.Value)),
                 CanDelete = !x.IsActive &&
-                            !x.Products.Any(y => !currentStoreId.HasValue || y.StoreId == currentStoreId.Value),
+                            !x.Products.Any(y => y.IsActive && (!currentStoreId.HasValue || y.StoreId == currentStoreId.Value)) &&
+                            !x.SupplierBrands.Any(y => y.Supplier.IsActive && (!currentStoreId.HasValue || y.StoreId == currentStoreId.Value)),
                 DeleteBlockReason = x.IsActive
                     ? BrandDeleteRequiresDeactivateMessage
-                    : x.Products.Any(y => !currentStoreId.HasValue || y.StoreId == currentStoreId.Value)
+                    : x.Products.Any(y => y.IsActive && (!currentStoreId.HasValue || y.StoreId == currentStoreId.Value))
                         ? BrandDeleteProductLinksMessage
+                        : x.SupplierBrands.Any(y => y.Supplier.IsActive && (!currentStoreId.HasValue || y.StoreId == currentStoreId.Value))
+                            ? BrandDeleteSupplierLinksMessage
                         : null,
                 CreatedAt = x.CreatedAtUtc,
                 UpdatedAt = x.UpdatedAtUtc
@@ -1194,6 +1206,7 @@ public sealed class ProductService(
         var deleteAvailability = await GetBrandDeleteAvailabilityAsync(
             brand.Id,
             brand.IsActive,
+            currentStoreId,
             cancellationToken);
         return ToBrandItemResponse(
             brand,
@@ -1234,6 +1247,7 @@ public sealed class ProductService(
         var deleteAvailability = await GetBrandDeleteAvailabilityAsync(
             brandId,
             brand.IsActive,
+            currentStoreId,
             cancellationToken);
 
         return ToBrandItemResponse(
@@ -1260,6 +1274,7 @@ public sealed class ProductService(
         var deleteAvailability = await GetBrandDeleteAvailabilityAsync(
             brandId,
             isActive: false,
+            currentStoreId,
             cancellationToken);
 
         if (!deleteAvailability.CanDelete)
@@ -2057,6 +2072,7 @@ public sealed class ProductService(
     private async Task<CategoryDeleteAvailability> GetCategoryDeleteAvailabilityAsync(
         Guid categoryId,
         bool isActive,
+        Guid? storeId,
         CancellationToken cancellationToken)
     {
         if (isActive)
@@ -2064,10 +2080,14 @@ public sealed class ProductService(
             return new CategoryDeleteAvailability(false, CategoryDeleteRequiresDeactivateMessage);
         }
 
-        var hasProductLinks = await dbContext.Products
+        var hasActiveProductLinks = await dbContext.Products
             .AsNoTracking()
-            .AnyAsync(x => x.CategoryId == categoryId, cancellationToken);
-        if (hasProductLinks)
+            .AnyAsync(
+                x => x.CategoryId == categoryId &&
+                     x.IsActive &&
+                     (!storeId.HasValue || x.StoreId == storeId.Value),
+                cancellationToken);
+        if (hasActiveProductLinks)
         {
             return new CategoryDeleteAvailability(false, CategoryDeleteProductLinksMessage);
         }
@@ -2100,6 +2120,7 @@ public sealed class ProductService(
     private async Task<BrandDeleteAvailability> GetBrandDeleteAvailabilityAsync(
         Guid brandId,
         bool isActive,
+        Guid? storeId,
         CancellationToken cancellationToken)
     {
         if (isActive)
@@ -2107,12 +2128,28 @@ public sealed class ProductService(
             return new BrandDeleteAvailability(false, BrandDeleteRequiresDeactivateMessage);
         }
 
-        var hasProductLinks = await dbContext.Products
+        var hasActiveProductLinks = await dbContext.Products
             .AsNoTracking()
-            .AnyAsync(x => x.BrandId == brandId, cancellationToken);
-        if (hasProductLinks)
+            .AnyAsync(
+                x => x.BrandId == brandId &&
+                     x.IsActive &&
+                     (!storeId.HasValue || x.StoreId == storeId.Value),
+                cancellationToken);
+        if (hasActiveProductLinks)
         {
             return new BrandDeleteAvailability(false, BrandDeleteProductLinksMessage);
+        }
+
+        var hasActiveSupplierLinks = await dbContext.SupplierBrands
+            .AsNoTracking()
+            .AnyAsync(
+                x => x.BrandId == brandId &&
+                     x.Supplier.IsActive &&
+                     (!storeId.HasValue || x.StoreId == storeId.Value),
+                cancellationToken);
+        if (hasActiveSupplierLinks)
+        {
+            return new BrandDeleteAvailability(false, BrandDeleteSupplierLinksMessage);
         }
 
         return new BrandDeleteAvailability(true, null);

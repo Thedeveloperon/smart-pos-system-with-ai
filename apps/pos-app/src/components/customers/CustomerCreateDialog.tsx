@@ -25,6 +25,7 @@ type CustomerCreateDialogProps = {
 const initialState = {
   name: "",
   code: "",
+  idNumber: "",
   phone: "",
   email: "",
   address: "",
@@ -41,6 +42,7 @@ const initialState = {
 export default function CustomerCreateDialog({ open, onOpenChange, onCreate, tiers = [] }: CustomerCreateDialogProps) {
   const [name, setName] = useState(initialState.name);
   const [code, setCode] = useState(initialState.code);
+  const [idNumber, setIdNumber] = useState(initialState.idNumber);
   const [phone, setPhone] = useState(initialState.phone);
   const [email, setEmail] = useState(initialState.email);
   const [address, setAddress] = useState(initialState.address);
@@ -61,6 +63,7 @@ export default function CustomerCreateDialog({ open, onOpenChange, onCreate, tie
 
     setName("");
     setCode("");
+    setIdNumber("");
     setPhone("");
     setEmail("");
     setAddress("");
@@ -96,6 +99,7 @@ export default function CustomerCreateDialog({ open, onOpenChange, onCreate, tie
       await onCreate({
         name: trimmedName,
         code: code.trim() || null,
+        idNumber: idNumber.trim() || null,
         phone: phone.trim() || null,
         email: email.trim() || null,
         address: address.trim() || null,
@@ -126,6 +130,9 @@ export default function CustomerCreateDialog({ open, onOpenChange, onCreate, tie
           </Field>
           <Field label="Code (auto if blank)">
             <Input value={code} onChange={(event) => setCode(event.target.value)} placeholder="C-0005" />
+          </Field>
+          <Field label="ID number" className="sm:col-span-2">
+            <Input value={idNumber} onChange={(event) => setIdNumber(event.target.value)} />
           </Field>
           <Field label="Phone">
             <Input value={phone} onChange={(event) => setPhone(event.target.value)} />

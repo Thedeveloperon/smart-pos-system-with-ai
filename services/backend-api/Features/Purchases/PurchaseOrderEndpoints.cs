@@ -164,6 +164,29 @@ public static class PurchaseOrderEndpoints
         .WithName("CancelPurchaseOrder")
         .WithOpenApi();
 
+        group.MapPost("/{id:guid}/reverse", async (
+            Guid id,
+            PurchaseOrderService purchaseOrderService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var result = await purchaseOrderService.ReversePurchaseOrderAsync(id, cancellationToken);
+                return Results.Ok(result);
+            }
+            catch (KeyNotFoundException exception)
+            {
+                return Results.NotFound(new { message = exception.Message });
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.ManagerOrOwner)
+        .WithName("ReversePurchaseOrder")
+        .WithOpenApi();
+
         return app;
     }
 }

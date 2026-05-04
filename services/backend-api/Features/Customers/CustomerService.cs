@@ -180,6 +180,7 @@ public sealed class CustomerService(
             customerQuery = customerQuery.Where(x =>
                 x.Name.ToLower().Contains(normalizedQuery) ||
                 (x.Code != null && x.Code.ToLower().Contains(normalizedQuery)) ||
+                (x.IdNumber != null && x.IdNumber.ToLower().Contains(normalizedQuery)) ||
                 (x.Phone != null && x.Phone.ToLower().Contains(normalizedQuery)) ||
                 (x.Email != null && x.Email.ToLower().Contains(normalizedQuery)));
         }
@@ -251,6 +252,7 @@ public sealed class CustomerService(
             PriceTierId = request.PriceTierId,
             Name = normalizedName,
             Code = normalizedCode,
+            IdNumber = NormalizeOptional(request.IdNumber),
             Phone = NormalizeOptional(request.Phone),
             Email = NormalizeOptional(request.Email),
             Address = NormalizeOptional(request.Address),
@@ -285,6 +287,7 @@ public sealed class CustomerService(
             {
                 customer.Name,
                 customer.Code,
+                customer.IdNumber,
                 customer.Phone,
                 customer.Email,
                 customer.IsActive
@@ -319,6 +322,7 @@ public sealed class CustomerService(
         {
             customer.Name,
             customer.Code,
+            customer.IdNumber,
             customer.Phone,
             customer.Email,
             customer.IsActive
@@ -326,6 +330,7 @@ public sealed class CustomerService(
 
         customer.Name = normalizedName;
         customer.Code = normalizedCode;
+        customer.IdNumber = NormalizeOptional(request.IdNumber);
         customer.Phone = NormalizeOptional(request.Phone);
         customer.Email = NormalizeOptional(request.Email);
         customer.Address = NormalizeOptional(request.Address);
@@ -365,6 +370,7 @@ public sealed class CustomerService(
             {
                 customer.Name,
                 customer.Code,
+                customer.IdNumber,
                 customer.Phone,
                 customer.Email,
                 customer.IsActive
@@ -653,6 +659,7 @@ public sealed class CustomerService(
             CustomerId = customer.Id,
             Name = customer.Name,
             Code = customer.Code ?? string.Empty,
+            IdNumber = customer.IdNumber,
             Phone = customer.Phone,
             Email = customer.Email,
             Address = customer.Address,
@@ -680,6 +687,7 @@ public sealed class CustomerService(
             CustomerId = customer.Id,
             Name = customer.Name,
             Code = customer.Code ?? string.Empty,
+            IdNumber = customer.IdNumber,
             Phone = customer.Phone,
             Email = customer.Email,
             PriceTier = customer.PriceTier is null ? null : ToPriceTierResponse(customer.PriceTier, 0),

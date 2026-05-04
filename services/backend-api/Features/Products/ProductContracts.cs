@@ -27,6 +27,7 @@ public sealed class ProductSearchItem
     public string? BrandName { get; set; }
 
     public decimal UnitPrice { get; set; }
+    public decimal CostPrice { get; set; }
     public decimal StockQuantity { get; set; }
     [JsonPropertyName("is_low_stock")]
     public bool IsLowStock { get; set; }

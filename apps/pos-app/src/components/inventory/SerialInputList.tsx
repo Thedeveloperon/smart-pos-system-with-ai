@@ -18,6 +18,9 @@ const parse = (raw: string): string[] =>
     .map((s) => s.trim())
     .filter(Boolean);
 
+const sameSerials = (left: string[], right: string[]) =>
+  left.length === right.length && left.every((serial, index) => serial === right[index]);
+
 type RangeResult = {
   serials: string[];
   error: string | null;
@@ -103,7 +106,7 @@ export default function SerialInputList({ value, onChange }: Props) {
   const [rangeEnd, setRangeEnd] = useState("");
 
   useEffect(() => {
-    setText(value.join("\n"));
+    setText((current) => (sameSerials(parse(current), value) ? current : value.join("\n")));
   }, [value]);
 
   const rangeResult = generateRange(rangeStart, rangeEnd);

@@ -181,6 +181,12 @@ export async function cancelPurchaseOrder(id: string): Promise<PurchaseOrder> {
   });
 }
 
+export async function reversePurchaseOrder(id: string): Promise<PurchaseOrder> {
+  return requestJson<PurchaseOrder>(`/api/purchase-orders/${id}/reverse`, {
+    method: "POST",
+  });
+}
+
 export async function receivePurchaseOrder(
   id: string,
   body: {

@@ -35,6 +35,7 @@ public sealed class CustomerFeatureIntegrationTests
             {
                 name = "Gamma Stores",
                 code = (string?)null,
+                id_number = "NIC-778899V",
                 phone = "+94 11 222 3344",
                 email = "accounts@gamma.example",
                 address = "Colombo",
@@ -50,6 +51,7 @@ public sealed class CustomerFeatureIntegrationTests
         var customerId = Guid.Parse(TestJson.GetString(customer, "customer_id"));
         Assert.Equal("Gamma Stores", TestJson.GetString(customer, "name"));
         Assert.Equal("C-0001", TestJson.GetString(customer, "code"));
+        Assert.Equal("NIC-778899V", TestJson.GetString(customer, "id_number"));
         Assert.Equal(150000m, TestJson.GetDecimal(customer, "credit_limit"));
         Assert.Equal(2, customer["tags"]!.AsArray().Count);
 
@@ -57,6 +59,7 @@ public sealed class CustomerFeatureIntegrationTests
             await client.GetAsync($"/api/customers/{customerId}"));
 
         Assert.Equal("Gamma Stores", TestJson.GetString(detail, "name"));
+        Assert.Equal("NIC-778899V", TestJson.GetString(detail, "id_number"));
         Assert.Equal(tierId, Guid.Parse(TestJson.GetString(detail["price_tier"]!, "price_tier_id")));
         Assert.Contains("vip", detail["tags"]!.AsArray().Select(tag => tag!.GetValue<string>()));
 
@@ -66,13 +69,26 @@ public sealed class CustomerFeatureIntegrationTests
 
         var list = await TestJson.ReadObjectAsync(
             await client.GetAsync("/api/customers?page=1&take=20"));
-        var listItem = FirstObjectFromArray(list["items"]!.AsArray());
+        var listItem = FindObjectFromArray(
+            list["items"]!.AsArray(),
+            item => Guid.Parse(TestJson.GetString(item, "customer_id")) == customerId);
         Assert.Equal(customerId, Guid.Parse(TestJson.GetString(listItem, "customer_id")));
+        Assert.Equal("NIC-778899V", TestJson.GetString(listItem, "id_number"));
 
         var search = await TestJson.ReadArrayAsync(
             await client.GetAsync("/api/customers/search?q=Gamma"));
-        var searchItem = FirstObjectFromArray(search);
+        var searchItem = FindObjectFromArray(
+            search,
+            item => Guid.Parse(TestJson.GetString(item, "customer_id")) == customerId);
         Assert.Equal(customerId, Guid.Parse(TestJson.GetString(searchItem, "customer_id")));
+
+        var idNumberSearch = await TestJson.ReadArrayAsync(
+            await client.GetAsync("/api/customers/search?q=778899"));
+        var idSearchItem = FindObjectFromArray(
+            idNumberSearch,
+            item => Guid.Parse(TestJson.GetString(item, "customer_id")) == customerId);
+        Assert.Equal(customerId, Guid.Parse(TestJson.GetString(idSearchItem, "customer_id")));
+        Assert.Equal("NIC-778899V", TestJson.GetString(idSearchItem, "id_number"));
 
         using var scope = appFactory.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
@@ -85,6 +101,7 @@ public sealed class CustomerFeatureIntegrationTests
             {
                 name = "Gamma Holdings",
                 code = "C-9001",
+                id_number = "NIC-112233V",
                 phone = "+94 11 222 3344",
                 email = "billing@gamma.example",
                 address = "Colombo",
@@ -99,6 +116,7 @@ public sealed class CustomerFeatureIntegrationTests
 
         Assert.Equal("Gamma Holdings", TestJson.GetString(updated, "name"));
         Assert.Equal("C-9001", TestJson.GetString(updated, "code"));
+        Assert.Equal("NIC-112233V", TestJson.GetString(updated, "id_number"));
         Assert.Equal(180000m, TestJson.GetDecimal(updated, "credit_limit"));
         Assert.Single(updated["tags"]!.AsArray());
     }
@@ -127,6 +145,7 @@ public sealed class CustomerFeatureIntegrationTests
             {
                 name = "Credit Customer",
                 code = (string?)null,
+                id_number = "PASSPORT-CR-01",
                 phone = "+94 70 555 1234",
                 email = "credit@example.com",
                 address = "Kandy",
@@ -220,5 +239,11 @@ public sealed class CustomerFeatureIntegrationTests
     {
         return array.OfType<JsonObject>().FirstOrDefault()
             ?? throw new InvalidOperationException("Array was empty.");
+    }
+
+    private static JsonObject FindObjectFromArray(JsonArray array, Func<JsonObject, bool> predicate)
+    {
+        return array.OfType<JsonObject>().FirstOrDefault(predicate)
+            ?? throw new InvalidOperationException("Matching object was not found.");
     }
 }

@@ -159,6 +159,166 @@ public sealed class InventoryManagerOverviewEndpointTests(CustomWebApplicationFa
     }
 
     [Fact]
+    public async Task CompleteStocktakeSession_ShouldRequireSerialReconciliationForSerialTrackedVariance()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+        var serialOne = $"STK-REQ-{runId}-001";
+        var serialTwo = $"STK-REQ-{runId}-002";
+
+        var createProduct = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"Stocktake Serial Required {runId}",
+                sku = $"STK-REQ-{runId}",
+                unit_price = 250m,
+                cost_price = 180m,
+                initial_stock_quantity = 2m,
+                reorder_level = 1m,
+                allow_negative_stock = false,
+                is_active = true,
+                is_serial_tracked = true,
+                warranty_months = 12
+            }));
+        var productId = Guid.Parse(TestJson.GetString(createProduct, "product_id"));
+
+        await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync($"/api/products/{productId}/serials", new
+            {
+                serials = new[] { serialOne, serialTwo }
+            }));
+
+        var createdSession = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/stocktake/sessions", new { }));
+        var sessionId = TestJson.GetString(createdSession, "id");
+
+        await TestJson.ReadObjectAsync(
+            await client.PutAsync($"/api/stocktake/sessions/{sessionId}/start", null));
+
+        var sessionDetails = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/stocktake/sessions/{sessionId}"));
+        var trackedItem = sessionDetails["items"]?.AsArray()
+            .OfType<JsonObject>()
+            .FirstOrDefault(item => string.Equals(
+                TestJson.GetString(item, "product_id"),
+                productId.ToString(),
+                StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException("Expected the serial-tracked stocktake item to be present.");
+        var itemId = TestJson.GetString(trackedItem, "id");
+
+        await TestJson.ReadObjectAsync(
+            await client.PutAsJsonAsync(
+                $"/api/stocktake/sessions/{sessionId}/items/{itemId}",
+                new { counted_quantity = 1m }));
+
+        var completeResponse = await client.PostAsync($"/api/stocktake/sessions/{sessionId}/complete", null);
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, completeResponse.StatusCode);
+
+        var error = JsonNode.Parse(await completeResponse.Content.ReadAsStringAsync())?.AsObject()
+                    ?? throw new InvalidOperationException("Expected stocktake validation error.");
+        Assert.Contains("requires serial reconciliation", TestJson.GetString(error, "message"), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CompleteStocktakeSession_ShouldReconcileSerialTrackedItemsByRemovingAndAddingSerials()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+        var removedSerial = $"STK-REC-{runId}-001";
+        var keptSerial = $"STK-REC-{runId}-002";
+        var newSerialOne = $"STK-REC-{runId}-003";
+        var newSerialTwo = $"STK-REC-{runId}-004";
+
+        var createProduct = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"Stocktake Serial Reconcile {runId}",
+                sku = $"STK-REC-{runId}",
+                unit_price = 250m,
+                cost_price = 180m,
+                initial_stock_quantity = 2m,
+                reorder_level = 1m,
+                allow_negative_stock = false,
+                is_active = true,
+                is_serial_tracked = true,
+                warranty_months = 12
+            }));
+        var productId = Guid.Parse(TestJson.GetString(createProduct, "product_id"));
+
+        await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync($"/api/products/{productId}/serials", new
+            {
+                serials = new[] { removedSerial, keptSerial }
+            }));
+
+        var createdSession = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/stocktake/sessions", new { }));
+        var sessionId = TestJson.GetString(createdSession, "id");
+
+        await TestJson.ReadObjectAsync(
+            await client.PutAsync($"/api/stocktake/sessions/{sessionId}/start", null));
+
+        var sessionDetails = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/stocktake/sessions/{sessionId}"));
+        var trackedItem = sessionDetails["items"]?.AsArray()
+            .OfType<JsonObject>()
+            .FirstOrDefault(item => string.Equals(
+                TestJson.GetString(item, "product_id"),
+                productId.ToString(),
+                StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException("Expected the serial-tracked stocktake item to be present.");
+        var itemId = TestJson.GetString(trackedItem, "id");
+
+        await TestJson.ReadObjectAsync(
+            await client.PutAsJsonAsync(
+                $"/api/stocktake/sessions/{sessionId}/items/{itemId}",
+                new { counted_quantity = 3m }));
+
+        var completedSession = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync(
+                $"/api/stocktake/sessions/{sessionId}/complete",
+                new
+                {
+                    serial_reconciliations = new[]
+                    {
+                        new
+                        {
+                            item_id = itemId,
+                            serials = new[] { keptSerial, newSerialOne, newSerialTwo }
+                        }
+                    }
+                }));
+        Assert.Equal("Completed", TestJson.GetString(completedSession, "status"));
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+            var quantityOnHand = await dbContext.Inventory
+                .Where(x => x.ProductId == productId)
+                .Select(x => x.QuantityOnHand)
+                .SingleAsync();
+            Assert.Equal(3m, quantityOnHand);
+        }
+
+        var serialReload = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/products/{productId}/serials"));
+        var serialItems = serialReload["items"]?.AsArray()
+                          ?? throw new InvalidOperationException("Expected serial items after stocktake reconciliation.");
+        var serialValues = serialItems
+            .OfType<JsonObject>()
+            .Select(item => TestJson.GetString(item, "serial_value"))
+            .ToArray();
+
+        Assert.Equal(3, serialValues.Length);
+        Assert.Contains(keptSerial, serialValues);
+        Assert.Contains(newSerialOne, serialValues);
+        Assert.Contains(newSerialTwo, serialValues);
+        Assert.DoesNotContain(removedSerial, serialValues);
+    }
+
+    [Fact]
     public async Task StocktakeSessions_ShouldLoadOnSqlite_WhenLegacyRowsContainMalformedVarianceQuantity()
     {
         var sessionId = Guid.NewGuid();
