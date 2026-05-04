@@ -1,7 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Banknote, CreditCard, QrCode, CheckCircle2, PauseCircle, XCircle, Plus } from "lucide-react";
+import { Banknote, CreditCard, QrCode, CheckCircle2, PauseCircle, XCircle, Plus, Wallet } from "lucide-react";
 import CashReceivedDialog from "./cash-session/CashReceivedDialog";
 import CashChangeDialog from "./cash-session/CashChangeDialog";
 import { isQuickSaleEnabled } from "@/lib/posPreferences";
@@ -87,6 +87,19 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
       ? combineDenominationCounts(cashDrawer.counts, cashReceivedCounts)
       : cashReceivedCounts;
     const customerDisplay = selectedCustomer ?? defaultCustomer;
+    const isDefaultCustomerSelected =
+      customerDisplay != null &&
+      defaultCustomer != null &&
+      customerDisplay.id === defaultCustomer.id;
+    const customerOutstandingBalance = customerDisplay?.outstandingBalance ?? 0;
+    const customerCreditLimit = customerDisplay?.creditLimit ?? 0;
+    const availableCredit = Math.max(0, customerCreditLimit - customerOutstandingBalance);
+    const creditBalanceAfterSale = customerOutstandingBalance + grandTotal;
+    const requiresCreditCustomer = paymentMethod === "credit" && (customerDisplay == null || isDefaultCustomerSelected);
+    const exceedsAvailableCredit =
+      paymentMethod === "credit" &&
+      !requiresCreditCustomer &&
+      creditBalanceAfterSale > customerCreditLimit;
     const customerOptions = useMemo(() => {
       const query = customerQuery.trim().toLowerCase();
       if (!query) {
@@ -100,6 +113,10 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
     const completeBlockReason =
       items.length === 0
         ? "add items to the cart"
+        : requiresCreditCustomer
+          ? "select a customer for credit sales"
+          : exceedsAvailableCredit
+            ? "selected customer does not have enough available credit"
         : paymentMethod === "cash" && cashNum < grandTotal
           ? "cash received is less than the grand total"
           : null;
@@ -285,6 +302,24 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
                 {customerDisplay?.phone ? <span className="text-muted-foreground">{customerDisplay.phone}</span> : null}
               </div>
             </div>
+            {paymentMethod === "credit" && (
+              <div className="mt-2 rounded-xl border border-border bg-muted/30 px-3 py-2 text-xs">
+                {requiresCreditCustomer ? (
+                  <p className="text-muted-foreground">Select a customer with a credit profile to complete this sale on credit.</p>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span>Limit: <strong>Rs. {customerCreditLimit.toLocaleString()}</strong></span>
+                    <span>Outstanding: <strong>Rs. {customerOutstandingBalance.toLocaleString()}</strong></span>
+                    <span className={exceedsAvailableCredit ? "text-destructive" : "text-foreground"}>
+                      Available: <strong>Rs. {availableCredit.toLocaleString()}</strong>
+                    </span>
+                    <span className={exceedsAvailableCredit ? "text-destructive" : "text-muted-foreground"}>
+                      After sale: <strong>Rs. {creditBalanceAfterSale.toLocaleString()}</strong>
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Payment Method */}
@@ -292,7 +327,7 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
             <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               Payment Method
             </p>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {(
                 [
                   {
@@ -302,6 +337,7 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
                       ? `Cash (${POS_SHORTCUT_LABELS.openCashWorkflow})`
                       : "Cash",
                   },
+                  { key: "credit", icon: Wallet, label: "Credit" },
                   { key: "card", icon: CreditCard, label: "Card" },
                   { key: "qr", icon: QrCode, label: "QR" },
                 ] as const

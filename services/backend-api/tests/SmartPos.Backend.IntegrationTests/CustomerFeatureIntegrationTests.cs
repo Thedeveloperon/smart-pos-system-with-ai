@@ -15,19 +15,21 @@ public sealed class CustomerFeatureIntegrationTests
         using var appFactory = new CustomWebApplicationFactory();
         using var client = appFactory.CreateClient();
         await TestAuth.SignInAsManagerAsync(client);
+        var tierCode = $"PLT-{Guid.NewGuid():N}";
+        var tierName = $"Platinum-{Guid.NewGuid():N}";
 
         var tier = await TestJson.ReadObjectAsync(
             await client.PostAsJsonAsync("/api/customer-price-tiers", new
             {
-                name = "Platinum",
-                code = "PLT",
+                name = tierName,
+                code = tierCode,
                 discount_percent = 12m,
                 description = "High value customers",
                 is_active = true
             }));
 
         var tierId = Guid.Parse(TestJson.GetString(tier, "price_tier_id"));
-        Assert.Equal("Platinum", TestJson.GetString(tier, "name"));
+        Assert.Equal(tierName, TestJson.GetString(tier, "name"));
         Assert.Equal(0, TestJson.GetInt32(tier, "customer_count"));
 
         var customer = await TestJson.ReadObjectAsync(
@@ -50,7 +52,7 @@ public sealed class CustomerFeatureIntegrationTests
 
         var customerId = Guid.Parse(TestJson.GetString(customer, "customer_id"));
         Assert.Equal("Gamma Stores", TestJson.GetString(customer, "name"));
-        Assert.Equal("C-0001", TestJson.GetString(customer, "code"));
+        Assert.StartsWith("C-", TestJson.GetString(customer, "code"));
         Assert.Equal("NIC-778899V", TestJson.GetString(customer, "id_number"));
         Assert.Equal(150000m, TestJson.GetDecimal(customer, "credit_limit"));
         Assert.Equal(2, customer["tags"]!.AsArray().Count);
@@ -95,12 +97,13 @@ public sealed class CustomerFeatureIntegrationTests
         var seededCustomer = await dbContext.Customers.FirstAsync(x => x.Id == customerId);
         seededCustomer.LoyaltyPoints = 42m;
         await dbContext.SaveChangesAsync();
+        var updatedCustomerCode = $"C-{Random.Shared.Next(9000, 9999)}";
 
         var updated = await TestJson.ReadObjectAsync(
             await client.PutAsJsonAsync($"/api/customers/{customerId}", new
             {
                 name = "Gamma Holdings",
-                code = "C-9001",
+                code = updatedCustomerCode,
                 id_number = "NIC-112233V",
                 phone = "+94 11 222 3344",
                 email = "billing@gamma.example",
@@ -115,7 +118,7 @@ public sealed class CustomerFeatureIntegrationTests
             }));
 
         Assert.Equal("Gamma Holdings", TestJson.GetString(updated, "name"));
-        Assert.Equal("C-9001", TestJson.GetString(updated, "code"));
+        Assert.Equal(updatedCustomerCode, TestJson.GetString(updated, "code"));
         Assert.Equal("NIC-112233V", TestJson.GetString(updated, "id_number"));
         Assert.Equal(180000m, TestJson.GetDecimal(updated, "credit_limit"));
         Assert.Single(updated["tags"]!.AsArray());
@@ -127,12 +130,14 @@ public sealed class CustomerFeatureIntegrationTests
         using var appFactory = new CustomWebApplicationFactory();
         using var client = appFactory.CreateClient();
         await TestAuth.SignInAsManagerAsync(client);
+        var tierCode = $"SLV-IT-{Guid.NewGuid():N}";
+        var tierName = $"Silver-{Guid.NewGuid():N}";
 
         var tier = await TestJson.ReadObjectAsync(
             await client.PostAsJsonAsync("/api/customer-price-tiers", new
             {
-                name = "Silver",
-                code = "SLV-IT",
+                name = tierName,
+                code = tierCode,
                 discount_percent = 10m,
                 description = "Integration test price tier",
                 is_active = true
@@ -233,6 +238,131 @@ public sealed class CustomerFeatureIntegrationTests
             await client.GetAsync($"/api/receipts/{saleId}"));
         Assert.Equal(customerId, Guid.Parse(TestJson.GetString(saleReceipt, "customer_id")));
         Assert.Equal("Credit Customer", TestJson.GetString(saleReceipt, "customer_name"));
+    }
+
+    [Fact]
+    public async Task HeldSale_ShouldAllowSelectingCustomerAtCreditCompletion()
+    {
+        using var appFactory = new CustomWebApplicationFactory();
+        using var client = appFactory.CreateClient();
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var customer = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/customers", new
+            {
+                name = "Held Credit Customer",
+                code = (string?)null,
+                id_number = "PASSPORT-HLD-01",
+                phone = "+94 71 555 4321",
+                email = "held-credit@example.com",
+                address = "Galle",
+                date_of_birth = (DateOnly?)null,
+                price_tier_id = (Guid?)null,
+                fixed_discount_percent = (decimal?)null,
+                credit_limit = 100000m,
+                notes = "Used for held credit completion",
+                tags = new[] { "held-credit" },
+                is_active = true
+            }));
+
+        var customerId = Guid.Parse(TestJson.GetString(customer, "customer_id"));
+
+        var productSearch = await TestJson.ReadObjectAsync(
+            await client.GetAsync("/api/products/search?q=Ballpoint%20Pen"));
+        var product = FirstObjectFromArray(productSearch["items"]!.AsArray());
+        var productId = Guid.Parse(TestJson.GetString(product, "id"));
+
+        var heldSale = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/checkout/hold", new
+            {
+                items = new[]
+                {
+                    new
+                    {
+                        product_id = productId,
+                        quantity = 2m
+                    }
+                },
+                discount_percent = 0m,
+                role = "cashier"
+            }));
+
+        var heldSaleId = Guid.Parse(TestJson.GetString(heldSale, "sale_id"));
+        var grandTotal = TestJson.GetDecimal(heldSale, "grand_total");
+
+        var completeResponse = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/checkout/complete", new
+            {
+                sale_id = heldSaleId,
+                customer_id = customerId,
+                discount_percent = 0m,
+                role = "cashier",
+                payments = new[]
+                {
+                    new
+                    {
+                        method = "credit",
+                        amount = grandTotal,
+                        reference_number = "CR-HLD-001"
+                    }
+                }
+            }));
+
+        Assert.Equal("completed", TestJson.GetString(completeResponse, "status"));
+        Assert.Equal(customerId, Guid.Parse(TestJson.GetString(completeResponse, "customer_id")));
+
+        using var scope = appFactory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+        var customerEntity = await dbContext.Customers
+            .Include(x => x.CreditLedger)
+            .FirstAsync(x => x.Id == customerId);
+
+        Assert.Equal(grandTotal, customerEntity.OutstandingBalance);
+        Assert.Single(customerEntity.CreditLedger);
+    }
+
+    [Fact]
+    public async Task CreditSale_WithoutCustomerShouldFail()
+    {
+        using var appFactory = new CustomWebApplicationFactory();
+        using var client = appFactory.CreateClient();
+        await TestAuth.SignInAsCashierAsync(client);
+
+        var productSearch = await TestJson.ReadObjectAsync(
+            await client.GetAsync("/api/products/search?q=Ballpoint%20Pen"));
+        var product = FirstObjectFromArray(productSearch["items"]!.AsArray());
+        var productId = Guid.Parse(TestJson.GetString(product, "id"));
+        var unitPrice = product["unitPrice"]?.GetValue<decimal>()
+            ?? throw new InvalidOperationException("Missing unitPrice for product search item.");
+
+        var response = await client.PostAsJsonAsync("/api/checkout/complete", new
+        {
+            sale_id = (Guid?)null,
+            items = new[]
+            {
+                new
+                {
+                    product_id = productId,
+                    quantity = 2m
+                }
+            },
+            discount_percent = 0m,
+            role = "cashier",
+            payments = new[]
+            {
+                new
+                {
+                    method = "credit",
+                    amount = unitPrice * 2m,
+                    reference_number = "CR-NO-CUSTOMER"
+                }
+            }
+        });
+
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonObject>();
+        Assert.NotNull(payload);
+        Assert.Equal("Credit sales require a customer.", TestJson.GetString(payload, "message"));
     }
 
     private static JsonObject FirstObjectFromArray(JsonArray array)

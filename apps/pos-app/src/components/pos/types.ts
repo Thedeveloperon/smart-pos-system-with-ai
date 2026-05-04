@@ -45,11 +45,11 @@ export interface RecentSale {
   items: CartItem[];
   total: number;
   status: string;
-  paymentMethod: "cash" | "card" | "qr";
+  paymentMethod: "cash" | "credit" | "card" | "qr";
   customerMobile?: string;
   completedAt: Date;
   cashReceived?: number;
   change?: number;
 }
 
-export type PaymentMethod = "cash" | "card" | "qr";
+export type PaymentMethod = "cash" | "credit" | "card" | "qr";

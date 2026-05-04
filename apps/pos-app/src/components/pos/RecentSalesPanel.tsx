@@ -11,6 +11,7 @@ import {
   Printer,
   MessageCircle,
   Banknote,
+  Wallet,
   CreditCard,
   QrCode,
   Receipt,
@@ -31,6 +32,8 @@ const PaymentIcon = ({ method }: { method: string }) => {
   switch (method) {
     case "cash":
       return <Banknote className="h-3.5 w-3.5" />;
+    case "credit":
+      return <Wallet className="h-3.5 w-3.5" />;
     case "card":
       return <CreditCard className="h-3.5 w-3.5" />;
     case "qr":
