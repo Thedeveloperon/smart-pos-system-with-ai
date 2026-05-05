@@ -51,6 +51,9 @@ type ReceiveLine = {
   batch_number: string;
   expiry_date: string;
   manufacture_date: string;
+  has_pack_option: boolean;
+  pack_size: number;
+  pack_label?: string | null;
 };
 
 type Props = {
@@ -103,6 +106,9 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
             batch_number: "",
             expiry_date: "",
             manufacture_date: "",
+            has_pack_option: Boolean(p?.hasPackOption ?? p?.has_pack_option),
+            pack_size: Number(p?.packSize ?? p?.pack_size ?? 0),
+            pack_label: p?.packLabel ?? p?.pack_label ?? null,
           };
         }),
     );
@@ -295,7 +301,16 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
                   return (
                     <FragmentWithKey key={`${l.product_id}-${idx}`}>
                       <TableRow>
-                        <TableCell className="font-medium">{l.product_name}</TableCell>
+                        <TableCell className="font-medium">
+                          <div className="space-y-0.5">
+                            <div>{l.product_name}</div>
+                            {l.has_pack_option && l.pack_size >= 2 && (
+                              <div className="text-[11px] text-muted-foreground">
+                                {l.pack_label || `Pack of ${l.pack_size}`} · receiving ≈ {(l.quantity_receiving / l.pack_size).toFixed(2)} packs
+                              </div>
+                            )}
+                          </div>
+                        </TableCell>
                         <TableCell className="text-right">{l.quantity_ordered}</TableCell>
                         <TableCell className="text-right">{l.quantity_already_received}</TableCell>
                         <TableCell className="text-right text-amber-700">

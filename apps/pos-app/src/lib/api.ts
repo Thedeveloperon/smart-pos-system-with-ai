@@ -181,6 +181,10 @@ type BackendProductSearchItem = {
   stockQuantity: number;
   is_low_stock?: boolean;
   is_serial_tracked?: boolean;
+  has_pack_option?: boolean;
+  pack_size?: number;
+  pack_price?: number | null;
+  pack_label?: string | null;
 };
 
 type BackendProductSearchResponse = {
@@ -207,6 +211,10 @@ type BackendProductCatalogItem = {
   alert_level: number;
   allow_negative_stock: boolean;
   is_serial_tracked?: boolean;
+  has_pack_option?: boolean;
+  pack_size?: number;
+  pack_price?: number | null;
+  pack_label?: string | null;
   warranty_months?: number | null;
   is_batch_tracked?: boolean;
   expiry_alert_days?: number | null;
@@ -222,8 +230,13 @@ type BackendProductCatalogResponse = {
 
 type BackendSaleItem = {
   sale_item_id: string;
-  product_id: string;
+  product_id?: string | null;
   product_name: string;
+  bundle_id?: string | null;
+  bundle_name?: string | null;
+  is_pack?: boolean;
+  sale_pack_size?: number;
+  pack_label?: string | null;
   unit_price: number;
   quantity: number;
   line_total: number;
@@ -253,6 +266,8 @@ export type SaleReceiptResponse = {
   items: BackendSaleItem[];
   payments: BackendSalePayment[];
 };
+
+type BackendSaleResponse = SaleReceiptResponse;
 
 export type RefundableSaleItem = {
   sale_item_id: string;
@@ -300,8 +315,11 @@ export type RefundResponse = {
   created_at: string;
   items: {
     sale_item_id: string;
-    product_id: string;
+    item_type?: "product" | "bundle";
+    product_id?: string | null;
     product_name: string;
+    bundle_id?: string | null;
+    bundle_name?: string | null;
     quantity: number;
     subtotal_amount: number;
     discount_amount: number;
@@ -312,6 +330,60 @@ export type RefundResponse = {
     method: string;
     amount: number;
   }[];
+};
+
+type BackendBundleItem = {
+  id: string;
+  product_id?: string | null;
+  item_name: string;
+  quantity: number;
+  notes?: string | null;
+};
+
+type BackendBundle = {
+  id: string;
+  name: string;
+  barcode?: string | null;
+  description?: string | null;
+  price: number;
+  stock_quantity: number;
+  is_active: boolean;
+  items: BackendBundleItem[];
+};
+
+type BackendBundleCatalogResponse = {
+  items: BackendBundle[];
+};
+
+type BackendBundleSearchItem = {
+  id: string;
+  name: string;
+  barcode?: string | null;
+  price: number;
+  stock_quantity: number;
+};
+
+type BackendBundleSearchResponse = {
+  items: BackendBundleSearchItem[];
+};
+
+export type BundleItem = {
+  id: string;
+  product_id?: string | null;
+  item_name: string;
+  quantity: number;
+  notes?: string | null;
+};
+
+export type Bundle = {
+  id: string;
+  name: string;
+  barcode?: string | null;
+  description?: string | null;
+  price: number;
+  stock_quantity: number;
+  is_active: boolean;
+  items: BundleItem[];
 };
 
 type BackendCashCount = {
@@ -522,6 +594,10 @@ export type CreateProductRequest = {
   target_stock_level: number;
   allow_negative_stock: boolean;
   is_serial_tracked?: boolean;
+  has_pack_option?: boolean;
+  pack_size?: number;
+  pack_price?: number | null;
+  pack_label?: string | null;
   warranty_months?: number | null;
   is_batch_tracked?: boolean;
   expiry_alert_days?: number | null;
@@ -929,6 +1005,10 @@ export type CatalogProduct = {
   alertLevel: number;
   allowNegativeStock: boolean;
   isSerialTracked?: boolean;
+  hasPackOption?: boolean;
+  packSize?: number | null;
+  packPrice?: number | null;
+  packLabel?: string | null;
   warrantyMonths?: number | null;
   isBatchTracked?: boolean;
   expiryAlertDays?: number | null;
@@ -957,6 +1037,10 @@ export type Product = CatalogProduct & {
   alert_level: number;
   allow_negative_stock: boolean;
   is_serial_tracked?: boolean;
+  has_pack_option?: boolean;
+  pack_size?: number | null;
+  pack_price?: number | null;
+  pack_label?: string | null;
   warranty_months?: number | null;
   is_batch_tracked?: boolean;
   expiry_alert_days?: number | null;
@@ -1186,8 +1270,11 @@ type TransactionsReportResponse = {
     }[];
     line_items: {
       sale_item_id: string;
-      product_id: string;
+      item_type?: "product" | "bundle" | "unknown";
+      product_id?: string | null;
       product_name: string;
+      bundle_id?: string | null;
+      bundle_name?: string | null;
       category_id?: string | null;
       category_name?: string | null;
       quantity: number;
@@ -1217,7 +1304,10 @@ type TopItemsReportResponse = {
   to_date: string;
   take: number;
   items: {
-    product_id: string;
+    item_type?: "product" | "bundle" | "unknown";
+    product_id?: string | null;
+    bundle_id?: string | null;
+    bundle_name?: string | null;
     product_name: string;
     sold_quantity: number;
     refunded_quantity: number;
@@ -1253,7 +1343,10 @@ type WorstItemsReportResponse = {
   to_date: string;
   take: number;
   items: {
-    product_id: string;
+    item_type?: "product" | "bundle" | "unknown";
+    product_id?: string | null;
+    bundle_id?: string | null;
+    bundle_name?: string | null;
     product_name: string;
     sold_quantity: number;
     refunded_quantity: number;
@@ -1322,7 +1415,10 @@ type MarginSummaryReportResponse = {
   to_date: string;
   take: number;
   items: {
-    product_id: string;
+    item_type?: "product" | "bundle" | "unknown";
+    product_id?: string | null;
+    bundle_id?: string | null;
+    bundle_name?: string | null;
     product_name: string;
     net_quantity: number;
     net_sales: number;
@@ -1887,7 +1983,14 @@ export type SyncEventsRequestOptions = {
 
 type CreateSaleRequest = {
   sale_id?: string;
-  items?: { product_id: string; quantity: number; serial_number_id?: string; sale_item_id?: string }[];
+  items?: {
+    product_id?: string | null;
+    bundle_id?: string | null;
+    quantity: number;
+    is_pack_sale?: boolean;
+    serial_number_id?: string;
+    sale_item_id?: string;
+  }[];
   discount_percent?: number;
   customer_id?: string;
   role: string;
@@ -1899,7 +2002,13 @@ type CreateSaleRequest = {
 };
 
 type HoldSaleRequest = {
-  items: { product_id: string; quantity: number; serial_number_id?: string }[];
+  items: {
+    product_id?: string | null;
+    bundle_id?: string | null;
+    quantity: number;
+    is_pack_sale?: boolean;
+    serial_number_id?: string;
+  }[];
   discount_percent: number;
   role: string;
 };
@@ -2523,6 +2632,14 @@ function mapProduct(item: BackendProductSearchItem): Product {
     is_low_stock: item.is_low_stock ?? false,
     isSerialTracked: item.is_serial_tracked ?? false,
     is_serial_tracked: item.is_serial_tracked ?? false,
+    hasPackOption: item.has_pack_option ?? false,
+    has_pack_option: item.has_pack_option ?? false,
+    packSize: item.pack_size ?? null,
+    pack_size: item.pack_size ?? null,
+    packPrice: item.pack_price ?? null,
+    pack_price: item.pack_price ?? null,
+    packLabel: item.pack_label ?? null,
+    pack_label: item.pack_label ?? null,
     stockQuantity: Number(item.stockQuantity),
     stock: Number(item.stockQuantity),
     stock_quantity: Number(item.stockQuantity),
@@ -2574,6 +2691,14 @@ function mapSerialLookupProduct(item: BackendSerialLookupResponse["product"]): P
     is_low_stock: item.is_low_stock ?? false,
     isSerialTracked: item.is_serial_tracked ?? false,
     is_serial_tracked: item.is_serial_tracked ?? false,
+    hasPackOption: item.has_pack_option ?? false,
+    has_pack_option: item.has_pack_option ?? false,
+    packSize: item.pack_size ?? null,
+    pack_size: item.pack_size ?? null,
+    packPrice: item.pack_price ?? null,
+    pack_price: item.pack_price ?? null,
+    packLabel: item.pack_label ?? null,
+    pack_label: item.pack_label ?? null,
     stock: Number(item.stock_quantity),
     stock_quantity: Number(item.stock_quantity),
     cost_price: Number(item.unit_price),
@@ -2615,6 +2740,14 @@ function mapCatalogProduct(item: BackendProductCatalogItem): Product {
     brand_name: item.brand_name || null,
     isLowStock: item.is_low_stock,
     is_low_stock: item.is_low_stock,
+    hasPackOption: item.has_pack_option ?? false,
+    has_pack_option: item.has_pack_option ?? false,
+    packSize: item.pack_size ?? null,
+    pack_size: item.pack_size ?? null,
+    packPrice: item.pack_price ?? null,
+    pack_price: item.pack_price ?? null,
+    packLabel: item.pack_label ?? null,
+    pack_label: item.pack_label ?? null,
     stock: Number(item.stock_quantity),
     stock_quantity: Number(item.stock_quantity),
     cost_price: Number(item.cost_price),
@@ -2635,21 +2768,46 @@ function mapCatalogProduct(item: BackendProductCatalogItem): Product {
 }
 
 function mapSaleItems(items: BackendSaleItem[]): CartItem[] {
-  return items.map((item) => ({
-    saleItemId: item.sale_item_id,
-    lineId: item.sale_item_id,
-    product: {
-      id: item.product_id,
-      name: item.product_name,
-      sku: item.product_id.slice(0, 8),
-      barcode: undefined,
-      price: Number(item.unit_price),
-      category: undefined,
-      stock: Number(item.quantity),
-      image: getSampleProductImage(item.product_name) || createProductImage(item.product_name),
-    },
-    quantity: Number(item.quantity),
-  }));
+  return items.map((item) => {
+    const isBundle = Boolean(item.bundle_id);
+    const isPack = Boolean(item.is_pack);
+    const rawQuantity = Number(item.quantity);
+    const salePackSize = Number(item.sale_pack_size ?? 0);
+    const cartQuantity = isPack && salePackSize > 0
+      ? rawQuantity / salePackSize
+      : rawQuantity;
+    const productId = item.product_id || item.bundle_id || item.sale_item_id;
+    const mode: CartItem["sellMode"] = isBundle ? "bundle" : isPack ? "pack" : "unit";
+    const lineId = isBundle
+      ? `bundle:${item.bundle_id}`
+      : isPack
+        ? `product:${item.product_id}:pack`
+        : `product:${item.product_id}:unit`;
+
+    return {
+      saleItemId: item.sale_item_id,
+      lineId,
+      sellMode: mode,
+      bundleId: item.bundle_id ?? undefined,
+      bundleName: item.bundle_name ?? undefined,
+      packSize: isPack ? salePackSize : undefined,
+      packLabel: item.pack_label ?? undefined,
+      baseUnitPrice: undefined,
+      product: {
+        id: isBundle ? `bundle:${item.bundle_id}` : productId,
+        bundleId: item.bundle_id ?? undefined,
+        isBundle,
+        name: item.product_name,
+        sku: productId.slice(0, 8),
+        barcode: undefined,
+        price: Number(item.unit_price),
+        category: undefined,
+        stock: rawQuantity,
+        image: getSampleProductImage(item.product_name) || createProductImage(item.product_name),
+      },
+      quantity: Number.isFinite(cartQuantity) ? cartQuantity : rawQuantity,
+    };
+  });
 }
 
 function normalizePaymentMethod(method: string): PaymentMethod {
@@ -2687,6 +2845,25 @@ function mapSaleResponseToHeldBill(sale: BackendSaleResponse): HeldBill {
     label: sale.sale_number,
     items: mapSaleItems(sale.items),
     heldAt: new Date(sale.created_at),
+  };
+}
+
+function mapBundle(item: BackendBundle): Bundle {
+  return {
+    id: item.id,
+    name: item.name,
+    barcode: item.barcode ?? null,
+    description: item.description ?? null,
+    price: Number(item.price),
+    stock_quantity: Number(item.stock_quantity),
+    is_active: item.is_active,
+    items: item.items.map((bundleItem) => ({
+      id: bundleItem.id,
+      product_id: bundleItem.product_id ?? null,
+      item_name: bundleItem.item_name,
+      quantity: Number(bundleItem.quantity),
+      notes: bundleItem.notes ?? null,
+    })),
   };
 }
 
@@ -2811,6 +2988,14 @@ function mapCatalogProductItem(item: BackendProductCatalogItem): Product {
     allow_negative_stock: item.allow_negative_stock,
     isSerialTracked: item.is_serial_tracked ?? false,
     is_serial_tracked: item.is_serial_tracked ?? false,
+    hasPackOption: item.has_pack_option ?? false,
+    has_pack_option: item.has_pack_option ?? false,
+    packSize: item.pack_size ?? null,
+    pack_size: item.pack_size ?? null,
+    packPrice: item.pack_price ?? null,
+    pack_price: item.pack_price ?? null,
+    packLabel: item.pack_label ?? null,
+    pack_label: item.pack_label ?? null,
     warrantyMonths: item.warranty_months ?? null,
     warranty_months: item.warranty_months ?? null,
     isBatchTracked: item.is_batch_tracked ?? false,
@@ -3052,6 +3237,123 @@ export async function fetchProducts(query?: string, take = 200) {
 
   const response = await request<BackendProductSearchResponse>(`/api/products/search?${params.toString()}`);
   return response.items.map(mapProduct);
+}
+
+export async function searchBundles(query?: string, take = 30) {
+  const params = new URLSearchParams();
+  if (query?.trim()) {
+    params.set("q", query.trim());
+  }
+  params.set("take", String(Math.max(1, Math.min(100, Math.trunc(take) || 30))));
+
+  const response = await request<BackendBundleSearchResponse>(`/api/bundles/search?${params.toString()}`);
+  return response.items.map((item) => ({
+    id: item.id,
+    bundleId: item.id,
+    isBundle: true,
+    name: item.name,
+    sku: item.barcode?.trim() || item.id.slice(0, 8),
+    barcode: item.barcode ?? undefined,
+    price: Number(item.price),
+    stock: Number(item.stock_quantity),
+    category: "Bundle",
+  }));
+}
+
+export async function fetchBundles(
+  query?: string,
+  take = 80,
+  includeInactive = false,
+): Promise<Bundle[]> {
+  const params = new URLSearchParams();
+  if (query?.trim()) {
+    params.set("q", query.trim());
+  }
+  params.set("take", String(Math.max(1, Math.min(300, Math.trunc(take) || 80))));
+  params.set("include_inactive", includeInactive ? "true" : "false");
+  const response = await request<BackendBundleCatalogResponse>(`/api/bundles?${params.toString()}`);
+  return response.items.map(mapBundle);
+}
+
+export type BundleItemRequest = {
+  product_id?: string | null;
+  item_name: string;
+  quantity: number;
+  notes?: string | null;
+};
+
+export type CreateBundleRequest = {
+  name: string;
+  barcode?: string | null;
+  description?: string | null;
+  price: number;
+  is_active?: boolean;
+  initial_stock?: number;
+  items?: BundleItemRequest[];
+};
+
+export type UpdateBundleRequest = {
+  name?: string | null;
+  barcode?: string | null;
+  description?: string | null;
+  price?: number | null;
+  is_active?: boolean | null;
+  items?: BundleItemRequest[] | null;
+};
+
+export async function createBundle(requestBody: CreateBundleRequest): Promise<Bundle> {
+  const response = await request<BackendBundle>("/api/bundles", {
+    method: "POST",
+    body: JSON.stringify({
+      name: requestBody.name,
+      barcode: normalizeOptionalString(requestBody.barcode),
+      description: normalizeOptionalString(requestBody.description),
+      price: requestBody.price,
+      is_active: requestBody.is_active ?? true,
+      initial_stock: requestBody.initial_stock ?? 0,
+      items: requestBody.items ?? [],
+    }),
+  });
+  return mapBundle(response);
+}
+
+export async function updateBundle(bundleId: string, requestBody: UpdateBundleRequest): Promise<Bundle> {
+  const response = await request<BackendBundle>(`/api/bundles/${encodeURIComponent(bundleId)}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      name: normalizeOptionalString(requestBody.name),
+      barcode: normalizeOptionalString(requestBody.barcode),
+      description: normalizeOptionalString(requestBody.description),
+      price: requestBody.price ?? null,
+      is_active: requestBody.is_active ?? null,
+      items: requestBody.items ?? null,
+    }),
+  });
+  return mapBundle(response);
+}
+
+export async function receiveBundles(bundleId: string, quantity: number): Promise<Bundle> {
+  const response = await request<BackendBundle>(`/api/bundles/${encodeURIComponent(bundleId)}/receive`, {
+    method: "POST",
+    body: JSON.stringify({ quantity }),
+  });
+  return mapBundle(response);
+}
+
+export async function assembleBundles(bundleId: string, quantity: number): Promise<Bundle> {
+  const response = await request<BackendBundle>(`/api/bundles/${encodeURIComponent(bundleId)}/assemble`, {
+    method: "POST",
+    body: JSON.stringify({ quantity }),
+  });
+  return mapBundle(response);
+}
+
+export async function breakBundles(bundleId: string, quantity: number): Promise<Bundle> {
+  const response = await request<BackendBundle>(`/api/bundles/${encodeURIComponent(bundleId)}/break`, {
+    method: "POST",
+    body: JSON.stringify({ quantity }),
+  });
+  return mapBundle(response);
 }
 
 export async function fetchProductCatalog(take = 200) {
@@ -3683,6 +3985,10 @@ type BackendSerialLookupResponse = {
     unit_price: number;
     stock_quantity: number;
     is_low_stock?: boolean;
+    has_pack_option?: boolean;
+    pack_size?: number | null;
+    pack_price?: number | null;
+    pack_label?: string | null;
     warranty_months?: number | null;
     is_serial_tracked?: boolean;
   };
@@ -4775,6 +5081,10 @@ export type UpdateProductRequest = {
   target_stock_level: number;
   allow_negative_stock: boolean;
   is_serial_tracked?: boolean;
+  has_pack_option?: boolean;
+  pack_size?: number;
+  pack_price?: number | null;
+  pack_label?: string | null;
   warranty_months?: number | null;
   is_batch_tracked?: boolean;
   expiry_alert_days?: number | null;
@@ -4926,11 +5236,23 @@ export async function updateCurrentCashDrawer(counts: DenominationCount[], total
 
 export async function holdSale(items: CartItem[], role: "admin" | "manager" | "cashier") {
   const payload: HoldSaleRequest = {
-    items: items.map((item) => ({
-      product_id: item.product.id,
+    items: items.map((item) => {
+      const sellMode = item.sellMode ?? (item.bundleId || item.product.isBundle ? "bundle" : "unit");
+      return {
+      product_id:
+        sellMode === "bundle"
+          ? null
+          : item.product.id.startsWith("bundle:")
+            ? null
+            : item.product.id,
+      bundle_id: sellMode === "bundle"
+        ? (item.bundleId || item.product.bundleId || item.product.id.replace(/^bundle:/, ""))
+        : undefined,
       quantity: item.quantity,
+      is_pack_sale: sellMode === "pack",
       serial_number_id: item.selectedSerial?.id,
-    })),
+    };
+    }),
     discount_percent: 0,
     role: toBackendRole(role),
   };
@@ -4954,14 +5276,30 @@ export async function completeSale(
   cashShortAmount?: number,
   customerId?: string
 ) {
+  const cartItemsPayload = saleId
+    ? undefined
+    : items.map((item) => {
+      const sellMode = item.sellMode ?? (item.bundleId || item.product.isBundle ? "bundle" : "unit");
+      return {
+        product_id:
+          sellMode === "bundle"
+            ? null
+            : item.product.id.startsWith("bundle:")
+              ? null
+              : item.product.id,
+        bundle_id: sellMode === "bundle"
+          ? (item.bundleId || item.product.bundleId || item.product.id.replace(/^bundle:/, ""))
+          : undefined,
+        quantity: item.quantity,
+        is_pack_sale: sellMode === "pack",
+        serial_number_id: item.selectedSerial?.id,
+        sale_item_id: item.saleItemId,
+      };
+    });
+
   const payload: CreateSaleRequest = {
     sale_id: saleId,
-    items: items.map((item) => ({
-      product_id: item.product.id,
-      quantity: item.quantity,
-      serial_number_id: item.selectedSerial?.id,
-      sale_item_id: item.saleItemId,
-    })),
+    items: cartItemsPayload,
     discount_percent: 0,
     role: toBackendRole(role),
     customer_id: customerId || undefined,

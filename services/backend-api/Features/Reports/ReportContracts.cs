@@ -145,11 +145,20 @@ public sealed class TransactionReportLineItemRow
     [JsonPropertyName("sale_item_id")]
     public Guid SaleItemId { get; set; }
 
+    [JsonPropertyName("item_type")]
+    public string ItemType { get; set; } = "product";
+
     [JsonPropertyName("product_id")]
-    public Guid ProductId { get; set; }
+    public Guid? ProductId { get; set; }
 
     [JsonPropertyName("product_name")]
     public string ProductName { get; set; } = string.Empty;
+
+    [JsonPropertyName("bundle_id")]
+    public Guid? BundleId { get; set; }
+
+    [JsonPropertyName("bundle_name")]
+    public string? BundleName { get; set; }
 
     [JsonPropertyName("category_id")]
     public Guid? CategoryId { get; set; }
@@ -223,8 +232,17 @@ public sealed class TopItemsReportResponse
 
 public sealed class TopItemReportRow
 {
+    [JsonPropertyName("item_type")]
+    public string ItemType { get; set; } = "product";
+
     [JsonPropertyName("product_id")]
-    public Guid ProductId { get; set; }
+    public Guid? ProductId { get; set; }
+
+    [JsonPropertyName("bundle_id")]
+    public Guid? BundleId { get; set; }
+
+    [JsonPropertyName("bundle_name")]
+    public string? BundleName { get; set; }
 
     [JsonPropertyName("product_name")]
     public string ProductName { get; set; } = string.Empty;
@@ -259,8 +277,17 @@ public sealed class WorstItemsReportResponse
 
 public sealed class WorstItemReportRow
 {
+    [JsonPropertyName("item_type")]
+    public string ItemType { get; set; } = "product";
+
     [JsonPropertyName("product_id")]
-    public Guid ProductId { get; set; }
+    public Guid? ProductId { get; set; }
+
+    [JsonPropertyName("bundle_id")]
+    public Guid? BundleId { get; set; }
+
+    [JsonPropertyName("bundle_name")]
+    public string? BundleName { get; set; }
 
     [JsonPropertyName("product_name")]
     public string ProductName { get; set; } = string.Empty;
@@ -499,8 +526,17 @@ public sealed class MarginSummaryReportResponse
 
 public sealed class MarginSummaryReportRow
 {
+    [JsonPropertyName("item_type")]
+    public string ItemType { get; set; } = "product";
+
     [JsonPropertyName("product_id")]
-    public Guid ProductId { get; set; }
+    public Guid? ProductId { get; set; }
+
+    [JsonPropertyName("bundle_id")]
+    public Guid? BundleId { get; set; }
+
+    [JsonPropertyName("bundle_name")]
+    public string? BundleName { get; set; }
 
     [JsonPropertyName("product_name")]
     public string ProductName { get; set; } = string.Empty;

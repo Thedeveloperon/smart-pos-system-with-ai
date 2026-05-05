@@ -10,7 +10,7 @@ public static class InventoryEndpoints
 {
     private sealed record StockMovementListRow(
         Guid Id,
-        Guid ProductId,
+        Guid? ProductId,
         StockMovementType MovementType,
         decimal QuantityBefore,
         decimal QuantityChange,
@@ -230,6 +230,8 @@ public static class InventoryEndpoints
 
             var productIds = pageRows
                 .Select(x => x.ProductId)
+                .Where(x => x.HasValue)
+                .Select(x => x!.Value)
                 .Distinct()
                 .ToList();
             var productNamesById = productIds.Count == 0
@@ -245,9 +247,9 @@ public static class InventoryEndpoints
                 {
                     id = x.Id,
                     product_id = x.ProductId,
-                    product_name = productNamesById.TryGetValue(x.ProductId, out var productName)
+                    product_name = x.ProductId.HasValue && productNamesById.TryGetValue(x.ProductId.Value, out var productName)
                         ? productName
-                        : string.Empty,
+                        : null,
                     movement_type = x.MovementType,
                     quantity_before = x.QuantityBefore,
                     quantity_change = x.QuantityChange,

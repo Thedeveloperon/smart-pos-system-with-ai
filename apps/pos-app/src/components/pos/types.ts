@@ -16,6 +16,12 @@ export interface Product {
   matchedSerialId?: string;
   matchedSerialValue?: string;
   matchedSerialStatus?: string;
+  hasPackOption?: boolean;
+  packSize?: number | null;
+  packPrice?: number | null;
+  packLabel?: string | null;
+  isBundle?: boolean;
+  bundleId?: string;
   stock: number;
 }
 
@@ -30,6 +36,12 @@ export interface CartItem {
   product: Product;
   quantity: number;
   selectedSerial?: SelectedSerial;
+  sellMode?: "unit" | "pack" | "bundle";
+  bundleId?: string;
+  bundleName?: string;
+  packSize?: number;
+  packLabel?: string | null;
+  baseUnitPrice?: number;
 }
 
 export interface HeldBill {

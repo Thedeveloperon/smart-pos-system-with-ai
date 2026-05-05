@@ -64,11 +64,20 @@ public sealed class RefundItemResponse
     [JsonPropertyName("sale_item_id")]
     public Guid SaleItemId { get; set; }
 
+    [JsonPropertyName("item_type")]
+    public string ItemType { get; set; } = "product";
+
     [JsonPropertyName("product_id")]
-    public Guid ProductId { get; set; }
+    public Guid? ProductId { get; set; }
 
     [JsonPropertyName("product_name")]
     public string ProductName { get; set; } = string.Empty;
+
+    [JsonPropertyName("bundle_id")]
+    public Guid? BundleId { get; set; }
+
+    [JsonPropertyName("bundle_name")]
+    public string? BundleName { get; set; }
 
     [JsonPropertyName("quantity")]
     public decimal Quantity { get; set; }

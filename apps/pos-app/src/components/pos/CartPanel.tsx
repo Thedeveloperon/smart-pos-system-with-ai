@@ -53,7 +53,7 @@ const CartPanel = ({ items, onUpdateQty, onRemove, expertMode = false }: CartPan
         ) : (
           items.map((item) => (
             <CartItemRow
-              key={item.lineId ?? item.selectedSerial?.id ?? item.product.id}
+              key={item.lineId ?? `${item.sellMode ?? "unit"}:${item.selectedSerial?.id ?? item.bundleId ?? item.product.id}`}
               item={item}
               onUpdateQty={onUpdateQty}
               onRemove={onRemove}

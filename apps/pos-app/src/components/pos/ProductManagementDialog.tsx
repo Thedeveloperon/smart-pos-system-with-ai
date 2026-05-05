@@ -69,6 +69,10 @@ type ProductFormState = {
   safetyStock: string;
   targetStockLevel: string;
   allowNegativeStock: boolean;
+  hasPackOption: boolean;
+  packSize: string;
+  packPrice: string;
+  packLabel: string;
   serialTracked: boolean;
   warrantyMonths: string;
   batchTracked: boolean;
@@ -91,6 +95,10 @@ const emptyFormState = (): ProductFormState => ({
   safetyStock: "0",
   targetStockLevel: "0",
   allowNegativeStock: false,
+  hasPackOption: false,
+  packSize: "0",
+  packPrice: "0",
+  packLabel: "",
   serialTracked: false,
   warrantyMonths: "12",
   batchTracked: false,
@@ -166,6 +174,10 @@ const toFormState = (product: Product): ProductFormState => ({
   safetyStock: String(product.safety_stock ?? 0),
   targetStockLevel: String(product.target_stock_level ?? 0),
   allowNegativeStock: product.allow_negative_stock ?? false,
+  hasPackOption: product.has_pack_option ?? product.hasPackOption ?? false,
+  packSize: String(product.pack_size ?? product.packSize ?? 0),
+  packPrice: String(product.pack_price ?? product.packPrice ?? 0),
+  packLabel: product.pack_label ?? product.packLabel ?? "",
   serialTracked: product.is_serial_tracked ?? false,
   warrantyMonths: String(product.warranty_months ?? 12),
   batchTracked: product.is_batch_tracked ?? false,
@@ -197,6 +209,14 @@ function snapshotProduct(
     safety_stock: toNumber(form.safetyStock),
     target_stock_level: toNumber(form.targetStockLevel),
     allow_negative_stock: form.allowNegativeStock,
+    hasPackOption: form.hasPackOption,
+    has_pack_option: form.hasPackOption,
+    packSize: form.hasPackOption ? toNumber(form.packSize) : 0,
+    pack_size: form.hasPackOption ? toNumber(form.packSize) : 0,
+    packPrice: form.hasPackOption ? toNumber(form.packPrice) : null,
+    pack_price: form.hasPackOption ? toNumber(form.packPrice) : null,
+    packLabel: form.hasPackOption ? form.packLabel.trim() || null : null,
+    pack_label: form.hasPackOption ? form.packLabel.trim() || null : null,
     is_serial_tracked: form.serialTracked,
     warranty_months: form.serialTracked ? toNumber(form.warrantyMonths) : 0,
     is_batch_tracked: form.batchTracked,
@@ -392,6 +412,18 @@ export default function ProductManagementDialog({
       return;
     }
 
+    if (form.hasPackOption) {
+      if (toNumber(form.packSize) < 2) {
+        toast.error("Pack size must be at least 2 when pack selling is enabled.");
+        return;
+      }
+
+      if (toNumber(form.packPrice) <= 0) {
+        toast.error("Pack price must be greater than 0 when pack selling is enabled.");
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       const payload = {
@@ -408,6 +440,10 @@ export default function ProductManagementDialog({
         safety_stock: toNumber(form.safetyStock),
         target_stock_level: toNumber(form.targetStockLevel),
         allow_negative_stock: form.allowNegativeStock,
+        has_pack_option: form.hasPackOption,
+        pack_size: form.hasPackOption ? toNumber(form.packSize) : 0,
+        pack_price: form.hasPackOption ? toNumber(form.packPrice) : null,
+        pack_label: form.hasPackOption ? form.packLabel.trim() || undefined : undefined,
         is_serial_tracked: form.serialTracked,
         warranty_months: form.serialTracked ? toNumber(form.warrantyMonths) : 0,
         is_batch_tracked: form.batchTracked,
@@ -800,6 +836,56 @@ export default function ProductManagementDialog({
                     value={form.initialStockQuantity}
                     onChange={(event) => updateField("initialStockQuantity", event.target.value)}
                   />
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-lg border p-4 space-y-3">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <Label className="text-sm font-medium">Enable pack selling</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Allow selling this product by pack in POS checkout.
+                  </p>
+                </div>
+                <Switch
+                  checked={form.hasPackOption}
+                  onCheckedChange={(checked) => updateField("hasPackOption", checked)}
+                />
+              </div>
+              {form.hasPackOption && (
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="pack-size">Pack size (units)</Label>
+                    <Input
+                      id="pack-size"
+                      type="number"
+                      min={2}
+                      step="1"
+                      value={form.packSize}
+                      onChange={(event) => updateField("packSize", event.target.value)}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="pack-price">Pack price</Label>
+                    <Input
+                      id="pack-price"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={form.packPrice}
+                      onChange={(event) => updateField("packPrice", event.target.value)}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="pack-label">Pack label</Label>
+                    <Input
+                      id="pack-label"
+                      value={form.packLabel}
+                      onChange={(event) => updateField("packLabel", event.target.value)}
+                      placeholder="e.g. Pack of 6"
+                    />
+                  </div>
                 </div>
               )}
             </div>

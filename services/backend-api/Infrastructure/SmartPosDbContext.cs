@@ -9,6 +9,9 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
     public DbSet<Brand> Brands => Set<Brand>();
     public DbSet<Product> Products => Set<Product>();
     public DbSet<InventoryRecord> Inventory => Set<InventoryRecord>();
+    public DbSet<Bundle> Bundles => Set<Bundle>();
+    public DbSet<BundleItem> BundleItems => Set<BundleItem>();
+    public DbSet<BundleInventoryRecord> BundleInventory => Set<BundleInventoryRecord>();
     public DbSet<Supplier> Suppliers => Set<Supplier>();
     public DbSet<SupplierBrand> SupplierBrands => Set<SupplierBrand>();
     public DbSet<ProductSupplier> ProductSuppliers => Set<ProductSupplier>();
@@ -98,6 +101,10 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.ImageUrl).HasMaxLength(500);
             entity.Property(x => x.UnitPrice).HasPrecision(18, 2);
             entity.Property(x => x.CostPrice).HasPrecision(18, 2);
+            entity.Property(x => x.HasPackOption).HasDefaultValue(false);
+            entity.Property(x => x.PackSize).HasDefaultValue(0);
+            entity.Property(x => x.PackPrice).HasPrecision(18, 2);
+            entity.Property(x => x.PackLabel).HasMaxLength(40);
             entity.Property(x => x.IsSerialTracked).HasDefaultValue(false);
             entity.Property(x => x.WarrantyMonths).HasDefaultValue(0);
             entity.Property(x => x.IsBatchTracked).HasDefaultValue(false);
@@ -126,6 +133,47 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.HasOne(x => x.Product)
                 .WithOne(x => x.Inventory)
                 .HasForeignKey<InventoryRecord>(x => x.ProductId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<Bundle>(entity =>
+        {
+            entity.ToTable("bundles");
+            entity.Property(x => x.Name).HasMaxLength(200);
+            entity.Property(x => x.Barcode).HasMaxLength(64);
+            entity.Property(x => x.Description).HasMaxLength(1000);
+            entity.Property(x => x.Price).HasPrecision(18, 2);
+            entity.HasIndex(x => new { x.StoreId, x.Name });
+            entity.HasIndex(x => new { x.StoreId, x.Barcode }).IsUnique();
+        });
+
+        modelBuilder.Entity<BundleItem>(entity =>
+        {
+            entity.ToTable("bundle_items");
+            entity.Property(x => x.ItemName).HasMaxLength(200);
+            entity.Property(x => x.Quantity).HasPrecision(18, 3);
+            entity.Property(x => x.Notes).HasMaxLength(500);
+            entity.HasIndex(x => x.BundleId);
+            entity.HasIndex(x => x.ProductId);
+            entity.HasOne(x => x.Bundle)
+                .WithMany(x => x.Items)
+                .HasForeignKey(x => x.BundleId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.Product)
+                .WithMany(x => x.BundleItems)
+                .HasForeignKey(x => x.ProductId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<BundleInventoryRecord>(entity =>
+        {
+            entity.ToTable("bundle_inventory");
+            entity.Property(x => x.QuantityOnHand).HasPrecision(18, 3);
+            entity.Property(x => x.ReorderLevel).HasPrecision(18, 3);
+            entity.HasIndex(x => x.BundleId).IsUnique();
+            entity.HasOne(x => x.Bundle)
+                .WithOne(x => x.Inventory)
+                .HasForeignKey<BundleInventoryRecord>(x => x.BundleId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -217,10 +265,15 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.SerialNumber).HasMaxLength(120);
             entity.Property(x => x.Reason).HasMaxLength(500);
             entity.HasIndex(x => new { x.StoreId, x.ProductId, x.CreatedAtUtc });
+            entity.HasIndex(x => new { x.StoreId, x.BundleId, x.CreatedAtUtc });
             entity.HasIndex(x => new { x.StoreId, x.MovementType, x.CreatedAtUtc });
             entity.HasOne(x => x.Product)
                 .WithMany(x => x.StockMovements)
                 .HasForeignKey(x => x.ProductId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.Bundle)
+                .WithMany(x => x.StockMovements)
+                .HasForeignKey(x => x.BundleId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(x => x.Batch)
                 .WithMany()
@@ -539,11 +592,13 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
         {
             entity.ToTable("sale_items");
             entity.Property(x => x.ProductNameSnapshot).HasMaxLength(200);
+            entity.Property(x => x.BundleNameSnapshot).HasMaxLength(200);
             entity.Property(x => x.UnitPrice).HasPrecision(18, 2);
             entity.Property(x => x.Quantity).HasPrecision(18, 3);
             entity.Property(x => x.DiscountAmount).HasPrecision(18, 2);
             entity.Property(x => x.TaxAmount).HasPrecision(18, 2);
             entity.Property(x => x.LineTotal).HasPrecision(18, 2);
+            entity.HasIndex(x => x.BundleId);
             entity.HasOne(x => x.Sale)
                 .WithMany(x => x.Items)
                 .HasForeignKey(x => x.SaleId)
@@ -551,6 +606,10 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.HasOne(x => x.Product)
                 .WithMany(x => x.SaleItems)
                 .HasForeignKey(x => x.ProductId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.Bundle)
+                .WithMany(x => x.SaleItems)
+                .HasForeignKey(x => x.BundleId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -587,6 +646,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
         {
             entity.ToTable("refund_items");
             entity.Property(x => x.ProductNameSnapshot).HasMaxLength(200);
+            entity.Property(x => x.BundleNameSnapshot).HasMaxLength(200);
             entity.Property(x => x.Quantity).HasPrecision(18, 3);
             entity.Property(x => x.SubtotalAmount).HasPrecision(18, 2);
             entity.Property(x => x.DiscountAmount).HasPrecision(18, 2);
@@ -601,6 +661,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
                 .HasForeignKey(x => x.SaleItemId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(x => x.SaleItemId);
+            entity.HasIndex(x => x.BundleId);
         });
 
         modelBuilder.Entity<LedgerEntry>(entity =>

@@ -6,10 +6,16 @@ namespace SmartPos.Backend.Features.Checkout;
 public sealed class CartItemRequest
 {
     [JsonPropertyName("product_id")]
-    public Guid ProductId { get; set; }
+    public Guid? ProductId { get; set; }
+
+    [JsonPropertyName("bundle_id")]
+    public Guid? BundleId { get; set; }
 
     [JsonPropertyName("quantity")]
     public decimal Quantity { get; set; }
+
+    [JsonPropertyName("is_pack_sale")]
+    public bool IsPackSale { get; set; }
 
     [JsonPropertyName("serial_number_id")]
     public Guid? SerialNumberId { get; set; }
@@ -204,10 +210,25 @@ public sealed class SaleItemResponse
     public Guid SaleItemId { get; set; }
 
     [JsonPropertyName("product_id")]
-    public Guid ProductId { get; set; }
+    public Guid? ProductId { get; set; }
 
     [JsonPropertyName("product_name")]
     public string ProductName { get; set; } = string.Empty;
+
+    [JsonPropertyName("bundle_id")]
+    public Guid? BundleId { get; set; }
+
+    [JsonPropertyName("bundle_name")]
+    public string? BundleName { get; set; }
+
+    [JsonPropertyName("is_pack")]
+    public bool IsPack { get; set; }
+
+    [JsonPropertyName("sale_pack_size")]
+    public int SalePackSize { get; set; }
+
+    [JsonPropertyName("pack_label")]
+    public string? PackLabel { get; set; }
 
     [JsonPropertyName("unit_price")]
     public decimal UnitPrice { get; set; }

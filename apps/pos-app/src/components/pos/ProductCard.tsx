@@ -53,6 +53,11 @@ const ProductCard = ({ product, onAdd, showAddButton = true, interactive = true 
             {product.category}
           </Badge>
         )}
+        {product.isBundle && (
+          <Badge className="absolute bottom-1 left-1 text-[9px] px-1 py-0.5 bg-primary/90 text-primary-foreground">
+            Bundle
+          </Badge>
+        )}
 
         {isLowStock && (
           <Badge className="absolute top-1 right-1 text-[9px] px-1 py-0.5 bg-warning text-warning-foreground">
@@ -74,6 +79,11 @@ const ProductCard = ({ product, onAdd, showAddButton = true, interactive = true 
         <p className="text-[9px] text-muted-foreground font-mono">
           {product.sku}
         </p>
+        {product.hasPackOption && !product.isBundle && (
+          <p className="text-[9px] text-primary/80">
+            Pack: Rs. {(product.packPrice ?? 0).toLocaleString()} {product.packLabel ? `· ${product.packLabel}` : ""}
+          </p>
+        )}
         {product.matchedSerialValue && (
           <p className="text-[9px] font-mono text-primary/80">
             Serial {product.matchedSerialValue}
