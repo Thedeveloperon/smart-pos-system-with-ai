@@ -1,6 +1,6 @@
 import { useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { toast } from "sonner";
-import { Loader2, PencilLine, Plus, Power, Trash2 } from "lucide-react";
+import { Loader2, PencilLine, Plus, Power, Trash2, Upload } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,6 +19,8 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import BulkImportDialog from "@/components/import/BulkImportDialog";
+import { type ImportEntityType } from "@/components/import/importTemplates";
 import {
   createBrand,
   createCategory,
@@ -138,6 +140,8 @@ export default function CatalogueTab() {
   const [actionPending, setActionPending] = useState(false);
   const [categoryActionPending, setCategoryActionPending] = useState(false);
   const [productActionProductId, setProductActionProductId] = useState<string | null>(null);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importEntityType, setImportEntityType] = useState<ImportEntityType>("brand");
 
   const loadData = async () => {
     setLoading(true);
@@ -371,6 +375,10 @@ export default function CatalogueTab() {
                 title="Categories"
                 description="Create and update category records used by products."
                 onAdd={() => openEditor("category")}
+                onImport={() => {
+                  setImportEntityType("category");
+                  setImportDialogOpen(true);
+                }}
               />
               <SectionTable
                 loading={loading}
@@ -433,6 +441,10 @@ export default function CatalogueTab() {
                 title="Brands"
                 description="Manage brand codes and descriptions."
                 onAdd={() => openEditor("brand")}
+                onImport={() => {
+                  setImportEntityType("brand");
+                  setImportDialogOpen(true);
+                }}
               />
               <SectionTable
                 loading={loading}
@@ -617,6 +629,14 @@ export default function CatalogueTab() {
         cancelDisabled={categoryActionPending}
         confirmContent={categoryActionPending ? <Loader2 className="h-4 w-4 animate-spin" /> : undefined}
       />
+      <BulkImportDialog
+        open={importDialogOpen}
+        onOpenChange={setImportDialogOpen}
+        entityType={importEntityType}
+        onImportComplete={() => {
+          void loadData();
+        }}
+      />
     </>
   );
 }
@@ -625,10 +645,12 @@ function SectionHeader({
   title,
   description,
   onAdd,
+  onImport,
 }: {
   title: string;
   description: string;
   onAdd: () => void;
+  onImport: () => void;
 }) {
   const singularTitle = title === "Categories" ? "Category" : "Brand";
   return (
@@ -637,10 +659,16 @@ function SectionHeader({
         <p className="font-medium">{title}</p>
         <p className="text-sm text-muted-foreground">{description}</p>
       </div>
-      <Button type="button" onClick={onAdd}>
-        <Plus className="h-4 w-4" />
-        Add {singularTitle}
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" variant="outline" className="gap-2" onClick={onImport}>
+          <Upload className="h-4 w-4" />
+          Import
+        </Button>
+        <Button type="button" className="gap-2" onClick={onAdd}>
+          <Plus className="h-4 w-4" />
+          Add {singularTitle}
+        </Button>
+      </div>
     </div>
   );
 }

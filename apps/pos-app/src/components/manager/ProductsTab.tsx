@@ -9,6 +9,7 @@ import {
   RefreshCw,
   Search,
   Trash2,
+  Upload,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import ProductManagementDialog from "@/components/pos/ProductManagementDialog";
+import BulkImportDialog from "@/components/import/BulkImportDialog";
 import {
   bulkGenerateMissingProductBarcodes,
   deleteProduct,
@@ -68,6 +70,7 @@ export default function ProductsTab({ onNavigate }: Props) {
   const [deleteMode, setDeleteMode] = useState<"soft" | "hard" | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [barcodeBatchRunning, setBarcodeBatchRunning] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
 
   const loadProducts = async () => {
     setLoading(true);
@@ -183,6 +186,10 @@ export default function ProductsTab({ onNavigate }: Props) {
                     <AlertCircle className="h-4 w-4" />
                   )}
                   Missing barcodes
+                </Button>
+                <Button type="button" variant="outline" className="gap-2" onClick={() => setImportDialogOpen(true)}>
+                  <Upload className="h-4 w-4" />
+                  Import Products
                 </Button>
                 <Button
                   type="button"
@@ -434,6 +441,14 @@ export default function ProductsTab({ onNavigate }: Props) {
         confirmDisabled={deleting}
         cancelDisabled={deleting}
         confirmContent={deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : undefined}
+      />
+      <BulkImportDialog
+        open={importDialogOpen}
+        onOpenChange={setImportDialogOpen}
+        entityType="product"
+        onImportComplete={() => {
+          void loadProducts();
+        }}
       />
     </>
   );

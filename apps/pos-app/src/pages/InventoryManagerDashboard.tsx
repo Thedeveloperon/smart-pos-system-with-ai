@@ -7,6 +7,7 @@ import ManagerWorkspace from "@/components/manager/ManagerWorkspace";
 import PurchasesWorkspace from "@/components/purchases/PurchasesWorkspace";
 import ReportsPage from "@/components/reports/ReportsPage";
 import InventoryProductsWorkspace from "@/components/pos/InventoryProductsWorkspace";
+import BulkImportWorkspace from "@/components/import/BulkImportWorkspace";
 
 const InventoryDashboardTab = lazy(() => import("@/components/inventory/InventoryDashboardTab"));
 const CustomersWorkspace = lazy(() => import("@/components/customers/CustomersWorkspace"));
@@ -16,10 +17,10 @@ const BatchesTab = lazy(() => import("@/components/inventory/BatchesTab"));
 const StocktakeTab = lazy(() => import("@/components/inventory/StocktakeTab"));
 const WarrantyClaimsTab = lazy(() => import("@/components/inventory/WarrantyClaimsTab"));
 
-type ModuleTab = "inventory" | "products" | "customers" | "purchases" | "reports" | "manager";
+type ModuleTab = "inventory" | "products" | "customers" | "purchases" | "reports" | "manager" | "bulk-import";
 type InventoryTab = "overview" | "movements" | "serials" | "batches" | "stocktake" | "claims";
 
-const TAB_VALUES: ModuleTab[] = ["inventory", "products", "customers", "purchases", "reports", "manager"];
+const TAB_VALUES: ModuleTab[] = ["inventory", "products", "customers", "purchases", "reports", "manager", "bulk-import"];
 
 const TabFallback = () => (
   <div className="space-y-3">
@@ -142,6 +143,12 @@ export default function InventoryManagerDashboard() {
                   >
                     Product Manager
                   </TabsTrigger>
+                  <TabsTrigger
+                    value="bulk-import"
+                    className="rounded-lg px-4 py-2 text-sm font-semibold text-pos-header-foreground/80 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+                  >
+                    Bulk Import
+                  </TabsTrigger>
                 </TabsList>
               </Tabs>
             </div>
@@ -210,6 +217,9 @@ export default function InventoryManagerDashboard() {
           </TabsContent>
           <TabsContent value="manager" className="mt-0">
             <ManagerWorkspace />
+          </TabsContent>
+          <TabsContent value="bulk-import" className="mt-0">
+            <BulkImportWorkspace />
           </TabsContent>
         </Tabs>
       </main>

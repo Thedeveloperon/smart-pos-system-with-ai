@@ -55,6 +55,8 @@
     --input: 214 20% 90%;
     --ring: 152 60% 40%;
     --primary-soft: 152 55% 94%;
+    --nav: 220 25% 12%;
+    --nav-foreground: 210 20% 95%;
 
     --radius: 0.75rem;
 
@@ -92,6 +94,8 @@
     --input: 220 15% 18%;
     --ring: 152 60% 45%;
     --primary-soft: 152 40% 15%;
+    --nav: 220 25% 8%;
+    --nav-foreground: 210 20% 95%;
     --info: 204 75% 56%;
     --info-foreground: 0 0% 100%;
     --brand: var(--primary);
