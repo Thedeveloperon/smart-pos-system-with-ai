@@ -26,7 +26,7 @@ public sealed class ProductService(
     private const string CategoryDeleteProductLinksMessage = "This category is linked to products and cannot be permanently deleted.";
     private const string SupplierDeleteRequiresDeactivateMessage = "Deactivate the supplier before deleting.";
     private const string SupplierDeleteOnlyInactiveMessage = "Only inactive suppliers can be permanently deleted.";
-    private const string SupplierDeleteProductLinksMessage = "This supplier has product links and cannot be permanently deleted.";
+    private const string SupplierDeleteProductLinksMessage = "This supplier is linked to active products and cannot be permanently deleted.";
     private const string SupplierDeletePurchaseHistoryMessage = "This supplier has purchase history and cannot be permanently deleted.";
     private const string SupplierDeleteBatchHistoryMessage = "This supplier has batch history and cannot be permanently deleted.";
 
@@ -1331,15 +1331,15 @@ public sealed class ProductService(
                 IsActive = x.IsActive,
                 LinkedProductCount = x.ProductSuppliers.Count(y => y.IsActive),
                 CanDelete = !x.IsActive &&
-                            !x.ProductSuppliers.Any() &&
+                            !x.ProductSuppliers.Any(y => y.IsActive) &&
                             !x.PurchaseBills.Any() &&
                             !x.ProductBatches.Any(),
                 DeleteBlockReason = x.IsActive
                     ? SupplierDeleteRequiresDeactivateMessage
-                    : x.ProductSuppliers.Any()
+                    : x.ProductSuppliers.Any(y => y.IsActive)
                         ? SupplierDeleteProductLinksMessage
-                        : x.PurchaseBills.Any()
-                            ? SupplierDeletePurchaseHistoryMessage
+                    : x.PurchaseBills.Any()
+                        ? SupplierDeletePurchaseHistoryMessage
                             : x.ProductBatches.Any()
                                 ? SupplierDeleteBatchHistoryMessage
                                 : null,
@@ -2190,7 +2190,7 @@ public sealed class ProductService(
 
         var hasProductLinks = await dbContext.ProductSuppliers
             .AsNoTracking()
-            .AnyAsync(x => x.SupplierId == supplierId, cancellationToken);
+            .AnyAsync(x => x.SupplierId == supplierId && x.IsActive, cancellationToken);
         if (hasProductLinks)
         {
             return new SupplierDeleteAvailability(false, SupplierDeleteProductLinksMessage);

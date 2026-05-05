@@ -229,8 +229,77 @@ public sealed class StockPlanningTests(CustomWebApplicationFactory factory)
         var errorPayload = JsonNode.Parse(await hardDeleteResponse.Content.ReadAsStringAsync())?.AsObject()
                            ?? throw new InvalidOperationException("Response body was empty.");
         Assert.Equal(
-            "This supplier has product links and cannot be permanently deleted.",
+            "This supplier is linked to active products and cannot be permanently deleted.",
             TestJson.GetString(errorPayload, "message"));
+    }
+
+    [Fact]
+    public async Task SupplierHardDelete_ShouldAllowInactiveSupplierWithOnlyInactiveProductLinks()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+
+        var supplier = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/suppliers", new
+            {
+                name = $"Inactive Link Supplier {runId}",
+                is_active = true,
+                brand_ids = Array.Empty<Guid>()
+            }));
+        var supplierId = Guid.Parse(TestJson.GetString(supplier, "supplier_id"));
+
+        var product = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"Inactive Link Product {runId}",
+                sku = $"ILP-{runId}",
+                barcode = (string?)null,
+                category_id = (Guid?)null,
+                brand_id = (Guid?)null,
+                unit_price = 100m,
+                cost_price = 60m,
+                initial_stock_quantity = 2m,
+                reorder_level = 1m,
+                safety_stock = 0m,
+                target_stock_level = 4m,
+                allow_negative_stock = false,
+                is_active = true
+            }));
+        var productId = Guid.Parse(TestJson.GetString(product, "product_id"));
+
+        var mappingResponse = await client.PutAsJsonAsync($"/api/products/{productId}/suppliers", new
+        {
+            supplier_id = supplierId,
+            is_preferred = true,
+            is_active = true
+        });
+        Assert.Equal(HttpStatusCode.OK, mappingResponse.StatusCode);
+
+        var inactiveMappingResponse = await client.PutAsJsonAsync($"/api/products/{productId}/suppliers", new
+        {
+            supplier_id = supplierId,
+            is_preferred = true,
+            is_active = false
+        });
+        Assert.Equal(HttpStatusCode.OK, inactiveMappingResponse.StatusCode);
+
+        var deactivateResponse = await TestJson.ReadObjectAsync(
+            await client.PutAsJsonAsync($"/api/suppliers/{supplierId}", new
+            {
+                name = $"Inactive Link Supplier {runId}",
+                is_active = false,
+                brand_ids = Array.Empty<Guid>()
+            }));
+        Assert.False(deactivateResponse["is_active"]?.GetValue<bool>() ?? true);
+
+        var supplierList = await TestJson.ReadObjectAsync(
+            await client.GetAsync("/api/suppliers?include_inactive=true"));
+        var listItem = FindObjectInArray(supplierList, "items", "supplier_id", supplierId.ToString());
+        Assert.True(listItem["can_delete"]?.GetValue<bool>() ?? false);
+
+        var hardDeleteResponse = await client.DeleteAsync($"/api/suppliers/{supplierId}/hard-delete");
+        Assert.Equal(HttpStatusCode.NoContent, hardDeleteResponse.StatusCode);
     }
 
     [Fact]
