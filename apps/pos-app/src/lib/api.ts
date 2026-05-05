@@ -3074,6 +3074,108 @@ export async function fetchCategories(includeInactive = false) {
   return response.items;
 }
 
+export type ImportRowResult = {
+  row_index: number;
+  status: "ok" | "skipped" | "updated" | "error";
+  entity_id?: string | null;
+  name?: string | null;
+  error?: string | null;
+};
+
+export type ImportSummary = {
+  total: number;
+  inserted: number;
+  updated: number;
+  skipped: number;
+  errors: number;
+  rows: ImportRowResult[];
+};
+
+export type BulkImportBrandRow = {
+  row_index: number;
+  name: string;
+  code?: string | null;
+  description?: string | null;
+  is_active: boolean;
+};
+
+export type BulkImportCategoryRow = {
+  row_index: number;
+  name: string;
+  description?: string | null;
+  is_active: boolean;
+};
+
+export type BulkImportProductRow = {
+  row_index: number;
+  name: string;
+  sku?: string | null;
+  barcode?: string | null;
+  category_name?: string | null;
+  brand_name?: string | null;
+  unit_price: number;
+  cost_price: number;
+  initial_stock_quantity: number;
+  reorder_level: number;
+  safety_stock: number;
+  target_stock_level: number;
+  allow_negative_stock: boolean;
+  is_active: boolean;
+};
+
+export type BulkImportCustomerRow = {
+  row_index: number;
+  name: string;
+  code?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  date_of_birth?: string | null;
+  credit_limit: number;
+  notes?: string | null;
+  is_active: boolean;
+};
+
+export async function bulkImportBrands(rows: BulkImportBrandRow[], duplicateStrategy: "skip" | "update") {
+  return request<ImportSummary>("/api/import/brands", {
+    method: "POST",
+    body: JSON.stringify({
+      rows,
+      duplicate_strategy: duplicateStrategy,
+    }),
+  });
+}
+
+export async function bulkImportCategories(rows: BulkImportCategoryRow[], duplicateStrategy: "skip" | "update") {
+  return request<ImportSummary>("/api/import/categories", {
+    method: "POST",
+    body: JSON.stringify({
+      rows,
+      duplicate_strategy: duplicateStrategy,
+    }),
+  });
+}
+
+export async function bulkImportProducts(rows: BulkImportProductRow[], duplicateStrategy: "skip" | "update") {
+  return request<ImportSummary>("/api/import/products", {
+    method: "POST",
+    body: JSON.stringify({
+      rows,
+      duplicate_strategy: duplicateStrategy,
+    }),
+  });
+}
+
+export async function bulkImportCustomers(rows: BulkImportCustomerRow[], duplicateStrategy: "skip" | "update") {
+  return request<ImportSummary>("/api/import/customers", {
+    method: "POST",
+    body: JSON.stringify({
+      rows,
+      duplicate_strategy: duplicateStrategy,
+    }),
+  });
+}
+
 type BackendCustomerPriceTierItem = {
   price_tier_id: string;
   name: string;

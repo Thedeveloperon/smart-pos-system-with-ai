@@ -18,11 +18,16 @@ vi.mock("@/components/manager/SuppliersTab", () => ({
   default: () => <div>Suppliers panel</div>,
 }));
 
+vi.mock("@/components/import/ShopImportWizard", () => ({
+  default: () => <div>Shop import wizard</div>,
+}));
+
 describe("ManagerWorkspace", () => {
   it("switches the controlled manager tab when products requests navigation", () => {
     render(<ManagerWorkspace />);
 
     expect(screen.getByRole("tab", { name: "Products" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("button", { name: "Import Shop Data" })).toBeInTheDocument();
     expect(screen.getByText("Mock products workspace")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Mock products workspace" }));

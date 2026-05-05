@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
 import {
   ArrowDown,
   ArrowLeft,
@@ -15,6 +15,7 @@ import {
   Star,
   StickyNote,
   Trash2,
+  Upload,
   X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -37,6 +38,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import BulkImportDialog from "@/components/import/BulkImportDialog";
 import { ApiError, requestJson } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import CustomerSearchInput from "@/components/customers/CustomerSearchInput";
@@ -392,41 +394,39 @@ export default function CustomersWorkspace() {
 
   const selectedCustomer = customers.find((customer) => customer.id === detailId) ?? null;
 
+  const loadWorkspace = useCallback(async (isCancelled: () => boolean = () => false) => {
+    setIsLoading(true);
+    setLoadError(null);
+
+    try {
+      const [nextTiers, nextCustomers] = await Promise.all([fetchCustomerPriceTiers(), fetchCustomerDirectory()]);
+      if (isCancelled()) {
+        return;
+      }
+
+      setTiers(nextTiers);
+      setCustomers(nextCustomers);
+      setLoadedDetailIds({});
+    } catch (error) {
+      if (isCancelled()) {
+        return;
+      }
+
+      setLoadError(error instanceof ApiError ? error.message : "Unable to load customer data from the backend.");
+    } finally {
+      if (!isCancelled()) {
+        setIsLoading(false);
+      }
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
-
-    const loadWorkspace = async () => {
-      setIsLoading(true);
-      setLoadError(null);
-
-      try {
-        const [nextTiers, nextCustomers] = await Promise.all([fetchCustomerPriceTiers(), fetchCustomerDirectory()]);
-        if (cancelled) {
-          return;
-        }
-
-        setTiers(nextTiers);
-        setCustomers(nextCustomers);
-        setLoadedDetailIds({});
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-
-        setLoadError(error instanceof ApiError ? error.message : "Unable to load customer data from the backend.");
-      } finally {
-        if (!cancelled) {
-          setIsLoading(false);
-        }
-      }
-    };
-
-    void loadWorkspace();
-
+    void loadWorkspace(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadWorkspace]);
 
   useEffect(() => {
     if (!detailId || loadedDetailIds[detailId]) {
@@ -695,6 +695,9 @@ export default function CustomersWorkspace() {
             onToggleActive={toggleCustomerActive}
             onDelete={setDeleteCustomerTarget}
             onOpenDetails={setDetailId}
+            onImportComplete={() => {
+              void loadWorkspace();
+            }}
           />
         </TabsContent>
 
@@ -827,6 +830,7 @@ function DirectoryPanel({
   onToggleActive,
   onDelete,
   onOpenDetails,
+  onImportComplete,
 }: {
   customers: Customer[];
   tiers: PriceTier[];
@@ -836,9 +840,11 @@ function DirectoryPanel({
   onToggleActive: (id: string) => void;
   onDelete: (customer: Customer) => void;
   onOpenDetails: (id: string) => void;
+  onImportComplete: () => void;
 }) {
   const [search, setSearch] = useState("");
   const [showInactive, setShowInactive] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
 
   const filteredCustomers = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -862,10 +868,16 @@ function DirectoryPanel({
       <CardHeader className="space-y-3 pb-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <CardTitle className="text-base font-semibold">Customer Directory</CardTitle>
-          <Button onClick={onCreate} className="gap-1">
-            <Plus className="h-4 w-4" />
-            New customer
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" className="gap-2" onClick={() => setImportDialogOpen(true)}>
+              <Upload className="h-4 w-4" />
+              Import
+            </Button>
+            <Button onClick={onCreate} className="gap-1">
+              <Plus className="h-4 w-4" />
+              New customer
+            </Button>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <CustomerSearchInput
@@ -984,6 +996,12 @@ function DirectoryPanel({
           </TableBody>
         </Table>
       </CardContent>
+      <BulkImportDialog
+        open={importDialogOpen}
+        onOpenChange={setImportDialogOpen}
+        entityType="customer"
+        onImportComplete={onImportComplete}
+      />
     </Card>
   );
 }

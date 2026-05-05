@@ -102,6 +102,7 @@ describe("InventoryManagerDashboard", () => {
     expect(screen.getByRole("tab", { name: "Purchases" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Reports" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Product Manager" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Bulk Import" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Products" })).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByRole("heading", { name: "Products" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Current sale" })).not.toBeInTheDocument();

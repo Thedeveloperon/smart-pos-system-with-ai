@@ -28,6 +28,10 @@ export default {
           foreground: "hsl(var(--primary-foreground))",
         },
         "primary-soft": "hsl(var(--primary-soft))",
+        nav: {
+          DEFAULT: "hsl(var(--nav))",
+          foreground: "hsl(var(--nav-foreground))",
+        },
         secondary: {
           DEFAULT: "hsl(var(--secondary))",
           foreground: "hsl(var(--secondary-foreground))",
