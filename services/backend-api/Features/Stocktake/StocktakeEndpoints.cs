@@ -617,7 +617,8 @@ public static class StocktakeEndpoints
                 })
                 .ToListAsync(cancellationToken);
             var inventoryChangedSinceCompletion = stockMovements.Any(movement =>
-                productIds.Contains(movement.ProductId) &&
+                movement.ProductId.HasValue &&
+                productIds.Contains(movement.ProductId.Value) &&
                 movement.CreatedAtUtc > session.CompletedAtUtc.Value &&
                 (!session.StoreId.HasValue || movement.StoreId == session.StoreId.Value));
             if (inventoryChangedSinceCompletion)

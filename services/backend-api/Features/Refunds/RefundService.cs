@@ -105,7 +105,9 @@ public sealed class RefundService(
             {
                 SaleItemId = saleItem.Id,
                 ProductId = saleItem.ProductId,
+                BundleId = saleItem.BundleId,
                 ProductNameSnapshot = saleItem.ProductNameSnapshot,
+                BundleNameSnapshot = saleItem.BundleNameSnapshot,
                 Quantity = requestItem.Quantity,
                 SubtotalAmount = lineSubtotal,
                 DiscountAmount = lineDiscount,
@@ -160,9 +162,12 @@ public sealed class RefundService(
         var refundNumber = CreateRefundNumber();
         var now = DateTimeOffset.UtcNow;
         var productStoreIds = await LoadProductStoreIdsAsync(
-            refundItems.Select(x => x.ProductId),
+            refundItems.Where(x => x.ProductId.HasValue).Select(x => x.ProductId!.Value),
             cancellationToken);
-        var resolvedSaleStoreId = ResolveStoreId(productStoreIds.Values, "Refund");
+        var bundleStoreIds = await LoadBundleStoreIdsAsync(
+            refundItems.Where(x => x.BundleId.HasValue).Select(x => x.BundleId!.Value),
+            cancellationToken);
+        var resolvedSaleStoreId = ResolveStoreId(productStoreIds.Values.Concat(bundleStoreIds.Values), "Refund");
         sale.StoreId = resolvedSaleStoreId;
 
         var refund = new Refund
@@ -210,87 +215,132 @@ public sealed class RefundService(
 
         foreach (var refundItem in refundItems)
         {
-            var product = await dbContext.Products
-                .Include(x => x.Inventory)
-                .Include(x => x.SerialNumbers)
-                .Include(x => x.ProductBatches)
-                .FirstOrDefaultAsync(x => x.Id == refundItem.ProductId, cancellationToken)
-                ?? throw new InvalidOperationException("Product not found for refund item.");
-
-            var inventoryRecord = product.Inventory;
-
-            if (inventoryRecord is null)
+            if (refundItem.ProductId.HasValue)
             {
-                var productStoreId = productStoreIds[refundItem.ProductId];
-                inventoryRecord = new InventoryRecord
+                var productId = refundItem.ProductId.Value;
+                var product = await dbContext.Products
+                    .Include(x => x.Inventory)
+                    .Include(x => x.SerialNumbers)
+                    .Include(x => x.ProductBatches)
+                    .FirstOrDefaultAsync(x => x.Id == productId, cancellationToken)
+                    ?? throw new InvalidOperationException("Product not found for refund item.");
+
+                var inventoryRecord = product.Inventory;
+
+                if (inventoryRecord is null)
                 {
-                    ProductId = refundItem.ProductId,
-                    StoreId = productStoreId,
+                    var productStoreId = productStoreIds[productId];
+                    inventoryRecord = new InventoryRecord
+                    {
+                        ProductId = productId,
+                        StoreId = productStoreId,
+                        QuantityOnHand = 0m,
+                        ReorderLevel = 0m,
+                        SafetyStock = 0m,
+                        TargetStockLevel = 0m,
+                        AllowNegativeStock = true,
+                        Product = null!
+                    };
+                    dbContext.Inventory.Add(inventoryRecord);
+                    product.Inventory = inventoryRecord;
+                }
+                inventoryRecord.StoreId = productStoreIds[productId];
+                inventoryRecord.UpdatedAtUtc = now;
+
+                await stockMovementHelper.RecordMovementAsync(
+                    storeId: productStoreIds[productId],
+                    productId: productId,
+                    type: StockMovementType.Refund,
+                    quantityChange: refundItem.Quantity,
+                    refType: StockMovementRef.Refund,
+                    refId: refund.Id,
+                    batchId: null,
+                    serialNumber: null,
+                    reason: reason,
+                    userId: null,
+                    cancellationToken);
+
+                if (product.IsBatchTracked)
+                {
+                    await RestoreBatchQuantitiesAsync(
+                        product,
+                        sale.Id,
+                        refundItem.Quantity,
+                        productStoreIds[productId],
+                        now,
+                        reason,
+                        cancellationToken);
+                }
+
+                if (product.IsSerialTracked)
+                {
+                    if (refundItem.Quantity <= 0m || refundItem.Quantity != decimal.Truncate(refundItem.Quantity))
+                    {
+                        throw new InvalidOperationException("Serial-tracked refund quantities must be whole numbers.");
+                    }
+
+                    var serialsToReturn = product.SerialNumbers
+                        .Where(x => x.SaleId == sale.Id &&
+                                    x.Status == SerialNumberStatus.Sold)
+                        .OrderBy(x => x.CreatedAtUtc)
+                        .Take((int)refundItem.Quantity)
+                        .ToList();
+
+                    if (serialsToReturn.Count != (int)refundItem.Quantity)
+                    {
+                        throw new InvalidOperationException(
+                            $"Not enough sold serial numbers exist to refund '{refundItem.ProductNameSnapshot}'.");
+                    }
+
+                    foreach (var serial in serialsToReturn)
+                    {
+                        serial.Status = SerialNumberStatus.Returned;
+                        serial.RefundId = refund.Id;
+                        serial.UpdatedAtUtc = now;
+                    }
+                }
+
+                continue;
+            }
+
+            if (!refundItem.BundleId.HasValue)
+            {
+                throw new InvalidOperationException("Refund item must reference a product or bundle.");
+            }
+
+            var bundleId = refundItem.BundleId.Value;
+            var bundle = await dbContext.Bundles
+                .Include(x => x.Inventory)
+                .FirstOrDefaultAsync(x => x.Id == bundleId, cancellationToken)
+                ?? throw new InvalidOperationException("Bundle not found for refund item.");
+
+            var bundleInventory = bundle.Inventory;
+            if (bundleInventory is null)
+            {
+                bundleInventory = new BundleInventoryRecord
+                {
+                    BundleId = bundleId,
                     QuantityOnHand = 0m,
                     ReorderLevel = 0m,
-                    SafetyStock = 0m,
-                    TargetStockLevel = 0m,
                     AllowNegativeStock = true,
-                    Product = null!
+                    Bundle = null!
                 };
-                dbContext.Inventory.Add(inventoryRecord);
-                product.Inventory = inventoryRecord;
+                dbContext.BundleInventory.Add(bundleInventory);
+                bundle.Inventory = bundleInventory;
             }
-            inventoryRecord.StoreId = productStoreIds[refundItem.ProductId];
-            inventoryRecord.UpdatedAtUtc = now;
 
-            await stockMovementHelper.RecordMovementAsync(
-                storeId: productStoreIds[refundItem.ProductId],
-                productId: refundItem.ProductId,
+            bundleInventory.UpdatedAtUtc = now;
+
+            await stockMovementHelper.RecordBundleMovementAsync(
+                storeId: bundleStoreIds[bundleId],
+                bundleId: bundleId,
                 type: StockMovementType.Refund,
                 quantityChange: refundItem.Quantity,
                 refType: StockMovementRef.Refund,
                 refId: refund.Id,
-                batchId: null,
-                serialNumber: null,
                 reason: reason,
                 userId: null,
-                cancellationToken);
-
-            if (product.IsBatchTracked)
-            {
-                await RestoreBatchQuantitiesAsync(
-                    product,
-                    sale.Id,
-                    refundItem.Quantity,
-                    productStoreIds[refundItem.ProductId],
-                    now,
-                    reason,
-                    cancellationToken);
-            }
-
-            if (product.IsSerialTracked)
-            {
-                if (refundItem.Quantity <= 0m || refundItem.Quantity != decimal.Truncate(refundItem.Quantity))
-                {
-                    throw new InvalidOperationException("Serial-tracked refund quantities must be whole numbers.");
-                }
-
-                var serialsToReturn = product.SerialNumbers
-                    .Where(x => x.SaleId == sale.Id &&
-                                x.Status == SerialNumberStatus.Sold)
-                    .OrderBy(x => x.CreatedAtUtc)
-                    .Take((int)refundItem.Quantity)
-                    .ToList();
-
-                if (serialsToReturn.Count != (int)refundItem.Quantity)
-                {
-                    throw new InvalidOperationException(
-                        $"Not enough sold serial numbers exist to refund '{refundItem.ProductNameSnapshot}'.");
-                }
-
-                foreach (var serial in serialsToReturn)
-                {
-                    serial.Status = SerialNumberStatus.Returned;
-                    serial.RefundId = refund.Id;
-                    serial.UpdatedAtUtc = now;
-                }
-            }
+                cancellationToken: cancellationToken);
         }
 
         dbContext.Ledger.Add(new LedgerEntry
@@ -440,7 +490,10 @@ public sealed class RefundService(
             {
                 SaleItemId = x.SaleItemId,
                 ProductId = x.ProductId,
+                ItemType = x.BundleId.HasValue ? "bundle" : "product",
                 ProductName = x.ProductNameSnapshot,
+                BundleId = x.BundleId,
+                BundleName = x.BundleNameSnapshot,
                 Quantity = x.Quantity,
                 SubtotalAmount = x.SubtotalAmount,
                 DiscountAmount = x.DiscountAmount,
@@ -534,6 +587,11 @@ public sealed class RefundService(
             .Distinct()
             .ToArray();
 
+        if (distinctProductIds.Length == 0)
+        {
+            return [];
+        }
+
         var storeIds = await dbContext.Products
             .AsNoTracking()
             .Where(x => distinctProductIds.Contains(x.Id))
@@ -543,6 +601,33 @@ public sealed class RefundService(
         if (storeIds.Count != distinctProductIds.Length)
         {
             throw new InvalidOperationException("Some products are missing.");
+        }
+
+        return storeIds;
+    }
+
+    private async Task<Dictionary<Guid, Guid?>> LoadBundleStoreIdsAsync(
+        IEnumerable<Guid> bundleIds,
+        CancellationToken cancellationToken)
+    {
+        var distinctBundleIds = bundleIds
+            .Distinct()
+            .ToArray();
+
+        if (distinctBundleIds.Length == 0)
+        {
+            return [];
+        }
+
+        var storeIds = await dbContext.Bundles
+            .AsNoTracking()
+            .Where(x => distinctBundleIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.StoreId })
+            .ToDictionaryAsync(x => x.Id, x => x.StoreId, cancellationToken);
+
+        if (storeIds.Count != distinctBundleIds.Length)
+        {
+            throw new InvalidOperationException("Some bundles are missing.");
         }
 
         return storeIds;

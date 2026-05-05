@@ -77,7 +77,11 @@ public sealed class ProductService(
                 CostPrice = x.CostPrice,
                 StockQuantity = x.Inventory != null ? x.Inventory.QuantityOnHand : 0m,
                 ReorderLevel = x.Inventory != null ? x.Inventory.ReorderLevel : 0m,
-                IsSerialTracked = x.IsSerialTracked
+                IsSerialTracked = x.IsSerialTracked,
+                HasPackOption = x.HasPackOption,
+                PackSize = x.PackSize,
+                PackPrice = x.PackPrice,
+                PackLabel = x.PackLabel
             })
             .ToListAsync(cancellationToken);
 
@@ -102,7 +106,11 @@ public sealed class ProductService(
                     CostPrice = RoundMoney(item.CostPrice),
                     StockQuantity = stockQuantity,
                     IsLowStock = stockQuantity <= alertLevel,
-                    IsSerialTracked = item.IsSerialTracked
+                    IsSerialTracked = item.IsSerialTracked,
+                    HasPackOption = item.HasPackOption,
+                    PackSize = item.PackSize,
+                    PackPrice = item.PackPrice,
+                    PackLabel = item.PackLabel
                 };
             }).ToList()
         };
@@ -460,6 +468,11 @@ public sealed class ProductService(
         ValidateQuantityValue(request.ReorderLevel, "Reorder level cannot be negative.");
         ValidateQuantityValue(request.SafetyStock, "Safety stock cannot be negative.");
         ValidateQuantityValue(request.TargetStockLevel, "Target stock level cannot be negative.");
+        var normalizedPack = NormalizePackOptions(
+            request.HasPackOption,
+            request.PackSize,
+            request.PackPrice,
+            request.PackLabel);
 
         var normalizedTargetStockLevel = request.TargetStockLevel > 0m
             ? request.TargetStockLevel
@@ -486,6 +499,10 @@ public sealed class ProductService(
             BrandId = request.BrandId,
             UnitPrice = RoundMoney(request.UnitPrice),
             CostPrice = RoundMoney(request.CostPrice),
+            HasPackOption = normalizedPack.HasPackOption,
+            PackSize = normalizedPack.PackSize,
+            PackPrice = normalizedPack.PackPrice,
+            PackLabel = normalizedPack.PackLabel,
             IsSerialTracked = request.IsSerialTracked,
             WarrantyMonths = Math.Max(0, request.WarrantyMonths),
             IsBatchTracked = request.IsBatchTracked,
@@ -523,6 +540,10 @@ public sealed class ProductService(
                 product.BrandId,
                 product.UnitPrice,
                 product.CostPrice,
+                product.HasPackOption,
+                product.PackSize,
+                product.PackPrice,
+                product.PackLabel,
                 inventory.InitialStockQuantity,
                 inventory.QuantityOnHand,
                 inventory.ReorderLevel,
@@ -587,6 +608,11 @@ public sealed class ProductService(
         ValidateQuantityValue(request.ReorderLevel, "Reorder level cannot be negative.");
         ValidateQuantityValue(request.SafetyStock, "Safety stock cannot be negative.");
         ValidateQuantityValue(request.TargetStockLevel, "Target stock level cannot be negative.");
+        var normalizedPack = NormalizePackOptions(
+            request.HasPackOption,
+            request.PackSize,
+            request.PackPrice,
+            request.PackLabel);
 
         var normalizedTargetStockLevel = request.TargetStockLevel > 0m
             ? request.TargetStockLevel
@@ -611,6 +637,10 @@ public sealed class ProductService(
             product.BrandId,
             product.UnitPrice,
             product.CostPrice,
+            product.HasPackOption,
+            product.PackSize,
+            product.PackPrice,
+            product.PackLabel,
             product.IsSerialTracked,
             product.WarrantyMonths,
             product.IsBatchTracked,
@@ -631,6 +661,10 @@ public sealed class ProductService(
         product.BrandId = request.BrandId;
         product.UnitPrice = RoundMoney(request.UnitPrice);
         product.CostPrice = RoundMoney(request.CostPrice);
+        product.HasPackOption = normalizedPack.HasPackOption;
+        product.PackSize = normalizedPack.PackSize;
+        product.PackPrice = normalizedPack.PackPrice;
+        product.PackLabel = normalizedPack.PackLabel;
         product.IsSerialTracked = request.IsSerialTracked;
         product.WarrantyMonths = Math.Max(0, request.WarrantyMonths);
         product.IsBatchTracked = request.IsBatchTracked;
@@ -708,6 +742,10 @@ public sealed class ProductService(
                 product.BrandId,
                 product.UnitPrice,
                 product.CostPrice,
+                product.HasPackOption,
+                product.PackSize,
+                product.PackPrice,
+                product.PackLabel,
                 InitialStockQuantity = product.Inventory.InitialStockQuantity,
                 CurrentStockQuantity = product.Inventory.QuantityOnHand,
                 ReorderLevel = product.Inventory.ReorderLevel,
@@ -2027,6 +2065,30 @@ public sealed class ProductService(
         }
     }
 
+    private static (bool HasPackOption, int PackSize, decimal? PackPrice, string? PackLabel) NormalizePackOptions(
+        bool hasPackOption,
+        int packSize,
+        decimal? packPrice,
+        string? packLabel)
+    {
+        if (!hasPackOption)
+        {
+            return (false, 0, null, null);
+        }
+
+        if (packSize < 2)
+        {
+            throw new InvalidOperationException("Pack size must be at least 2 when pack option is enabled.");
+        }
+
+        if (!packPrice.HasValue || packPrice.Value <= 0m)
+        {
+            throw new InvalidOperationException("Pack price must be greater than 0 when pack option is enabled.");
+        }
+
+        return (true, packSize, RoundMoney(packPrice.Value), NormalizeOptional(packLabel));
+    }
+
     private static ProductCatalogItemResponse ToCatalogItemResponse(Product product, decimal threshold)
     {
         var stockQuantity = RoundQuantity(product.Inventory?.QuantityOnHand ?? 0m);
@@ -2059,6 +2121,10 @@ public sealed class ProductService(
             WarrantyMonths = product.WarrantyMonths,
             IsBatchTracked = product.IsBatchTracked,
             ExpiryAlertDays = product.ExpiryAlertDays,
+            HasPackOption = product.HasPackOption,
+            PackSize = product.PackSize,
+            PackPrice = product.PackPrice,
+            PackLabel = product.PackLabel,
             ProductSuppliers = product.ProductSuppliers
                 .Select(ToProductSupplierItemResponse)
                 .OrderByDescending(x => x.IsPreferred)

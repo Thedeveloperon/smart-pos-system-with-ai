@@ -33,6 +33,14 @@ public sealed class ProductSearchItem
     public bool IsLowStock { get; set; }
     [JsonPropertyName("is_serial_tracked")]
     public bool IsSerialTracked { get; set; }
+    [JsonPropertyName("has_pack_option")]
+    public bool HasPackOption { get; set; }
+    [JsonPropertyName("pack_size")]
+    public int PackSize { get; set; }
+    [JsonPropertyName("pack_price")]
+    public decimal? PackPrice { get; set; }
+    [JsonPropertyName("pack_label")]
+    public string? PackLabel { get; set; }
 }
 
 public sealed class BrandListResponse
@@ -391,6 +399,14 @@ public sealed class ProductCatalogItemResponse
 
     [JsonPropertyName("expiry_alert_days")]
     public int ExpiryAlertDays { get; set; }
+    [JsonPropertyName("has_pack_option")]
+    public bool HasPackOption { get; set; }
+    [JsonPropertyName("pack_size")]
+    public int PackSize { get; set; }
+    [JsonPropertyName("pack_price")]
+    public decimal? PackPrice { get; set; }
+    [JsonPropertyName("pack_label")]
+    public string? PackLabel { get; set; }
 
     [JsonPropertyName("product_suppliers")]
     public List<ProductSupplierItemResponse> ProductSuppliers { get; set; } = [];
@@ -454,6 +470,14 @@ public sealed class CreateProductRequest
 
     [JsonPropertyName("expiry_alert_days")]
     public int ExpiryAlertDays { get; set; } = 30;
+    [JsonPropertyName("has_pack_option")]
+    public bool HasPackOption { get; set; }
+    [JsonPropertyName("pack_size")]
+    public int PackSize { get; set; }
+    [JsonPropertyName("pack_price")]
+    public decimal? PackPrice { get; set; }
+    [JsonPropertyName("pack_label")]
+    public string? PackLabel { get; set; }
 
     [JsonPropertyName("is_active")]
     public bool IsActive { get; set; } = true;
@@ -511,6 +535,14 @@ public sealed class UpdateProductRequest
 
     [JsonPropertyName("expiry_alert_days")]
     public int ExpiryAlertDays { get; set; } = 30;
+    [JsonPropertyName("has_pack_option")]
+    public bool HasPackOption { get; set; }
+    [JsonPropertyName("pack_size")]
+    public int PackSize { get; set; }
+    [JsonPropertyName("pack_price")]
+    public decimal? PackPrice { get; set; }
+    [JsonPropertyName("pack_label")]
+    public string? PackLabel { get; set; }
 
     [JsonPropertyName("is_active")]
     public bool IsActive { get; set; } = true;

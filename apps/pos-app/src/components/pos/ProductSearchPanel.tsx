@@ -25,7 +25,7 @@ import { Label } from "@/components/ui/label";
 import { Camera, Check, ChevronsUpDown, Keyboard, Package, Plus, ScanBarcode, Search } from "lucide-react";
 import { BrowserMultiFormatReader, type IScannerControls } from "@zxing/browser";
 import { NotFoundException } from "@zxing/library";
-import { ApiError, lookupSerial } from "@/lib/api";
+import { ApiError, lookupSerial, searchBundles } from "@/lib/api";
 import ProductCard from "./ProductCard";
 import type { Product, SelectedSerial } from "./types";
 import { POS_SHORTCUT_INLINE_HINT, POS_SHORTCUT_LABELS } from "./shortcuts";
@@ -65,7 +65,18 @@ const resolveBrandName = (product: Product) => {
 
 interface ProductSearchPanelProps {
   products: Product[];
-  onAddToCart: (product: Product, qty: number, selectedSerial?: SelectedSerial) => void;
+  onAddToCart: (
+    product: Product,
+    qty: number,
+    selectedSerial?: SelectedSerial,
+    options?: {
+      sellMode?: "unit" | "pack" | "bundle";
+      bundleId?: string;
+      bundleName?: string;
+      packSize?: number;
+      packLabel?: string | null;
+    },
+  ) => void;
   showShortcutHints?: boolean;
   expertMode?: boolean;
 }
@@ -94,6 +105,8 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
     const [serialDialogValue, setSerialDialogValue] = useState("");
     const [serialDialogError, setSerialDialogError] = useState<string | null>(null);
     const [serialDialogSubmitting, setSerialDialogSubmitting] = useState(false);
+    const [packChoiceProduct, setPackChoiceProduct] = useState<Product | null>(null);
+    const [bundleResults, setBundleResults] = useState<Product[]>([]);
     const searchInputRef = useRef<HTMLInputElement>(null);
     const cameraVideoRef = useRef<HTMLVideoElement>(null);
     const scannerControlsRef = useRef<IScannerControls | null>(null);
@@ -157,7 +170,17 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
             setSerialDialogValue("");
             setSerialDialogError(null);
           } else {
-            onAddToCart(matchedProduct, 1);
+            if (matchedProduct.isBundle) {
+              onAddToCart(matchedProduct, 1, undefined, {
+                sellMode: "bundle",
+                bundleId: matchedProduct.bundleId,
+                bundleName: matchedProduct.name,
+              });
+            } else if (matchedProduct.hasPackOption && (matchedProduct.packSize ?? 0) >= 2 && (matchedProduct.packPrice ?? 0) > 0) {
+              setPackChoiceProduct(matchedProduct);
+            } else {
+              onAddToCart(matchedProduct, 1, undefined, { sellMode: "unit" });
+            }
           }
           setSearchQuery("");
           setBarcodeFeedback(null);
@@ -176,6 +199,46 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
         }
       },
       [focusAndSelectSearch, onAddToCart, products, resetScannerBurst],
+    );
+
+    const addProductToCart = useCallback(
+      (
+        product: Product,
+        qty: number,
+        selectedSerial?: SelectedSerial,
+        mode: "unit" | "pack" | "bundle" = "unit",
+      ) => {
+        if (mode === "bundle" || product.isBundle) {
+          onAddToCart(product, qty, undefined, {
+            sellMode: "bundle",
+            bundleId: product.bundleId,
+            bundleName: product.name,
+          });
+          return;
+        }
+
+        if (selectedSerial) {
+          onAddToCart(product, 1, selectedSerial, { sellMode: "unit" });
+          return;
+        }
+
+        if (mode === "pack") {
+          onAddToCart(product, qty, undefined, {
+            sellMode: "pack",
+            packSize: product.packSize ?? undefined,
+            packLabel: product.packLabel ?? null,
+          });
+          return;
+        }
+
+        if (product.hasPackOption && (product.packSize ?? 0) >= 2 && (product.packPrice ?? 0) > 0) {
+          setPackChoiceProduct(product);
+          return;
+        }
+
+        onAddToCart(product, qty, undefined, { sellMode: "unit" });
+      },
+      [onAddToCart],
     );
 
     useImperativeHandle(
@@ -277,17 +340,57 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
       return next;
     }, [products, selectedCategory, selectedBrand, selectedProductId, stockFilter, normalizedQuery, sortOption]);
 
+    useEffect(() => {
+      if (searchMode !== "manual" || normalizedQuery.length < 2) {
+        setBundleResults([]);
+        return;
+      }
+
+      let cancelled = false;
+      const timeoutId = window.setTimeout(() => {
+        void searchBundles(normalizedQuery, 25)
+          .then((items) => {
+            if (!cancelled) {
+              setBundleResults(items);
+            }
+          })
+          .catch(() => {
+            if (!cancelled) {
+              setBundleResults([]);
+            }
+          });
+      }, 180);
+
+      return () => {
+        cancelled = true;
+        window.clearTimeout(timeoutId);
+      };
+    }, [normalizedQuery, searchMode]);
+
     const displayedProducts = useMemo(() => {
+      const merged = [...filtered];
+      const existingBundleIds = new Set(
+        merged.filter((item) => item.isBundle).map((item) => item.bundleId ?? item.id),
+      );
+
+      for (const bundle of bundleResults) {
+        const bundleKey = bundle.bundleId ?? bundle.id;
+        if (!existingBundleIds.has(bundleKey)) {
+          merged.push(bundle);
+          existingBundleIds.add(bundleKey);
+        }
+      }
+
       if (!serialLookupProduct) {
-        return filtered;
+        return merged;
       }
 
-      if (filtered.some((product) => product.id === serialLookupProduct.id)) {
-        return filtered;
+      if (merged.some((product) => product.id === serialLookupProduct.id)) {
+        return merged;
       }
 
-      return [serialLookupProduct, ...filtered];
-    }, [filtered, serialLookupProduct]);
+      return [serialLookupProduct, ...merged];
+    }, [bundleResults, filtered, serialLookupProduct]);
 
     const selectedProductLabel = useMemo(() => {
       if (selectedProductId === "all") {
@@ -361,7 +464,7 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
           return;
         }
 
-        onAddToCart(result.product, 1, {
+        addProductToCart(result.product, 1, {
           id: result.serial_id,
           value: result.serial_value,
         });
@@ -380,7 +483,7 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
       } finally {
         setSerialDialogSubmitting(false);
       }
-    }, [closeSerialDialog, onAddToCart, serialDialogProduct, serialDialogValue]);
+    }, [addProductToCart, closeSerialDialog, serialDialogProduct, serialDialogValue]);
 
     const submitBarcodeQuery = useCallback(
       (scannerLike: boolean) => {
@@ -436,7 +539,7 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
           return;
         }
 
-        onAddToCart(product, 1, selectedSerial);
+        addProductToCart(product, 1, selectedSerial);
         setSearchQuery("");
         setSerialLookupProduct(null);
         setSerialLookupFeedback(null);
@@ -444,7 +547,7 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
           focusAndSelectSearch();
         }, 0);
       },
-      [focusAndSelectSearch, getSelectedSerial, onAddToCart],
+      [addProductToCart, focusAndSelectSearch, getSelectedSerial],
     );
 
     const handleSearchKeyDown = useCallback(
@@ -914,7 +1017,7 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
             </div>
           </div>
           <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
-            <span>{displayedProducts.length} products</span>
+            <span>{displayedProducts.length} items</span>
             {searchQuery && (
               <button className="text-primary hover:underline" onClick={() => setSearchQuery("")}>
                 Clear search
@@ -1015,7 +1118,14 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
                     onClick={() => handleAddProduct(product)}
                   >
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-foreground">{product.name}</p>
+                      <p className="truncate text-sm font-semibold text-foreground">
+                        {product.name}
+                        {product.isBundle && (
+                          <span className="ml-2 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                            Bundle
+                          </span>
+                        )}
+                      </p>
                       <p className="truncate text-[11px] text-muted-foreground font-mono">
                         {product.matchedSerialValue ? `Serial ${product.matchedSerialValue}` : product.sku}
                       </p>
@@ -1023,7 +1133,7 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
                     <div className="flex shrink-0 items-center gap-3 text-right">
                       <div>
                         <p className="text-sm font-bold text-primary">Rs. {product.price.toLocaleString()}</p>
-                        <p className="text-[11px] text-muted-foreground">Stock {product.stock}</p>
+                        <p className="text-[11px] text-muted-foreground">{product.isBundle ? "Bundle stock" : "Stock"} {product.stock}</p>
                       </div>
                       <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary">
                         <Plus className="h-4 w-4" />
@@ -1051,6 +1161,53 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
             )}
           </div>
         )}
+
+        <Dialog
+          open={packChoiceProduct !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              setPackChoiceProduct(null);
+            }
+          }}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Choose Selling Mode</DialogTitle>
+              <DialogDescription>
+                {packChoiceProduct?.name} can be sold by unit or pack.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (packChoiceProduct) {
+                    addProductToCart(packChoiceProduct, 1, undefined, "unit");
+                  }
+                  setPackChoiceProduct(null);
+                  setSearchQuery("");
+                }}
+              >
+                Sell by Unit (Rs. {packChoiceProduct?.price.toLocaleString() ?? "0"})
+              </Button>
+              <Button
+                onClick={() => {
+                  if (packChoiceProduct) {
+                    const packProduct: Product = {
+                      ...packChoiceProduct,
+                      price: Number(packChoiceProduct.packPrice ?? packChoiceProduct.price),
+                    };
+                    addProductToCart(packProduct, 1, undefined, "pack");
+                  }
+                  setPackChoiceProduct(null);
+                  setSearchQuery("");
+                }}
+              >
+                Sell by Pack (Rs. {(packChoiceProduct?.packPrice ?? 0).toLocaleString()}) · {packChoiceProduct?.packLabel || `Pack of ${packChoiceProduct?.packSize ?? 0}`}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <Dialog
           open={serialDialogProduct !== null}

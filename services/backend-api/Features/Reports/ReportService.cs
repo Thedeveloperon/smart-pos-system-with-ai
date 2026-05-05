@@ -88,8 +88,10 @@ public sealed class ReportService(
         var sales = await dbContext.Sales
             .AsNoTracking()
             .Include(x => x.Items)
-            .ThenInclude(x => x.Product)
+            .ThenInclude(x => x.Product!)
             .ThenInclude(x => x.Category)
+            .Include(x => x.Items)
+            .ThenInclude(x => x.Bundle)
             .Include(x => x.Payments)
             .ToListAsync(cancellationToken);
 
@@ -148,10 +150,13 @@ public sealed class ReportService(
                         .Select(y => new TransactionReportLineItemRow
                         {
                             SaleItemId = y.Id,
+                            ItemType = y.BundleId.HasValue ? "bundle" : "product",
                             ProductId = y.ProductId,
                             ProductName = y.ProductNameSnapshot,
-                            CategoryId = y.Product.CategoryId,
-                            CategoryName = y.Product.Category?.Name,
+                            BundleId = y.BundleId,
+                            BundleName = y.BundleNameSnapshot,
+                            CategoryId = y.Product?.CategoryId,
+                            CategoryName = y.Product?.Category?.Name,
                             Quantity = RoundQuantity(y.Quantity),
                             UnitPrice = RoundMoney(y.UnitPrice),
                             LineTotal = RoundMoney(y.LineTotal)
@@ -230,49 +235,52 @@ public sealed class ReportService(
             .Include(x => x.Items)
             .ToListAsync(cancellationToken);
 
-        var soldByProduct = sales
+        var soldByItem = sales
             .Where(x => IsFinancialSaleStatus(x.Status) && IsInRange(GetSaleTimestamp(x), range))
             .SelectMany(x => x.Items)
-            .GroupBy(x => x.ProductId)
+            .GroupBy(BuildItemKey)
             .ToDictionary(
                 x => x.Key,
                 x => new ItemAgg(
-                    ProductName: x.Select(y => y.ProductNameSnapshot).FirstOrDefault() ?? string.Empty,
+                    ItemName: x.Select(y => y.ProductNameSnapshot).FirstOrDefault() ?? string.Empty,
                     Quantity: x.Sum(y => y.Quantity),
                     Amount: x.Sum(y => y.LineTotal)));
 
-        var refundedByProduct = refunds
+        var refundedByItem = refunds
             .Where(x => IsInRange(x.CreatedAtUtc, range))
             .SelectMany(x => x.Items)
-            .GroupBy(x => x.ProductId)
+            .GroupBy(BuildItemKey)
             .ToDictionary(
                 x => x.Key,
                 x => new ItemAgg(
-                    ProductName: x.Select(y => y.ProductNameSnapshot).FirstOrDefault() ?? string.Empty,
+                    ItemName: x.Select(y => y.ProductNameSnapshot).FirstOrDefault() ?? string.Empty,
                     Quantity: x.Sum(y => y.Quantity),
                     Amount: x.Sum(y => y.TotalAmount)));
 
-        var allProductIds = soldByProduct.Keys
-            .Union(refundedByProduct.Keys)
+        var allItemKeys = soldByItem.Keys
+            .Union(refundedByItem.Keys)
             .ToList();
 
-        var items = allProductIds
-            .Select(productId =>
+        var items = allItemKeys
+            .Select(itemKey =>
             {
-                var sold = soldByProduct.GetValueOrDefault(productId, ItemAgg.Empty);
-                var refunded = refundedByProduct.GetValueOrDefault(productId, ItemAgg.Empty);
+                var sold = soldByItem.GetValueOrDefault(itemKey, ItemAgg.Empty);
+                var refunded = refundedByItem.GetValueOrDefault(itemKey, ItemAgg.Empty);
 
                 var soldQty = RoundQuantity(sold.Quantity);
                 var refundedQty = RoundQuantity(refunded.Quantity);
                 var netQty = RoundQuantity(soldQty - refundedQty);
                 var netSales = RoundMoney(sold.Amount - refunded.Amount);
-                var name = string.IsNullOrWhiteSpace(sold.ProductName)
-                    ? refunded.ProductName
-                    : sold.ProductName;
+                var name = string.IsNullOrWhiteSpace(sold.ItemName)
+                    ? refunded.ItemName
+                    : sold.ItemName;
 
                 return new TopItemReportRow
                 {
-                    ProductId = productId,
+                    ItemType = itemKey.ItemType,
+                    ProductId = itemKey.ProductId,
+                    BundleId = itemKey.BundleId,
+                    BundleName = itemKey.ItemType == "bundle" ? name : null,
                     ProductName = name,
                     SoldQuantity = soldQty,
                     RefundedQuantity = refundedQty,
@@ -313,45 +321,49 @@ public sealed class ReportService(
             .Include(x => x.Items)
             .ToListAsync(cancellationToken);
 
-        var soldByProduct = sales
+        var soldByItem = sales
             .Where(x => IsFinancialSaleStatus(x.Status) && IsInRange(GetSaleTimestamp(x), range))
             .SelectMany(x => x.Items)
-            .GroupBy(x => x.ProductId)
+            .GroupBy(BuildItemKey)
             .ToDictionary(
                 x => x.Key,
                 x => new ItemAgg(
-                    ProductName: x.Select(y => y.ProductNameSnapshot).FirstOrDefault() ?? string.Empty,
+                    ItemName: x.Select(y => y.ProductNameSnapshot).FirstOrDefault() ?? string.Empty,
                     Quantity: x.Sum(y => y.Quantity),
                     Amount: x.Sum(y => y.LineTotal)));
 
-        var refundedByProduct = refunds
+        var refundedByItem = refunds
             .Where(x => IsInRange(x.CreatedAtUtc, range))
             .SelectMany(x => x.Items)
-            .GroupBy(x => x.ProductId)
+            .GroupBy(BuildItemKey)
             .ToDictionary(
                 x => x.Key,
                 x => new ItemAgg(
-                    ProductName: x.Select(y => y.ProductNameSnapshot).FirstOrDefault() ?? string.Empty,
+                    ItemName: x.Select(y => y.ProductNameSnapshot).FirstOrDefault() ?? string.Empty,
                     Quantity: x.Sum(y => y.Quantity),
                     Amount: x.Sum(y => y.TotalAmount)));
 
-        var items = soldByProduct.Keys
-            .Select(productId =>
+        var items = soldByItem.Keys
+            .Union(refundedByItem.Keys)
+            .Select(itemKey =>
             {
-                var sold = soldByProduct.GetValueOrDefault(productId, ItemAgg.Empty);
-                var refunded = refundedByProduct.GetValueOrDefault(productId, ItemAgg.Empty);
+                var sold = soldByItem.GetValueOrDefault(itemKey, ItemAgg.Empty);
+                var refunded = refundedByItem.GetValueOrDefault(itemKey, ItemAgg.Empty);
 
                 var soldQty = RoundQuantity(sold.Quantity);
                 var refundedQty = RoundQuantity(refunded.Quantity);
                 var netQty = RoundQuantity(soldQty - refundedQty);
                 var netSales = RoundMoney(sold.Amount - refunded.Amount);
-                var name = string.IsNullOrWhiteSpace(sold.ProductName)
-                    ? refunded.ProductName
-                    : sold.ProductName;
+                var name = string.IsNullOrWhiteSpace(sold.ItemName)
+                    ? refunded.ItemName
+                    : sold.ItemName;
 
                 return new WorstItemReportRow
                 {
-                    ProductId = productId,
+                    ItemType = itemKey.ItemType,
+                    ProductId = itemKey.ProductId,
+                    BundleId = itemKey.BundleId,
+                    BundleName = itemKey.ItemType == "bundle" ? name : null,
                     ProductName = name,
                     SoldQuantity = soldQty,
                     RefundedQuantity = refundedQty,
@@ -629,6 +641,9 @@ public sealed class ReportService(
             .ToListAsync(cancellationToken);
         var productNamesById = products.ToDictionary(x => x.Id, x => x.Name);
         var productCostsById = products.ToDictionary(x => x.Id, x => x.CostPrice);
+        var bundleNamesById = await dbContext.Bundles
+            .AsNoTracking()
+            .ToDictionaryAsync(x => x.Id, x => x.Name, cancellationToken);
 
         var sales = await dbContext.Sales
             .AsNoTracking()
@@ -639,41 +654,48 @@ public sealed class ReportService(
             .Include(x => x.Items)
             .ToListAsync(cancellationToken);
 
-        var soldByProduct = sales
+        var soldByItem = sales
             .Where(x => IsFinancialSaleStatus(x.Status) && IsInRange(GetSaleTimestamp(x), range))
             .SelectMany(x => x.Items)
-            .GroupBy(x => x.ProductId)
+            .GroupBy(BuildItemKey)
             .ToDictionary(
                 x => x.Key,
                 x => new ItemAgg(
-                    ProductName: x.Select(y => y.ProductNameSnapshot).FirstOrDefault() ?? string.Empty,
+                    ItemName: x.Select(y => y.ProductNameSnapshot).FirstOrDefault() ?? string.Empty,
                     Quantity: x.Sum(y => y.Quantity),
                     Amount: x.Sum(y => y.LineTotal)));
-        var refundedByProduct = refunds
+        var refundedByItem = refunds
             .Where(x => IsInRange(x.CreatedAtUtc, range))
             .SelectMany(x => x.Items)
-            .GroupBy(x => x.ProductId)
+            .GroupBy(BuildItemKey)
             .ToDictionary(
                 x => x.Key,
                 x => new ItemAgg(
-                    ProductName: x.Select(y => y.ProductNameSnapshot).FirstOrDefault() ?? string.Empty,
+                    ItemName: x.Select(y => y.ProductNameSnapshot).FirstOrDefault() ?? string.Empty,
                     Quantity: x.Sum(y => y.Quantity),
                     Amount: x.Sum(y => y.TotalAmount)));
 
-        var productIds = soldByProduct.Keys
-            .Union(refundedByProduct.Keys)
+        var itemKeys = soldByItem.Keys
+            .Union(refundedByItem.Keys)
             .ToList();
 
-        var rows = productIds
-            .Select(productId =>
+        var rows = itemKeys
+            .Select(itemKey =>
             {
-                var sold = soldByProduct.GetValueOrDefault(productId, ItemAgg.Empty);
-                var refunded = refundedByProduct.GetValueOrDefault(productId, ItemAgg.Empty);
-                var productName = productNamesById.GetValueOrDefault(productId) ??
-                                  sold.ProductName ??
-                                  refunded.ProductName ??
-                                  string.Empty;
-                var cost = productCostsById.GetValueOrDefault(productId);
+                var sold = soldByItem.GetValueOrDefault(itemKey, ItemAgg.Empty);
+                var refunded = refundedByItem.GetValueOrDefault(itemKey, ItemAgg.Empty);
+                var itemName = itemKey.ItemType == "bundle"
+                    ? (bundleNamesById.GetValueOrDefault(itemKey.BundleId.GetValueOrDefault()) ??
+                       sold.ItemName ??
+                       refunded.ItemName ??
+                       string.Empty)
+                    : (productNamesById.GetValueOrDefault(itemKey.ProductId.GetValueOrDefault()) ??
+                       sold.ItemName ??
+                       refunded.ItemName ??
+                       string.Empty);
+                var cost = itemKey.ItemType == "bundle"
+                    ? 0m
+                    : productCostsById.GetValueOrDefault(itemKey.ProductId.GetValueOrDefault());
                 var netQuantity = RoundQuantity(sold.Quantity - refunded.Quantity);
                 var netSales = RoundMoney(sold.Amount - refunded.Amount);
                 var costOfGoods = RoundMoney(netQuantity * cost);
@@ -681,8 +703,11 @@ public sealed class ReportService(
 
                 return new MarginSummaryReportRow
                 {
-                    ProductId = productId,
-                    ProductName = productName,
+                    ItemType = itemKey.ItemType,
+                    ProductId = itemKey.ProductId,
+                    BundleId = itemKey.BundleId,
+                    BundleName = itemKey.ItemType == "bundle" ? itemName : null,
+                    ProductName = itemName,
                     NetQuantity = netQuantity,
                     NetSales = netSales,
                     CostOfGoods = costOfGoods,
@@ -988,21 +1013,23 @@ public sealed class ReportService(
         var soldByProduct = sales
             .Where(x => IsFinancialSaleStatus(x.Status) && IsInRange(GetSaleTimestamp(x), range))
             .SelectMany(x => x.Items)
+            .Where(x => x.ProductId.HasValue)
             .GroupBy(x => x.ProductId)
             .ToDictionary(
-                x => x.Key,
+                x => x.Key!.Value,
                 x => new ItemAgg(
-                    ProductName: x.Select(y => y.ProductNameSnapshot).FirstOrDefault() ?? string.Empty,
+                    ItemName: x.Select(y => y.ProductNameSnapshot).FirstOrDefault() ?? string.Empty,
                     Quantity: x.Sum(y => y.Quantity),
                     Amount: x.Sum(y => y.LineTotal)));
         var refundedByProduct = refunds
             .Where(x => IsInRange(x.CreatedAtUtc, range))
             .SelectMany(x => x.Items)
+            .Where(x => x.ProductId.HasValue)
             .GroupBy(x => x.ProductId)
             .ToDictionary(
-                x => x.Key,
+                x => x.Key!.Value,
                 x => new ItemAgg(
-                    ProductName: x.Select(y => y.ProductNameSnapshot).FirstOrDefault() ?? string.Empty,
+                    ItemName: x.Select(y => y.ProductNameSnapshot).FirstOrDefault() ?? string.Empty,
                     Quantity: x.Sum(y => y.Quantity),
                     Amount: x.Sum(y => y.TotalAmount)));
 
@@ -1018,7 +1045,7 @@ public sealed class ReportService(
                 var sold = soldByProduct.GetValueOrDefault(id, ItemAgg.Empty);
                 var refunded = refundedByProduct.GetValueOrDefault(id, ItemAgg.Empty);
                 var name = productNamesById.GetValueOrDefault(id) ??
-                           sold.ProductName ??
+                           sold.ItemName ??
                            string.Empty;
                 var cost = productCostsById.GetValueOrDefault(id);
                 var netQuantity = RoundQuantity(sold.Quantity - refunded.Quantity);
@@ -1642,6 +1669,31 @@ public sealed class ReportService(
         return decimal.Round(value, 3, MidpointRounding.AwayFromZero);
     }
 
+    private static ItemKey BuildItemKey(SaleItem saleItem)
+    {
+        return BuildItemKey(saleItem.ProductId, saleItem.BundleId);
+    }
+
+    private static ItemKey BuildItemKey(RefundItem refundItem)
+    {
+        return BuildItemKey(refundItem.ProductId, refundItem.BundleId);
+    }
+
+    private static ItemKey BuildItemKey(Guid? productId, Guid? bundleId)
+    {
+        if (bundleId.HasValue)
+        {
+            return ItemKey.ForBundle(bundleId.Value);
+        }
+
+        if (productId.HasValue)
+        {
+            return ItemKey.ForProduct(productId.Value);
+        }
+
+        return ItemKey.Unknown;
+    }
+
     private async Task<decimal> ResolveLowStockThresholdAsync(
         decimal threshold,
         CancellationToken cancellationToken)
@@ -1948,8 +2000,18 @@ public sealed class ReportService(
         LowStockReportRow Row,
         decimal CostPrice);
 
+    private sealed record ItemKey(
+        string ItemType,
+        Guid? ProductId,
+        Guid? BundleId)
+    {
+        public static ItemKey ForProduct(Guid productId) => new("product", productId, null);
+        public static ItemKey ForBundle(Guid bundleId) => new("bundle", null, bundleId);
+        public static ItemKey Unknown { get; } = new("unknown", null, null);
+    }
+
     private sealed record ItemAgg(
-        string ProductName,
+        string ItemName,
         decimal Quantity,
         decimal Amount)
     {

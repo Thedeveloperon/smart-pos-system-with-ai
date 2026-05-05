@@ -42,6 +42,10 @@ public sealed class Product
     public string? ImageUrl { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal CostPrice { get; set; }
+    public bool HasPackOption { get; set; }
+    public int PackSize { get; set; }
+    public decimal? PackPrice { get; set; }
+    public string? PackLabel { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? UpdatedAtUtc { get; set; }
@@ -60,6 +64,7 @@ public sealed class Product
     public ICollection<ProductBatch> ProductBatches { get; set; } = [];
     public ICollection<StockMovement> StockMovements { get; set; } = [];
     public ICollection<StocktakeItem> StocktakeItems { get; set; } = [];
+    public ICollection<BundleItem> BundleItems { get; set; } = [];
 }
 
 public sealed class Supplier
@@ -259,6 +264,51 @@ public sealed class InventoryRecord
     public required Product Product { get; set; }
 }
 
+public sealed class Bundle
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? StoreId { get; set; }
+    public required string Name { get; set; }
+    public string? Barcode { get; set; }
+    public string? Description { get; set; }
+    public decimal Price { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+
+    public ICollection<BundleItem> Items { get; set; } = [];
+    public BundleInventoryRecord? Inventory { get; set; }
+    public ICollection<SaleItem> SaleItems { get; set; } = [];
+    public ICollection<StockMovement> StockMovements { get; set; } = [];
+}
+
+public sealed class BundleItem
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid BundleId { get; set; }
+    public Guid? ProductId { get; set; }
+    public required string ItemName { get; set; }
+    public decimal Quantity { get; set; }
+    public string? Notes { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public required Bundle Bundle { get; set; }
+    public Product? Product { get; set; }
+}
+
+public sealed class BundleInventoryRecord
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid BundleId { get; set; }
+    public decimal QuantityOnHand { get; set; }
+    public decimal ReorderLevel { get; set; }
+    public bool AllowNegativeStock { get; set; } = true;
+    public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+
+    public required Bundle Bundle { get; set; }
+}
+
 public sealed class SerialNumber
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -330,7 +380,8 @@ public sealed class StockMovement
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid? StoreId { get; set; }
-    public Guid ProductId { get; set; }
+    public Guid? ProductId { get; set; }
+    public Guid? BundleId { get; set; }
     public StockMovementType MovementType { get; set; }
     public decimal QuantityBefore { get; set; }
     public decimal QuantityChange { get; set; }
@@ -343,7 +394,8 @@ public sealed class StockMovement
     public Guid? CreatedByUserId { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 
-    public required Product Product { get; set; }
+    public Product? Product { get; set; }
+    public Bundle? Bundle { get; set; }
     public ProductBatch? Batch { get; set; }
     public AppUser? CreatedByUser { get; set; }
 }
@@ -494,8 +546,12 @@ public sealed class SaleItem
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid SaleId { get; set; }
-    public Guid ProductId { get; set; }
+    public Guid? ProductId { get; set; }
+    public Guid? BundleId { get; set; }
     public required string ProductNameSnapshot { get; set; }
+    public string? BundleNameSnapshot { get; set; }
+    public bool IsPack { get; set; }
+    public int SalePackSize { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal Quantity { get; set; }
     public decimal DiscountAmount { get; set; }
@@ -503,7 +559,8 @@ public sealed class SaleItem
     public decimal LineTotal { get; set; }
 
     public required Sale Sale { get; set; }
-    public required Product Product { get; set; }
+    public Product? Product { get; set; }
+    public Bundle? Bundle { get; set; }
     public ICollection<RefundItem> RefundItems { get; set; } = [];
     public ICollection<SerialNumber> SerialNumbers { get; set; } = [];
 }
@@ -558,8 +615,10 @@ public sealed class RefundItem
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid RefundId { get; set; }
     public Guid SaleItemId { get; set; }
-    public Guid ProductId { get; set; }
+    public Guid? ProductId { get; set; }
+    public Guid? BundleId { get; set; }
     public required string ProductNameSnapshot { get; set; }
+    public string? BundleNameSnapshot { get; set; }
     public decimal Quantity { get; set; }
     public decimal SubtotalAmount { get; set; }
     public decimal DiscountAmount { get; set; }

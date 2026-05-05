@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
 
@@ -1057,6 +1058,394 @@ public static class DbSchemaUpdater
         }
     }
 
+    public static async Task EnsurePackAndBundleSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken = default)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+
+        if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            await EnsureSqliteColumnAsync(dbContext, "products", "HasPackOption", """ALTER TABLE "products" ADD COLUMN "HasPackOption" INTEGER NOT NULL DEFAULT 0;""", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "products", "PackSize", """ALTER TABLE "products" ADD COLUMN "PackSize" INTEGER NOT NULL DEFAULT 0;""", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "products", "PackPrice", """ALTER TABLE "products" ADD COLUMN "PackPrice" TEXT NULL;""", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "products", "PackLabel", """ALTER TABLE "products" ADD COLUMN "PackLabel" TEXT NULL;""", cancellationToken);
+
+            await EnsureSqliteColumnAsync(dbContext, "sale_items", "IsPack", """ALTER TABLE "sale_items" ADD COLUMN "IsPack" INTEGER NOT NULL DEFAULT 0;""", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "sale_items", "SalePackSize", """ALTER TABLE "sale_items" ADD COLUMN "SalePackSize" INTEGER NOT NULL DEFAULT 0;""", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "sale_items", "BundleId", """ALTER TABLE "sale_items" ADD COLUMN "BundleId" TEXT NULL;""", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "sale_items", "BundleNameSnapshot", """ALTER TABLE "sale_items" ADD COLUMN "BundleNameSnapshot" TEXT NULL;""", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "stock_movements", "BundleId", """ALTER TABLE "stock_movements" ADD COLUMN "BundleId" TEXT NULL;""", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "refund_items", "BundleId", """ALTER TABLE "refund_items" ADD COLUMN "BundleId" TEXT NULL;""", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "refund_items", "BundleNameSnapshot", """ALTER TABLE "refund_items" ADD COLUMN "BundleNameSnapshot" TEXT NULL;""", cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                CREATE TABLE IF NOT EXISTS "bundles" (
+                  "Id" TEXT NOT NULL CONSTRAINT "PK_bundles" PRIMARY KEY,
+                  "StoreId" TEXT NULL,
+                  "Name" TEXT NOT NULL,
+                  "Barcode" TEXT NULL,
+                  "Description" TEXT NULL,
+                  "Price" TEXT NOT NULL,
+                  "IsActive" INTEGER NOT NULL DEFAULT 1,
+                  "CreatedAtUtc" TEXT NOT NULL,
+                  "UpdatedAtUtc" TEXT NOT NULL
+                );
+                """,
+                cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                CREATE TABLE IF NOT EXISTS "bundle_items" (
+                  "Id" TEXT NOT NULL CONSTRAINT "PK_bundle_items" PRIMARY KEY,
+                  "BundleId" TEXT NOT NULL,
+                  "ProductId" TEXT NULL,
+                  "ItemName" TEXT NOT NULL,
+                  "Quantity" TEXT NOT NULL,
+                  "Notes" TEXT NULL,
+                  "CreatedAtUtc" TEXT NOT NULL,
+                  "UpdatedAtUtc" TEXT NULL,
+                  CONSTRAINT "FK_bundle_items_bundles_BundleId" FOREIGN KEY ("BundleId") REFERENCES "bundles" ("Id") ON DELETE CASCADE,
+                  CONSTRAINT "FK_bundle_items_products_ProductId" FOREIGN KEY ("ProductId") REFERENCES "products" ("Id") ON DELETE SET NULL
+                );
+                """,
+                cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                CREATE TABLE IF NOT EXISTS "bundle_inventory" (
+                  "Id" TEXT NOT NULL CONSTRAINT "PK_bundle_inventory" PRIMARY KEY,
+                  "BundleId" TEXT NOT NULL,
+                  "QuantityOnHand" TEXT NOT NULL,
+                  "ReorderLevel" TEXT NOT NULL,
+                  "AllowNegativeStock" INTEGER NOT NULL DEFAULT 1,
+                  "UpdatedAtUtc" TEXT NOT NULL,
+                  CONSTRAINT "FK_bundle_inventory_bundles_BundleId" FOREIGN KEY ("BundleId") REFERENCES "bundles" ("Id") ON DELETE CASCADE
+                );
+                """,
+                cancellationToken);
+
+            await EnsureSqliteSaleItemsSupportsBundleSchemaAsync(dbContext, cancellationToken);
+            await EnsureSqliteStockMovementsSupportsBundleSchemaAsync(dbContext, cancellationToken);
+            await EnsureSqliteRefundItemsSupportsBundleSchemaAsync(dbContext, cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_bundles_StoreId_Name" ON "bundles" ("StoreId", "Name");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_bundles_StoreId_Barcode" ON "bundles" ("StoreId", "Barcode");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_bundle_items_BundleId" ON "bundle_items" ("BundleId");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_bundle_items_ProductId" ON "bundle_items" ("ProductId");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_bundle_inventory_BundleId" ON "bundle_inventory" ("BundleId");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_sale_items_BundleId" ON "sale_items" ("BundleId");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_stock_movements_StoreId_BundleId_CreatedAtUtc" ON "stock_movements" ("StoreId", "BundleId", "CreatedAtUtc");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_refund_items_BundleId" ON "refund_items" ("BundleId");""", cancellationToken);
+            return;
+        }
+
+        if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE products ADD COLUMN IF NOT EXISTS "HasPackOption" boolean NOT NULL DEFAULT false;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE products ADD COLUMN IF NOT EXISTS "PackSize" integer NOT NULL DEFAULT 0;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE products ADD COLUMN IF NOT EXISTS "PackPrice" numeric(18,2) NULL;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE products ADD COLUMN IF NOT EXISTS "PackLabel" varchar(40) NULL;""", cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS "IsPack" boolean NOT NULL DEFAULT false;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS "SalePackSize" integer NOT NULL DEFAULT 0;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS "BundleId" uuid NULL;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS "BundleNameSnapshot" varchar(200) NULL;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE sale_items ALTER COLUMN "ProductId" DROP NOT NULL;""", cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS "BundleId" uuid NULL;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE stock_movements ALTER COLUMN "ProductId" DROP NOT NULL;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE refund_items ADD COLUMN IF NOT EXISTS "BundleId" uuid NULL;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE refund_items ADD COLUMN IF NOT EXISTS "BundleNameSnapshot" varchar(200) NULL;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE refund_items ALTER COLUMN "ProductId" DROP NOT NULL;""", cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                CREATE TABLE IF NOT EXISTS bundles (
+                  "Id" uuid NOT NULL PRIMARY KEY,
+                  "StoreId" uuid NULL,
+                  "Name" varchar(200) NOT NULL,
+                  "Barcode" varchar(64) NULL,
+                  "Description" varchar(1000) NULL,
+                  "Price" numeric(18,2) NOT NULL,
+                  "IsActive" boolean NOT NULL DEFAULT true,
+                  "CreatedAtUtc" timestamptz NOT NULL,
+                  "UpdatedAtUtc" timestamptz NOT NULL
+                );
+                """,
+                cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                CREATE TABLE IF NOT EXISTS bundle_items (
+                  "Id" uuid NOT NULL PRIMARY KEY,
+                  "BundleId" uuid NOT NULL,
+                  "ProductId" uuid NULL,
+                  "ItemName" varchar(200) NOT NULL,
+                  "Quantity" numeric(18,3) NOT NULL,
+                  "Notes" varchar(500) NULL,
+                  "CreatedAtUtc" timestamptz NOT NULL,
+                  "UpdatedAtUtc" timestamptz NULL,
+                  CONSTRAINT "FK_bundle_items_bundles_BundleId" FOREIGN KEY ("BundleId") REFERENCES bundles("Id") ON DELETE CASCADE,
+                  CONSTRAINT "FK_bundle_items_products_ProductId" FOREIGN KEY ("ProductId") REFERENCES products("Id") ON DELETE SET NULL
+                );
+                """,
+                cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                CREATE TABLE IF NOT EXISTS bundle_inventory (
+                  "Id" uuid NOT NULL PRIMARY KEY,
+                  "BundleId" uuid NOT NULL,
+                  "QuantityOnHand" numeric(18,3) NOT NULL,
+                  "ReorderLevel" numeric(18,3) NOT NULL,
+                  "AllowNegativeStock" boolean NOT NULL DEFAULT true,
+                  "UpdatedAtUtc" timestamptz NOT NULL,
+                  CONSTRAINT "FK_bundle_inventory_bundles_BundleId" FOREIGN KEY ("BundleId") REFERENCES bundles("Id") ON DELETE CASCADE
+                );
+                """,
+                cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_bundles_StoreId_Name" ON bundles ("StoreId", "Name");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_bundles_StoreId_Barcode" ON bundles ("StoreId", "Barcode");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_bundle_items_BundleId" ON bundle_items ("BundleId");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_bundle_items_ProductId" ON bundle_items ("ProductId");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_bundle_inventory_BundleId" ON bundle_inventory ("BundleId");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_sale_items_BundleId" ON sale_items ("BundleId");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_stock_movements_StoreId_BundleId_CreatedAtUtc" ON stock_movements ("StoreId", "BundleId", "CreatedAtUtc");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_refund_items_BundleId" ON refund_items ("BundleId");""", cancellationToken);
+        }
+    }
+
+    private static async Task EnsureSqliteSaleItemsSupportsBundleSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var productIdIsNotNull = await IsSqliteColumnNotNullAsync(dbContext, "sale_items", "ProductId", cancellationToken);
+        if (!productIdIsNotNull)
+        {
+            return;
+        }
+
+        const string sql = """
+            PRAGMA foreign_keys = OFF;
+            BEGIN TRANSACTION;
+
+            ALTER TABLE "sale_items" RENAME TO "sale_items__pack_bundle_old";
+
+            CREATE TABLE "sale_items" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_sale_items" PRIMARY KEY,
+              "SaleId" TEXT NOT NULL,
+              "ProductId" TEXT NULL,
+              "BundleId" TEXT NULL,
+              "ProductNameSnapshot" TEXT NOT NULL,
+              "BundleNameSnapshot" TEXT NULL,
+              "IsPack" INTEGER NOT NULL DEFAULT 0,
+              "SalePackSize" INTEGER NOT NULL DEFAULT 0,
+              "UnitPrice" TEXT NOT NULL,
+              "Quantity" TEXT NOT NULL,
+              "DiscountAmount" TEXT NOT NULL,
+              "TaxAmount" TEXT NOT NULL,
+              "LineTotal" TEXT NOT NULL,
+              CONSTRAINT "FK_sale_items_sales_SaleId" FOREIGN KEY ("SaleId") REFERENCES "sales" ("Id") ON DELETE CASCADE,
+              CONSTRAINT "FK_sale_items_products_ProductId" FOREIGN KEY ("ProductId") REFERENCES "products" ("Id") ON DELETE RESTRICT,
+              CONSTRAINT "FK_sale_items_bundles_BundleId" FOREIGN KEY ("BundleId") REFERENCES "bundles" ("Id") ON DELETE RESTRICT
+            );
+
+            INSERT INTO "sale_items" (
+              "Id",
+              "SaleId",
+              "ProductId",
+              "BundleId",
+              "ProductNameSnapshot",
+              "BundleNameSnapshot",
+              "IsPack",
+              "SalePackSize",
+              "UnitPrice",
+              "Quantity",
+              "DiscountAmount",
+              "TaxAmount",
+              "LineTotal"
+            )
+            SELECT
+              "Id",
+              "SaleId",
+              "ProductId",
+              "BundleId",
+              "ProductNameSnapshot",
+              "BundleNameSnapshot",
+              "IsPack",
+              "SalePackSize",
+              "UnitPrice",
+              "Quantity",
+              "DiscountAmount",
+              "TaxAmount",
+              "LineTotal"
+            FROM "sale_items__pack_bundle_old";
+
+            DROP TABLE "sale_items__pack_bundle_old";
+
+            COMMIT;
+            PRAGMA foreign_keys = ON;
+            """;
+
+        await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+    }
+
+    private static async Task EnsureSqliteStockMovementsSupportsBundleSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var productIdIsNotNull = await IsSqliteColumnNotNullAsync(dbContext, "stock_movements", "ProductId", cancellationToken);
+        if (!productIdIsNotNull)
+        {
+            return;
+        }
+
+        const string sql = """
+            PRAGMA foreign_keys = OFF;
+            BEGIN TRANSACTION;
+
+            ALTER TABLE "stock_movements" RENAME TO "stock_movements__pack_bundle_old";
+
+            CREATE TABLE "stock_movements" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_stock_movements" PRIMARY KEY,
+              "StoreId" TEXT NULL,
+              "ProductId" TEXT NULL,
+              "BundleId" TEXT NULL,
+              "MovementType" TEXT NOT NULL,
+              "QuantityBefore" TEXT NOT NULL,
+              "QuantityChange" TEXT NOT NULL,
+              "QuantityAfter" TEXT NOT NULL,
+              "ReferenceType" TEXT NOT NULL,
+              "ReferenceId" TEXT NULL,
+              "BatchId" TEXT NULL,
+              "SerialNumber" TEXT NULL,
+              "Reason" TEXT NULL,
+              "CreatedByUserId" TEXT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              CONSTRAINT "FK_stock_movements_products_ProductId" FOREIGN KEY ("ProductId") REFERENCES "products" ("Id") ON DELETE RESTRICT,
+              CONSTRAINT "FK_stock_movements_bundles_BundleId" FOREIGN KEY ("BundleId") REFERENCES "bundles" ("Id") ON DELETE RESTRICT,
+              CONSTRAINT "FK_stock_movements_product_batches_BatchId" FOREIGN KEY ("BatchId") REFERENCES "product_batches" ("Id") ON DELETE SET NULL,
+              CONSTRAINT "FK_stock_movements_users_CreatedByUserId" FOREIGN KEY ("CreatedByUserId") REFERENCES "users" ("Id") ON DELETE SET NULL
+            );
+
+            INSERT INTO "stock_movements" (
+              "Id",
+              "StoreId",
+              "ProductId",
+              "BundleId",
+              "MovementType",
+              "QuantityBefore",
+              "QuantityChange",
+              "QuantityAfter",
+              "ReferenceType",
+              "ReferenceId",
+              "BatchId",
+              "SerialNumber",
+              "Reason",
+              "CreatedByUserId",
+              "CreatedAtUtc"
+            )
+            SELECT
+              "Id",
+              "StoreId",
+              "ProductId",
+              "BundleId",
+              "MovementType",
+              "QuantityBefore",
+              "QuantityChange",
+              "QuantityAfter",
+              "ReferenceType",
+              "ReferenceId",
+              "BatchId",
+              "SerialNumber",
+              "Reason",
+              "CreatedByUserId",
+              "CreatedAtUtc"
+            FROM "stock_movements__pack_bundle_old";
+
+            DROP TABLE "stock_movements__pack_bundle_old";
+
+            COMMIT;
+            PRAGMA foreign_keys = ON;
+            """;
+
+        await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+    }
+
+    private static async Task EnsureSqliteRefundItemsSupportsBundleSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var productIdIsNotNull = await IsSqliteColumnNotNullAsync(dbContext, "refund_items", "ProductId", cancellationToken);
+        if (!productIdIsNotNull)
+        {
+            return;
+        }
+
+        const string sql = """
+            PRAGMA foreign_keys = OFF;
+            BEGIN TRANSACTION;
+
+            ALTER TABLE "refund_items" RENAME TO "refund_items__pack_bundle_old";
+
+            CREATE TABLE "refund_items" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_refund_items" PRIMARY KEY,
+              "RefundId" TEXT NOT NULL,
+              "SaleItemId" TEXT NOT NULL,
+              "ProductId" TEXT NULL,
+              "BundleId" TEXT NULL,
+              "ProductNameSnapshot" TEXT NOT NULL,
+              "BundleNameSnapshot" TEXT NULL,
+              "Quantity" TEXT NOT NULL,
+              "SubtotalAmount" TEXT NOT NULL,
+              "DiscountAmount" TEXT NOT NULL,
+              "TaxAmount" TEXT NOT NULL,
+              "TotalAmount" TEXT NOT NULL,
+              CONSTRAINT "FK_refund_items_refunds_RefundId" FOREIGN KEY ("RefundId") REFERENCES "refunds" ("Id") ON DELETE CASCADE,
+              CONSTRAINT "FK_refund_items_sale_items_SaleItemId" FOREIGN KEY ("SaleItemId") REFERENCES "sale_items" ("Id") ON DELETE RESTRICT
+            );
+
+            INSERT INTO "refund_items" (
+              "Id",
+              "RefundId",
+              "SaleItemId",
+              "ProductId",
+              "BundleId",
+              "ProductNameSnapshot",
+              "BundleNameSnapshot",
+              "Quantity",
+              "SubtotalAmount",
+              "DiscountAmount",
+              "TaxAmount",
+              "TotalAmount"
+            )
+            SELECT
+              "Id",
+              "RefundId",
+              "SaleItemId",
+              "ProductId",
+              "BundleId",
+              "ProductNameSnapshot",
+              "BundleNameSnapshot",
+              "Quantity",
+              "SubtotalAmount",
+              "DiscountAmount",
+              "TaxAmount",
+              "TotalAmount"
+            FROM "refund_items__pack_bundle_old";
+
+            DROP TABLE "refund_items__pack_bundle_old";
+
+            COMMIT;
+            PRAGMA foreign_keys = ON;
+            """;
+
+        await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+    }
+
     public static async Task EnsureCashSessionSchemaAsync(
         SmartPosDbContext dbContext,
         CancellationToken cancellationToken = default)
@@ -1571,6 +1960,29 @@ public static class DbSchemaUpdater
         command.CommandText = sql;
         var result = await command.ExecuteScalarAsync(cancellationToken);
         return result is not null && result is not DBNull;
+    }
+
+    private static async Task<bool> IsSqliteColumnNotNullAsync(
+        SmartPosDbContext dbContext,
+        string tableName,
+        string columnName,
+        CancellationToken cancellationToken)
+    {
+        var connection = dbContext.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync(cancellationToken);
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""SELECT "notnull" FROM pragma_table_info('{tableName}') WHERE name = '{columnName}' LIMIT 1;""";
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        if (result is null || result is DBNull)
+        {
+            return false;
+        }
+
+        return Convert.ToInt32(result, CultureInfo.InvariantCulture) == 1;
     }
 
     private static async Task<bool> HasDuplicateNormalizedBarcodesAsync(

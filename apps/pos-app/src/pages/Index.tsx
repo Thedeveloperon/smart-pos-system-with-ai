@@ -478,23 +478,52 @@ const IndexInner = () => {
     : null;
   const needsOpening = !session || session.status === "closed";
   const isClosed = session?.status === "closed";
+  const resolveLineId = (item: CartItem) =>
+    {
+      const sellMode = item.sellMode ?? (item.bundleId || item.product.isBundle ? "bundle" : "unit");
+      return item.lineId ??
+        (item.selectedSerial?.id
+          ? `serial:${item.selectedSerial.id}`
+          : sellMode === "bundle"
+            ? `bundle:${item.bundleId || item.product.bundleId || item.product.id.replace(/^bundle:/, "")}`
+            : `product:${item.product.id.replace(/^bundle:/, "")}:${sellMode}`);
+    };
 
-  const handleAddToCart = useCallback((product: Product, qty: number, selectedSerial?: SelectedSerial) => {
+  const handleAddToCart = useCallback((
+    product: Product,
+    qty: number,
+    selectedSerial?: SelectedSerial,
+    options?: {
+      sellMode?: "unit" | "pack" | "bundle";
+      bundleId?: string;
+      bundleName?: string;
+      packSize?: number;
+      packLabel?: string | null;
+    },
+  ) => {
+    const sellMode = options?.sellMode ?? (product.isBundle ? "bundle" : "unit");
     const normalizedQty = selectedSerial ? 1 : qty;
-    const nextLineId = selectedSerial ? `serial:${selectedSerial.id}` : `product:${product.id}`;
+    const productId = product.id.replace(/^bundle:/, "");
+    const bundleId = options?.bundleId || product.bundleId || (sellMode === "bundle" ? productId : undefined);
+    const nextLineId = selectedSerial
+      ? `serial:${selectedSerial.id}`
+      : sellMode === "bundle"
+        ? `bundle:${bundleId}`
+        : `product:${productId}:${sellMode}`;
 
-    if (selectedSerial && cartItems.some((item) => item.selectedSerial?.id === selectedSerial.id)) {
-      toast.info(`Serial ${selectedSerial.value} is already in the cart.`);
-      return;
-    }
-
+    let serialAlreadyExists = false;
     setCartItems((prev) => {
-      const existing = prev.find((item) => (item.lineId ?? `product:${item.product.id}`) === nextLineId);
+      if (selectedSerial && prev.some((item) => item.selectedSerial?.id === selectedSerial.id)) {
+        serialAlreadyExists = true;
+        return prev;
+      }
+
+      const existing = prev.find((item) => item.lineId === nextLineId);
       if (existing) {
         return prev.map((item) =>
-          (item.lineId ?? `product:${item.product.id}`) === nextLineId
-            ? { ...item, quantity: item.quantity + normalizedQty }
-            : item
+          item.lineId === nextLineId
+            ? { ...item, quantity: item.selectedSerial ? 1 : item.quantity + normalizedQty }
+            : item,
         );
       }
 
@@ -505,33 +534,50 @@ const IndexInner = () => {
           product,
           quantity: normalizedQty,
           selectedSerial,
+          sellMode,
+          bundleId,
+          bundleName: options?.bundleName || (sellMode === "bundle" ? product.name : undefined),
+          packSize: options?.packSize || undefined,
+          packLabel: options?.packLabel ?? null,
         },
       ];
     });
+
+    if (serialAlreadyExists && selectedSerial) {
+      toast.info(`Serial ${selectedSerial.value} is already in the cart.`);
+      return;
+    }
+
     void playCartAddSound();
     toast.success(
-      selectedSerial ? `Added ${product.name} (${selectedSerial.value})` : `Added ${product.name}`,
+      selectedSerial
+        ? `Added ${product.name} (${selectedSerial.value})`
+        : sellMode === "bundle"
+          ? `Added bundle ${product.name}`
+          : sellMode === "pack"
+            ? `Added ${product.name} (pack)`
+            : `Added ${product.name}`,
       { duration: 1500 },
     );
-  }, [cartItems]);
+  }, [resolveLineId]);
 
   const handleUpdateQty = useCallback((lineId: string, qty: number) => {
     if (qty <= 0) {
-      setCartItems((prev) => prev.filter((item) => (item.lineId ?? `product:${item.product.id}`) !== lineId));
+      setCartItems((prev) => prev.filter((item) => resolveLineId(item) !== lineId));
       return;
     }
 
     setCartItems((prev) =>
       prev.map((item) =>
-        (item.lineId ?? `product:${item.product.id}`) === lineId
+        resolveLineId(item) === lineId
           ? { ...item, quantity: item.selectedSerial ? 1 : qty }
           : item,
       )
     );
-  }, []);
+  }, [resolveLineId]);
 
   const handleRemove = useCallback((lineId: string) => {
-    setCartItems((prev) => prev.filter((item) => (item.lineId ?? `product:${item.product.id}`) !== lineId));
+    setCartItems((prev) => prev.filter((item) => resolveLineId(item) !== lineId));
     toast.info("Item removed");
   }, []);
 

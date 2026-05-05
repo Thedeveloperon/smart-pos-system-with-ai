@@ -9,12 +9,27 @@ interface CartItemRowProps {
 }
 
 const CartItemRow = ({ item, onUpdateQty, onRemove }: CartItemRowProps) => {
-  const lineId = item.lineId ?? item.selectedSerial?.id ?? item.product.id;
+  const sellMode = item.sellMode ?? (item.bundleId || item.product.isBundle ? "bundle" : "unit");
+  const lineId = item.lineId ??
+    (item.selectedSerial?.id
+      ? `serial:${item.selectedSerial.id}`
+      : sellMode === "bundle"
+        ? `bundle:${item.bundleId || item.product.bundleId || item.product.id.replace(/^bundle:/, "")}`
+        : `product:${item.product.id.replace(/^bundle:/, "")}:${sellMode}`);
   const hasSelectedSerial = Boolean(item.selectedSerial?.id);
   const lineTotal = item.product.price * item.quantity;
   const stock = item.product.stock ?? 0;
-  const exceedsStock = stock >= 0 && item.quantity > stock;
-  const remainingStock = Math.max(0, stock - item.quantity);
+  const availableQuantity = sellMode === "pack" && (item.packSize ?? 0) > 0
+    ? Math.floor(stock / (item.packSize ?? 1))
+    : stock;
+  const exceedsStock = availableQuantity >= 0 && item.quantity > availableQuantity;
+  const remainingStock = Math.max(0, availableQuantity - item.quantity);
+  const modeLabel = sellMode === "bundle"
+    ? "Bundle"
+    : sellMode === "pack"
+      ? (item.packLabel || `Pack x${item.packSize ?? 0}`)
+      : "Unit";
+  const quantityLabel = sellMode === "pack" ? "packs" : sellMode === "bundle" ? "bundles" : "units";
 
   return (
     <div
@@ -24,7 +39,10 @@ const CartItemRow = ({ item, onUpdateQty, onRemove }: CartItemRowProps) => {
     >
       <div className="mb-2 flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">{item.product.name}</p>
+          <p className="truncate text-sm font-medium">
+            {item.product.name}
+            <span className="ml-2 text-xs font-normal text-muted-foreground">({modeLabel})</span>
+          </p>
           {item.selectedSerial?.value && (
             <p className="mt-1 truncate font-mono text-[11px] text-primary/80">
               Serial {item.selectedSerial.value}
@@ -34,7 +52,7 @@ const CartItemRow = ({ item, onUpdateQty, onRemove }: CartItemRowProps) => {
             <div className="mt-1 flex items-center gap-1.5 text-[11px] font-semibold text-destructive" role="status" aria-live="polite">
               <AlertTriangle className="h-3.5 w-3.5" />
               <span>
-                Stock warning: only {stock.toLocaleString()} available, cart has {item.quantity.toLocaleString()}.
+                Stock warning: only {availableQuantity.toLocaleString()} {quantityLabel} available, cart has {item.quantity.toLocaleString()}.
               </span>
             </div>
           )}
@@ -80,15 +98,22 @@ const CartItemRow = ({ item, onUpdateQty, onRemove }: CartItemRowProps) => {
 
         <div className="text-right">
           <p className="text-sm font-semibold">Rs. {lineTotal.toLocaleString()}</p>
-          <p className="text-xs text-muted-foreground">Rs. {item.product.price.toLocaleString()} x {item.quantity}</p>
-          {exceedsStock && (
-            <p className="text-[11px] font-medium text-destructive">
-              Exceeds stock by {Math.max(0, item.quantity - stock).toLocaleString()}.
+          <p className="text-xs text-muted-foreground">
+            Rs. {item.product.price.toLocaleString()} x {item.quantity} {quantityLabel}
+          </p>
+          {sellMode === "pack" && (item.packSize ?? 0) > 0 && (
+            <p className="text-[11px] text-muted-foreground">
+              Base units: {(item.quantity * (item.packSize ?? 0)).toLocaleString()}
             </p>
           )}
-          {!exceedsStock && stock > 0 && remainingStock <= 5 && (
+          {exceedsStock && (
+            <p className="text-[11px] font-medium text-destructive">
+              Exceeds stock by {Math.max(0, item.quantity - availableQuantity).toLocaleString()} {quantityLabel}.
+            </p>
+          )}
+          {!exceedsStock && availableQuantity > 0 && remainingStock <= 5 && (
             <p className="text-[11px] font-medium text-amber-600">
-              Only {remainingStock.toLocaleString()} left in stock.
+              Only {remainingStock.toLocaleString()} {quantityLabel} left in stock.
             </p>
           )}
         </div>

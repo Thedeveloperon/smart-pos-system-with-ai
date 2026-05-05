@@ -66,6 +66,7 @@ public sealed class StockMovementHelper(SmartPosDbContext dbContext)
         {
             StoreId = storeId,
             ProductId = productId,
+            BundleId = null,
             MovementType = type,
             QuantityBefore = quantityBefore,
             QuantityChange = RoundQuantity(quantityChange),
@@ -78,6 +79,78 @@ public sealed class StockMovementHelper(SmartPosDbContext dbContext)
             CreatedByUserId = userId,
             CreatedAtUtc = now,
             Product = product,
+            Batch = null,
+            CreatedByUser = null
+        });
+    }
+
+    public async Task RecordBundleMovementAsync(
+        Guid? storeId,
+        Guid bundleId,
+        StockMovementType type,
+        decimal quantityChange,
+        StockMovementRef refType,
+        Guid? refId,
+        string? reason,
+        Guid? userId,
+        CancellationToken cancellationToken,
+        decimal? quantityBeforeOverride = null,
+        bool updateInventory = true)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var bundle = await dbContext.Bundles
+            .Include(x => x.Inventory)
+            .FirstOrDefaultAsync(x => x.Id == bundleId, cancellationToken)
+            ?? throw new KeyNotFoundException("Bundle not found.");
+
+        var inventory = bundle.Inventory;
+        if (inventory is null)
+        {
+            inventory = new BundleInventoryRecord
+            {
+                BundleId = bundleId,
+                QuantityOnHand = 0m,
+                ReorderLevel = 0m,
+                AllowNegativeStock = true,
+                Bundle = bundle,
+                UpdatedAtUtc = now
+            };
+            dbContext.BundleInventory.Add(inventory);
+            bundle.Inventory = inventory;
+        }
+
+        var quantityBefore = RoundQuantity(quantityBeforeOverride ?? inventory.QuantityOnHand);
+        var quantityAfter = RoundQuantity(quantityBefore + quantityChange);
+
+        if (!inventory.AllowNegativeStock && quantityAfter < 0m)
+        {
+            throw new InvalidOperationException("Negative stock is not allowed for this bundle.");
+        }
+
+        if (updateInventory)
+        {
+            inventory.QuantityOnHand = quantityAfter;
+            inventory.UpdatedAtUtc = now;
+        }
+
+        dbContext.StockMovements.Add(new StockMovement
+        {
+            StoreId = storeId,
+            ProductId = null,
+            BundleId = bundleId,
+            MovementType = type,
+            QuantityBefore = quantityBefore,
+            QuantityChange = RoundQuantity(quantityChange),
+            QuantityAfter = quantityAfter,
+            ReferenceType = refType,
+            ReferenceId = refId,
+            BatchId = null,
+            SerialNumber = null,
+            Reason = NormalizeOptional(reason),
+            CreatedByUserId = userId,
+            CreatedAtUtc = now,
+            Product = null,
+            Bundle = bundle,
             Batch = null,
             CreatedByUser = null
         });
