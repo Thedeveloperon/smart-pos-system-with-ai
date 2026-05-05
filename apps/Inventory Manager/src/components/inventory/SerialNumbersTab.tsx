@@ -83,6 +83,13 @@ const toIsoDateString = (value: string) => {
   return `${value}T00:00:00.000Z`;
 };
 
+const formatDateTime = (value?: string) => {
+  if (!value) return "-";
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "-" : date.toLocaleString();
+};
+
 export default function SerialNumbersTab() {
   const [products, setProducts] = useState<Product[]>([]);
   const [productId, setProductId] = useState<string>("");
@@ -400,7 +407,7 @@ export default function SerialNumbersTab() {
                 <TableRow>
                   <TableHead>Serial</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Created</TableHead>
+                  <TableHead>Purchase date/time</TableHead>
                   <TableHead>Warranty</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -412,7 +419,7 @@ export default function SerialNumbersTab() {
                     <TableCell>
                       <Badge className={STATUS_TONES[s.status] ?? ""}>{s.status}</Badge>
                     </TableCell>
-                    <TableCell>{new Date(s.created_at).toLocaleDateString()}</TableCell>
+                    <TableCell>{formatDateTime(s.created_at)}</TableCell>
                     <TableCell>
                       {s.warranty_expiry_date
                         ? new Date(s.warranty_expiry_date).toLocaleDateString()

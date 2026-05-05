@@ -338,6 +338,59 @@ public sealed class ProductInventoryTests(CustomWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task ProductSerialNumbers_ShouldListSerialsInNaturalAscendingOrder()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+        var serialOne = $"SER-{runId}-1";
+        var serialTwo = $"SER-{runId}-2";
+        var serialTen = $"SER-{runId}-10";
+        var serialEleven = $"SER-{runId}-11";
+
+        var createProduct = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"Serial Order Product {runId}",
+                sku = $"SER-ORD-{runId}",
+                unit_price = 250m,
+                cost_price = 180m,
+                initial_stock_quantity = 4m,
+                reorder_level = 1m,
+                allow_negative_stock = false,
+                is_active = true,
+                is_serial_tracked = true,
+                warranty_months = 12
+            }));
+
+        var productId = Guid.Parse(TestJson.GetString(createProduct, "product_id"));
+
+        await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync($"/api/products/{productId}/serials", new
+            {
+                serials = new[] { serialTen, serialTwo }
+            }));
+
+        await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync($"/api/products/{productId}/serials", new
+            {
+                serials = new[] { serialEleven, serialOne }
+            }));
+
+        var reloadPayload = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/products/{productId}/serials"));
+        var items = reloadPayload["items"]?.AsArray()
+                    ?? throw new InvalidOperationException("Missing serial items.");
+
+        var serialValues = items
+            .OfType<JsonObject>()
+            .Select(item => TestJson.GetString(item, "serial_value"))
+            .ToArray();
+
+        Assert.Equal(new[] { serialOne, serialTwo, serialTen, serialEleven }, serialValues);
+    }
+
+    [Fact]
     public async Task ProductSearch_ShouldMatchSerialNumberQueries()
     {
         await TestAuth.SignInAsManagerAsync(client);
