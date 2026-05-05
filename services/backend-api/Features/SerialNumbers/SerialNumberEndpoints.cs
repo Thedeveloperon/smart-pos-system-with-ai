@@ -1,5 +1,7 @@
 using System.Security.Claims;
+using System.Text;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Infrastructure;
@@ -30,7 +32,7 @@ public static class SerialNumberEndpoints
                 return Results.NotFound(new { message = "Product not found." });
             }
 
-            // SQLite cannot translate ORDER BY over DateTimeOffset columns, so sort after materialization.
+            // Sort after materialization so SQLite stays supported and serial values use natural numeric order.
             var serials = (await dbContext.SerialNumbers
                     .AsNoTracking()
                     .Where(x => x.ProductId == productId)
@@ -48,7 +50,7 @@ public static class SerialNumberEndpoints
                         updated_at = x.UpdatedAtUtc
                     })
                     .ToListAsync(cancellationToken))
-                .OrderByDescending(x => x.created_at)
+                .OrderBy(x => GetNaturalSortKey(x.serial_value))
                 .ToList();
 
             return Results.Ok(new
@@ -377,6 +379,29 @@ public static class SerialNumberEndpoints
         }
 
         return value.Trim();
+    }
+
+    private static string GetNaturalSortKey(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder(value.Length + 16);
+        foreach (Match match in Regex.Matches(value, @"\d+|\D+"))
+        {
+            if (char.IsDigit(match.Value[0]))
+            {
+                builder.Append(match.Value.PadLeft(20, '0'));
+            }
+            else
+            {
+                builder.Append(match.Value.ToUpperInvariant());
+            }
+        }
+
+        return builder.ToString();
     }
 
     private static bool IsValidStatusTransition(SerialNumberStatus currentStatus, SerialNumberStatus nextStatus)
