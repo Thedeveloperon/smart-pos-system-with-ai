@@ -11,11 +11,17 @@ public sealed class CartItemRequest
     [JsonPropertyName("bundle_id")]
     public Guid? BundleId { get; set; }
 
+    [JsonPropertyName("service_id")]
+    public Guid? ServiceId { get; set; }
+
     [JsonPropertyName("quantity")]
     public decimal Quantity { get; set; }
 
     [JsonPropertyName("is_pack_sale")]
     public bool IsPackSale { get; set; }
+
+    [JsonPropertyName("custom_price")]
+    public decimal? CustomPrice { get; set; }
 
     [JsonPropertyName("serial_number_id")]
     public Guid? SerialNumberId { get; set; }
@@ -220,6 +226,18 @@ public sealed class SaleItemResponse
 
     [JsonPropertyName("bundle_name")]
     public string? BundleName { get; set; }
+
+    [JsonPropertyName("service_id")]
+    public Guid? ServiceId { get; set; }
+
+    [JsonPropertyName("service_name")]
+    public string? ServiceName { get; set; }
+
+    [JsonPropertyName("is_service")]
+    public bool IsService { get; set; }
+
+    [JsonPropertyName("custom_price")]
+    public decimal? CustomPrice { get; set; }
 
     [JsonPropertyName("is_pack")]
     public bool IsPack { get; set; }

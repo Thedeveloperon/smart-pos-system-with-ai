@@ -10,6 +10,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
     public DbSet<Product> Products => Set<Product>();
     public DbSet<InventoryRecord> Inventory => Set<InventoryRecord>();
     public DbSet<Bundle> Bundles => Set<Bundle>();
+    public DbSet<Service> Services => Set<Service>();
     public DbSet<BundleItem> BundleItems => Set<BundleItem>();
     public DbSet<BundleInventoryRecord> BundleInventory => Set<BundleInventoryRecord>();
     public DbSet<Supplier> Suppliers => Set<Supplier>();
@@ -145,6 +146,21 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.Price).HasPrecision(18, 2);
             entity.HasIndex(x => new { x.StoreId, x.Name });
             entity.HasIndex(x => new { x.StoreId, x.Barcode }).IsUnique();
+        });
+
+        modelBuilder.Entity<Service>(entity =>
+        {
+            entity.ToTable("services");
+            entity.Property(x => x.Name).HasMaxLength(200);
+            entity.Property(x => x.Sku).HasMaxLength(64);
+            entity.Property(x => x.Price).HasPrecision(18, 2);
+            entity.Property(x => x.Description).HasMaxLength(1000);
+            entity.HasIndex(x => new { x.StoreId, x.Name });
+            entity.HasIndex(x => new { x.StoreId, x.Sku }).IsUnique();
+            entity.HasOne(x => x.Category)
+                .WithMany()
+                .HasForeignKey(x => x.CategoryId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<BundleItem>(entity =>
@@ -593,12 +609,15 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.ToTable("sale_items");
             entity.Property(x => x.ProductNameSnapshot).HasMaxLength(200);
             entity.Property(x => x.BundleNameSnapshot).HasMaxLength(200);
+            entity.Property(x => x.ServiceNameSnapshot).HasMaxLength(200);
+            entity.Property(x => x.CustomPrice).HasPrecision(18, 2);
             entity.Property(x => x.UnitPrice).HasPrecision(18, 2);
             entity.Property(x => x.Quantity).HasPrecision(18, 3);
             entity.Property(x => x.DiscountAmount).HasPrecision(18, 2);
             entity.Property(x => x.TaxAmount).HasPrecision(18, 2);
             entity.Property(x => x.LineTotal).HasPrecision(18, 2);
             entity.HasIndex(x => x.BundleId);
+            entity.HasIndex(x => x.ServiceId);
             entity.HasOne(x => x.Sale)
                 .WithMany(x => x.Items)
                 .HasForeignKey(x => x.SaleId)
@@ -610,6 +629,10 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.HasOne(x => x.Bundle)
                 .WithMany(x => x.SaleItems)
                 .HasForeignKey(x => x.BundleId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.Service)
+                .WithMany(x => x.SaleItems)
+                .HasForeignKey(x => x.ServiceId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -647,6 +670,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.ToTable("refund_items");
             entity.Property(x => x.ProductNameSnapshot).HasMaxLength(200);
             entity.Property(x => x.BundleNameSnapshot).HasMaxLength(200);
+            entity.Property(x => x.ServiceNameSnapshot).HasMaxLength(200);
             entity.Property(x => x.Quantity).HasPrecision(18, 3);
             entity.Property(x => x.SubtotalAmount).HasPrecision(18, 2);
             entity.Property(x => x.DiscountAmount).HasPrecision(18, 2);
@@ -662,6 +686,11 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(x => x.SaleItemId);
             entity.HasIndex(x => x.BundleId);
+            entity.HasIndex(x => x.ServiceId);
+            entity.HasOne<Service>()
+                .WithMany()
+                .HasForeignKey(x => x.ServiceId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<LedgerEntry>(entity =>

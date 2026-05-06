@@ -22,10 +22,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Camera, Check, ChevronsUpDown, Keyboard, Package, Plus, ScanBarcode, Search } from "lucide-react";
+import { Camera, Check, ChevronsUpDown, Keyboard, Package, Plus, ScanBarcode, Search, Wrench } from "lucide-react";
 import { BrowserMultiFormatReader, type IScannerControls } from "@zxing/browser";
 import { NotFoundException } from "@zxing/library";
-import { ApiError, lookupSerial, searchBundles } from "@/lib/api";
+import { ApiError, lookupSerial, searchBundles, searchServices } from "@/lib/api";
 import ProductCard from "./ProductCard";
 import type { Product, SelectedSerial } from "./types";
 import { POS_SHORTCUT_INLINE_HINT, POS_SHORTCUT_LABELS } from "./shortcuts";
@@ -70,7 +70,7 @@ interface ProductSearchPanelProps {
     qty: number,
     selectedSerial?: SelectedSerial,
     options?: {
-      sellMode?: "unit" | "pack" | "bundle";
+      sellMode?: "unit" | "pack" | "bundle" | "service";
       bundleId?: string;
       bundleName?: string;
       packSize?: number;
@@ -107,6 +107,7 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
     const [serialDialogSubmitting, setSerialDialogSubmitting] = useState(false);
     const [packChoiceProduct, setPackChoiceProduct] = useState<Product | null>(null);
     const [bundleResults, setBundleResults] = useState<Product[]>([]);
+    const [serviceResults, setServiceResults] = useState<Product[]>([]);
     const searchInputRef = useRef<HTMLInputElement>(null);
     const cameraVideoRef = useRef<HTMLVideoElement>(null);
     const scannerControlsRef = useRef<IScannerControls | null>(null);
@@ -206,8 +207,13 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
         product: Product,
         qty: number,
         selectedSerial?: SelectedSerial,
-        mode: "unit" | "pack" | "bundle" = "unit",
+        mode: "unit" | "pack" | "bundle" | "service" = "unit",
       ) => {
+        if (mode === "service" || product.isService) {
+          onAddToCart(product, qty, undefined, { sellMode: "service" });
+          return;
+        }
+
         if (mode === "bundle" || product.isBundle) {
           onAddToCart(product, qty, undefined, {
             sellMode: "bundle",
@@ -367,6 +373,33 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
       };
     }, [normalizedQuery, searchMode]);
 
+    useEffect(() => {
+      if (searchMode !== "manual" || normalizedQuery.length < 2) {
+        setServiceResults([]);
+        return;
+      }
+
+      let cancelled = false;
+      const timeoutId = window.setTimeout(() => {
+        void searchServices(normalizedQuery, 25)
+          .then((items) => {
+            if (!cancelled) {
+              setServiceResults(items);
+            }
+          })
+          .catch(() => {
+            if (!cancelled) {
+              setServiceResults([]);
+            }
+          });
+      }, 180);
+
+      return () => {
+        cancelled = true;
+        window.clearTimeout(timeoutId);
+      };
+    }, [normalizedQuery, searchMode]);
+
     const displayedProducts = useMemo(() => {
       const merged = [...filtered];
       const existingBundleIds = new Set(
@@ -381,6 +414,20 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
         }
       }
 
+      const existingServiceIds = new Set(
+        merged
+          .filter((item) => item.isService)
+          .map((item) => item.serviceId ?? item.id.replace(/^service:/, "")),
+      );
+
+      for (const service of serviceResults) {
+        const serviceKey = service.serviceId ?? service.id.replace(/^service:/, "");
+        if (!existingServiceIds.has(serviceKey)) {
+          merged.push(service);
+          existingServiceIds.add(serviceKey);
+        }
+      }
+
       if (!serialLookupProduct) {
         return merged;
       }
@@ -390,7 +437,7 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
       }
 
       return [serialLookupProduct, ...merged];
-    }, [bundleResults, filtered, serialLookupProduct]);
+    }, [bundleResults, filtered, serialLookupProduct, serviceResults]);
 
     const selectedProductLabel = useMemo(() => {
       if (selectedProductId === "all") {
@@ -1125,6 +1172,11 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
                             Bundle
                           </span>
                         )}
+                        {product.isService && (
+                          <span className="ml-2 rounded bg-emerald-600/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                            Service
+                          </span>
+                        )}
                       </p>
                       <p className="truncate text-[11px] text-muted-foreground font-mono">
                         {product.matchedSerialValue ? `Serial ${product.matchedSerialValue}` : product.sku}
@@ -1133,10 +1185,14 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
                     <div className="flex shrink-0 items-center gap-3 text-right">
                       <div>
                         <p className="text-sm font-bold text-primary">Rs. {product.price.toLocaleString()}</p>
-                        <p className="text-[11px] text-muted-foreground">{product.isBundle ? "Bundle stock" : "Stock"} {product.stock}</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {product.isService
+                            ? "Service item"
+                            : `${product.isBundle ? "Bundle stock" : "Stock"} ${product.stock}`}
+                        </p>
                       </div>
                       <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary">
-                        <Plus className="h-4 w-4" />
+                        {product.isService ? <Wrench className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
                       </span>
                     </div>
                   </button>

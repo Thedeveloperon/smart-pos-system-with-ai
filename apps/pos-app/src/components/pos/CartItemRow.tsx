@@ -9,27 +9,40 @@ interface CartItemRowProps {
 }
 
 const CartItemRow = ({ item, onUpdateQty, onRemove }: CartItemRowProps) => {
-  const sellMode = item.sellMode ?? (item.bundleId || item.product.isBundle ? "bundle" : "unit");
-  const lineId = item.lineId ??
-    (item.selectedSerial?.id
+  const sellMode = item.sellMode
+    ?? (item.product.isService || item.product.serviceId ? "service" : item.bundleId || item.product.isBundle ? "bundle" : "unit");
+  const lineId = item.lineId
+    ?? (item.selectedSerial?.id
       ? `serial:${item.selectedSerial.id}`
-      : sellMode === "bundle"
-        ? `bundle:${item.bundleId || item.product.bundleId || item.product.id.replace(/^bundle:/, "")}`
-        : `product:${item.product.id.replace(/^bundle:/, "")}:${sellMode}`);
+      : sellMode === "service"
+        ? `service:${item.product.serviceId || item.product.id.replace(/^service:/, "")}`
+        : sellMode === "bundle"
+          ? `bundle:${item.bundleId || item.product.bundleId || item.product.id.replace(/^bundle:/, "")}`
+          : `product:${item.product.id.replace(/^bundle:/, "")}:${sellMode}`);
   const hasSelectedSerial = Boolean(item.selectedSerial?.id);
   const lineTotal = item.product.price * item.quantity;
+  const tracksStock = item.product.tracksStock ?? sellMode !== "service";
   const stock = item.product.stock ?? 0;
-  const availableQuantity = sellMode === "pack" && (item.packSize ?? 0) > 0
-    ? Math.floor(stock / (item.packSize ?? 1))
-    : stock;
-  const exceedsStock = availableQuantity >= 0 && item.quantity > availableQuantity;
-  const remainingStock = Math.max(0, availableQuantity - item.quantity);
-  const modeLabel = sellMode === "bundle"
-    ? "Bundle"
-    : sellMode === "pack"
-      ? (item.packLabel || `Pack x${item.packSize ?? 0}`)
-      : "Unit";
-  const quantityLabel = sellMode === "pack" ? "packs" : sellMode === "bundle" ? "bundles" : "units";
+  const availableQuantity = tracksStock
+    ? sellMode === "pack" && (item.packSize ?? 0) > 0
+      ? Math.floor(stock / (item.packSize ?? 1))
+      : stock
+    : Number.POSITIVE_INFINITY;
+  const exceedsStock = tracksStock && availableQuantity >= 0 && item.quantity > availableQuantity;
+  const remainingStock = tracksStock ? Math.max(0, availableQuantity - item.quantity) : Number.POSITIVE_INFINITY;
+  const modeLabel = sellMode === "service"
+    ? "Service"
+    : sellMode === "bundle"
+      ? "Bundle"
+      : sellMode === "pack"
+        ? (item.packLabel || `Pack x${item.packSize ?? 0}`)
+        : "Unit";
+  const quantityLabel = sellMode === "service" ? "services" : sellMode === "pack" ? "packs" : sellMode === "bundle" ? "bundles" : "units";
+  const hasServiceOverride =
+    sellMode === "service"
+    && typeof item.customPrice === "number"
+    && typeof item.product.serviceDefaultPrice === "number"
+    && Math.abs(item.customPrice - item.product.serviceDefaultPrice) > 0.0001;
 
   return (
     <div
@@ -42,11 +55,21 @@ const CartItemRow = ({ item, onUpdateQty, onRemove }: CartItemRowProps) => {
           <p className="truncate text-sm font-medium">
             {item.product.name}
             <span className="ml-2 text-xs font-normal text-muted-foreground">({modeLabel})</span>
+            {sellMode === "service" && (
+              <span className="ml-2 rounded bg-emerald-600/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                Service
+              </span>
+            )}
           </p>
           {item.selectedSerial?.value && (
             <p className="mt-1 truncate font-mono text-[11px] text-primary/80">
               Serial {item.selectedSerial.value}
             </p>
+          )}
+          {hasServiceOverride && (
+            <div className="mt-1 text-[11px] font-medium text-emerald-700">
+              Price override from Rs. {item.product.serviceDefaultPrice?.toLocaleString()} to Rs. {item.customPrice?.toLocaleString()}
+            </div>
           )}
           {exceedsStock && (
             <div className="mt-1 flex items-center gap-1.5 text-[11px] font-semibold text-destructive" role="status" aria-live="polite">
@@ -111,7 +134,7 @@ const CartItemRow = ({ item, onUpdateQty, onRemove }: CartItemRowProps) => {
               Exceeds stock by {Math.max(0, item.quantity - availableQuantity).toLocaleString()} {quantityLabel}.
             </p>
           )}
-          {!exceedsStock && availableQuantity > 0 && remainingStock <= 5 && (
+          {!exceedsStock && tracksStock && availableQuantity > 0 && remainingStock <= 5 && (
             <p className="text-[11px] font-medium text-amber-600">
               Only {remainingStock.toLocaleString()} {quantityLabel} left in stock.
             </p>

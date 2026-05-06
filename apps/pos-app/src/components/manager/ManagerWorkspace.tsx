@@ -7,9 +7,10 @@ import ProductsTab from "@/components/manager/ProductsTab";
 import CatalogueTab from "@/components/manager/CatalogueTab";
 import SuppliersTab from "@/components/manager/SuppliersTab";
 import BundlesTab from "@/components/manager/BundlesTab";
+import ServicesTab from "@/components/manager/ServicesTab";
 
 export default function ManagerWorkspace() {
-  const [activeTab, setActiveTab] = useState<"products" | "bundles" | "catalogue" | "suppliers">("products");
+  const [activeTab, setActiveTab] = useState<"products" | "bundles" | "services" | "catalogue" | "suppliers">("products");
   const [wizardOpen, setWizardOpen] = useState(false);
 
   return (
@@ -22,9 +23,10 @@ export default function ManagerWorkspace() {
       </div>
       <ShopImportWizard open={wizardOpen} onOpenChange={setWizardOpen} />
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-4 border border-border/60 bg-secondary/60 md:w-fit">
+        <TabsList className="grid w-full grid-cols-5 border border-border/60 bg-secondary/60 md:w-fit">
           <TabsTrigger value="products">Products</TabsTrigger>
           <TabsTrigger value="bundles">Bundles</TabsTrigger>
+          <TabsTrigger value="services">Services</TabsTrigger>
           <TabsTrigger value="catalogue">Categories & Brands</TabsTrigger>
           <TabsTrigger value="suppliers">Suppliers</TabsTrigger>
         </TabsList>
@@ -35,6 +37,10 @@ export default function ManagerWorkspace() {
 
         <TabsContent value="bundles" className="mt-0">
           <BundlesTab />
+        </TabsContent>
+
+        <TabsContent value="services" className="mt-0">
+          <ServicesTab />
         </TabsContent>
 
         <TabsContent value="catalogue" className="mt-0">

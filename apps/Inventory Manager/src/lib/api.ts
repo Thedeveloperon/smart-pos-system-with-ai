@@ -30,6 +30,18 @@ export type Brand = {
   updated_at?: string | null;
 };
 
+export type Service = {
+  id: string;
+  name: string;
+  sku?: string | null;
+  price: number;
+  description?: string | null;
+  category_id?: string | null;
+  category_name?: string | null;
+  duration_minutes?: number | null;
+  is_active: boolean;
+};
+
 export type CreateCategoryRequest = {
   name: string;
   description?: string | null;
@@ -355,6 +367,18 @@ type BackendBrandItem = {
   updated_at?: string | null;
 };
 
+type BackendServiceItem = {
+  id: string;
+  name: string;
+  sku?: string | null;
+  price: number;
+  description?: string | null;
+  category_id?: string | null;
+  category_name?: string | null;
+  duration_minutes?: number | null;
+  is_active: boolean;
+};
+
 type BackendSupplierItem = {
   supplier_id: string;
   name: string;
@@ -394,6 +418,7 @@ type BackendProductSupplierItem = {
 
 type BackendCategoryListResponse = { items: BackendCategoryItem[] };
 type BackendBrandListResponse = { items: BackendBrandItem[] };
+type BackendServiceListResponse = { items: BackendServiceItem[] };
 type BackendSupplierListResponse = { items: BackendSupplierItem[] };
 type BackendProductSupplierListResponse = { items: BackendProductSupplierItem[] };
 
@@ -876,6 +901,20 @@ function mapBrand(item: BackendBrandItem): Brand {
   };
 }
 
+function mapService(item: BackendServiceItem): Service {
+  return {
+    id: item.id,
+    name: item.name,
+    sku: item.sku ?? undefined,
+    price: Number(item.price),
+    description: item.description ?? undefined,
+    category_id: item.category_id ?? undefined,
+    category_name: item.category_name ?? undefined,
+    duration_minutes: item.duration_minutes ?? undefined,
+    is_active: item.is_active,
+  };
+}
+
 function mapSupplier(item: BackendSupplierItem): Supplier {
   return {
     supplier_id: item.supplier_id,
@@ -1243,6 +1282,67 @@ export async function updateBrand(
 
 export async function hardDeleteBrand(brandId: string): Promise<void> {
   await requestJson<void>(`/api/brands/${brandId}/hard-delete`, {
+    method: "DELETE",
+  });
+}
+
+export type CreateServiceRequest = {
+  name: string;
+  sku?: string | null;
+  price: number;
+  description?: string | null;
+  category_id?: string | null;
+  duration_minutes?: number | null;
+};
+
+export type UpdateServiceRequest = {
+  name?: string | null;
+  sku?: string | null;
+  price?: number | null;
+  description?: string | null;
+  category_id?: string | null;
+  duration_minutes?: number | null;
+};
+
+export async function fetchServices(): Promise<Service[]> {
+  const response = await safeRequestJson<BackendServiceListResponse>("/api/services", { items: [] });
+  return response.items.map(mapService);
+}
+
+export async function createService(payload: CreateServiceRequest): Promise<Service> {
+  const response = await requestJson<BackendServiceItem>("/api/services", {
+    method: "POST",
+    body: JSON.stringify({
+      name: payload.name.trim(),
+      sku: payload.sku?.trim() || null,
+      price: payload.price,
+      description: payload.description?.trim() || null,
+      category_id: payload.category_id ?? null,
+      duration_minutes: payload.duration_minutes ?? null,
+    }),
+  });
+
+  return mapService(response);
+}
+
+export async function updateService(serviceId: string, payload: UpdateServiceRequest): Promise<Service> {
+  const response = await requestJson<BackendServiceItem>(`/api/services/${serviceId}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      name: payload.name?.trim() || null,
+      sku: payload.sku?.trim() || null,
+      price: payload.price ?? null,
+      description: payload.description?.trim() || null,
+      category_id: payload.category_id ?? null,
+      duration_minutes: payload.duration_minutes ?? null,
+    }),
+  });
+
+  return mapService(response);
+}
+
+export async function deleteService(serviceId: string): Promise<void> {
+  await requestJson<void>(`/api/services/${serviceId}`, {
     method: "DELETE",
   });
 }
