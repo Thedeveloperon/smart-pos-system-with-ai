@@ -2,7 +2,14 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ProductManagementDialog from "./ProductManagementDialog";
-import { createProduct, fetchBrands, fetchCategories, fetchSuppliers } from "@/lib/api";
+import {
+  createProduct,
+  fetchBrands,
+  fetchCategories,
+  fetchProductSuppliers,
+  fetchSuppliers,
+  updateProduct,
+} from "@/lib/api";
 import { toast } from "sonner";
 
 vi.mock("sonner", () => ({
@@ -82,6 +89,7 @@ describe("ProductManagementDialog", () => {
     vi.mocked(fetchCategories).mockResolvedValue(categories as never);
     vi.mocked(fetchBrands).mockResolvedValue(brands as never);
     vi.mocked(fetchSuppliers).mockResolvedValue(suppliers as never);
+    vi.mocked(fetchProductSuppliers).mockResolvedValue([] as never);
   });
 
   it("loads saved defaults for a new product", async () => {
@@ -183,5 +191,59 @@ describe("ProductManagementDialog", () => {
 
     expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(onNavigate).toHaveBeenCalledWith("catalogue");
+  });
+
+  it("clears permanent discounts and saves null values", async () => {
+    const existingProduct = {
+      id: "prod-100",
+      name: "Discounted Item",
+      sku: "DISC-100",
+      barcode: "1234567890123",
+      image_url: null,
+      category_id: "cat-1",
+      brand_id: "brand-1",
+      unit_price: 150,
+      cost_price: 120,
+      price: 150,
+      permanent_discount_percent: 10,
+      permanent_discount_fixed: null,
+      stock_quantity: 5,
+      stock: 5,
+      initial_stock_quantity: 5,
+      reorder_level: 0,
+      safety_stock: 0,
+      target_stock_level: 0,
+      allow_negative_stock: false,
+      has_pack_option: false,
+      pack_size: 0,
+      pack_price: null,
+      pack_label: null,
+      is_serial_tracked: false,
+      warranty_months: 0,
+      is_batch_tracked: false,
+      expiry_alert_days: 30,
+      is_active: true,
+      product_suppliers: [],
+      created_at: "2026-05-03T00:00:00Z",
+      updated_at: "2026-05-03T00:00:00Z",
+    };
+    vi.mocked(updateProduct).mockResolvedValue(existingProduct as never);
+
+    renderDialog({ product: existingProduct as never });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Remove discount" }));
+    expect(screen.getByLabelText("Permanent discount %")).toHaveValue(null);
+    expect(screen.getByLabelText("Permanent discount Rs.")).toHaveValue(null);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => {
+      expect(updateProduct).toHaveBeenCalledTimes(1);
+    });
+
+    expect(vi.mocked(updateProduct).mock.calls[0]?.[1]).toMatchObject({
+      permanent_discount_percent: null,
+      permanent_discount_fixed: null,
+    });
   });
 });

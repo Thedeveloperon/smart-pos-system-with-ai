@@ -1346,6 +1346,7 @@ const IndexInner = () => {
                   <CheckoutPanel
                     ref={desktopCheckoutRef}
                     items={cartItems}
+                    role={backendRole}
                     cashDrawer={session?.drawer}
                     allowCustomPayout={isAdmin}
                     holdBlockReason={holdBlockReason}
@@ -1387,6 +1388,7 @@ const IndexInner = () => {
                 <CheckoutPanel
                   ref={mobileCheckoutRef}
                   items={cartItems}
+                  role={backendRole}
                   cashDrawer={session?.drawer}
                   allowCustomPayout={isAdmin}
                   holdBlockReason={holdBlockReason}

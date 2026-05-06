@@ -22,6 +22,7 @@ import CustomerSearchInput from "@/components/customers/CustomerSearchInput";
 
 interface CheckoutPanelProps {
   items: CartItem[];
+  role?: "owner" | "manager" | "cashier";
   cashDrawer?: CashDrawerState | null;
   allowCustomPayout?: boolean;
   holdBlockReason?: string | null;
@@ -55,6 +56,7 @@ export interface CheckoutPanelHandle {
 const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
   ({
     items,
+    role = "owner",
     cashDrawer,
     allowCustomPayout = false,
     holdBlockReason = null,
@@ -80,10 +82,27 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
     const [showCashChangeDialog, setShowCashChangeDialog] = useState(false);
     const cashReceivedInputRef = useRef<HTMLInputElement>(null);
 
+    const transactionDiscountCap = role === "cashier" ? 10 : role === "manager" ? 25 : 100;
+    const clampDiscountPercent = useCallback(
+      (value?: number | null) => {
+        const normalized = Number.isFinite(value) ? Number(value) : 0;
+        return Math.min(transactionDiscountCap, Math.max(0, normalized));
+      },
+      [transactionDiscountCap],
+    );
+    const sanitizedCartDiscount = useMemo<CartDiscount>(
+      () => ({
+        cashierTransactionDiscountPercent: clampDiscountPercent(
+          cartDiscount.cashierTransactionDiscountPercent,
+        ),
+        cashierTransactionDiscountFixed: cartDiscount.cashierTransactionDiscountFixed ?? null,
+      }),
+      [cartDiscount.cashierTransactionDiscountFixed, cartDiscount.cashierTransactionDiscountPercent, clampDiscountPercent],
+    );
     const customerDiscountPercent = (selectedCustomer?.fixedDiscountPercent ?? selectedCustomer?.priceTierDiscountPercent ?? 0);
     const totals = useMemo(
-      () => computeCartTotals(items, cartDiscount, customerDiscountPercent),
-      [items, cartDiscount, customerDiscountPercent],
+      () => computeCartTotals(items, sanitizedCartDiscount, customerDiscountPercent),
+      [items, sanitizedCartDiscount, customerDiscountPercent],
     );
     const grandTotal = totals.grandTotal;
     const cashNum = parseFloat(cashReceived) || 0;
@@ -168,7 +187,7 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
         paymentMethod,
         cashNum,
         customerDisplay?.id,
-        cartDiscount,
+        sanitizedCartDiscount,
         cashReceivedCounts,
         nextCashChangeCounts,
         customPayoutUsed,
@@ -185,7 +204,7 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
       setCustomerDropdownOpen(false);
       setCashReceivedCounts([]);
       setCashChangeCounts([]);
-    }, [cartDiscount, cashChangeCounts, cashNum, cashReceivedCounts, customerDisplay?.id, defaultCustomer, onCompleteSale, paymentMethod]);
+    }, [cashChangeCounts, cashNum, cashReceivedCounts, customerDisplay?.id, defaultCustomer, onCompleteSale, paymentMethod, sanitizedCartDiscount]);
 
     const openCashWorkflow = useCallback(() => {
       setPaymentMethod("cash");
@@ -389,11 +408,12 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
                 type="number"
                 min={0}
                 step="0.01"
-                value={cartDiscount.cashierTransactionDiscountPercent ?? ""}
+                value={sanitizedCartDiscount.cashierTransactionDiscountPercent ?? ""}
                 onChange={(event) => {
                   const value = event.target.value;
+                  const parsedValue = value === "" ? 0 : clampDiscountPercent(Number(value));
                   onCartDiscountChange({
-                    cashierTransactionDiscountPercent: value === "" ? 0 : Number(value),
+                    cashierTransactionDiscountPercent: parsedValue,
                     cashierTransactionDiscountFixed: null,
                   });
                 }}
@@ -416,6 +436,7 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
                 className="h-9"
               />
             </div>
+            <p className="mt-1 text-xs text-muted-foreground">Max {transactionDiscountCap}% for your role</p>
             <div className="mt-2 rounded-lg border bg-muted/20 p-2 text-xs text-muted-foreground">
               <div className="flex justify-between">
                 <span>Subtotal</span>
@@ -503,7 +524,7 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
             <Button
               variant="pos-outline"
               className="h-10 w-full rounded-xl px-4 text-sm justify-center"
-              onClick={() => onHoldBill(cartDiscount)}
+              onClick={() => onHoldBill(sanitizedCartDiscount)}
               disabled={items.length === 0 || holdBlockReason != null}
               title={holdBlockReason ?? undefined}
             >

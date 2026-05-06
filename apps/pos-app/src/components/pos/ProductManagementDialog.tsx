@@ -362,6 +362,11 @@ export default function ProductManagementDialog({
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  const clearPermanentDiscounts = () => {
+    updateField("permanentDiscountPercent", "");
+    updateField("permanentDiscountFixed", "");
+  };
+
   const validateBarcode = async (value: string) => {
     const trimmed = value.trim();
     if (!trimmed) {
@@ -861,6 +866,12 @@ export default function ProductManagementDialog({
                     }
                   }}
                 />
+              </div>
+
+              <div className="md:col-span-2 flex items-end">
+                <Button type="button" variant="outline" onClick={clearPermanentDiscounts}>
+                  Remove discount
+                </Button>
               </div>
 
               {isEditing ? (
