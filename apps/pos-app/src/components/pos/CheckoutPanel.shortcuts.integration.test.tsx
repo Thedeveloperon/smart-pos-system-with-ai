@@ -53,6 +53,10 @@ const sampleCashDrawer: CashDrawerState = {
 
 const mockFetchCustomerDirectoryLookup = vi.mocked(fetchCustomerDirectoryLookup);
 const mockFetchCustomerPriceTiers = vi.mocked(fetchCustomerPriceTiers);
+const emptyCashierDiscount = {
+  cashierTransactionDiscountPercent: 0,
+  cashierTransactionDiscountFixed: null,
+};
 
 beforeEach(() => {
   mockFetchCustomerDirectoryLookup.mockResolvedValue([
@@ -106,6 +110,8 @@ describe("CheckoutPanel shortcut integration", () => {
         onCompleteSale={onCompleteSale}
         onHoldBill={vi.fn()}
         onCancelSale={vi.fn()}
+        cartDiscount={{}}
+        onCartDiscountChange={vi.fn()}
         showShortcutHints
       />,
     );
@@ -132,6 +138,8 @@ describe("CheckoutPanel shortcut integration", () => {
         onCompleteSale={onCompleteSale}
         onHoldBill={vi.fn()}
         onCancelSale={vi.fn()}
+        cartDiscount={{}}
+        onCartDiscountChange={vi.fn()}
         showShortcutHints
       />,
     );
@@ -162,6 +170,8 @@ describe("CheckoutPanel shortcut integration", () => {
         onCompleteSale={onCompleteSale}
         onHoldBill={vi.fn()}
         onCancelSale={vi.fn()}
+        cartDiscount={{}}
+        onCartDiscountChange={vi.fn()}
         showShortcutHints
       />,
     );
@@ -174,7 +184,7 @@ describe("CheckoutPanel shortcut integration", () => {
       result = panelRef.current?.tryCompleteSale();
     });
     expect(result).toEqual({ ok: true });
-    expect(onCompleteSale).toHaveBeenCalledWith("card", 0, "customer-default", [], [], false, 0);
+    expect(onCompleteSale).toHaveBeenCalledWith("card", 0, "customer-default", emptyCashierDiscount, [], [], false, 0);
   });
 
   it("quick sale cash button pre-fills the exact grand total", async () => {
@@ -190,6 +200,8 @@ describe("CheckoutPanel shortcut integration", () => {
         onCompleteSale={onCompleteSale}
         onHoldBill={vi.fn()}
         onCancelSale={vi.fn()}
+        cartDiscount={{}}
+        onCartDiscountChange={vi.fn()}
         showShortcutHints
       />,
     );
@@ -203,7 +215,7 @@ describe("CheckoutPanel shortcut integration", () => {
     });
 
     expect(result).toEqual({ ok: true });
-    expect(onCompleteSale).toHaveBeenCalledWith("cash", 100, "customer-default", [], [], false, 0);
+    expect(onCompleteSale).toHaveBeenCalledWith("cash", 100, "customer-default", emptyCashierDiscount, [], [], false, 0);
   });
 
   it("opens a change breakdown dialog before completing a cash sale", async () => {
@@ -218,6 +230,8 @@ describe("CheckoutPanel shortcut integration", () => {
         onCompleteSale={onCompleteSale}
         onHoldBill={vi.fn()}
         onCancelSale={vi.fn()}
+        cartDiscount={{}}
+        onCartDiscountChange={vi.fn()}
         showShortcutHints
       />,
     );
@@ -231,7 +245,7 @@ describe("CheckoutPanel shortcut integration", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Proceed - Rs. 50" }));
 
-    expect(onCompleteSale).toHaveBeenCalledWith("cash", 150, "customer-default", [], expect.any(Array), false, 0);
+    expect(onCompleteSale).toHaveBeenCalledWith("cash", 150, "customer-default", emptyCashierDiscount, [], expect.any(Array), false, 0);
   });
 
   it("marks custom payout sales when the override is enabled", async () => {
@@ -245,6 +259,8 @@ describe("CheckoutPanel shortcut integration", () => {
         onCompleteSale={onCompleteSale}
         onHoldBill={vi.fn()}
         onCancelSale={vi.fn()}
+        cartDiscount={{}}
+        onCartDiscountChange={vi.fn()}
         showShortcutHints
         allowCustomPayout
       />,
@@ -259,7 +275,7 @@ describe("CheckoutPanel shortcut integration", () => {
     expect(await screen.findByText(/Selected total: Rs\./)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Proceed - Rs. 50" }));
 
-    expect(onCompleteSale).toHaveBeenCalledWith("cash", 150, "customer-default", [], expect.any(Array), true, 50);
+    expect(onCompleteSale).toHaveBeenCalledWith("cash", 150, "customer-default", emptyCashierDiscount, [], expect.any(Array), true, 50);
   });
 
   it("opens cash workflow dialog through imperative shortcut action", async () => {
@@ -273,6 +289,8 @@ describe("CheckoutPanel shortcut integration", () => {
         onCompleteSale={vi.fn()}
         onHoldBill={vi.fn()}
         onCancelSale={vi.fn()}
+        cartDiscount={{}}
+        onCartDiscountChange={vi.fn()}
         showShortcutHints
       />,
     );
@@ -297,6 +315,8 @@ describe("CheckoutPanel shortcut integration", () => {
         onCompleteSale={vi.fn()}
         onHoldBill={vi.fn()}
         onCancelSale={vi.fn()}
+        cartDiscount={{}}
+        onCartDiscountChange={vi.fn()}
         showShortcutHints
       />,
     );
@@ -324,6 +344,8 @@ describe("CheckoutPanel shortcut integration", () => {
         onCompleteSale={onCompleteSale}
         onHoldBill={vi.fn()}
         onCancelSale={vi.fn()}
+        cartDiscount={{}}
+        onCartDiscountChange={vi.fn()}
         showShortcutHints
       />,
     );
@@ -339,7 +361,7 @@ describe("CheckoutPanel shortcut integration", () => {
       result = panelRef.current?.tryCompleteSale();
     });
     expect(result).toEqual({ ok: true });
-    expect(onCompleteSale).toHaveBeenCalledWith("credit", 0, "customer-credit", [], [], false, 0);
+    expect(onCompleteSale).toHaveBeenCalledWith("credit", 0, "customer-credit", emptyCashierDiscount, [], [], false, 0);
   });
 
   it("blocks credit sales when the selected customer exceeds the credit limit", async () => {
@@ -353,6 +375,8 @@ describe("CheckoutPanel shortcut integration", () => {
         onCompleteSale={vi.fn()}
         onHoldBill={vi.fn()}
         onCancelSale={vi.fn()}
+        cartDiscount={{}}
+        onCartDiscountChange={vi.fn()}
         showShortcutHints
       />,
     );
@@ -367,4 +391,75 @@ describe("CheckoutPanel shortcut integration", () => {
     });
     expect(result).toEqual({ ok: false, reason: "selected customer does not have enough available credit" });
   });
+
+  it("shows cashier role cap hint and clamps transaction percent input", async () => {
+    const onCartDiscountChange = vi.fn();
+
+    render(
+      <CheckoutPanel
+        items={sampleItems}
+        role="cashier"
+        cashDrawer={sampleCashDrawer}
+        onCompleteSale={vi.fn()}
+        onHoldBill={vi.fn()}
+        onCancelSale={vi.fn()}
+        cartDiscount={{}}
+        onCartDiscountChange={onCartDiscountChange}
+        showShortcutHints
+      />,
+    );
+
+    await waitForDefaultCustomer();
+    expect(screen.getByText("Max 10% for your role")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("%"), { target: { value: "30" } });
+    expect(onCartDiscountChange).toHaveBeenCalledWith({
+      cashierTransactionDiscountPercent: 10,
+      cashierTransactionDiscountFixed: null,
+    });
+  });
+
+  it("clamps over-cap cashier transaction percent before completing", async () => {
+    const panelRef = createRef<CheckoutPanelHandle>();
+    const onCompleteSale = vi.fn();
+
+    render(
+      <CheckoutPanel
+        ref={panelRef}
+        items={sampleItems}
+        role="cashier"
+        cashDrawer={sampleCashDrawer}
+        onCompleteSale={onCompleteSale}
+        onHoldBill={vi.fn()}
+        onCancelSale={vi.fn()}
+        cartDiscount={{ cashierTransactionDiscountPercent: 30 }}
+        onCartDiscountChange={vi.fn()}
+        showShortcutHints
+      />,
+    );
+
+    await waitForDefaultCustomer();
+    fireEvent.click(screen.getByRole("button", { name: "Card" }));
+
+    let result;
+    act(() => {
+      result = panelRef.current?.tryCompleteSale();
+    });
+    expect(result).toEqual({ ok: true });
+    expect(onCompleteSale).toHaveBeenCalledWith(
+      "card",
+      0,
+      "customer-default",
+      {
+        cashierTransactionDiscountPercent: 10,
+        cashierTransactionDiscountFixed: null,
+      },
+      [],
+      [],
+      false,
+      0,
+    );
+  });
 });
+
+

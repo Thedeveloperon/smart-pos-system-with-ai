@@ -8,6 +8,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<Brand> Brands => Set<Brand>();
     public DbSet<Product> Products => Set<Product>();
+    public DbSet<Promotion> Promotions => Set<Promotion>();
     public DbSet<InventoryRecord> Inventory => Set<InventoryRecord>();
     public DbSet<Bundle> Bundles => Set<Bundle>();
     public DbSet<Service> Services => Set<Service>();
@@ -102,6 +103,8 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.ImageUrl).HasMaxLength(500);
             entity.Property(x => x.UnitPrice).HasPrecision(18, 2);
             entity.Property(x => x.CostPrice).HasPrecision(18, 2);
+            entity.Property(x => x.PermanentDiscountPercent).HasPrecision(6, 2);
+            entity.Property(x => x.PermanentDiscountFixed).HasPrecision(18, 2);
             entity.Property(x => x.HasPackOption).HasDefaultValue(false);
             entity.Property(x => x.PackSize).HasDefaultValue(0);
             entity.Property(x => x.PackPrice).HasPrecision(18, 2);
@@ -118,6 +121,27 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.HasOne(x => x.Brand)
                 .WithMany(x => x.Products)
                 .HasForeignKey(x => x.BrandId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<Promotion>(entity =>
+        {
+            entity.ToTable("promotions");
+            entity.Property(x => x.Name).HasMaxLength(160);
+            entity.Property(x => x.Description).HasMaxLength(500);
+            entity.Property(x => x.Scope).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.ValueType).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.Value).HasPrecision(18, 2);
+            entity.HasIndex(x => new { x.StoreId, x.StartsAtUtc, x.EndsAtUtc });
+            entity.HasIndex(x => new { x.Scope, x.CategoryId });
+            entity.HasIndex(x => new { x.Scope, x.ProductId });
+            entity.HasOne(x => x.Category)
+                .WithMany(x => x.Promotions)
+                .HasForeignKey(x => x.CategoryId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(x => x.Product)
+                .WithMany(x => x.Promotions)
+                .HasForeignKey(x => x.ProductId)
                 .OnDelete(DeleteBehavior.SetNull);
         });
 
@@ -591,6 +615,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(32);
             entity.Property(x => x.Subtotal).HasPrecision(18, 2);
             entity.Property(x => x.DiscountTotal).HasPrecision(18, 2);
+            entity.Property(x => x.TransactionDiscountAmount).HasPrecision(18, 2);
             entity.Property(x => x.TaxTotal).HasPrecision(18, 2);
             entity.Property(x => x.GrandTotal).HasPrecision(18, 2);
             entity.Property(x => x.LoyaltyPointsEarned).HasPrecision(18, 3);
@@ -613,6 +638,10 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.CustomPrice).HasPrecision(18, 2);
             entity.Property(x => x.UnitPrice).HasPrecision(18, 2);
             entity.Property(x => x.Quantity).HasPrecision(18, 3);
+            entity.Property(x => x.RawCashierLineDiscountPercent).HasPrecision(18, 2);
+            entity.Property(x => x.RawCashierLineDiscountFixed).HasPrecision(18, 2);
+            entity.Property(x => x.CatalogDiscountAmount).HasPrecision(18, 2);
+            entity.Property(x => x.CashierLineDiscountAmount).HasPrecision(18, 2);
             entity.Property(x => x.DiscountAmount).HasPrecision(18, 2);
             entity.Property(x => x.TaxAmount).HasPrecision(18, 2);
             entity.Property(x => x.LineTotal).HasPrecision(18, 2);

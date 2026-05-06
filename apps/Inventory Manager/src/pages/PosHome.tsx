@@ -14,6 +14,7 @@ type Props = {
   onOpenInventory: () => void;
   onOpenReports?: () => void;
   onOpenManager?: () => void;
+  onOpenPromotions?: () => void;
   onOpenPurchases?: () => void;
 };
 
@@ -22,6 +23,7 @@ export default function PosHome({
   onOpenInventory,
   onOpenReports,
   onOpenManager,
+  onOpenPromotions,
   onOpenPurchases,
 }: Props) {
   const [products, setProducts] = useState<Product[] | null>(null);
@@ -56,6 +58,7 @@ export default function PosHome({
         onInventory={onOpenInventory}
         onReports={onOpenReports}
         onManager={onOpenManager}
+        onPromotions={onOpenPromotions}
         onPurchases={onOpenPurchases}
         inventoryAlertCount={alertCount}
       />

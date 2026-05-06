@@ -1058,6 +1058,148 @@ public static class DbSchemaUpdater
         }
     }
 
+    public static async Task EnsureDiscountSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken = default)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+
+        if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "products",
+                "PermanentDiscountPercent",
+                """ALTER TABLE "products" ADD COLUMN "PermanentDiscountPercent" TEXT NULL;""",
+                cancellationToken);
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "products",
+                "PermanentDiscountFixed",
+                """ALTER TABLE "products" ADD COLUMN "PermanentDiscountFixed" TEXT NULL;""",
+                cancellationToken);
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "sale_items",
+                "RawCashierLineDiscountPercent",
+                """ALTER TABLE "sale_items" ADD COLUMN "RawCashierLineDiscountPercent" TEXT NULL;""",
+                cancellationToken);
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "sale_items",
+                "RawCashierLineDiscountFixed",
+                """ALTER TABLE "sale_items" ADD COLUMN "RawCashierLineDiscountFixed" TEXT NULL;""",
+                cancellationToken);
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "sale_items",
+                "CatalogDiscountAmount",
+                """ALTER TABLE "sale_items" ADD COLUMN "CatalogDiscountAmount" TEXT NOT NULL DEFAULT '0';""",
+                cancellationToken);
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "sale_items",
+                "CashierLineDiscountAmount",
+                """ALTER TABLE "sale_items" ADD COLUMN "CashierLineDiscountAmount" TEXT NOT NULL DEFAULT '0';""",
+                cancellationToken);
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "sales",
+                "TransactionDiscountAmount",
+                """ALTER TABLE "sales" ADD COLUMN "TransactionDiscountAmount" TEXT NOT NULL DEFAULT '0';""",
+                cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                CREATE TABLE IF NOT EXISTS "promotions" (
+                  "Id" TEXT NOT NULL CONSTRAINT "PK_promotions" PRIMARY KEY,
+                  "StoreId" TEXT NULL,
+                  "Name" TEXT NOT NULL,
+                  "Description" TEXT NULL,
+                  "Scope" TEXT NOT NULL,
+                  "CategoryId" TEXT NULL,
+                  "ProductId" TEXT NULL,
+                  "ValueType" TEXT NOT NULL,
+                  "Value" TEXT NOT NULL,
+                  "StartsAtUtc" TEXT NOT NULL,
+                  "EndsAtUtc" TEXT NOT NULL,
+                  "IsActive" INTEGER NOT NULL DEFAULT 1,
+                  "CreatedAtUtc" TEXT NOT NULL,
+                  "UpdatedAtUtc" TEXT NULL,
+                  CONSTRAINT "FK_promotions_categories_CategoryId" FOREIGN KEY ("CategoryId") REFERENCES "categories" ("Id") ON DELETE SET NULL,
+                  CONSTRAINT "FK_promotions_products_ProductId" FOREIGN KEY ("ProductId") REFERENCES "products" ("Id") ON DELETE SET NULL
+                );
+                """,
+                cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE INDEX IF NOT EXISTS "IX_promotions_StoreId_StartsAtUtc_EndsAtUtc" ON "promotions" ("StoreId", "StartsAtUtc", "EndsAtUtc");""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE INDEX IF NOT EXISTS "IX_promotions_Scope_CategoryId" ON "promotions" ("Scope", "CategoryId");""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE INDEX IF NOT EXISTS "IX_promotions_Scope_ProductId" ON "promotions" ("Scope", "ProductId");""",
+                cancellationToken);
+            return;
+        }
+
+        if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE products ADD COLUMN IF NOT EXISTS "PermanentDiscountPercent" numeric(6,2) NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE products ADD COLUMN IF NOT EXISTS "PermanentDiscountFixed" numeric(18,2) NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS "RawCashierLineDiscountPercent" numeric(18,2) NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS "RawCashierLineDiscountFixed" numeric(18,2) NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS "CatalogDiscountAmount" numeric(18,2) NOT NULL DEFAULT 0;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS "CashierLineDiscountAmount" numeric(18,2) NOT NULL DEFAULT 0;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE sales ADD COLUMN IF NOT EXISTS "TransactionDiscountAmount" numeric(18,2) NOT NULL DEFAULT 0;""",
+                cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                CREATE TABLE IF NOT EXISTS promotions (
+                  "Id" uuid NOT NULL PRIMARY KEY,
+                  "StoreId" uuid NULL,
+                  "Name" varchar(160) NOT NULL,
+                  "Description" varchar(500) NULL,
+                  "Scope" varchar(32) NOT NULL,
+                  "CategoryId" uuid NULL REFERENCES categories("Id") ON DELETE SET NULL,
+                  "ProductId" uuid NULL REFERENCES products("Id") ON DELETE SET NULL,
+                  "ValueType" varchar(32) NOT NULL,
+                  "Value" numeric(18,2) NOT NULL,
+                  "StartsAtUtc" timestamptz NOT NULL,
+                  "EndsAtUtc" timestamptz NOT NULL,
+                  "IsActive" boolean NOT NULL DEFAULT true,
+                  "CreatedAtUtc" timestamptz NOT NULL,
+                  "UpdatedAtUtc" timestamptz NULL
+                );
+                """,
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE INDEX IF NOT EXISTS "IX_promotions_StoreId_StartsAtUtc_EndsAtUtc" ON promotions("StoreId", "StartsAtUtc", "EndsAtUtc");""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE INDEX IF NOT EXISTS "IX_promotions_Scope_CategoryId" ON promotions("Scope", "CategoryId");""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """CREATE INDEX IF NOT EXISTS "IX_promotions_Scope_ProductId" ON promotions("Scope", "ProductId");""",
+                cancellationToken);
+        }
+    }
+
     public static async Task EnsurePackAndBundleSchemaAsync(
         SmartPosDbContext dbContext,
         CancellationToken cancellationToken = default)

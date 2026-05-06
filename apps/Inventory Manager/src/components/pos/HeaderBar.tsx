@@ -1,12 +1,13 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Package, Receipt, Settings, ShoppingCart } from "lucide-react";
+import { ArrowLeft, Package, Receipt, Settings, ShoppingCart, Tag } from "lucide-react";
 
 type Props = {
   onBack?: () => void;
   onInventory?: () => void;
   onReports?: () => void;
   onManager?: () => void;
+  onPromotions?: () => void;
   onPurchases?: () => void;
   inventoryAlertCount?: number;
 };
@@ -16,6 +17,7 @@ export default function HeaderBar({
   onInventory,
   onReports,
   onManager,
+  onPromotions,
   onPurchases,
   inventoryAlertCount = 0,
 }: Props) {
@@ -76,6 +78,17 @@ export default function HeaderBar({
             >
               <ShoppingCart className="h-4 w-4" />
               <span className="hidden md:inline ml-1">Purchases</span>
+            </Button>
+          )}
+          {onPromotions && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onPromotions}
+              className="text-pos-header-foreground/80 hover:bg-white/10 hover:text-pos-header-foreground"
+            >
+              <Tag className="h-4 w-4" />
+              <span className="hidden md:inline ml-1">Promotions</span>
             </Button>
           )}
           <Button

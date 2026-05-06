@@ -28,6 +28,12 @@ public sealed class CartItemRequest
 
     [JsonPropertyName("sale_item_id")]
     public Guid? SaleItemId { get; set; }
+
+    [JsonPropertyName("cashier_line_discount_percent")]
+    public decimal? CashierLineDiscountPercent { get; set; }
+
+    [JsonPropertyName("cashier_line_discount_fixed")]
+    public decimal? CashierLineDiscountFixed { get; set; }
 }
 
 public sealed class PaymentRequest
@@ -50,6 +56,9 @@ public sealed class HoldSaleRequest
     [JsonPropertyName("discount_percent")]
     public decimal DiscountPercent { get; set; }
 
+    [JsonPropertyName("discount_fixed")]
+    public decimal? DiscountFixed { get; set; }
+
     [JsonPropertyName("customer_id")]
     public Guid? CustomerId { get; set; }
 
@@ -70,6 +79,9 @@ public sealed class CompleteSaleRequest
 
     [JsonPropertyName("discount_percent")]
     public decimal DiscountPercent { get; set; }
+
+    [JsonPropertyName("discount_fixed")]
+    public decimal? DiscountFixed { get; set; }
 
     [JsonPropertyName("customer_id")]
     public Guid? CustomerId { get; set; }
@@ -160,6 +172,9 @@ public sealed class SaleResponse
 
     [JsonPropertyName("discount_total")]
     public decimal DiscountTotal { get; set; }
+
+    [JsonPropertyName("transaction_discount_amount")]
+    public decimal TransactionDiscountAmount { get; set; }
 
     [JsonPropertyName("discount_percent")]
     public decimal DiscountPercent { get; set; }
@@ -253,6 +268,21 @@ public sealed class SaleItemResponse
 
     [JsonPropertyName("quantity")]
     public decimal Quantity { get; set; }
+
+    [JsonPropertyName("cashier_line_discount_percent")]
+    public decimal? CashierLineDiscountPercent { get; set; }
+
+    [JsonPropertyName("cashier_line_discount_fixed")]
+    public decimal? CashierLineDiscountFixed { get; set; }
+
+    [JsonPropertyName("catalog_discount_amount")]
+    public decimal CatalogDiscountAmount { get; set; }
+
+    [JsonPropertyName("cashier_line_discount_amount")]
+    public decimal CashierLineDiscountAmount { get; set; }
+
+    [JsonPropertyName("discount_amount")]
+    public decimal DiscountAmount { get; set; }
 
     [JsonPropertyName("line_total")]
     public decimal LineTotal { get; set; }

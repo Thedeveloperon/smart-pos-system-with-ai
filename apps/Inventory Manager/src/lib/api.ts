@@ -161,6 +161,8 @@ export type Product = {
   allow_negative_stock?: boolean;
   is_low_stock?: boolean;
   is_serial_tracked?: boolean;
+  permanent_discount_percent?: number | null;
+  permanent_discount_fixed?: number | null;
   warranty_months?: number;
   is_batch_tracked?: boolean;
   expiry_alert_days?: number;
@@ -168,6 +170,38 @@ export type Product = {
   is_active?: boolean;
   created_at?: string;
   updated_at?: string | null;
+};
+
+export type PromotionScope = "all" | "category" | "product";
+export type PromotionValueType = "percent" | "fixed";
+
+export type Promotion = {
+  id: string;
+  name: string;
+  description?: string | null;
+  scope: PromotionScope;
+  category_id?: string | null;
+  product_id?: string | null;
+  value_type: PromotionValueType;
+  value: number;
+  starts_at_utc: string;
+  ends_at_utc: string;
+  is_active: boolean;
+  created_at_utc: string;
+  updated_at_utc?: string | null;
+};
+
+export type UpsertPromotionRequest = {
+  name: string;
+  description?: string | null;
+  scope: PromotionScope;
+  category_id?: string | null;
+  product_id?: string | null;
+  value_type: PromotionValueType;
+  value: number;
+  starts_at_utc: string;
+  ends_at_utc: string;
+  is_active?: boolean;
 };
 
 export type StockMovement = {
@@ -319,6 +353,8 @@ type BackendProductCatalogItem = {
   allow_negative_stock?: boolean;
   is_low_stock?: boolean;
   is_serial_tracked?: boolean;
+  permanent_discount_percent?: number | null;
+  permanent_discount_fixed?: number | null;
   warranty_months?: number;
   is_batch_tracked?: boolean;
   expiry_alert_days?: number;
@@ -862,6 +898,8 @@ function mapProduct(item: BackendProductCatalogItem): Product {
     allow_negative_stock: item.allow_negative_stock,
     is_low_stock: item.is_low_stock,
     is_serial_tracked: item.is_serial_tracked,
+    permanent_discount_percent: item.permanent_discount_percent ?? null,
+    permanent_discount_fixed: item.permanent_discount_fixed ?? null,
     warranty_months: item.warranty_months,
     is_batch_tracked: item.is_batch_tracked,
     expiry_alert_days: item.expiry_alert_days,
@@ -1105,6 +1143,8 @@ function normalizeProductPayload(
     target_stock_level: data.target_stock_level ?? 0,
     allow_negative_stock: data.allow_negative_stock ?? false,
     is_serial_tracked: data.is_serial_tracked ?? false,
+    permanent_discount_percent: data.permanent_discount_percent ?? null,
+    permanent_discount_fixed: data.permanent_discount_fixed ?? null,
     warranty_months: data.is_serial_tracked ? (data.warranty_months ?? 0) : 0,
     is_batch_tracked: data.is_batch_tracked ?? false,
     expiry_alert_days: data.is_batch_tracked ? (data.expiry_alert_days ?? 30) : 30,
@@ -1234,6 +1274,45 @@ export async function updateCategory(
 
 export async function hardDeleteCategory(categoryId: string): Promise<void> {
   await requestJson<void>(`/api/categories/${categoryId}/hard-delete`, {
+    method: "DELETE",
+  });
+}
+
+function mapPromotion(item: Promotion): Promotion {
+  return {
+    ...item,
+    value: Number(item.value),
+  };
+}
+
+export async function fetchPromotions(): Promise<Promotion[]> {
+  const response = await requestJson<{ items: Promotion[] }>("/api/promotions");
+  return (response.items ?? []).map(mapPromotion);
+}
+
+export async function fetchPromotion(id: string): Promise<Promotion> {
+  const response = await requestJson<Promotion>(`/api/promotions/${id}`);
+  return mapPromotion(response);
+}
+
+export async function createPromotion(payload: UpsertPromotionRequest): Promise<Promotion> {
+  const response = await requestJson<Promotion>("/api/promotions", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return mapPromotion(response);
+}
+
+export async function updatePromotion(id: string, payload: UpsertPromotionRequest): Promise<Promotion> {
+  const response = await requestJson<Promotion>(`/api/promotions/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+  return mapPromotion(response);
+}
+
+export async function deactivatePromotion(id: string): Promise<void> {
+  await requestJson<void>(`/api/promotions/${id}`, {
     method: "DELETE",
   });
 }
