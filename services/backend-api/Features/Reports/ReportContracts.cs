@@ -160,6 +160,12 @@ public sealed class TransactionReportLineItemRow
     [JsonPropertyName("bundle_name")]
     public string? BundleName { get; set; }
 
+    [JsonPropertyName("service_id")]
+    public Guid? ServiceId { get; set; }
+
+    [JsonPropertyName("service_name")]
+    public string? ServiceName { get; set; }
+
     [JsonPropertyName("category_id")]
     public Guid? CategoryId { get; set; }
 
@@ -244,6 +250,12 @@ public sealed class TopItemReportRow
     [JsonPropertyName("bundle_name")]
     public string? BundleName { get; set; }
 
+    [JsonPropertyName("service_id")]
+    public Guid? ServiceId { get; set; }
+
+    [JsonPropertyName("service_name")]
+    public string? ServiceName { get; set; }
+
     [JsonPropertyName("product_name")]
     public string ProductName { get; set; } = string.Empty;
 
@@ -288,6 +300,12 @@ public sealed class WorstItemReportRow
 
     [JsonPropertyName("bundle_name")]
     public string? BundleName { get; set; }
+
+    [JsonPropertyName("service_id")]
+    public Guid? ServiceId { get; set; }
+
+    [JsonPropertyName("service_name")]
+    public string? ServiceName { get; set; }
 
     [JsonPropertyName("product_name")]
     public string ProductName { get; set; } = string.Empty;
@@ -537,6 +555,12 @@ public sealed class MarginSummaryReportRow
 
     [JsonPropertyName("bundle_name")]
     public string? BundleName { get; set; }
+
+    [JsonPropertyName("service_id")]
+    public Guid? ServiceId { get; set; }
+
+    [JsonPropertyName("service_name")]
+    public string? ServiceName { get; set; }
 
     [JsonPropertyName("product_name")]
     public string ProductName { get; set; } = string.Empty;

@@ -480,11 +480,14 @@ const IndexInner = () => {
   const isClosed = session?.status === "closed";
   const resolveLineId = (item: CartItem) =>
     {
-      const sellMode = item.sellMode ?? (item.bundleId || item.product.isBundle ? "bundle" : "unit");
+      const sellMode = item.sellMode
+        ?? (item.product.isService || item.product.serviceId ? "service" : item.bundleId || item.product.isBundle ? "bundle" : "unit");
       return item.lineId ??
         (item.selectedSerial?.id
           ? `serial:${item.selectedSerial.id}`
-          : sellMode === "bundle"
+          : sellMode === "service"
+            ? `service:${item.product.serviceId || item.product.id.replace(/^service:/, "")}`
+            : sellMode === "bundle"
             ? `bundle:${item.bundleId || item.product.bundleId || item.product.id.replace(/^bundle:/, "")}`
             : `product:${item.product.id.replace(/^bundle:/, "")}:${sellMode}`);
     };
@@ -494,22 +497,71 @@ const IndexInner = () => {
     qty: number,
     selectedSerial?: SelectedSerial,
     options?: {
-      sellMode?: "unit" | "pack" | "bundle";
+      sellMode?: "unit" | "pack" | "bundle" | "service";
       bundleId?: string;
       bundleName?: string;
       packSize?: number;
       packLabel?: string | null;
     },
   ) => {
-    const sellMode = options?.sellMode ?? (product.isBundle ? "bundle" : "unit");
+    const sellMode = options?.sellMode ?? (product.isService ? "service" : product.isBundle ? "bundle" : "unit");
     const normalizedQty = selectedSerial ? 1 : qty;
+    const serviceId = product.serviceId || product.id.replace(/^service:/, "");
     const productId = product.id.replace(/^bundle:/, "");
     const bundleId = options?.bundleId || product.bundleId || (sellMode === "bundle" ? productId : undefined);
+    const existingServiceLine = sellMode === "service"
+      ? cartItems.find((item) => {
+        const currentMode = item.sellMode
+          ?? (item.product.isService || item.product.serviceId ? "service" : item.bundleId || item.product.isBundle ? "bundle" : "unit");
+        const currentServiceId = item.product.serviceId || item.product.id.replace(/^service:/, "");
+        return currentMode === "service" && currentServiceId === serviceId;
+      })
+      : null;
+
+    let serviceLinePrice: number | undefined;
+    let serviceCustomPrice: number | undefined;
+    if (sellMode === "service") {
+      if (existingServiceLine) {
+        serviceLinePrice = existingServiceLine.product.price;
+        serviceCustomPrice = existingServiceLine.customPrice ?? existingServiceLine.product.price;
+      } else {
+        const defaultPrice = Number(product.serviceDefaultPrice ?? product.price);
+        const input = window.prompt(`Enter service price for ${product.name}`, defaultPrice.toFixed(2));
+        if (input === null) {
+          return;
+        }
+
+        const parsedPrice = Number(input.trim());
+        if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) {
+          toast.error("Service price must be a positive number.");
+          return;
+        }
+
+        serviceLinePrice = parsedPrice;
+        serviceCustomPrice = parsedPrice;
+      }
+    }
+
     const nextLineId = selectedSerial
       ? `serial:${selectedSerial.id}`
-      : sellMode === "bundle"
+      : sellMode === "service"
+        ? `service:${serviceId}`
+        : sellMode === "bundle"
         ? `bundle:${bundleId}`
         : `product:${productId}:${sellMode}`;
+
+    const productForCart = sellMode === "service"
+      ? {
+        ...product,
+        id: `service:${serviceId}`,
+        serviceId,
+        isService: true,
+        serviceDefaultPrice: Number(product.serviceDefaultPrice ?? product.price),
+        tracksStock: false,
+        stock: 0,
+        price: Number(serviceLinePrice ?? product.price),
+      }
+      : product;
 
     let serialAlreadyExists = false;
     setCartItems((prev) => {
@@ -531,7 +583,7 @@ const IndexInner = () => {
         ...prev,
         {
           lineId: nextLineId,
-          product,
+          product: productForCart,
           quantity: normalizedQty,
           selectedSerial,
           sellMode,
@@ -539,6 +591,7 @@ const IndexInner = () => {
           bundleName: options?.bundleName || (sellMode === "bundle" ? product.name : undefined),
           packSize: options?.packSize || undefined,
           packLabel: options?.packLabel ?? null,
+          customPrice: sellMode === "service" ? serviceCustomPrice : undefined,
         },
       ];
     });
@@ -554,12 +607,14 @@ const IndexInner = () => {
         ? `Added ${product.name} (${selectedSerial.value})`
         : sellMode === "bundle"
           ? `Added bundle ${product.name}`
+          : sellMode === "service"
+            ? `Added service ${product.name}`
           : sellMode === "pack"
             ? `Added ${product.name} (pack)`
             : `Added ${product.name}`,
       { duration: 1500 },
     );
-  }, [resolveLineId]);
+  }, [cartItems]);
 
   const handleUpdateQty = useCallback((lineId: string, qty: number) => {
     if (qty <= 0) {

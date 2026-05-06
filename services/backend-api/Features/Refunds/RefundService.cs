@@ -106,8 +106,10 @@ public sealed class RefundService(
                 SaleItemId = saleItem.Id,
                 ProductId = saleItem.ProductId,
                 BundleId = saleItem.BundleId,
+                ServiceId = saleItem.ServiceId,
                 ProductNameSnapshot = saleItem.ProductNameSnapshot,
                 BundleNameSnapshot = saleItem.BundleNameSnapshot,
+                ServiceNameSnapshot = saleItem.ServiceNameSnapshot,
                 Quantity = requestItem.Quantity,
                 SubtotalAmount = lineSubtotal,
                 DiscountAmount = lineDiscount,
@@ -167,7 +169,14 @@ public sealed class RefundService(
         var bundleStoreIds = await LoadBundleStoreIdsAsync(
             refundItems.Where(x => x.BundleId.HasValue).Select(x => x.BundleId!.Value),
             cancellationToken);
-        var resolvedSaleStoreId = ResolveStoreId(productStoreIds.Values.Concat(bundleStoreIds.Values), "Refund");
+        var serviceStoreIds = await LoadServiceStoreIdsAsync(
+            refundItems.Where(x => x.ServiceId.HasValue).Select(x => x.ServiceId!.Value),
+            cancellationToken);
+        var resolvedSaleStoreId = ResolveStoreId(
+            productStoreIds.Values
+                .Concat(bundleStoreIds.Values)
+                .Concat(serviceStoreIds.Values),
+            "Refund");
         sale.StoreId = resolvedSaleStoreId;
 
         var refund = new Refund
@@ -305,7 +314,12 @@ public sealed class RefundService(
 
             if (!refundItem.BundleId.HasValue)
             {
-                throw new InvalidOperationException("Refund item must reference a product or bundle.");
+                if (refundItem.ServiceId.HasValue)
+                {
+                    continue;
+                }
+
+                throw new InvalidOperationException("Refund item must reference a product, bundle, or service.");
             }
 
             var bundleId = refundItem.BundleId.Value;
@@ -490,10 +504,12 @@ public sealed class RefundService(
             {
                 SaleItemId = x.SaleItemId,
                 ProductId = x.ProductId,
-                ItemType = x.BundleId.HasValue ? "bundle" : "product",
+                ItemType = x.ServiceId.HasValue ? "service" : x.BundleId.HasValue ? "bundle" : "product",
                 ProductName = x.ProductNameSnapshot,
                 BundleId = x.BundleId,
                 BundleName = x.BundleNameSnapshot,
+                ServiceId = x.ServiceId,
+                ServiceName = x.ServiceNameSnapshot,
                 Quantity = x.Quantity,
                 SubtotalAmount = x.SubtotalAmount,
                 DiscountAmount = x.DiscountAmount,
@@ -628,6 +644,33 @@ public sealed class RefundService(
         if (storeIds.Count != distinctBundleIds.Length)
         {
             throw new InvalidOperationException("Some bundles are missing.");
+        }
+
+        return storeIds;
+    }
+
+    private async Task<Dictionary<Guid, Guid?>> LoadServiceStoreIdsAsync(
+        IEnumerable<Guid> serviceIds,
+        CancellationToken cancellationToken)
+    {
+        var distinctServiceIds = serviceIds
+            .Distinct()
+            .ToArray();
+
+        if (distinctServiceIds.Length == 0)
+        {
+            return [];
+        }
+
+        var storeIds = await dbContext.Services
+            .AsNoTracking()
+            .Where(x => distinctServiceIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.StoreId })
+            .ToDictionaryAsync(x => x.Id, x => x.StoreId, cancellationToken);
+
+        if (storeIds.Count != distinctServiceIds.Length)
+        {
+            throw new InvalidOperationException("Some services are missing.");
         }
 
         return storeIds;

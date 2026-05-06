@@ -92,6 +92,9 @@ public sealed class ReportService(
             .ThenInclude(x => x.Category)
             .Include(x => x.Items)
             .ThenInclude(x => x.Bundle)
+            .Include(x => x.Items)
+            .ThenInclude(x => x.Service)
+            .ThenInclude(x => x.Category)
             .Include(x => x.Payments)
             .ToListAsync(cancellationToken);
 
@@ -150,13 +153,15 @@ public sealed class ReportService(
                         .Select(y => new TransactionReportLineItemRow
                         {
                             SaleItemId = y.Id,
-                            ItemType = y.BundleId.HasValue ? "bundle" : "product",
+                            ItemType = y.ServiceId.HasValue ? "service" : y.BundleId.HasValue ? "bundle" : "product",
                             ProductId = y.ProductId,
                             ProductName = y.ProductNameSnapshot,
                             BundleId = y.BundleId,
                             BundleName = y.BundleNameSnapshot,
-                            CategoryId = y.Product?.CategoryId,
-                            CategoryName = y.Product?.Category?.Name,
+                            ServiceId = y.ServiceId,
+                            ServiceName = y.ServiceNameSnapshot,
+                            CategoryId = y.Product?.CategoryId ?? y.Service?.CategoryId,
+                            CategoryName = y.Product?.Category?.Name ?? y.Service?.Category?.Name,
                             Quantity = RoundQuantity(y.Quantity),
                             UnitPrice = RoundMoney(y.UnitPrice),
                             LineTotal = RoundMoney(y.LineTotal)
@@ -280,6 +285,8 @@ public sealed class ReportService(
                     ItemType = itemKey.ItemType,
                     ProductId = itemKey.ProductId,
                     BundleId = itemKey.BundleId,
+                    ServiceId = itemKey.ServiceId,
+                    ServiceName = itemKey.ItemType == "service" ? name : null,
                     BundleName = itemKey.ItemType == "bundle" ? name : null,
                     ProductName = name,
                     SoldQuantity = soldQty,
@@ -363,6 +370,8 @@ public sealed class ReportService(
                     ItemType = itemKey.ItemType,
                     ProductId = itemKey.ProductId,
                     BundleId = itemKey.BundleId,
+                    ServiceId = itemKey.ServiceId,
+                    ServiceName = itemKey.ItemType == "service" ? name : null,
                     BundleName = itemKey.ItemType == "bundle" ? name : null,
                     ProductName = name,
                     SoldQuantity = soldQty,
@@ -644,6 +653,9 @@ public sealed class ReportService(
         var bundleNamesById = await dbContext.Bundles
             .AsNoTracking()
             .ToDictionaryAsync(x => x.Id, x => x.Name, cancellationToken);
+        var serviceNamesById = await dbContext.Services
+            .AsNoTracking()
+            .ToDictionaryAsync(x => x.Id, x => x.Name, cancellationToken);
 
         var sales = await dbContext.Sales
             .AsNoTracking()
@@ -684,16 +696,17 @@ public sealed class ReportService(
             {
                 var sold = soldByItem.GetValueOrDefault(itemKey, ItemAgg.Empty);
                 var refunded = refundedByItem.GetValueOrDefault(itemKey, ItemAgg.Empty);
-                var itemName = itemKey.ItemType == "bundle"
-                    ? (bundleNamesById.GetValueOrDefault(itemKey.BundleId.GetValueOrDefault()) ??
-                       sold.ItemName ??
-                       refunded.ItemName ??
-                       string.Empty)
-                    : (productNamesById.GetValueOrDefault(itemKey.ProductId.GetValueOrDefault()) ??
-                       sold.ItemName ??
-                       refunded.ItemName ??
-                       string.Empty);
-                var cost = itemKey.ItemType == "bundle"
+                var itemName = itemKey.ItemType switch
+                {
+                    "bundle" => bundleNamesById.GetValueOrDefault(itemKey.BundleId.GetValueOrDefault()),
+                    "service" => serviceNamesById.GetValueOrDefault(itemKey.ServiceId.GetValueOrDefault()),
+                    _ => productNamesById.GetValueOrDefault(itemKey.ProductId.GetValueOrDefault())
+                };
+                itemName = itemName ??
+                    sold.ItemName ??
+                    refunded.ItemName ??
+                    string.Empty;
+                var cost = itemKey.ItemType is "bundle" or "service"
                     ? 0m
                     : productCostsById.GetValueOrDefault(itemKey.ProductId.GetValueOrDefault());
                 var netQuantity = RoundQuantity(sold.Quantity - refunded.Quantity);
@@ -706,6 +719,8 @@ public sealed class ReportService(
                     ItemType = itemKey.ItemType,
                     ProductId = itemKey.ProductId,
                     BundleId = itemKey.BundleId,
+                    ServiceId = itemKey.ServiceId,
+                    ServiceName = itemKey.ItemType == "service" ? itemName : null,
                     BundleName = itemKey.ItemType == "bundle" ? itemName : null,
                     ProductName = itemName,
                     NetQuantity = netQuantity,
@@ -1671,16 +1686,21 @@ public sealed class ReportService(
 
     private static ItemKey BuildItemKey(SaleItem saleItem)
     {
-        return BuildItemKey(saleItem.ProductId, saleItem.BundleId);
+        return BuildItemKey(saleItem.ProductId, saleItem.BundleId, saleItem.ServiceId);
     }
 
     private static ItemKey BuildItemKey(RefundItem refundItem)
     {
-        return BuildItemKey(refundItem.ProductId, refundItem.BundleId);
+        return BuildItemKey(refundItem.ProductId, refundItem.BundleId, refundItem.ServiceId);
     }
 
-    private static ItemKey BuildItemKey(Guid? productId, Guid? bundleId)
+    private static ItemKey BuildItemKey(Guid? productId, Guid? bundleId, Guid? serviceId)
     {
+        if (serviceId.HasValue)
+        {
+            return ItemKey.ForService(serviceId.Value);
+        }
+
         if (bundleId.HasValue)
         {
             return ItemKey.ForBundle(bundleId.Value);
@@ -2003,11 +2023,13 @@ public sealed class ReportService(
     private sealed record ItemKey(
         string ItemType,
         Guid? ProductId,
-        Guid? BundleId)
+        Guid? BundleId,
+        Guid? ServiceId)
     {
-        public static ItemKey ForProduct(Guid productId) => new("product", productId, null);
-        public static ItemKey ForBundle(Guid bundleId) => new("bundle", null, bundleId);
-        public static ItemKey Unknown { get; } = new("unknown", null, null);
+        public static ItemKey ForProduct(Guid productId) => new("product", productId, null, null);
+        public static ItemKey ForBundle(Guid bundleId) => new("bundle", null, bundleId, null);
+        public static ItemKey ForService(Guid serviceId) => new("service", null, null, serviceId);
+        public static ItemKey Unknown { get; } = new("unknown", null, null, null);
     }
 
     private sealed record ItemAgg(

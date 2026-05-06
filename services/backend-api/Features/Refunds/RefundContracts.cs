@@ -79,6 +79,12 @@ public sealed class RefundItemResponse
     [JsonPropertyName("bundle_name")]
     public string? BundleName { get; set; }
 
+    [JsonPropertyName("service_id")]
+    public Guid? ServiceId { get; set; }
+
+    [JsonPropertyName("service_name")]
+    public string? ServiceName { get; set; }
+
     [JsonPropertyName("quantity")]
     public decimal Quantity { get; set; }
 

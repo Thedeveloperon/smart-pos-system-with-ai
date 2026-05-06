@@ -282,6 +282,24 @@ public sealed class Bundle
     public ICollection<StockMovement> StockMovements { get; set; } = [];
 }
 
+public sealed class Service
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? StoreId { get; set; }
+    public Guid? CategoryId { get; set; }
+    public required string Name { get; set; }
+    public string? Sku { get; set; }
+    public decimal Price { get; set; }
+    public string? Description { get; set; }
+    public int? DurationMinutes { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public Category? Category { get; set; }
+    public ICollection<SaleItem> SaleItems { get; set; } = [];
+}
+
 public sealed class BundleItem
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -548,10 +566,14 @@ public sealed class SaleItem
     public Guid SaleId { get; set; }
     public Guid? ProductId { get; set; }
     public Guid? BundleId { get; set; }
+    public Guid? ServiceId { get; set; }
     public required string ProductNameSnapshot { get; set; }
     public string? BundleNameSnapshot { get; set; }
+    public string? ServiceNameSnapshot { get; set; }
     public bool IsPack { get; set; }
     public int SalePackSize { get; set; }
+    public bool IsService { get; set; }
+    public decimal? CustomPrice { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal Quantity { get; set; }
     public decimal DiscountAmount { get; set; }
@@ -561,6 +583,7 @@ public sealed class SaleItem
     public required Sale Sale { get; set; }
     public Product? Product { get; set; }
     public Bundle? Bundle { get; set; }
+    public Service? Service { get; set; }
     public ICollection<RefundItem> RefundItems { get; set; } = [];
     public ICollection<SerialNumber> SerialNumbers { get; set; } = [];
 }
@@ -617,8 +640,10 @@ public sealed class RefundItem
     public Guid SaleItemId { get; set; }
     public Guid? ProductId { get; set; }
     public Guid? BundleId { get; set; }
+    public Guid? ServiceId { get; set; }
     public required string ProductNameSnapshot { get; set; }
     public string? BundleNameSnapshot { get; set; }
+    public string? ServiceNameSnapshot { get; set; }
     public decimal Quantity { get; set; }
     public decimal SubtotalAmount { get; set; }
     public decimal DiscountAmount { get; set; }

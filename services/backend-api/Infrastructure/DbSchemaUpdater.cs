@@ -1218,6 +1218,116 @@ public static class DbSchemaUpdater
         }
     }
 
+    public static async Task EnsureServiceSchemaAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken = default)
+    {
+        var provider = dbContext.Database.ProviderName ?? string.Empty;
+
+        if (provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            await EnsureSqliteColumnAsync(dbContext, "sale_items", "ServiceId", """ALTER TABLE "sale_items" ADD COLUMN "ServiceId" TEXT NULL;""", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "sale_items", "ServiceNameSnapshot", """ALTER TABLE "sale_items" ADD COLUMN "ServiceNameSnapshot" TEXT NULL;""", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "sale_items", "CustomPrice", """ALTER TABLE "sale_items" ADD COLUMN "CustomPrice" TEXT NULL;""", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "sale_items", "IsService", """ALTER TABLE "sale_items" ADD COLUMN "IsService" INTEGER NOT NULL DEFAULT 0;""", cancellationToken);
+
+            await EnsureSqliteColumnAsync(dbContext, "refund_items", "ServiceId", """ALTER TABLE "refund_items" ADD COLUMN "ServiceId" TEXT NULL;""", cancellationToken);
+            await EnsureSqliteColumnAsync(dbContext, "refund_items", "ServiceNameSnapshot", """ALTER TABLE "refund_items" ADD COLUMN "ServiceNameSnapshot" TEXT NULL;""", cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                CREATE TABLE IF NOT EXISTS "services" (
+                  "Id" TEXT NOT NULL CONSTRAINT "PK_services" PRIMARY KEY,
+                  "StoreId" TEXT NULL,
+                  "CategoryId" TEXT NULL,
+                  "Name" TEXT NOT NULL,
+                  "Sku" TEXT NULL,
+                  "Price" TEXT NOT NULL,
+                  "Description" TEXT NULL,
+                  "DurationMinutes" INTEGER NULL,
+                  "IsActive" INTEGER NOT NULL DEFAULT 1,
+                  "CreatedAtUtc" TEXT NOT NULL,
+                  "UpdatedAtUtc" TEXT NULL,
+                  CONSTRAINT "FK_services_categories_CategoryId" FOREIGN KEY ("CategoryId") REFERENCES "categories" ("Id") ON DELETE SET NULL
+                );
+                """,
+                cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_services_StoreId_Name" ON "services" ("StoreId", "Name");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_services_StoreId_Sku" ON "services" ("StoreId", "Sku");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_services_CategoryId" ON "services" ("CategoryId");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_sale_items_ServiceId" ON "sale_items" ("ServiceId");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_refund_items_ServiceId" ON "refund_items" ("ServiceId");""", cancellationToken);
+            return;
+        }
+
+        if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                CREATE TABLE IF NOT EXISTS services (
+                  "Id" uuid NOT NULL PRIMARY KEY,
+                  "StoreId" uuid NULL,
+                  "CategoryId" uuid NULL,
+                  "Name" varchar(200) NOT NULL,
+                  "Sku" varchar(64) NULL,
+                  "Price" numeric(18,2) NOT NULL,
+                  "Description" varchar(1000) NULL,
+                  "DurationMinutes" integer NULL,
+                  "IsActive" boolean NOT NULL DEFAULT true,
+                  "CreatedAtUtc" timestamptz NOT NULL,
+                  "UpdatedAtUtc" timestamptz NULL,
+                  CONSTRAINT "FK_services_categories_CategoryId" FOREIGN KEY ("CategoryId") REFERENCES categories("Id") ON DELETE SET NULL
+                );
+                """,
+                cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS "ServiceId" uuid NULL;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS "ServiceNameSnapshot" varchar(200) NULL;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS "CustomPrice" numeric(18,2) NULL;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS "IsService" boolean NOT NULL DEFAULT false;""", cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE refund_items ADD COLUMN IF NOT EXISTS "ServiceId" uuid NULL;""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""ALTER TABLE refund_items ADD COLUMN IF NOT EXISTS "ServiceNameSnapshot" varchar(200) NULL;""", cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_services_StoreId_Name" ON services ("StoreId", "Name");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_services_StoreId_Sku" ON services ("StoreId", "Sku");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_services_CategoryId" ON services ("CategoryId");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_sale_items_ServiceId" ON sale_items ("ServiceId");""", cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_refund_items_ServiceId" ON refund_items ("ServiceId");""", cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                DO $$
+                BEGIN
+                  IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = 'FK_sale_items_services_ServiceId'
+                  ) THEN
+                    ALTER TABLE sale_items
+                    ADD CONSTRAINT "FK_sale_items_services_ServiceId"
+                    FOREIGN KEY ("ServiceId") REFERENCES services("Id") ON DELETE RESTRICT;
+                  END IF;
+                END $$;
+                """,
+                cancellationToken);
+
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """
+                DO $$
+                BEGIN
+                  IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = 'FK_refund_items_services_ServiceId'
+                  ) THEN
+                    ALTER TABLE refund_items
+                    ADD CONSTRAINT "FK_refund_items_services_ServiceId"
+                    FOREIGN KEY ("ServiceId") REFERENCES services("Id") ON DELETE RESTRICT;
+                  END IF;
+                END $$;
+                """,
+                cancellationToken);
+        }
+    }
+
     private static async Task EnsureSqliteSaleItemsSupportsBundleSchemaAsync(
         SmartPosDbContext dbContext,
         CancellationToken cancellationToken)
@@ -1953,8 +2063,8 @@ public static class DbSchemaUpdater
         }
 
         var sql = provider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase)
-            ? $"""SELECT 1 FROM pragma_table_info('{tableName}') WHERE name = '{columnName}' LIMIT 1;"""
-            : $"""SELECT 1 FROM information_schema.columns WHERE table_name = '{tableName}' AND column_name = '{columnName}' LIMIT 1;""";
+            ? $"""SELECT 1 FROM pragma_table_info('{tableName}') WHERE lower(name) = lower('{columnName}') LIMIT 1;"""
+            : $"""SELECT 1 FROM information_schema.columns WHERE lower(table_name) = lower('{tableName}') AND lower(column_name) = lower('{columnName}') LIMIT 1;""";
 
         await using var command = connection.CreateCommand();
         command.CommandText = sql;

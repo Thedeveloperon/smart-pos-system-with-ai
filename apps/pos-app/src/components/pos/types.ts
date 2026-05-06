@@ -22,6 +22,11 @@ export interface Product {
   packLabel?: string | null;
   isBundle?: boolean;
   bundleId?: string;
+  isService?: boolean;
+  serviceId?: string;
+  serviceDurationMinutes?: number | null;
+  serviceDefaultPrice?: number;
+  tracksStock?: boolean;
   stock: number;
 }
 
@@ -36,12 +41,13 @@ export interface CartItem {
   product: Product;
   quantity: number;
   selectedSerial?: SelectedSerial;
-  sellMode?: "unit" | "pack" | "bundle";
+  sellMode?: "unit" | "pack" | "bundle" | "service";
   bundleId?: string;
   bundleName?: string;
   packSize?: number;
   packLabel?: string | null;
   baseUnitPrice?: number;
+  customPrice?: number;
 }
 
 export interface HeldBill {

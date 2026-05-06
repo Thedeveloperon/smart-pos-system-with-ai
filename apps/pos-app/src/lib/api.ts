@@ -234,6 +234,10 @@ type BackendSaleItem = {
   product_name: string;
   bundle_id?: string | null;
   bundle_name?: string | null;
+  service_id?: string | null;
+  service_name?: string | null;
+  is_service?: boolean;
+  custom_price?: number | null;
   is_pack?: boolean;
   sale_pack_size?: number;
   pack_label?: string | null;
@@ -315,11 +319,13 @@ export type RefundResponse = {
   created_at: string;
   items: {
     sale_item_id: string;
-    item_type?: "product" | "bundle";
+    item_type?: "product" | "bundle" | "service";
     product_id?: string | null;
     product_name: string;
     bundle_id?: string | null;
     bundle_name?: string | null;
+    service_id?: string | null;
+    service_name?: string | null;
     quantity: number;
     subtotal_amount: number;
     discount_amount: number;
@@ -367,6 +373,22 @@ type BackendBundleSearchResponse = {
   items: BackendBundleSearchItem[];
 };
 
+type BackendServiceItem = {
+  id: string;
+  name: string;
+  sku?: string | null;
+  price: number;
+  description?: string | null;
+  category_id?: string | null;
+  category_name?: string | null;
+  duration_minutes?: number | null;
+  is_active: boolean;
+};
+
+type BackendServiceListResponse = {
+  items: BackendServiceItem[];
+};
+
 export type BundleItem = {
   id: string;
   product_id?: string | null;
@@ -384,6 +406,18 @@ export type Bundle = {
   stock_quantity: number;
   is_active: boolean;
   items: BundleItem[];
+};
+
+export type Service = {
+  id: string;
+  name: string;
+  sku?: string | null;
+  price: number;
+  description?: string | null;
+  category_id?: string | null;
+  category_name?: string | null;
+  duration_minutes?: number | null;
+  is_active: boolean;
 };
 
 type BackendCashCount = {
@@ -1270,11 +1304,13 @@ type TransactionsReportResponse = {
     }[];
     line_items: {
       sale_item_id: string;
-      item_type?: "product" | "bundle" | "unknown";
+      item_type?: "product" | "bundle" | "service" | "unknown";
       product_id?: string | null;
       product_name: string;
       bundle_id?: string | null;
       bundle_name?: string | null;
+      service_id?: string | null;
+      service_name?: string | null;
       category_id?: string | null;
       category_name?: string | null;
       quantity: number;
@@ -1304,10 +1340,12 @@ type TopItemsReportResponse = {
   to_date: string;
   take: number;
   items: {
-    item_type?: "product" | "bundle" | "unknown";
+    item_type?: "product" | "bundle" | "service" | "unknown";
     product_id?: string | null;
     bundle_id?: string | null;
     bundle_name?: string | null;
+    service_id?: string | null;
+    service_name?: string | null;
     product_name: string;
     sold_quantity: number;
     refunded_quantity: number;
@@ -1343,10 +1381,12 @@ type WorstItemsReportResponse = {
   to_date: string;
   take: number;
   items: {
-    item_type?: "product" | "bundle" | "unknown";
+    item_type?: "product" | "bundle" | "service" | "unknown";
     product_id?: string | null;
     bundle_id?: string | null;
     bundle_name?: string | null;
+    service_id?: string | null;
+    service_name?: string | null;
     product_name: string;
     sold_quantity: number;
     refunded_quantity: number;
@@ -1415,10 +1455,12 @@ type MarginSummaryReportResponse = {
   to_date: string;
   take: number;
   items: {
-    item_type?: "product" | "bundle" | "unknown";
+    item_type?: "product" | "bundle" | "service" | "unknown";
     product_id?: string | null;
     bundle_id?: string | null;
     bundle_name?: string | null;
+    service_id?: string | null;
+    service_name?: string | null;
     product_name: string;
     net_quantity: number;
     net_sales: number;
@@ -1986,8 +2028,10 @@ type CreateSaleRequest = {
   items?: {
     product_id?: string | null;
     bundle_id?: string | null;
+    service_id?: string | null;
     quantity: number;
     is_pack_sale?: boolean;
+    custom_price?: number;
     serial_number_id?: string;
     sale_item_id?: string;
   }[];
@@ -2005,8 +2049,10 @@ type HoldSaleRequest = {
   items: {
     product_id?: string | null;
     bundle_id?: string | null;
+    service_id?: string | null;
     quantity: number;
     is_pack_sale?: boolean;
+    custom_price?: number;
     serial_number_id?: string;
   }[];
   discount_percent: number;
@@ -2770,15 +2816,18 @@ function mapCatalogProduct(item: BackendProductCatalogItem): Product {
 function mapSaleItems(items: BackendSaleItem[]): CartItem[] {
   return items.map((item) => {
     const isBundle = Boolean(item.bundle_id);
+    const isService = Boolean(item.service_id) || Boolean(item.is_service);
     const isPack = Boolean(item.is_pack);
     const rawQuantity = Number(item.quantity);
     const salePackSize = Number(item.sale_pack_size ?? 0);
     const cartQuantity = isPack && salePackSize > 0
       ? rawQuantity / salePackSize
       : rawQuantity;
-    const productId = item.product_id || item.bundle_id || item.sale_item_id;
-    const mode: CartItem["sellMode"] = isBundle ? "bundle" : isPack ? "pack" : "unit";
-    const lineId = isBundle
+    const identityId = item.service_id || item.product_id || item.bundle_id || item.sale_item_id;
+    const mode: CartItem["sellMode"] = isService ? "service" : isBundle ? "bundle" : isPack ? "pack" : "unit";
+    const lineId = isService
+      ? `service:${item.service_id}`
+      : isBundle
       ? `bundle:${item.bundle_id}`
       : isPack
         ? `product:${item.product_id}:pack`
@@ -2790,18 +2839,27 @@ function mapSaleItems(items: BackendSaleItem[]): CartItem[] {
       sellMode: mode,
       bundleId: item.bundle_id ?? undefined,
       bundleName: item.bundle_name ?? undefined,
+      customPrice: item.custom_price ?? undefined,
       packSize: isPack ? salePackSize : undefined,
       packLabel: item.pack_label ?? undefined,
       baseUnitPrice: undefined,
       product: {
-        id: isBundle ? `bundle:${item.bundle_id}` : productId,
+        id: isService
+          ? `service:${item.service_id}`
+          : isBundle
+            ? `bundle:${item.bundle_id}`
+            : identityId,
         bundleId: item.bundle_id ?? undefined,
         isBundle,
+        isService,
+        serviceId: item.service_id ?? undefined,
+        serviceDefaultPrice: item.unit_price != null ? Number(item.unit_price) : undefined,
+        tracksStock: !isService,
         name: item.product_name,
-        sku: productId.slice(0, 8),
+        sku: identityId.slice(0, 8),
         barcode: undefined,
         price: Number(item.unit_price),
-        category: undefined,
+        category: isService ? "Service" : undefined,
         stock: rawQuantity,
         image: getSampleProductImage(item.product_name) || createProductImage(item.product_name),
       },
@@ -2864,6 +2922,39 @@ function mapBundle(item: BackendBundle): Bundle {
       quantity: Number(bundleItem.quantity),
       notes: bundleItem.notes ?? null,
     })),
+  };
+}
+
+function mapService(item: BackendServiceItem): Service {
+  return {
+    id: item.id,
+    name: item.name,
+    sku: item.sku ?? null,
+    price: Number(item.price),
+    description: item.description ?? null,
+    category_id: item.category_id ?? null,
+    category_name: item.category_name ?? null,
+    duration_minutes: item.duration_minutes ?? null,
+    is_active: item.is_active,
+  };
+}
+
+function mapServiceSearchProduct(item: Service): Product {
+  return {
+    id: `service:${item.id}`,
+    serviceId: item.id,
+    isService: true,
+    name: item.name,
+    sku: item.sku?.trim() || item.id.slice(0, 8),
+    price: Number(item.price),
+    serviceDefaultPrice: Number(item.price),
+    serviceDurationMinutes: item.duration_minutes ?? null,
+    category: item.category_name || "Service",
+    categoryId: item.category_id || undefined,
+    categoryName: item.category_name || "Service",
+    stock: 0,
+    tracksStock: false,
+    image: getSampleProductImage(item.name) || createProductImage(item.name),
   };
 }
 
@@ -3260,6 +3351,33 @@ export async function searchBundles(query?: string, take = 30) {
   }));
 }
 
+export async function fetchServices(): Promise<Service[]> {
+  const response = await request<BackendServiceListResponse>("/api/services");
+  return response.items.map(mapService);
+}
+
+export async function searchServices(query?: string, take = 30): Promise<Product[]> {
+  const normalizedQuery = query?.trim().toLowerCase() ?? "";
+  const normalizedTake = Math.max(1, Math.min(100, Math.trunc(take) || 30));
+  const services = await fetchServices();
+  const filtered = normalizedQuery.length === 0
+    ? services
+    : services.filter((service) =>
+      [
+        service.name,
+        service.sku ?? "",
+        service.description ?? "",
+        service.category_name ?? "",
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(normalizedQuery));
+
+  return filtered
+    .slice(0, normalizedTake)
+    .map(mapServiceSearchProduct);
+}
+
 export async function fetchBundles(
   query?: string,
   take = 80,
@@ -3273,6 +3391,62 @@ export async function fetchBundles(
   params.set("include_inactive", includeInactive ? "true" : "false");
   const response = await request<BackendBundleCatalogResponse>(`/api/bundles?${params.toString()}`);
   return response.items.map(mapBundle);
+}
+
+export type CreateServiceRequest = {
+  name: string;
+  sku?: string | null;
+  price: number;
+  description?: string | null;
+  category_id?: string | null;
+  duration_minutes?: number | null;
+};
+
+export type UpdateServiceRequest = {
+  name?: string | null;
+  sku?: string | null;
+  price?: number | null;
+  description?: string | null;
+  category_id?: string | null;
+  duration_minutes?: number | null;
+};
+
+export async function createService(requestBody: CreateServiceRequest): Promise<Service> {
+  const response = await request<BackendServiceItem>("/api/services", {
+    method: "POST",
+    body: JSON.stringify({
+      name: requestBody.name,
+      sku: normalizeOptionalString(requestBody.sku),
+      price: requestBody.price,
+      description: normalizeOptionalString(requestBody.description),
+      category_id: requestBody.category_id ?? null,
+      duration_minutes: requestBody.duration_minutes ?? null,
+    }),
+  });
+
+  return mapService(response);
+}
+
+export async function updateService(serviceId: string, requestBody: UpdateServiceRequest): Promise<Service> {
+  const response = await request<BackendServiceItem>(`/api/services/${encodeURIComponent(serviceId)}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      name: normalizeOptionalString(requestBody.name),
+      sku: normalizeOptionalString(requestBody.sku),
+      price: requestBody.price ?? null,
+      description: normalizeOptionalString(requestBody.description),
+      category_id: requestBody.category_id ?? null,
+      duration_minutes: requestBody.duration_minutes ?? null,
+    }),
+  });
+
+  return mapService(response);
+}
+
+export async function deleteService(serviceId: string): Promise<void> {
+  await request<void>(`/api/services/${encodeURIComponent(serviceId)}`, {
+    method: "DELETE",
+  });
 }
 
 export type BundleItemRequest = {
@@ -5237,10 +5411,12 @@ export async function updateCurrentCashDrawer(counts: DenominationCount[], total
 export async function holdSale(items: CartItem[], role: "admin" | "manager" | "cashier") {
   const payload: HoldSaleRequest = {
     items: items.map((item) => {
-      const sellMode = item.sellMode ?? (item.bundleId || item.product.isBundle ? "bundle" : "unit");
+      const sellMode = item.sellMode
+        ?? (item.product.isService || item.product.serviceId ? "service" : item.bundleId || item.product.isBundle ? "bundle" : "unit");
+      const serviceId = item.product.serviceId || item.product.id.replace(/^service:/, "");
       return {
       product_id:
-        sellMode === "bundle"
+        sellMode === "bundle" || sellMode === "service"
           ? null
           : item.product.id.startsWith("bundle:")
             ? null
@@ -5248,8 +5424,12 @@ export async function holdSale(items: CartItem[], role: "admin" | "manager" | "c
       bundle_id: sellMode === "bundle"
         ? (item.bundleId || item.product.bundleId || item.product.id.replace(/^bundle:/, ""))
         : undefined,
+      service_id: sellMode === "service" ? serviceId : undefined,
       quantity: item.quantity,
       is_pack_sale: sellMode === "pack",
+      custom_price: sellMode === "service"
+        ? (item.customPrice ?? item.product.price)
+        : undefined,
       serial_number_id: item.selectedSerial?.id,
     };
     }),
@@ -5279,10 +5459,12 @@ export async function completeSale(
   const cartItemsPayload = saleId
     ? undefined
     : items.map((item) => {
-      const sellMode = item.sellMode ?? (item.bundleId || item.product.isBundle ? "bundle" : "unit");
+      const sellMode = item.sellMode
+        ?? (item.product.isService || item.product.serviceId ? "service" : item.bundleId || item.product.isBundle ? "bundle" : "unit");
+      const serviceId = item.product.serviceId || item.product.id.replace(/^service:/, "");
       return {
         product_id:
-          sellMode === "bundle"
+          sellMode === "bundle" || sellMode === "service"
             ? null
             : item.product.id.startsWith("bundle:")
               ? null
@@ -5290,8 +5472,12 @@ export async function completeSale(
         bundle_id: sellMode === "bundle"
           ? (item.bundleId || item.product.bundleId || item.product.id.replace(/^bundle:/, ""))
           : undefined,
+        service_id: sellMode === "service" ? serviceId : undefined,
         quantity: item.quantity,
         is_pack_sale: sellMode === "pack",
+        custom_price: sellMode === "service"
+          ? (item.customPrice ?? item.product.price)
+          : undefined,
         serial_number_id: item.selectedSerial?.id,
         sale_item_id: item.saleItemId,
       };

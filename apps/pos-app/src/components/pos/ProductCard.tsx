@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Package } from "lucide-react";
+import { Plus, Package, Wrench } from "lucide-react";
 import { primeCartAddSound } from "@/lib/sound";
 import type { Product } from "./types";
 
@@ -12,8 +12,9 @@ interface ProductCardProps {
 }
 
 const ProductCard = ({ product, onAdd, showAddButton = true, interactive = true }: ProductCardProps) => {
-  const isLowStock = product.stock > 0 && product.stock <= 5;
-  const isOutOfStock = product.stock === 0;
+  const tracksStock = product.tracksStock ?? !product.isService;
+  const isLowStock = tracksStock && product.stock > 0 && product.stock <= 5;
+  const isOutOfStock = tracksStock && product.stock === 0;
   const cardStateClass = isOutOfStock ? "opacity-60" : interactive ? "cursor-pointer hover:-translate-y-0.5 hover:pos-shadow-md" : "";
   const imageStateClass = interactive ? "group-hover:scale-105" : "";
 
@@ -31,7 +32,6 @@ const ProductCard = ({ product, onAdd, showAddButton = true, interactive = true 
         }
       }}
     >
-      {/* Image */}
       <div className="aspect-[5/4] bg-muted relative overflow-hidden">
         {product.image ? (
           <img
@@ -58,6 +58,11 @@ const ProductCard = ({ product, onAdd, showAddButton = true, interactive = true 
             Bundle
           </Badge>
         )}
+        {product.isService && (
+          <Badge className="absolute bottom-1 left-1 text-[9px] px-1 py-0.5 bg-emerald-700 text-white">
+            Service
+          </Badge>
+        )}
 
         {isLowStock && (
           <Badge className="absolute top-1 right-1 text-[9px] px-1 py-0.5 bg-warning text-warning-foreground">
@@ -71,7 +76,6 @@ const ProductCard = ({ product, onAdd, showAddButton = true, interactive = true 
         )}
       </div>
 
-      {/* Info */}
       <div className="p-2 flex flex-col gap-0.5 flex-1">
         <h3 className="text-[12px] font-semibold leading-tight line-clamp-2 text-foreground">
           {product.name}
@@ -79,9 +83,14 @@ const ProductCard = ({ product, onAdd, showAddButton = true, interactive = true 
         <p className="text-[9px] text-muted-foreground font-mono">
           {product.sku}
         </p>
-        {product.hasPackOption && !product.isBundle && (
+        {product.hasPackOption && !product.isBundle && !product.isService && (
           <p className="text-[9px] text-primary/80">
-            Pack: Rs. {(product.packPrice ?? 0).toLocaleString()} {product.packLabel ? `Â· ${product.packLabel}` : ""}
+            Pack: Rs. {(product.packPrice ?? 0).toLocaleString()} {product.packLabel ? `· ${product.packLabel}` : ""}
+          </p>
+        )}
+        {product.isService && product.serviceDurationMinutes && product.serviceDurationMinutes > 0 && (
+          <p className="text-[9px] text-emerald-700">
+            Duration: {product.serviceDurationMinutes} min
           </p>
         )}
         {product.matchedSerialValue && (
@@ -93,9 +102,15 @@ const ProductCard = ({ product, onAdd, showAddButton = true, interactive = true 
           <span className="text-[13px] font-bold text-primary">
             Rs. {product.price.toLocaleString()}
           </span>
-          <span className="text-[9px] text-muted-foreground">
-            Qty: {product.stock}
-          </span>
+          {tracksStock ? (
+            <span className="text-[9px] text-muted-foreground">
+              Qty: {product.stock}
+            </span>
+          ) : (
+            <span className="text-[9px] text-muted-foreground">
+              Non-inventory
+            </span>
+          )}
         </div>
 
         {showAddButton && (
@@ -112,7 +127,7 @@ const ProductCard = ({ product, onAdd, showAddButton = true, interactive = true 
                 onAdd(product, 1);
               }}
             >
-              <Plus className="h-4 w-4" />
+              {product.isService ? <Wrench className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
               <span>Add</span>
             </Button>
           </div>

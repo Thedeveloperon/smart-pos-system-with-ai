@@ -4,14 +4,17 @@ export const mergeHeldCartWithCurrentProducts = (items: CartItem[], products: Pr
   const currentProductsById = new Map(products.map((product) => [product.id, product]));
 
   return items.map((item) => {
-    const sellMode = item.sellMode ?? (item.bundleId || item.product.isBundle ? "bundle" : "unit");
-    const currentProduct = sellMode === "bundle"
+    const sellMode = item.sellMode
+      ?? (item.product.isService || item.product.serviceId ? "service" : item.bundleId || item.product.isBundle ? "bundle" : "unit");
+    const currentProduct = sellMode === "bundle" || sellMode === "service"
       ? null
       : currentProductsById.get(item.product.id.replace(/^bundle:/, ""));
     const lineId = item.lineId ??
       (item.selectedSerial?.id
         ? `serial:${item.selectedSerial.id}`
-        : sellMode === "bundle"
+        : sellMode === "service"
+          ? `service:${item.product.serviceId || item.product.id.replace(/^service:/, "")}`
+          : sellMode === "bundle"
           ? `bundle:${item.bundleId || item.product.bundleId || item.product.id.replace(/^bundle:/, "")}`
           : `product:${item.product.id.replace(/^bundle:/, "")}:${sellMode}`);
 

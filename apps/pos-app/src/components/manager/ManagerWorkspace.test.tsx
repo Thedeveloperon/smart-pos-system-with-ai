@@ -14,6 +14,14 @@ vi.mock("@/components/manager/CatalogueTab", () => ({
   default: () => <div>Catalogue panel</div>,
 }));
 
+vi.mock("@/components/manager/BundlesTab", () => ({
+  default: () => <div>Bundles panel</div>,
+}));
+
+vi.mock("@/components/manager/ServicesTab", () => ({
+  default: () => <div>Services panel</div>,
+}));
+
 vi.mock("@/components/manager/SuppliersTab", () => ({
   default: () => <div>Suppliers panel</div>,
 }));

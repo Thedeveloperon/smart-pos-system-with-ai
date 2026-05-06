@@ -1,16 +1,55 @@
 using System.Globalization;
 using System.Net;
 using System.Text;
+using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Features.Checkout;
 using SmartPos.Backend.Features.Settings;
+using SmartPos.Backend.Infrastructure;
 
 namespace SmartPos.Backend.Features.Receipts;
 
-public sealed class ReceiptService(CheckoutService checkoutService)
+public sealed class ReceiptService(
+    CheckoutService checkoutService,
+    SmartPosDbContext dbContext)
 {
     public async Task<SaleResponse?> GetReceiptAsync(Guid saleId, CancellationToken cancellationToken)
     {
-        return await checkoutService.GetSaleAsync(saleId, cancellationToken);
+        var sale = await checkoutService.GetSaleAsync(saleId, cancellationToken);
+        if (sale is null)
+        {
+            return null;
+        }
+
+        var serviceIds = sale.Items
+            .Where(x => x.IsService && x.ServiceId.HasValue)
+            .Select(x => x.ServiceId!.Value)
+            .Distinct()
+            .ToArray();
+
+        if (serviceIds.Length == 0)
+        {
+            return sale;
+        }
+
+        var durationsByServiceId = await dbContext.Services
+            .AsNoTracking()
+            .Where(x => serviceIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.DurationMinutes })
+            .ToDictionaryAsync(x => x.Id, x => x.DurationMinutes, cancellationToken);
+
+        foreach (var item in sale.Items.Where(x => x.IsService && x.ServiceId.HasValue))
+        {
+            if (!durationsByServiceId.TryGetValue(item.ServiceId!.Value, out var durationMinutes) ||
+                !durationMinutes.HasValue ||
+                durationMinutes.Value <= 0)
+            {
+                continue;
+            }
+
+            item.ServiceName = AppendDurationLabel(item.ServiceName ?? item.ProductName, durationMinutes.Value);
+        }
+
+        return sale;
     }
 
     public static string BuildThermalText(SaleResponse sale, ShopProfileResponse? shopProfile = null)
@@ -46,7 +85,10 @@ public sealed class ReceiptService(CheckoutService checkoutService)
 
         foreach (var item in sale.Items)
         {
-            sb.AppendLine(TrimToWidth(item.ProductName, width));
+            var lineLabel = item.IsService
+                ? $"[Service] {item.ServiceName ?? item.ProductName}"
+                : item.ProductName;
+            sb.AppendLine(TrimToWidth(lineLabel, width));
             var qtyPrice = $"{item.Quantity:0.###} x {item.UnitPrice:0.00}";
             var discount = item.UnitPrice * item.Quantity - item.LineTotal;
             sb.AppendLine(AlignLeftRight(qtyPrice, $"LKR {item.LineTotal:0.00}", width));
@@ -296,8 +338,11 @@ public sealed class ReceiptService(CheckoutService checkoutService)
         foreach (var item in sale.Items)
         {
             var discount = Math.Max(0m, item.UnitPrice * item.Quantity - item.LineTotal);
+            var lineLabel = item.IsService
+                ? $"[Service] {item.ServiceName ?? item.ProductName}"
+                : item.ProductName;
             sb.AppendLine("<tr>");
-            sb.AppendLine($"<td class=\"name\">{Html(item.ProductName)}</td>");
+            sb.AppendLine($"<td class=\"name\">{Html(lineLabel)}</td>");
             sb.AppendLine($"<td class=\"num\">{item.Quantity:0.###}</td>");
             sb.AppendLine($"<td class=\"num\">{discount:0.00}</td>");
             sb.AppendLine($"<td class=\"num\">{item.LineTotal:0.00}</td>");
@@ -352,7 +397,10 @@ public sealed class ReceiptService(CheckoutService checkoutService)
         sb.AppendLine("Items:");
         foreach (var item in sale.Items)
         {
-            sb.AppendLine($"- {item.ProductName} x{item.Quantity:0.###} = LKR {item.LineTotal:0.00}");
+            var lineLabel = item.IsService
+                ? $"[Service] {item.ServiceName ?? item.ProductName}"
+                : item.ProductName;
+            sb.AppendLine($"- {lineLabel} x{item.Quantity:0.###} = LKR {item.LineTotal:0.00}");
         }
 
         sb.AppendLine();
@@ -472,5 +520,10 @@ public sealed class ReceiptService(CheckoutService checkoutService)
         }
 
         return $"{value[..(width - 3)]}...";
+    }
+
+    private static string AppendDurationLabel(string serviceName, int durationMinutes)
+    {
+        return $"{serviceName} ({durationMinutes} min)";
     }
 }

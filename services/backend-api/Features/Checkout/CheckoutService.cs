@@ -65,10 +65,14 @@ public sealed class CheckoutService(
             {
                 ProductId = x.Product?.Id,
                 BundleId = x.Bundle?.Id,
-                ProductNameSnapshot = x.Product?.Name ?? x.Bundle?.Name ?? x.ProductName,
+                ServiceId = x.Service?.Id,
+                ProductNameSnapshot = x.Product?.Name ?? x.Bundle?.Name ?? x.Service?.Name ?? x.ProductName,
                 BundleNameSnapshot = x.Bundle?.Name,
+                ServiceNameSnapshot = x.Service?.Name,
                 IsPack = x.IsPackSale,
                 SalePackSize = x.SalePackSize,
+                IsService = x.Service is not null,
+                CustomPrice = x.CustomPrice,
                 UnitPrice = x.UnitPrice,
                 Quantity = x.Quantity,
                 DiscountAmount = x.DiscountAmount,
@@ -76,7 +80,8 @@ public sealed class CheckoutService(
                 LineTotal = x.LineTotal,
                 Sale = null!,
                 Product = null!,
-                Bundle = null
+                Bundle = null,
+                Service = null
             }).ToList()
         };
 
@@ -159,10 +164,14 @@ public sealed class CheckoutService(
                 {
                     ProductId = line.Product?.Id,
                     BundleId = line.Bundle?.Id,
-                    ProductNameSnapshot = line.Product?.Name ?? line.Bundle?.Name ?? line.ProductName,
+                    ServiceId = line.Service?.Id,
+                    ProductNameSnapshot = line.Product?.Name ?? line.Bundle?.Name ?? line.Service?.Name ?? line.ProductName,
                     BundleNameSnapshot = line.Bundle?.Name,
+                    ServiceNameSnapshot = line.Service?.Name,
                     IsPack = line.IsPackSale,
                     SalePackSize = line.SalePackSize,
+                    IsService = line.Service is not null,
+                    CustomPrice = line.CustomPrice,
                     UnitPrice = line.UnitPrice,
                     Quantity = line.Quantity,
                     DiscountAmount = line.DiscountAmount,
@@ -170,7 +179,8 @@ public sealed class CheckoutService(
                     LineTotal = line.LineTotal,
                     Sale = null!,
                     Product = null!,
-                    Bundle = null
+                    Bundle = null,
+                    Service = null
                 };
 
                 saleItems.Add(saleItem);
@@ -210,7 +220,14 @@ public sealed class CheckoutService(
         var bundleStoreIds = await LoadBundleStoreIdsAsync(
             sale.Items.Where(x => x.BundleId.HasValue).Select(x => x.BundleId!.Value),
             cancellationToken);
-        sale.StoreId = ResolveStoreId(productStoreIds.Values.Concat(bundleStoreIds.Values), "Sale");
+        var serviceStoreIds = await LoadServiceStoreIdsAsync(
+            sale.Items.Where(x => x.ServiceId.HasValue).Select(x => x.ServiceId!.Value),
+            cancellationToken);
+        sale.StoreId = ResolveStoreId(
+            productStoreIds.Values
+                .Concat(bundleStoreIds.Values)
+                .Concat(serviceStoreIds.Values),
+            "Sale");
 
         var paymentRecords = BuildPayments(request.Payments, sale.Id);
         var paidTotal = paymentRecords.Sum(x => x.Amount);
@@ -231,6 +248,11 @@ public sealed class CheckoutService(
             .Select(x => x.BundleId!.Value)
             .Distinct()
             .ToArray();
+        var serviceIds = sale.Items
+            .Where(x => x.ServiceId.HasValue)
+            .Select(x => x.ServiceId!.Value)
+            .Distinct()
+            .ToArray();
         var loadedProducts = await dbContext.Products
             .Include(x => x.SerialNumbers)
             .Include(x => x.Inventory)
@@ -239,6 +261,9 @@ public sealed class CheckoutService(
         var loadedBundles = await dbContext.Bundles
             .Include(x => x.Inventory)
             .Where(x => bundleIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+        var loadedServices = await dbContext.Services
+            .Where(x => serviceIds.Contains(x.Id))
             .ToDictionaryAsync(x => x.Id, cancellationToken);
         var reservedSerialIds = requestedSerialBySaleItemId.Values.ToHashSet();
 
@@ -307,7 +332,17 @@ public sealed class CheckoutService(
 
             if (!saleItem.BundleId.HasValue)
             {
-                throw new InvalidOperationException("Sale item must reference a product or bundle.");
+                if (saleItem.ServiceId.HasValue)
+                {
+                    if (!loadedServices.ContainsKey(saleItem.ServiceId.Value))
+                    {
+                        throw new InvalidOperationException("Service not found for sale item.");
+                    }
+
+                    continue;
+                }
+
+                throw new InvalidOperationException("Sale item must reference a product, bundle, or service.");
             }
 
             if (!loadedBundles.TryGetValue(saleItem.BundleId.Value, out var bundle))
@@ -631,13 +666,26 @@ public sealed class CheckoutService(
             throw new InvalidOperationException("All quantities must be greater than zero.");
         }
 
-        if (requestItems.Any(x => x.ProductId.HasValue == x.BundleId.HasValue))
+        if (requestItems.Any(x =>
+            (x.ProductId.HasValue ? 1 : 0) +
+            (x.BundleId.HasValue ? 1 : 0) +
+            (x.ServiceId.HasValue ? 1 : 0) != 1))
         {
-            throw new InvalidOperationException("Each cart item must include either product_id or bundle_id.");
+            throw new InvalidOperationException("Each cart item must include exactly one of product_id, bundle_id, or service_id.");
+        }
+
+        if (requestItems.Any(x => x.IsPackSale && !x.ProductId.HasValue))
+        {
+            throw new InvalidOperationException("Pack selling is supported only for product lines.");
+        }
+
+        if (requestItems.Any(x => x.CustomPrice.HasValue && !x.ServiceId.HasValue))
+        {
+            throw new InvalidOperationException("custom_price is allowed only for service lines.");
         }
 
         var serialSpecificItems = requestItems.Where(x => x.SerialNumberId.HasValue).ToList();
-        if (serialSpecificItems.Any(x => !x.ProductId.HasValue || x.IsPackSale || x.Quantity != 1m))
+        if (serialSpecificItems.Any(x => !x.ProductId.HasValue || x.BundleId.HasValue || x.ServiceId.HasValue || x.IsPackSale || x.Quantity != 1m))
         {
             throw new InvalidOperationException("Serial-selected items must be product unit lines with quantity 1.");
         }
@@ -673,6 +721,20 @@ public sealed class CheckoutService(
                 Quantity = x.Sum(y => y.Quantity)
             })
             .ToList();
+        var groupedServiceItems = requestItems
+            .Where(x => x.ServiceId.HasValue)
+            .GroupBy(x => new
+            {
+                ServiceId = x.ServiceId!.Value,
+                CustomPrice = x.CustomPrice
+            })
+            .Select(x => new
+            {
+                x.Key.ServiceId,
+                x.Key.CustomPrice,
+                Quantity = x.Sum(y => y.Quantity)
+            })
+            .ToList();
 
         var productIds = requestItems
             .Where(x => x.ProductId.HasValue)
@@ -680,6 +742,7 @@ public sealed class CheckoutService(
             .Distinct()
             .ToArray();
         var bundleIds = groupedBundleItems.Select(x => x.BundleId).Distinct().ToArray();
+        var serviceIds = groupedServiceItems.Select(x => x.ServiceId).Distinct().ToArray();
 
         var products = await dbContext.Products
             .AsNoTracking()
@@ -698,6 +761,14 @@ public sealed class CheckoutService(
         if (bundles.Count != bundleIds.Length)
         {
             throw new InvalidOperationException("Some bundles are missing or inactive.");
+        }
+        var services = await dbContext.Services
+            .AsNoTracking()
+            .Where(x => serviceIds.Contains(x.Id) && x.IsActive)
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+        if (services.Count != serviceIds.Length)
+        {
+            throw new InvalidOperationException("Some services are missing or inactive.");
         }
 
         Dictionary<Guid, SerialNumber> serialsById;
@@ -829,6 +900,28 @@ public sealed class CheckoutService(
                 LineGross = lineGross
             });
         }
+        foreach (var item in groupedServiceItems)
+        {
+            var service = services[item.ServiceId];
+            var unitPrice = item.CustomPrice ?? service.Price;
+            if (unitPrice <= 0m)
+            {
+                throw new InvalidOperationException($"'{service.Name}' has an invalid selling price.");
+            }
+
+            var lineGross = decimal.Round(unitPrice * item.Quantity, 2, MidpointRounding.AwayFromZero);
+            subtotal += lineGross;
+
+            cartLines.Add(new CartLine
+            {
+                Service = service,
+                ProductName = service.Name,
+                Quantity = item.Quantity,
+                UnitPrice = unitPrice,
+                CustomPrice = item.CustomPrice,
+                LineGross = lineGross
+            });
+        }
 
         var discountTotal = decimal.Round(subtotal * (discountPercent / 100m), 2, MidpointRounding.AwayFromZero);
         decimal allocatedDiscount = 0m;
@@ -856,7 +949,10 @@ public sealed class CheckoutService(
         {
             Items = cartLines,
             StoreId = ResolveStoreId(
-                cartLines.Select(x => x.Product?.StoreId).Concat(cartLines.Select(x => x.Bundle?.StoreId)),
+                cartLines
+                    .Select(x => x.Product?.StoreId)
+                    .Concat(cartLines.Select(x => x.Bundle?.StoreId))
+                    .Concat(cartLines.Select(x => x.Service?.StoreId)),
                 "Cart"),
             Subtotal = subtotal,
             DiscountTotal = discountTotal,
@@ -888,6 +984,24 @@ public sealed class CheckoutService(
             throw new InvalidOperationException("All quantities must be greater than zero.");
         }
 
+        if (requestItems.Any(x =>
+            (x.ProductId.HasValue ? 1 : 0) +
+            (x.BundleId.HasValue ? 1 : 0) +
+            (x.ServiceId.HasValue ? 1 : 0) != 1))
+        {
+            throw new InvalidOperationException("Each cart item must include exactly one of product_id, bundle_id, or service_id.");
+        }
+
+        if (requestItems.Any(x => x.IsPackSale && !x.ProductId.HasValue))
+        {
+            throw new InvalidOperationException("Pack selling is supported only for product lines.");
+        }
+
+        if (requestItems.Any(x => x.CustomPrice.HasValue && !x.ServiceId.HasValue))
+        {
+            throw new InvalidOperationException("custom_price is allowed only for service lines.");
+        }
+
         var duplicateSaleItemIds = requestItems
             .Where(x => x.SaleItemId.HasValue)
             .Select(x => x.SaleItemId!.Value)
@@ -908,16 +1022,18 @@ public sealed class CheckoutService(
                 throw new InvalidOperationException("Some held sale items were not found.");
             }
 
-            if (existingSaleItem.ProductId != requestItem.ProductId!.Value)
+            if (existingSaleItem.ProductId != requestItem.ProductId ||
+                existingSaleItem.BundleId != requestItem.BundleId ||
+                existingSaleItem.ServiceId != requestItem.ServiceId)
             {
-                throw new InvalidOperationException("Held sale items cannot be reassigned to a different product.");
+                throw new InvalidOperationException("Held sale items cannot be reassigned to a different item.");
             }
         }
 
         var serialSpecificItems = requestItems
             .Where(x => x.SerialNumberId.HasValue)
             .ToList();
-        if (serialSpecificItems.Any(x => x.Quantity != 1m))
+        if (serialSpecificItems.Any(x => x.Quantity != 1m || !x.ProductId.HasValue || x.BundleId.HasValue || x.ServiceId.HasValue || x.IsPackSale))
         {
             throw new InvalidOperationException("Serial-selected items must use a quantity of 1.");
         }
@@ -934,22 +1050,56 @@ public sealed class CheckoutService(
         }
 
         var productIds = requestItems
+            .Where(x => x.ProductId.HasValue)
             .Select(x => x.ProductId!.Value)
+            .Distinct()
+            .ToArray();
+        var bundleIds = requestItems
+            .Where(x => x.BundleId.HasValue)
+            .Select(x => x.BundleId!.Value)
+            .Distinct()
+            .ToArray();
+        var serviceIds = requestItems
+            .Where(x => x.ServiceId.HasValue)
+            .Select(x => x.ServiceId!.Value)
             .Distinct()
             .ToArray();
         var products = await dbContext.Products
             .AsNoTracking()
             .Where(x => productIds.Contains(x.Id))
             .ToDictionaryAsync(x => x.Id, cancellationToken);
-
         if (products.Count != productIds.Length)
         {
             throw new InvalidOperationException("Some products are missing.");
         }
+        var bundles = await dbContext.Bundles
+            .AsNoTracking()
+            .Where(x => bundleIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+        if (bundles.Count != bundleIds.Length)
+        {
+            throw new InvalidOperationException("Some bundles are missing.");
+        }
+        var services = await dbContext.Services
+            .AsNoTracking()
+            .Where(x => serviceIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+        if (services.Count != serviceIds.Length)
+        {
+            throw new InvalidOperationException("Some services are missing.");
+        }
 
-        if (requestItems.Any(x => !x.SaleItemId.HasValue && !products[x.ProductId!.Value].IsActive))
+        if (requestItems.Any(x => !x.SaleItemId.HasValue && x.ProductId.HasValue && !products[x.ProductId!.Value].IsActive))
         {
             throw new InvalidOperationException("Some products are missing or inactive.");
+        }
+        if (requestItems.Any(x => !x.SaleItemId.HasValue && x.BundleId.HasValue && !bundles[x.BundleId!.Value].IsActive))
+        {
+            throw new InvalidOperationException("Some bundles are missing or inactive.");
+        }
+        if (requestItems.Any(x => !x.SaleItemId.HasValue && x.ServiceId.HasValue && !services[x.ServiceId!.Value].IsActive))
+        {
+            throw new InvalidOperationException("Some services are missing or inactive.");
         }
 
         Dictionary<Guid, SerialNumber> serialsById;
@@ -980,32 +1130,92 @@ public sealed class CheckoutService(
 
         foreach (var item in requestItems)
         {
-            var product = products[item.ProductId!.Value];
             var existingSaleItem = item.SaleItemId.HasValue
                 ? existingSaleItemsById[item.SaleItemId.Value]
                 : null;
-
-            if (item.SerialNumberId.HasValue)
+            if (item.ProductId.HasValue)
             {
-                if (!product.IsSerialTracked)
+                var product = products[item.ProductId.Value];
+
+                if (item.SerialNumberId.HasValue)
                 {
-                    throw new InvalidOperationException($"'{product.Name}' is not configured for serial tracking.");
+                    if (!product.IsSerialTracked)
+                    {
+                        throw new InvalidOperationException($"'{product.Name}' is not configured for serial tracking.");
+                    }
+
+                    var serial = serialsById[item.SerialNumberId.Value];
+                    if (serial.ProductId != product.Id)
+                    {
+                        throw new InvalidOperationException($"Serial number '{serial.SerialValue}' does not belong to '{product.Name}'.");
+                    }
+
+                    if (serial.Status != SerialNumberStatus.Available)
+                    {
+                        throw new InvalidOperationException($"Serial number '{serial.SerialValue}' is not available for sale.");
+                    }
+
+                    var unitPrice = existingSaleItem?.UnitPrice ?? product.UnitPrice;
+                    var lineGross = decimal.Round(unitPrice * item.Quantity, 2, MidpointRounding.AwayFromZero);
+                    subtotal += lineGross;
+
+                    cartLines.Add(new CartLine
+                    {
+                        ExistingSaleItemId = existingSaleItem?.Id,
+                        Product = product,
+                        ProductName = existingSaleItem?.ProductNameSnapshot ?? product.Name,
+                        Quantity = item.Quantity,
+                        UnitPrice = unitPrice,
+                        LineGross = lineGross,
+                        SerialNumberId = serial.Id,
+                        SerialValue = serial.SerialValue
+                    });
+
+                    continue;
                 }
 
-                var serial = serialsById[item.SerialNumberId.Value];
-                if (serial.ProductId != product.Id)
+                if (item.IsPackSale)
                 {
-                    throw new InvalidOperationException($"Serial number '{serial.SerialValue}' does not belong to '{product.Name}'.");
+                    if (product.IsSerialTracked)
+                    {
+                        throw new InvalidOperationException($"'{product.Name}' cannot be sold as a pack because it is serial-tracked.");
+                    }
+
+                    if (!product.HasPackOption || product.PackSize < 2 || !product.PackPrice.HasValue || product.PackPrice.Value <= 0m)
+                    {
+                        throw new InvalidOperationException($"'{product.Name}' is not configured for pack selling.");
+                    }
+
+                    var stockQty = decimal.Round(item.Quantity * product.PackSize, 3, MidpointRounding.AwayFromZero);
+                    var unitPrice = existingSaleItem?.UnitPrice ?? product.PackPrice.Value;
+                    var lineGross = decimal.Round(unitPrice * item.Quantity, 2, MidpointRounding.AwayFromZero);
+                    subtotal += lineGross;
+
+                    cartLines.Add(new CartLine
+                    {
+                        ExistingSaleItemId = existingSaleItem?.Id,
+                        Product = product,
+                        ProductName = existingSaleItem?.ProductNameSnapshot ?? product.Name,
+                        IsPackSale = true,
+                        SalePackSize = product.PackSize,
+                        PackLabel = product.PackLabel,
+                        Quantity = stockQty,
+                        UnitPrice = unitPrice,
+                        LineGross = lineGross
+                    });
+
+                    continue;
                 }
 
-                if (serial.Status != SerialNumberStatus.Available)
+                if (product.IsSerialTracked)
                 {
-                    throw new InvalidOperationException($"Serial number '{serial.SerialValue}' is not available for sale.");
+                    throw new InvalidOperationException(
+                        $"'{product.Name}' requires a validated serial number before it can be added to the cart.");
                 }
 
-                var unitPrice = existingSaleItem?.UnitPrice ?? product.UnitPrice;
-                var lineGross = decimal.Round(unitPrice * item.Quantity, 2, MidpointRounding.AwayFromZero);
-                subtotal += lineGross;
+                var genericUnitPrice = existingSaleItem?.UnitPrice ?? product.UnitPrice;
+                var genericLineGross = decimal.Round(genericUnitPrice * item.Quantity, 2, MidpointRounding.AwayFromZero);
+                subtotal += genericLineGross;
 
                 cartLines.Add(new CartLine
                 {
@@ -1013,33 +1223,60 @@ public sealed class CheckoutService(
                     Product = product,
                     ProductName = existingSaleItem?.ProductNameSnapshot ?? product.Name,
                     Quantity = item.Quantity,
-                    UnitPrice = unitPrice,
-                    LineGross = lineGross,
-                    SerialNumberId = serial.Id,
-                    SerialValue = serial.SerialValue
+                    UnitPrice = genericUnitPrice,
+                    LineGross = genericLineGross
                 });
 
                 continue;
             }
 
-            if (product.IsSerialTracked)
+            if (item.BundleId.HasValue)
             {
-                throw new InvalidOperationException(
-                    $"'{product.Name}' requires a validated serial number before it can be added to the cart.");
+                var bundle = bundles[item.BundleId.Value];
+                var unitPrice = existingSaleItem?.UnitPrice ?? bundle.Price;
+                var lineGross = decimal.Round(unitPrice * item.Quantity, 2, MidpointRounding.AwayFromZero);
+                subtotal += lineGross;
+
+                cartLines.Add(new CartLine
+                {
+                    ExistingSaleItemId = existingSaleItem?.Id,
+                    Bundle = bundle,
+                    ProductName = existingSaleItem?.ProductNameSnapshot ?? bundle.Name,
+                    Quantity = item.Quantity,
+                    UnitPrice = unitPrice,
+                    LineGross = lineGross
+                });
+
+                continue;
             }
 
-            var genericUnitPrice = existingSaleItem?.UnitPrice ?? product.UnitPrice;
-            var genericLineGross = decimal.Round(genericUnitPrice * item.Quantity, 2, MidpointRounding.AwayFromZero);
-            subtotal += genericLineGross;
+            if (!item.ServiceId.HasValue)
+            {
+                throw new InvalidOperationException("Each cart item must include exactly one of product_id, bundle_id, or service_id.");
+            }
+
+            var service = services[item.ServiceId.Value];
+            var unitPriceForService = item.CustomPrice
+                ?? existingSaleItem?.CustomPrice
+                ?? existingSaleItem?.UnitPrice
+                ?? service.Price;
+            if (unitPriceForService <= 0m)
+            {
+                throw new InvalidOperationException($"'{service.Name}' has an invalid selling price.");
+            }
+
+            var serviceLineGross = decimal.Round(unitPriceForService * item.Quantity, 2, MidpointRounding.AwayFromZero);
+            subtotal += serviceLineGross;
 
             cartLines.Add(new CartLine
             {
                 ExistingSaleItemId = existingSaleItem?.Id,
-                Product = product,
-                ProductName = existingSaleItem?.ProductNameSnapshot ?? product.Name,
+                Service = service,
+                ProductName = existingSaleItem?.ProductNameSnapshot ?? service.Name,
                 Quantity = item.Quantity,
-                UnitPrice = genericUnitPrice,
-                LineGross = genericLineGross
+                UnitPrice = unitPriceForService,
+                CustomPrice = item.CustomPrice ?? existingSaleItem?.CustomPrice,
+                LineGross = serviceLineGross
             });
         }
 
@@ -1068,7 +1305,12 @@ public sealed class CheckoutService(
         return new CartComputation
         {
             Items = cartLines,
-            StoreId = ResolveStoreId(cartLines.Select(x => x.Product?.StoreId), "Cart"),
+            StoreId = ResolveStoreId(
+                cartLines
+                    .Select(x => x.Product?.StoreId)
+                    .Concat(cartLines.Select(x => x.Bundle?.StoreId))
+                    .Concat(cartLines.Select(x => x.Service?.StoreId)),
+                "Cart"),
             Subtotal = subtotal,
             DiscountTotal = discountTotal,
             GrandTotal = grandTotal
@@ -1104,10 +1346,14 @@ public sealed class CheckoutService(
                 saleItem.UnitPrice = line.UnitPrice;
                 saleItem.ProductNameSnapshot = line.ProductName;
                 saleItem.BundleNameSnapshot = line.Bundle?.Name;
+                saleItem.ServiceNameSnapshot = line.Service?.Name;
                 saleItem.BundleId = line.Bundle?.Id;
                 saleItem.ProductId = line.Product?.Id;
+                saleItem.ServiceId = line.Service?.Id;
                 saleItem.IsPack = line.IsPackSale;
                 saleItem.SalePackSize = line.SalePackSize;
+                saleItem.IsService = line.Service is not null;
+                saleItem.CustomPrice = line.CustomPrice;
                 saleItem.DiscountAmount = line.DiscountAmount;
                 saleItem.TaxAmount = 0m;
                 saleItem.LineTotal = line.LineTotal;
@@ -1125,10 +1371,14 @@ public sealed class CheckoutService(
                 SaleId = sale.Id,
                 ProductId = line.Product?.Id,
                 BundleId = line.Bundle?.Id,
+                ServiceId = line.Service?.Id,
                 ProductNameSnapshot = line.ProductName,
                 BundleNameSnapshot = line.Bundle?.Name,
+                ServiceNameSnapshot = line.Service?.Name,
                 IsPack = line.IsPackSale,
                 SalePackSize = line.SalePackSize,
+                IsService = line.Service is not null,
+                CustomPrice = line.CustomPrice,
                 UnitPrice = line.UnitPrice,
                 Quantity = line.Quantity,
                 DiscountAmount = line.DiscountAmount,
@@ -1136,7 +1386,8 @@ public sealed class CheckoutService(
                 LineTotal = line.LineTotal,
                 Sale = sale,
                 Product = null!,
-                Bundle = null
+                Bundle = null,
+                Service = null
             };
 
             dbContext.SaleItems.Add(saleItemToAdd);
@@ -1198,6 +1449,33 @@ public sealed class CheckoutService(
         if (storeIds.Count != distinctBundleIds.Length)
         {
             throw new InvalidOperationException("Some bundles are missing.");
+        }
+
+        return storeIds;
+    }
+
+    private async Task<Dictionary<Guid, Guid?>> LoadServiceStoreIdsAsync(
+        IEnumerable<Guid> serviceIds,
+        CancellationToken cancellationToken)
+    {
+        var distinctServiceIds = serviceIds
+            .Distinct()
+            .ToArray();
+
+        if (distinctServiceIds.Length == 0)
+        {
+            return [];
+        }
+
+        var storeIds = await dbContext.Services
+            .AsNoTracking()
+            .Where(x => distinctServiceIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.StoreId })
+            .ToDictionaryAsync(x => x.Id, x => x.StoreId, cancellationToken);
+
+        if (storeIds.Count != distinctServiceIds.Length)
+        {
+            throw new InvalidOperationException("Some services are missing.");
         }
 
         return storeIds;
@@ -1313,6 +1591,10 @@ public sealed class CheckoutService(
                 ProductName = x.ProductNameSnapshot,
                 BundleId = x.BundleId,
                 BundleName = x.BundleNameSnapshot,
+                ServiceId = x.ServiceId,
+                ServiceName = x.ServiceNameSnapshot,
+                IsService = x.IsService,
+                CustomPrice = x.CustomPrice,
                 IsPack = x.IsPack,
                 SalePackSize = x.SalePackSize,
                 PackLabel = x.IsPack && x.SalePackSize > 1
@@ -1527,10 +1809,12 @@ public sealed class CheckoutService(
         public Guid? ExistingSaleItemId { get; set; }
         public Product? Product { get; set; }
         public Bundle? Bundle { get; set; }
+        public Service? Service { get; set; }
         public string ProductName { get; set; } = string.Empty;
         public bool IsPackSale { get; set; }
         public int SalePackSize { get; set; }
         public string? PackLabel { get; set; }
+        public decimal? CustomPrice { get; set; }
         public decimal Quantity { get; set; }
         public decimal UnitPrice { get; set; }
         public decimal LineGross { get; set; }
