@@ -95,4 +95,28 @@ describe("BulkImportDialog", () => {
     });
     expect(bulkImportBrandsMock).toHaveBeenCalledTimes(1);
   });
+
+  it("keeps the preview dialog constrained to the viewport", async () => {
+    parseFileMock.mockResolvedValue({
+      rows: Array.from({ length: 3 }, (_, index) => ({ name: `Brand ${index + 1}` })),
+      headers: ["name"],
+      error: null,
+    });
+
+    render(<BulkImportDialog open onOpenChange={vi.fn()} entityType="brand" onImportComplete={vi.fn()} />);
+
+    const fileInput = document.querySelector("input[type='file']") as HTMLInputElement;
+    fireEvent.change(fileInput, {
+      target: { files: [new File(["name\nBrand 1"], "brands.csv", { type: "text/csv" })] },
+    });
+    fireEvent.click(screen.getByText("Skip duplicates"));
+    fireEvent.click(screen.getByRole("button", { name: "Next: Preview" }));
+
+    await screen.findByRole("button", { name: "Import 3 row(s)" });
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.className).toContain("max-h-[92vh]");
+    expect(dialog.className).toContain("overflow-hidden");
+    expect(screen.getAllByRole("button", { name: "Close" })).toHaveLength(1);
+  });
 });

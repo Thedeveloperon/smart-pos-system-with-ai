@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { AlertCircle, CheckCircle2, Download, Loader2, UploadCloud, X } from "lucide-react";
+import { AlertCircle, CheckCircle2, Download, Loader2, UploadCloud } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -211,20 +211,17 @@ export default function BulkImportDialog({ open, onOpenChange, entityType, onImp
 
   return (
     <Dialog open={open} onOpenChange={(next) => (next ? onOpenChange(true) : closeDialog())}>
-      <DialogContent className="max-w-5xl p-0">
+      <DialogContent className="flex max-h-[92vh] max-w-[95vw] flex-col overflow-hidden p-0 sm:max-w-5xl">
         <DialogHeader className="space-y-1 border-b px-6 py-5">
           <DialogTitle className="flex items-center justify-between">
             <span>Import {config.label}</span>
-            <Button type="button" size="icon" variant="ghost" onClick={closeDialog}>
-              <X className="h-4 w-4" />
-            </Button>
           </DialogTitle>
           <DialogDescription>
             Download the template, upload CSV/Excel, preview, then import.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-5 px-6 py-5">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
           {step === "upload" && (
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/20 p-4">
@@ -300,7 +297,7 @@ export default function BulkImportDialog({ open, onOpenChange, entityType, onImp
                 <Badge variant="secondary">{config.label}</Badge>
               </div>
 
-              <div className="overflow-hidden rounded-md border">
+              <div className="overflow-x-auto rounded-md border">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -343,7 +340,7 @@ export default function BulkImportDialog({ open, onOpenChange, entityType, onImp
                 <MetricCard label="Errors" value={importResult.errors} highlight />
               </div>
 
-              <div className="overflow-hidden rounded-md border">
+              <div className="overflow-x-auto rounded-md border">
                 <Table>
                   <TableHeader>
                     <TableRow>
