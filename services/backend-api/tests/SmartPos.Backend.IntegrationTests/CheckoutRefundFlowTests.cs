@@ -285,6 +285,134 @@ public sealed class CheckoutRefundFlowTests(CustomWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task HeldSaleRecall_ShouldReturnRawCashierLineDiscountInputs_AndPersistEditsOnComplete()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var productSearch = await TestJson.ReadObjectAsync(
+            await client.GetAsync("/api/products/search"));
+        var availableProducts = productSearch["items"]?
+            .AsArray()
+            .OfType<JsonObject>()
+            .Where(item => !(item["is_serial_tracked"]?.GetValue<bool>() ?? false))
+            .Take(2)
+            .ToArray()
+            ?? throw new InvalidOperationException("Product search items were missing.");
+
+        Assert.True(availableProducts.Length >= 2, "Expected at least two non-serial products.");
+
+        var firstProductId = Guid.Parse(TestJson.GetString(availableProducts[0], "id"));
+        var secondProductId = Guid.Parse(TestJson.GetString(availableProducts[1], "id"));
+
+        var holdSale = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/checkout/hold", new
+            {
+                items = new[]
+                {
+                    new
+                    {
+                        product_id = firstProductId,
+                        quantity = 1m,
+                        cashier_line_discount_percent = 7m,
+                        cashier_line_discount_fixed = (decimal?)null
+                    }
+                },
+                discount_percent = 0m,
+                role = "cashier"
+            }));
+
+        var heldLine = FirstObjectFromArray(holdSale, "items");
+        var heldSaleId = Guid.Parse(TestJson.GetString(holdSale, "sale_id"));
+        var heldSaleItemId = Guid.Parse(TestJson.GetString(heldLine, "sale_item_id"));
+
+        Assert.Equal(7m, TestJson.GetDecimal(heldLine, "cashier_line_discount_percent"));
+        Assert.True(heldLine["cashier_line_discount_fixed"] is null);
+
+        var recalledSale = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/checkout/held/{heldSaleId}"));
+        var recalledLine = FirstObjectFromArray(recalledSale, "items");
+        Assert.Equal(7m, TestJson.GetDecimal(recalledLine, "cashier_line_discount_percent"));
+        Assert.True(recalledLine["cashier_line_discount_fixed"] is null);
+
+        var completedSale = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/checkout/complete", new
+            {
+                sale_id = heldSaleId,
+                items = new object[]
+                {
+                    new
+                    {
+                        sale_item_id = heldSaleItemId,
+                        product_id = firstProductId,
+                        quantity = 1m,
+                        cashier_line_discount_percent = (decimal?)null,
+                        cashier_line_discount_fixed = 20m
+                    },
+                    new
+                    {
+                        product_id = secondProductId,
+                        quantity = 1m
+                    }
+                },
+                discount_percent = 0m,
+                role = "cashier",
+                payments = new[]
+                {
+                    new
+                    {
+                        method = "cash",
+                        amount = 999999m,
+                        reference_number = (string?)null
+                    }
+                }
+            }));
+
+        var completedLine = completedSale["items"]?
+            .AsArray()
+            .OfType<JsonObject>()
+            .Single(item => Guid.Parse(TestJson.GetString(item, "sale_item_id")) == heldSaleItemId)
+            ?? throw new InvalidOperationException("Updated held line was missing.");
+        Assert.True(completedLine["cashier_line_discount_percent"] is null);
+        Assert.Equal(20m, TestJson.GetDecimal(completedLine, "cashier_line_discount_fixed"));
+    }
+
+    [Fact]
+    public async Task HeldSaleRecall_ShouldReturnRawCashierLineFixedDiscountInput()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var productSearch = await TestJson.ReadObjectAsync(
+            await client.GetAsync("/api/products/search"));
+        var firstProduct = FirstObjectFromArray(productSearch, "items");
+        var firstProductId = Guid.Parse(TestJson.GetString(firstProduct, "id"));
+
+        var holdSale = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/checkout/hold", new
+            {
+                items = new[]
+                {
+                    new
+                    {
+                        product_id = firstProductId,
+                        quantity = 1m,
+                        cashier_line_discount_percent = (decimal?)null,
+                        cashier_line_discount_fixed = 15m
+                    }
+                },
+                discount_percent = 0m,
+                role = "cashier"
+            }));
+
+        var heldSaleId = Guid.Parse(TestJson.GetString(holdSale, "sale_id"));
+        var recalledSale = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/checkout/held/{heldSaleId}"));
+        var recalledLine = FirstObjectFromArray(recalledSale, "items");
+
+        Assert.True(recalledLine["cashier_line_discount_percent"] is null);
+        Assert.Equal(15m, TestJson.GetDecimal(recalledLine, "cashier_line_discount_fixed"));
+    }
+
+    [Fact]
     public async Task CompleteSale_WithCustomPayoutShouldPersistCashChangeDifference()
     {
         await TestAuth.SignInAsManagerAsync(client);

@@ -167,6 +167,15 @@ export default function PromotionsTab() {
     setOpen(true);
   };
 
+  const handleScopeChange = (value: PromotionScope) => {
+    setForm((prev) => ({
+      ...prev,
+      scope: value,
+      categoryId: "",
+      productId: "",
+    }));
+  };
+
   const handleSave = async () => {
     if (!form.name.trim()) {
       toast.error("Promotion name is required.");
@@ -364,7 +373,7 @@ export default function PromotionsTab() {
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-1.5">
                 <Label>Scope</Label>
-                <Select value={form.scope} onValueChange={(value) => setForm((prev) => ({ ...prev, scope: value as PromotionScope }))}>
+                <Select value={form.scope} onValueChange={(value) => handleScopeChange(value as PromotionScope)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All</SelectItem>

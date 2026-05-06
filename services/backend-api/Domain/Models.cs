@@ -602,6 +602,8 @@ public sealed class SaleItem
     public decimal? CustomPrice { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal Quantity { get; set; }
+    public decimal? RawCashierLineDiscountPercent { get; set; }
+    public decimal? RawCashierLineDiscountFixed { get; set; }
     public decimal CatalogDiscountAmount { get; set; }
     public decimal CashierLineDiscountAmount { get; set; }
     public decimal DiscountAmount { get; set; }

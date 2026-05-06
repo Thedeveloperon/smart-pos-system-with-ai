@@ -79,6 +79,8 @@ public sealed class CheckoutService(
                 CustomPrice = x.CustomPrice,
                 UnitPrice = x.UnitPrice,
                 Quantity = x.Quantity,
+                RawCashierLineDiscountPercent = x.RawCashierLineDiscountPercent,
+                RawCashierLineDiscountFixed = x.RawCashierLineDiscountFixed,
                 CatalogDiscountAmount = x.CatalogDiscountAmount,
                 CashierLineDiscountAmount = x.CashierLineDiscountAmount,
                 DiscountAmount = x.DiscountAmount,
@@ -190,6 +192,8 @@ public sealed class CheckoutService(
                     CustomPrice = line.CustomPrice,
                     UnitPrice = line.UnitPrice,
                     Quantity = line.Quantity,
+                    RawCashierLineDiscountPercent = line.RawCashierLineDiscountPercent,
+                    RawCashierLineDiscountFixed = line.RawCashierLineDiscountFixed,
                     CatalogDiscountAmount = line.CatalogDiscountAmount,
                     CashierLineDiscountAmount = line.CashierLineDiscountAmount,
                     DiscountAmount = line.DiscountAmount,
@@ -1499,6 +1503,8 @@ public sealed class CheckoutService(
                 saleItem.SalePackSize = line.SalePackSize;
                 saleItem.IsService = line.Service is not null;
                 saleItem.CustomPrice = line.CustomPrice;
+                saleItem.RawCashierLineDiscountPercent = line.RawCashierLineDiscountPercent;
+                saleItem.RawCashierLineDiscountFixed = line.RawCashierLineDiscountFixed;
                 saleItem.CatalogDiscountAmount = line.CatalogDiscountAmount;
                 saleItem.CashierLineDiscountAmount = line.CashierLineDiscountAmount;
                 saleItem.DiscountAmount = line.DiscountAmount;
@@ -1525,12 +1531,14 @@ public sealed class CheckoutService(
                 IsPack = line.IsPackSale,
                 SalePackSize = line.SalePackSize,
                 IsService = line.Service is not null,
-                    CustomPrice = line.CustomPrice,
-                    UnitPrice = line.UnitPrice,
-                    Quantity = line.Quantity,
-                    CatalogDiscountAmount = line.CatalogDiscountAmount,
-                    CashierLineDiscountAmount = line.CashierLineDiscountAmount,
-                    DiscountAmount = line.DiscountAmount,
+                CustomPrice = line.CustomPrice,
+                UnitPrice = line.UnitPrice,
+                Quantity = line.Quantity,
+                RawCashierLineDiscountPercent = line.RawCashierLineDiscountPercent,
+                RawCashierLineDiscountFixed = line.RawCashierLineDiscountFixed,
+                CatalogDiscountAmount = line.CatalogDiscountAmount,
+                CashierLineDiscountAmount = line.CashierLineDiscountAmount,
+                DiscountAmount = line.DiscountAmount,
                 TaxAmount = 0m,
                 LineTotal = line.LineTotal,
                 Sale = sale,
@@ -1753,6 +1761,8 @@ public sealed class CheckoutService(
                     : null,
                 UnitPrice = x.UnitPrice,
                 Quantity = x.Quantity,
+                CashierLineDiscountPercent = x.RawCashierLineDiscountPercent,
+                CashierLineDiscountFixed = x.RawCashierLineDiscountFixed,
                 CatalogDiscountAmount = x.CatalogDiscountAmount,
                 CashierLineDiscountAmount = x.CashierLineDiscountAmount,
                 DiscountAmount = x.DiscountAmount,

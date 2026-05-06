@@ -638,6 +638,8 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.Property(x => x.CustomPrice).HasPrecision(18, 2);
             entity.Property(x => x.UnitPrice).HasPrecision(18, 2);
             entity.Property(x => x.Quantity).HasPrecision(18, 3);
+            entity.Property(x => x.RawCashierLineDiscountPercent).HasPrecision(18, 2);
+            entity.Property(x => x.RawCashierLineDiscountFixed).HasPrecision(18, 2);
             entity.Property(x => x.CatalogDiscountAmount).HasPrecision(18, 2);
             entity.Property(x => x.CashierLineDiscountAmount).HasPrecision(18, 2);
             entity.Property(x => x.DiscountAmount).HasPrecision(18, 2);

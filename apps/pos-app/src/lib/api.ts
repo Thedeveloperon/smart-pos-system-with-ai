@@ -247,6 +247,8 @@ type BackendSaleItem = {
   pack_label?: string | null;
   unit_price: number;
   quantity: number;
+  cashier_line_discount_percent?: number | null;
+  cashier_line_discount_fixed?: number | null;
   catalog_discount_amount?: number;
   cashier_line_discount_amount?: number;
   discount_amount?: number;
@@ -2907,6 +2909,8 @@ function mapSaleItems(items: BackendSaleItem[]): CartItem[] {
       packSize: isPack ? salePackSize : undefined,
       packLabel: item.pack_label ?? undefined,
       baseUnitPrice: undefined,
+      cashierLineDiscountPercent: item.cashier_line_discount_percent ?? null,
+      cashierLineDiscountFixed: item.cashier_line_discount_fixed ?? null,
       catalogDiscountAmount: Number(item.catalog_discount_amount ?? 0),
       cashierLineDiscountAmount: Number(item.cashier_line_discount_amount ?? 0),
       discountAmount: Number(item.discount_amount ?? 0),

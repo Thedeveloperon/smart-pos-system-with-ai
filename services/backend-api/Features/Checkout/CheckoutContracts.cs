@@ -269,6 +269,12 @@ public sealed class SaleItemResponse
     [JsonPropertyName("quantity")]
     public decimal Quantity { get; set; }
 
+    [JsonPropertyName("cashier_line_discount_percent")]
+    public decimal? CashierLineDiscountPercent { get; set; }
+
+    [JsonPropertyName("cashier_line_discount_fixed")]
+    public decimal? CashierLineDiscountFixed { get; set; }
+
     [JsonPropertyName("catalog_discount_amount")]
     public decimal CatalogDiscountAmount { get; set; }
 

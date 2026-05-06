@@ -141,4 +141,41 @@ describe("PromotionsTab", () => {
       expect(deactivatePromotion).toHaveBeenCalledWith("promo-1");
     });
   });
+
+  it("clears stale scope picker values when switching between category and product", async () => {
+    render(<PromotionsTab />);
+    await screen.findByText("All Active");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Promotion" }));
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText("Create promotion");
+
+    const [scopeTrigger] = within(dialog).getAllByRole("combobox");
+    fireEvent.mouseDown(scopeTrigger);
+    fireEvent.click(scopeTrigger);
+    fireEvent.click(await screen.findByRole("option", { name: "Category" }));
+
+    const categoryLabel = within(dialog)
+      .getAllByText("Category")
+      .find((element) => element.tagName === "LABEL");
+    const categorySection = categoryLabel?.closest("div");
+    if (!categorySection) {
+      throw new Error("Missing category selector");
+    }
+
+    const categoryTrigger = within(categorySection).getByRole("combobox");
+    fireEvent.mouseDown(categoryTrigger);
+    fireEvent.click(categoryTrigger);
+    fireEvent.click(await screen.findByRole("option", { name: "Groceries" }));
+
+    fireEvent.mouseDown(scopeTrigger);
+    fireEvent.click(scopeTrigger);
+    fireEvent.click(await screen.findByRole("option", { name: "Product" }));
+
+    fireEvent.mouseDown(scopeTrigger);
+    fireEvent.click(scopeTrigger);
+    fireEvent.click(await screen.findByRole("option", { name: "Category" }));
+
+    expect(within(categorySection).getByRole("combobox")).not.toHaveTextContent("Groceries");
+  });
 });

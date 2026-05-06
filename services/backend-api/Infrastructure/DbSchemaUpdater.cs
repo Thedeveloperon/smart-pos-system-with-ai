@@ -1081,6 +1081,18 @@ public static class DbSchemaUpdater
             await EnsureSqliteColumnAsync(
                 dbContext,
                 "sale_items",
+                "RawCashierLineDiscountPercent",
+                """ALTER TABLE "sale_items" ADD COLUMN "RawCashierLineDiscountPercent" TEXT NULL;""",
+                cancellationToken);
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "sale_items",
+                "RawCashierLineDiscountFixed",
+                """ALTER TABLE "sale_items" ADD COLUMN "RawCashierLineDiscountFixed" TEXT NULL;""",
+                cancellationToken);
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "sale_items",
                 "CatalogDiscountAmount",
                 """ALTER TABLE "sale_items" ADD COLUMN "CatalogDiscountAmount" TEXT NOT NULL DEFAULT '0';""",
                 cancellationToken);
@@ -1139,6 +1151,12 @@ public static class DbSchemaUpdater
                 cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(
                 """ALTER TABLE products ADD COLUMN IF NOT EXISTS "PermanentDiscountFixed" numeric(18,2) NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS "RawCashierLineDiscountPercent" numeric(18,2) NULL;""",
+                cancellationToken);
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS "RawCashierLineDiscountFixed" numeric(18,2) NULL;""",
                 cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(
                 """ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS "CatalogDiscountAmount" numeric(18,2) NOT NULL DEFAULT 0;""",

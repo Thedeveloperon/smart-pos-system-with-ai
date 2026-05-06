@@ -130,21 +130,22 @@ public sealed class PromotionService(
             .ToArray();
 
         var query = dbContext.Promotions
-            .AsNoTracking()
-            .Where(x =>
-                x.IsActive &&
-                x.StartsAtUtc <= now &&
-                x.EndsAtUtc >= now &&
-                (x.Scope == PromotionScope.All ||
-                 (x.Scope == PromotionScope.Category && x.CategoryId.HasValue && categoryIds.Contains(x.CategoryId.Value)) ||
-                 (x.Scope == PromotionScope.Product && x.ProductId.HasValue && productIds.Contains(x.ProductId.Value))));
+            .AsNoTracking();
 
         if (storeId.HasValue)
         {
             query = query.Where(x => x.StoreId == storeId.Value);
         }
 
-        var promotions = await query.ToListAsync(cancellationToken);
+        var promotions = (await query.ToListAsync(cancellationToken))
+            .Where(x =>
+                x.IsActive &&
+                x.StartsAtUtc <= now &&
+                x.EndsAtUtc >= now &&
+                (x.Scope == PromotionScope.All ||
+                 (x.Scope == PromotionScope.Category && x.CategoryId.HasValue && categoryIds.Contains(x.CategoryId.Value)) ||
+                 (x.Scope == PromotionScope.Product && x.ProductId.HasValue && productIds.Contains(x.ProductId.Value))))
+            .ToList();
         var productCategoryLookup = products
             .GroupBy(x => x.ProductId)
             .ToDictionary(x => x.Key, x => x.Select(y => y.CategoryId).FirstOrDefault());
