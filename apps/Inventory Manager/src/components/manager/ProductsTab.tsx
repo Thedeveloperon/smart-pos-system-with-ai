@@ -260,6 +260,7 @@ export default function ProductsTab() {
                     <TableHead className="hidden w-[13%] lg:table-cell">Category</TableHead>
                     <TableHead className="hidden w-[13%] lg:table-cell">Brand</TableHead>
                     <TableHead className="w-[11%] text-right">Unit price</TableHead>
+                    <TableHead className="w-[11%] text-right">Discount</TableHead>
                     <TableHead className="w-[8%] text-right">Stock</TableHead>
                     <TableHead className="w-[8%]">Status</TableHead>
                     <TableHead className="w-[17%] text-right">Actions</TableHead>
@@ -268,13 +269,13 @@ export default function ProductsTab() {
                 <TableBody>
                   {loading ? (
                     <TableRow>
-                      <TableCell colSpan={8} className="py-12 text-center text-muted-foreground">
+                      <TableCell colSpan={9} className="py-12 text-center text-muted-foreground">
                         Loading products...
                       </TableCell>
                     </TableRow>
                   ) : filteredProducts.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={8} className="py-12 text-center text-muted-foreground">
+                      <TableCell colSpan={9} className="py-12 text-center text-muted-foreground">
                         No products match your filters.
                       </TableCell>
                     </TableRow>
@@ -315,6 +316,13 @@ export default function ProductsTab() {
                           </TableCell>
                           <TableCell className="text-right font-medium">
                             {currencyFormatter.format(product.unit_price ?? product.price ?? 0)}
+                          </TableCell>
+                          <TableCell className="text-right text-xs text-muted-foreground">
+                            {product.permanent_discount_percent != null
+                              ? `${product.permanent_discount_percent}%`
+                              : product.permanent_discount_fixed != null
+                                ? currencyFormatter.format(product.permanent_discount_fixed)
+                                : "—"}
                           </TableCell>
                           <TableCell className="text-right">
                             <div className="flex items-center justify-end gap-2">

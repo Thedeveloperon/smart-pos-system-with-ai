@@ -6,9 +6,10 @@ import CashReceivedDialog from "./cash-session/CashReceivedDialog";
 import CashChangeDialog from "./cash-session/CashChangeDialog";
 import { isQuickSaleEnabled } from "@/lib/posPreferences";
 import { playSaleCompleteSound, primeConfirmationSound } from "@/lib/sound";
-import type { CartItem, PaymentMethod } from "./types";
+import type { CartDiscount, CartItem, PaymentMethod } from "./types";
 import type { CashDrawerState, DenominationCount } from "./cash-session/types";
 import { POS_SHORTCUT_INLINE_HINT, POS_SHORTCUT_LABELS } from "./shortcuts";
+import { computeCartTotals } from "@/lib/cartMath";
 import {
   createCustomer,
   fetchCustomerDirectoryLookup,
@@ -24,16 +25,19 @@ interface CheckoutPanelProps {
   cashDrawer?: CashDrawerState | null;
   allowCustomPayout?: boolean;
   holdBlockReason?: string | null;
+  cartDiscount: CartDiscount;
+  onCartDiscountChange: (discount: CartDiscount) => void;
   onCompleteSale: (
     paymentMethod: PaymentMethod,
     cashReceived: number,
     customerId: string | undefined,
+    cartDiscount: CartDiscount,
     cashReceivedCounts?: DenominationCount[],
     cashChangeCounts?: DenominationCount[],
     customPayoutUsed?: boolean,
     cashShortAmount?: number
   ) => void;
-  onHoldBill: () => void;
+  onHoldBill: (cartDiscount: CartDiscount) => void;
   onCancelSale: () => void;
   showShortcutHints?: boolean;
 }
@@ -54,6 +58,8 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
     cashDrawer,
     allowCustomPayout = false,
     holdBlockReason = null,
+    cartDiscount,
+    onCartDiscountChange,
     onCompleteSale,
     onHoldBill,
     onCancelSale,
@@ -74,12 +80,12 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
     const [showCashChangeDialog, setShowCashChangeDialog] = useState(false);
     const cashReceivedInputRef = useRef<HTMLInputElement>(null);
 
-    const subtotal = items.reduce(
-      (acc, i) => acc + i.product.price * i.quantity,
-      0
+    const customerDiscountPercent = (selectedCustomer?.fixedDiscountPercent ?? selectedCustomer?.priceTierDiscountPercent ?? 0);
+    const totals = useMemo(
+      () => computeCartTotals(items, cartDiscount, customerDiscountPercent),
+      [items, cartDiscount, customerDiscountPercent],
     );
-    const discount = 0;
-    const grandTotal = subtotal - discount;
+    const grandTotal = totals.grandTotal;
     const cashNum = parseFloat(cashReceived) || 0;
     const change = cashNum - grandTotal;
     const due = grandTotal - cashNum;
@@ -162,6 +168,7 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
         paymentMethod,
         cashNum,
         customerDisplay?.id,
+        cartDiscount,
         cashReceivedCounts,
         nextCashChangeCounts,
         customPayoutUsed,
@@ -178,7 +185,7 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
       setCustomerDropdownOpen(false);
       setCashReceivedCounts([]);
       setCashChangeCounts([]);
-    }, [cashChangeCounts, cashNum, cashReceivedCounts, customerDisplay?.id, defaultCustomer, onCompleteSale, paymentMethod]);
+    }, [cartDiscount, cashChangeCounts, cashNum, cashReceivedCounts, customerDisplay?.id, defaultCustomer, onCompleteSale, paymentMethod]);
 
     const openCashWorkflow = useCallback(() => {
       setPaymentMethod("cash");
@@ -372,6 +379,66 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
               ))}
             </div>
           </div>
+
+          <div className="border-b border-border px-3 py-2">
+            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Cashier Transaction Discount
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <Input
+                type="number"
+                min={0}
+                step="0.01"
+                value={cartDiscount.cashierTransactionDiscountPercent ?? ""}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  onCartDiscountChange({
+                    cashierTransactionDiscountPercent: value === "" ? 0 : Number(value),
+                    cashierTransactionDiscountFixed: null,
+                  });
+                }}
+                placeholder="%"
+                className="h-9"
+              />
+              <Input
+                type="number"
+                min={0}
+                step="0.01"
+                value={cartDiscount.cashierTransactionDiscountFixed ?? ""}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  onCartDiscountChange({
+                    cashierTransactionDiscountPercent: 0,
+                    cashierTransactionDiscountFixed: value === "" ? null : Number(value),
+                  });
+                }}
+                placeholder="Rs."
+                className="h-9"
+              />
+            </div>
+            <div className="mt-2 rounded-lg border bg-muted/20 p-2 text-xs text-muted-foreground">
+              <div className="flex justify-between">
+                <span>Subtotal</span>
+                <span>Rs. {totals.subtotal.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Line discounts</span>
+                <span>- Rs. {totals.lineDiscountTotal.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Customer discount</span>
+                <span>- Rs. {totals.customerTransactionDiscountAmount.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Cashier txn discount</span>
+                <span>- Rs. {totals.cashierTransactionDiscountAmount.toLocaleString()}</span>
+              </div>
+              <div className="mt-1 flex justify-between border-t pt-1 font-semibold text-foreground">
+                <span>Grand total</span>
+                <span>Rs. {grandTotal.toLocaleString()}</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Cash Input - pinned above actions so it's always visible without scrolling */}
@@ -436,7 +503,7 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
             <Button
               variant="pos-outline"
               className="h-10 w-full rounded-xl px-4 text-sm justify-center"
-              onClick={onHoldBill}
+              onClick={() => onHoldBill(cartDiscount)}
               disabled={items.length === 0 || holdBlockReason != null}
               title={holdBlockReason ?? undefined}
             >

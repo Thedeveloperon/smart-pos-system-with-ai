@@ -75,6 +75,8 @@ public sealed class ProductService(
                 BrandName = x.Brand != null ? x.Brand.Name : null,
                 UnitPrice = x.UnitPrice,
                 CostPrice = x.CostPrice,
+                PermanentDiscountPercent = x.PermanentDiscountPercent,
+                PermanentDiscountFixed = x.PermanentDiscountFixed,
                 StockQuantity = x.Inventory != null ? x.Inventory.QuantityOnHand : 0m,
                 ReorderLevel = x.Inventory != null ? x.Inventory.ReorderLevel : 0m,
                 IsSerialTracked = x.IsSerialTracked,
@@ -104,6 +106,8 @@ public sealed class ProductService(
                     BrandName = item.BrandName,
                     UnitPrice = RoundMoney(item.UnitPrice),
                     CostPrice = RoundMoney(item.CostPrice),
+                    PermanentDiscountPercent = item.PermanentDiscountPercent,
+                    PermanentDiscountFixed = item.PermanentDiscountFixed,
                     StockQuantity = stockQuantity,
                     IsLowStock = stockQuantity <= alertLevel,
                     IsSerialTracked = item.IsSerialTracked,
@@ -461,6 +465,9 @@ public sealed class ProductService(
         var normalizedSku = NormalizeOptional(request.Sku);
         var normalizedBarcode = NormalizeOptionalBarcode(request.Barcode);
         var normalizedImageUrl = NormalizeOptional(request.ImageUrl);
+        var (permanentDiscountPercent, permanentDiscountFixed) = NormalizePermanentDiscount(
+            request.PermanentDiscountPercent,
+            request.PermanentDiscountFixed);
 
         ValidateMoneyValue(request.UnitPrice, "Unit price cannot be negative.");
         ValidateMoneyValue(request.CostPrice, "Cost price cannot be negative.");
@@ -499,6 +506,8 @@ public sealed class ProductService(
             BrandId = request.BrandId,
             UnitPrice = RoundMoney(request.UnitPrice),
             CostPrice = RoundMoney(request.CostPrice),
+            PermanentDiscountPercent = permanentDiscountPercent,
+            PermanentDiscountFixed = permanentDiscountFixed,
             HasPackOption = normalizedPack.HasPackOption,
             PackSize = normalizedPack.PackSize,
             PackPrice = normalizedPack.PackPrice,
@@ -540,6 +549,8 @@ public sealed class ProductService(
                 product.BrandId,
                 product.UnitPrice,
                 product.CostPrice,
+                product.PermanentDiscountPercent,
+                product.PermanentDiscountFixed,
                 product.HasPackOption,
                 product.PackSize,
                 product.PackPrice,
@@ -601,6 +612,9 @@ public sealed class ProductService(
         var normalizedSku = NormalizeOptional(request.Sku);
         var normalizedBarcode = NormalizeOptionalBarcode(request.Barcode);
         var normalizedImageUrl = NormalizeOptional(request.ImageUrl);
+        var (permanentDiscountPercent, permanentDiscountFixed) = NormalizePermanentDiscount(
+            request.PermanentDiscountPercent,
+            request.PermanentDiscountFixed);
 
         ValidateMoneyValue(request.UnitPrice, "Unit price cannot be negative.");
         ValidateMoneyValue(request.CostPrice, "Cost price cannot be negative.");
@@ -637,6 +651,8 @@ public sealed class ProductService(
             product.BrandId,
             product.UnitPrice,
             product.CostPrice,
+            product.PermanentDiscountPercent,
+            product.PermanentDiscountFixed,
             product.HasPackOption,
             product.PackSize,
             product.PackPrice,
@@ -661,6 +677,8 @@ public sealed class ProductService(
         product.BrandId = request.BrandId;
         product.UnitPrice = RoundMoney(request.UnitPrice);
         product.CostPrice = RoundMoney(request.CostPrice);
+        product.PermanentDiscountPercent = permanentDiscountPercent;
+        product.PermanentDiscountFixed = permanentDiscountFixed;
         product.HasPackOption = normalizedPack.HasPackOption;
         product.PackSize = normalizedPack.PackSize;
         product.PackPrice = normalizedPack.PackPrice;
@@ -742,6 +760,8 @@ public sealed class ProductService(
                 product.BrandId,
                 product.UnitPrice,
                 product.CostPrice,
+                product.PermanentDiscountPercent,
+                product.PermanentDiscountFixed,
                 product.HasPackOption,
                 product.PackSize,
                 product.PackPrice,
@@ -2108,6 +2128,8 @@ public sealed class ProductService(
             BrandName = product.Brand?.Name,
             UnitPrice = RoundMoney(product.UnitPrice),
             CostPrice = RoundMoney(product.CostPrice),
+            PermanentDiscountPercent = product.PermanentDiscountPercent,
+            PermanentDiscountFixed = product.PermanentDiscountFixed,
             StockQuantity = stockQuantity,
             InitialStockQuantity = RoundQuantity(product.Inventory?.InitialStockQuantity ?? stockQuantity),
             ReorderLevel = reorderLevel,
@@ -2494,6 +2516,36 @@ public sealed class ProductService(
         {
             throw new InvalidOperationException(errorMessage);
         }
+    }
+
+    private static (decimal? Percent, decimal? Fixed) NormalizePermanentDiscount(
+        decimal? percent,
+        decimal? fixedAmount)
+    {
+        decimal? normalizedPercent = percent.HasValue ? RoundMoney(percent.Value) : null;
+        decimal? normalizedFixed = fixedAmount.HasValue ? RoundMoney(fixedAmount.Value) : null;
+
+        if (normalizedPercent.HasValue && normalizedPercent.Value < 0m)
+        {
+            throw new InvalidOperationException("Permanent discount percent cannot be negative.");
+        }
+
+        if (normalizedFixed.HasValue && normalizedFixed.Value < 0m)
+        {
+            throw new InvalidOperationException("Permanent discount fixed amount cannot be negative.");
+        }
+
+        if (normalizedPercent.HasValue && normalizedPercent.Value > 100m)
+        {
+            throw new InvalidOperationException("Permanent discount percent must be between 0 and 100.");
+        }
+
+        if (normalizedPercent.HasValue && normalizedFixed.HasValue)
+        {
+            throw new InvalidOperationException("Only one permanent discount type can be set.");
+        }
+
+        return (normalizedPercent, normalizedFixed);
     }
 
     private static decimal RoundMoney(decimal value)

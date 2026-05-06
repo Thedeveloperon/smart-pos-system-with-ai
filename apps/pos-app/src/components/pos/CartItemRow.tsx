@@ -1,14 +1,19 @@
 import { Button } from "@/components/ui/button";
-import { AlertTriangle, Plus, Minus, Trash2 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { AlertTriangle, Minus, Plus, Trash2 } from "lucide-react";
 import type { CartItem } from "./types";
 
 interface CartItemRowProps {
   item: CartItem;
   onUpdateQty: (lineId: string, qty: number) => void;
   onRemove: (lineId: string) => void;
+  onUpdateDiscount: (
+    lineId: string,
+    discount: { cashierLineDiscountPercent?: number | null; cashierLineDiscountFixed?: number | null },
+  ) => void;
 }
 
-const CartItemRow = ({ item, onUpdateQty, onRemove }: CartItemRowProps) => {
+const CartItemRow = ({ item, onUpdateQty, onRemove, onUpdateDiscount }: CartItemRowProps) => {
   const sellMode = item.sellMode
     ?? (item.product.isService || item.product.serviceId ? "service" : item.bundleId || item.product.isBundle ? "bundle" : "unit");
   const lineId = item.lineId
@@ -20,7 +25,8 @@ const CartItemRow = ({ item, onUpdateQty, onRemove }: CartItemRowProps) => {
           ? `bundle:${item.bundleId || item.product.bundleId || item.product.id.replace(/^bundle:/, "")}`
           : `product:${item.product.id.replace(/^bundle:/, "")}:${sellMode}`);
   const hasSelectedSerial = Boolean(item.selectedSerial?.id);
-  const lineTotal = item.product.price * item.quantity;
+  const lineTotal = item.lineTotal ?? (item.product.price * item.quantity);
+  const lineGross = item.product.price * item.quantity;
   const tracksStock = item.product.tracksStock ?? sellMode !== "service";
   const stock = item.product.stock ?? 0;
   const availableQuantity = tracksStock
@@ -124,6 +130,9 @@ const CartItemRow = ({ item, onUpdateQty, onRemove }: CartItemRowProps) => {
           <p className="text-xs text-muted-foreground">
             Rs. {item.product.price.toLocaleString()} x {item.quantity} {quantityLabel}
           </p>
+          {(item.discountAmount ?? 0) > 0 && (
+            <p className="text-[11px] text-primary">Discount: Rs. {(item.discountAmount ?? 0).toLocaleString()}</p>
+          )}
           {sellMode === "pack" && (item.packSize ?? 0) > 0 && (
             <p className="text-[11px] text-muted-foreground">
               Base units: {(item.quantity * (item.packSize ?? 0)).toLocaleString()}
@@ -141,6 +150,49 @@ const CartItemRow = ({ item, onUpdateQty, onRemove }: CartItemRowProps) => {
           )}
         </div>
       </div>
+
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <div className="space-y-1">
+          <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Line discount %</label>
+          <Input
+            type="number"
+            min={0}
+            step="0.01"
+            value={item.cashierLineDiscountPercent ?? ""}
+            onChange={(event) => {
+              const value = event.target.value;
+              onUpdateDiscount(lineId, {
+                cashierLineDiscountPercent: value === "" ? null : Number(value),
+                cashierLineDiscountFixed: null,
+              });
+            }}
+            className="h-8"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Line discount Rs.</label>
+          <Input
+            type="number"
+            min={0}
+            step="0.01"
+            value={item.cashierLineDiscountFixed ?? ""}
+            onChange={(event) => {
+              const value = event.target.value;
+              onUpdateDiscount(lineId, {
+                cashierLineDiscountPercent: null,
+                cashierLineDiscountFixed: value === "" ? null : Number(value),
+              });
+            }}
+            className="h-8"
+          />
+        </div>
+      </div>
+
+      {(item.catalogDiscountAmount ?? 0) > 0 && (
+        <div className="mt-1 text-[11px] text-muted-foreground">
+          Catalog discount: Rs. {(item.catalogDiscountAmount ?? 0).toLocaleString()} on gross Rs. {lineGross.toLocaleString()}
+        </div>
+      )}
     </div>
   );
 };

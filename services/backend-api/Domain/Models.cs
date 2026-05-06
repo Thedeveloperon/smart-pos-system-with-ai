@@ -13,6 +13,7 @@ public sealed class Category
     public DateTimeOffset? UpdatedAtUtc { get; set; }
 
     public ICollection<Product> Products { get; set; } = [];
+    public ICollection<Promotion> Promotions { get; set; } = [];
 }
 
 public sealed class Brand
@@ -42,6 +43,8 @@ public sealed class Product
     public string? ImageUrl { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal CostPrice { get; set; }
+    public decimal? PermanentDiscountPercent { get; set; }
+    public decimal? PermanentDiscountFixed { get; set; }
     public bool HasPackOption { get; set; }
     public int PackSize { get; set; }
     public decimal? PackPrice { get; set; }
@@ -65,6 +68,28 @@ public sealed class Product
     public ICollection<StockMovement> StockMovements { get; set; } = [];
     public ICollection<StocktakeItem> StocktakeItems { get; set; } = [];
     public ICollection<BundleItem> BundleItems { get; set; } = [];
+    public ICollection<Promotion> Promotions { get; set; } = [];
+}
+
+public sealed class Promotion
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? StoreId { get; set; }
+    public required string Name { get; set; }
+    public string? Description { get; set; }
+    public PromotionScope Scope { get; set; }
+    public Guid? CategoryId { get; set; }
+    public Guid? ProductId { get; set; }
+    public PromotionValueType ValueType { get; set; }
+    public decimal Value { get; set; }
+    public DateTimeOffset StartsAtUtc { get; set; }
+    public DateTimeOffset EndsAtUtc { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? UpdatedAtUtc { get; set; }
+
+    public Category? Category { get; set; }
+    public Product? Product { get; set; }
 }
 
 public sealed class Supplier
@@ -544,6 +569,7 @@ public sealed class Sale
     public SaleStatus Status { get; set; } = SaleStatus.Held;
     public decimal Subtotal { get; set; }
     public decimal DiscountTotal { get; set; }
+    public decimal TransactionDiscountAmount { get; set; }
     public decimal TaxTotal { get; set; }
     public decimal GrandTotal { get; set; }
     public decimal LoyaltyPointsEarned { get; set; }
@@ -576,6 +602,8 @@ public sealed class SaleItem
     public decimal? CustomPrice { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal Quantity { get; set; }
+    public decimal CatalogDiscountAmount { get; set; }
+    public decimal CashierLineDiscountAmount { get; set; }
     public decimal DiscountAmount { get; set; }
     public decimal TaxAmount { get; set; }
     public decimal LineTotal { get; set; }
@@ -1303,6 +1331,19 @@ public enum SaleStatus
     Voided = 3,
     RefundedPartially = 4,
     RefundedFully = 5
+}
+
+public enum PromotionScope
+{
+    All = 1,
+    Category = 2,
+    Product = 3
+}
+
+public enum PromotionValueType
+{
+    Percent = 1,
+    Fixed = 2
 }
 
 public enum PaymentMethod

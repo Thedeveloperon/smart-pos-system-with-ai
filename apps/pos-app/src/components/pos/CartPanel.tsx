@@ -1,17 +1,23 @@
 import { ShoppingCart } from "lucide-react";
 import CartItemRow from "./CartItemRow";
-import type { CartItem } from "./types";
+import type { CartDiscount, CartItem } from "./types";
+import { computeCartTotals } from "@/lib/cartMath";
 
 interface CartPanelProps {
   items: CartItem[];
   onUpdateQty: (lineId: string, qty: number) => void;
   onRemove: (lineId: string) => void;
+  onUpdateDiscount: (
+    lineId: string,
+    discount: { cashierLineDiscountPercent?: number | null; cashierLineDiscountFixed?: number | null },
+  ) => void;
+  cartDiscount: CartDiscount;
   expertMode?: boolean;
 }
 
-const CartPanel = ({ items, onUpdateQty, onRemove, expertMode = false }: CartPanelProps) => {
+const CartPanel = ({ items, onUpdateQty, onRemove, onUpdateDiscount, cartDiscount, expertMode = false }: CartPanelProps) => {
   const itemCount = items.reduce((acc, i) => acc + i.quantity, 0);
-  const grandTotal = items.reduce((acc, item) => acc + item.product.price * item.quantity, 0);
+  const totals = computeCartTotals(items, cartDiscount, 0);
 
   return (
     <div className="flex flex-col h-full">
@@ -30,8 +36,11 @@ const CartPanel = ({ items, onUpdateQty, onRemove, expertMode = false }: CartPan
             Grand Total
           </p>
           <p className="text-xl font-extrabold text-primary">
-            Rs. {grandTotal.toLocaleString()}
+            Rs. {totals.grandTotal.toLocaleString()}
           </p>
+          {totals.discountTotal > 0 && (
+            <p className="text-[11px] text-muted-foreground">Discount: Rs. {totals.discountTotal.toLocaleString()}</p>
+          )}
         </div>
       </div>
 
@@ -57,6 +66,7 @@ const CartPanel = ({ items, onUpdateQty, onRemove, expertMode = false }: CartPan
               item={item}
               onUpdateQty={onUpdateQty}
               onRemove={onRemove}
+              onUpdateDiscount={onUpdateDiscount}
             />
           ))
         )}

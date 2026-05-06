@@ -26,7 +26,7 @@ import CashSessionBanner from "@/components/pos/cash-session/CashSessionBanner";
 import SessionClosedSummary from "@/components/pos/cash-session/SessionClosedSummary";
 import ManageDrawerDialog from "@/components/pos/cash-session/ManageDrawerDialog";
 import AuditLogPanel from "@/components/pos/cash-session/AuditLogPanel";
-import type { CartItem, HeldBill, PaymentMethod, Product, SelectedSerial } from "@/components/pos/types";
+import type { CartDiscount, CartItem, HeldBill, PaymentMethod, Product, SelectedSerial } from "@/components/pos/types";
 import type { CashSession, DenominationCount } from "@/components/pos/cash-session/types";
 import {
   acknowledgeReminder,
@@ -57,6 +57,7 @@ import { isExpertModeEnabled, setExpertModeEnabled } from "@/lib/posPreferences"
 import { useIsMobile } from "@/hooks/use-mobile";
 import { usePosShortcuts } from "@/hooks/usePosShortcuts";
 import { POS_SHORTCUTS } from "@/components/pos/shortcuts";
+import { computeCartTotals } from "@/lib/cartMath";
 import {
   Dialog,
   DialogContent,
@@ -94,6 +95,7 @@ const IndexInner = () => {
 
   const [products, setProducts] = useState<Product[]>([]);
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
+  const [cartDiscount, setCartDiscount] = useState<CartDiscount>({});
   const [heldBills, setHeldBills] = useState<HeldBill[]>([]);
   const [activeHeldSaleId, setActiveHeldSaleId] = useState<string | null>(null);
   const [showHeldBills, setShowHeldBills] = useState(false);
@@ -636,7 +638,24 @@ const IndexInner = () => {
     toast.info("Item removed");
   }, []);
 
-  const handleHoldBill = useCallback(async () => {
+  const handleUpdateLineDiscount = useCallback((
+    lineId: string,
+    discount: { cashierLineDiscountPercent?: number | null; cashierLineDiscountFixed?: number | null },
+  ) => {
+    setCartItems((prev) =>
+      prev.map((item) =>
+        resolveLineId(item) === lineId
+          ? {
+              ...item,
+              cashierLineDiscountPercent: discount.cashierLineDiscountPercent ?? null,
+              cashierLineDiscountFixed: discount.cashierLineDiscountFixed ?? null,
+            }
+          : item,
+      ),
+    );
+  }, [resolveLineId]);
+
+  const handleHoldBill = useCallback(async (nextCartDiscount?: CartDiscount) => {
     if (cartItems.length === 0) {
       return;
     }
@@ -647,8 +666,9 @@ const IndexInner = () => {
     }
 
     try {
-      await holdSale(cartItems, backendRole);
+      await holdSale(cartItems, backendRole, nextCartDiscount ?? cartDiscount);
       setCartItems([]);
+      setCartDiscount({});
       setActiveHeldSaleId(null);
       toast.success("Bill held successfully");
       await loadHeldBills();
@@ -656,7 +676,7 @@ const IndexInner = () => {
       console.error(error);
       toast.error("Failed to hold bill.");
     }
-  }, [backendRole, cartItems, holdBlockReason, loadHeldBills]);
+  }, [backendRole, cartDiscount, cartItems, holdBlockReason, loadHeldBills]);
 
   const handleResumeBill = useCallback(
     async (billId: string) => {
@@ -664,6 +684,7 @@ const IndexInner = () => {
         const [bill, currentProducts] = await Promise.all([fetchHeldBill(billId), fetchProducts()]);
         setProducts(currentProducts);
         setCartItems(mergeHeldCartWithCurrentProducts(bill.items, currentProducts));
+        setCartDiscount({});
         setActiveHeldSaleId(bill.id);
         setMobileTab("cart");
         toast.success("Bill resumed");
@@ -681,6 +702,7 @@ const IndexInner = () => {
         await voidSale(billId);
         if (activeHeldSaleId === billId) {
           setCartItems([]);
+          setCartDiscount({});
           setActiveHeldSaleId(null);
         }
         toast.info("Held bill removed");
@@ -698,12 +720,13 @@ const IndexInner = () => {
       paymentMethod: PaymentMethod,
       cashReceived: number,
       customerId: string | undefined,
+      nextCartDiscount: CartDiscount,
       cashReceivedCounts?: DenominationCount[],
       cashChangeCounts?: DenominationCount[],
       customPayoutUsed?: boolean,
       cashShortAmount?: number
     ) => {
-      const total = cartItems.reduce((a, i) => a + i.product.price * i.quantity, 0);
+      const total = computeCartTotals(cartItems, nextCartDiscount).grandTotal;
       const paidAmount = paymentMethod === "cash" ? cashReceived || total : total;
       const receiptWindow = window.open("", "_blank", "width=420,height=760");
 
@@ -714,6 +737,7 @@ const IndexInner = () => {
           paymentMethod,
           paidAmount,
           activeHeldSaleId || undefined,
+          nextCartDiscount,
           undefined,
           cashReceivedCounts,
           cashChangeCounts,
@@ -723,6 +747,7 @@ const IndexInner = () => {
         );
 
         setCartItems([]);
+        setCartDiscount({});
         setActiveHeldSaleId(null);
         toast.success("Sale completed!", { duration: 2000 });
         setSalesRefreshToken((current) => current + 1);
@@ -745,6 +770,7 @@ const IndexInner = () => {
 
   const handleCancelSale = useCallback(() => {
     setCartItems([]);
+    setCartDiscount({});
     setActiveHeldSaleId(null);
     toast.info("Sale cancelled");
   }, []);
@@ -1312,6 +1338,8 @@ const IndexInner = () => {
                     items={cartItems}
                     onUpdateQty={handleUpdateQty}
                     onRemove={handleRemove}
+                    onUpdateDiscount={handleUpdateLineDiscount}
+                    cartDiscount={cartDiscount}
                   />
                 </div>
                 <div className="min-h-0 overflow-hidden">
@@ -1321,8 +1349,10 @@ const IndexInner = () => {
                     cashDrawer={session?.drawer}
                     allowCustomPayout={isAdmin}
                     holdBlockReason={holdBlockReason}
+                    cartDiscount={cartDiscount}
+                    onCartDiscountChange={setCartDiscount}
                     onCompleteSale={handleCompleteSale}
-                    onHoldBill={() => void handleHoldBill()}
+                    onHoldBill={(nextCartDiscount) => void handleHoldBill(nextCartDiscount)}
                     onCancelSale={handleCancelSale}
                     showShortcutHints={isPosShortcutsFeatureEnabled}
                   />
@@ -1347,6 +1377,8 @@ const IndexInner = () => {
                   items={cartItems}
                   onUpdateQty={handleUpdateQty}
                   onRemove={handleRemove}
+                  onUpdateDiscount={handleUpdateLineDiscount}
+                  cartDiscount={cartDiscount}
                 />
               </div>
             )}
@@ -1358,8 +1390,10 @@ const IndexInner = () => {
                   cashDrawer={session?.drawer}
                   allowCustomPayout={isAdmin}
                   holdBlockReason={holdBlockReason}
+                  cartDiscount={cartDiscount}
+                  onCartDiscountChange={setCartDiscount}
                   onCompleteSale={handleCompleteSale}
-                  onHoldBill={() => void handleHoldBill()}
+                  onHoldBill={(nextCartDiscount) => void handleHoldBill(nextCartDiscount)}
                   onCancelSale={handleCancelSale}
                   showShortcutHints={isPosShortcutsFeatureEnabled}
                 />

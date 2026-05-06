@@ -62,6 +62,8 @@ type ProductFormState = {
   preferredSupplierId: string;
   unitPrice: string;
   costPrice: string;
+  permanentDiscountPercent: string;
+  permanentDiscountFixed: string;
   initialStockQuantity: string;
   reorderLevel: string;
   safetyStock: string;
@@ -84,6 +86,8 @@ const emptyFormState = (): ProductFormState => ({
   preferredSupplierId: "",
   unitPrice: "0",
   costPrice: "0",
+  permanentDiscountPercent: "",
+  permanentDiscountFixed: "",
   initialStockQuantity: "0",
   reorderLevel: "0",
   safetyStock: "0",
@@ -112,6 +116,8 @@ const toFormState = (product: Product): ProductFormState => ({
     product.product_suppliers?.find((supplier) => supplier.is_preferred)?.supplier_id ?? "",
   unitPrice: String(product.unit_price ?? product.price ?? 0),
   costPrice: String(product.cost_price ?? product.price ?? 0),
+  permanentDiscountPercent: product.permanent_discount_percent != null ? String(product.permanent_discount_percent) : "",
+  permanentDiscountFixed: product.permanent_discount_fixed != null ? String(product.permanent_discount_fixed) : "",
   initialStockQuantity: String(
     product.initial_stock_quantity ?? product.stock_quantity ?? product.stock ?? 0,
   ),
@@ -304,6 +310,8 @@ function snapshotProduct(
     price: toNumber(form.unitPrice),
     unit_price: toNumber(form.unitPrice),
     cost_price: toNumber(form.costPrice),
+    permanent_discount_percent: form.permanentDiscountPercent === "" ? null : toNumber(form.permanentDiscountPercent),
+    permanent_discount_fixed: form.permanentDiscountFixed === "" ? null : toNumber(form.permanentDiscountFixed),
     stock: stockQuantity,
     stock_quantity: stockQuantity,
     initial_stock_quantity: product?.initial_stock_quantity ?? stockQuantity,
@@ -498,6 +506,13 @@ export default function ProductManagementDialog({
       return;
     }
 
+    const permanentDiscountPercent = form.permanentDiscountPercent === "" ? null : toNumber(form.permanentDiscountPercent);
+    const permanentDiscountFixed = form.permanentDiscountFixed === "" ? null : toNumber(form.permanentDiscountFixed);
+    if (permanentDiscountPercent != null && permanentDiscountFixed != null) {
+      toast.error("Use either permanent discount percent or fixed amount.");
+      return;
+    }
+
     setSaving(true);
     try {
       const payload = {
@@ -509,6 +524,8 @@ export default function ProductManagementDialog({
         brand_id: form.brandId || undefined,
         unit_price: toNumber(form.unitPrice),
         cost_price: toNumber(form.costPrice),
+        permanent_discount_percent: permanentDiscountPercent,
+        permanent_discount_fixed: permanentDiscountFixed,
         initial_stock_quantity: isEditing ? undefined : toNumber(form.initialStockQuantity),
         reorder_level: toNumber(form.reorderLevel),
         safety_stock: toNumber(form.safetyStock),
@@ -803,7 +820,7 @@ export default function ProductManagementDialog({
 
             <Separator />
 
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-3 md:grid-cols-5">
               <div className="grid gap-1.5">
                 <Label htmlFor="unit-price">Unit price</Label>
                 <Input
@@ -825,6 +842,41 @@ export default function ProductManagementDialog({
                   step="0.01"
                   value={form.costPrice}
                   onChange={(event) => updateField("costPrice", event.target.value)}
+                />
+              </div>
+
+              <div className="grid gap-1.5">
+                <Label htmlFor="permanent-discount-percent">Permanent discount %</Label>
+                <Input
+                  id="permanent-discount-percent"
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.01"
+                  value={form.permanentDiscountPercent}
+                  onChange={(event) => {
+                    updateField("permanentDiscountPercent", event.target.value);
+                    if (event.target.value !== "") {
+                      updateField("permanentDiscountFixed", "");
+                    }
+                  }}
+                />
+              </div>
+
+              <div className="grid gap-1.5">
+                <Label htmlFor="permanent-discount-fixed">Permanent discount Rs.</Label>
+                <Input
+                  id="permanent-discount-fixed"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={form.permanentDiscountFixed}
+                  onChange={(event) => {
+                    updateField("permanentDiscountFixed", event.target.value);
+                    if (event.target.value !== "") {
+                      updateField("permanentDiscountPercent", "");
+                    }
+                  }}
                 />
               </div>
 

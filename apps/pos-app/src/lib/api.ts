@@ -1,4 +1,4 @@
-import type { CartItem, HeldBill, PaymentMethod, Product, RecentSale, SelectedSerial } from "@/components/pos/types";
+import type { CartDiscount, CartItem, HeldBill, PaymentMethod, Product, RecentSale, SelectedSerial } from "@/components/pos/types";
 import type {
   CashSession,
   CashSessionEntry,
@@ -185,6 +185,8 @@ type BackendProductSearchItem = {
   pack_size?: number;
   pack_price?: number | null;
   pack_label?: string | null;
+  permanent_discount_percent?: number | null;
+  permanent_discount_fixed?: number | null;
 };
 
 type BackendProductSearchResponse = {
@@ -215,6 +217,8 @@ type BackendProductCatalogItem = {
   pack_size?: number;
   pack_price?: number | null;
   pack_label?: string | null;
+  permanent_discount_percent?: number | null;
+  permanent_discount_fixed?: number | null;
   warranty_months?: number | null;
   is_batch_tracked?: boolean;
   expiry_alert_days?: number | null;
@@ -243,6 +247,9 @@ type BackendSaleItem = {
   pack_label?: string | null;
   unit_price: number;
   quantity: number;
+  catalog_discount_amount?: number;
+  cashier_line_discount_amount?: number;
+  discount_amount?: number;
   line_total: number;
 };
 
@@ -258,6 +265,7 @@ export type SaleReceiptResponse = {
   status: string;
   subtotal: number;
   discount_total: number;
+  transaction_discount_amount?: number;
   discount_percent: number;
   tax_total: number;
   grand_total: number;
@@ -632,6 +640,8 @@ export type CreateProductRequest = {
   pack_size?: number;
   pack_price?: number | null;
   pack_label?: string | null;
+  permanent_discount_percent?: number | null;
+  permanent_discount_fixed?: number | null;
   warranty_months?: number | null;
   is_batch_tracked?: boolean;
   expiry_alert_days?: number | null;
@@ -1043,6 +1053,8 @@ export type CatalogProduct = {
   packSize?: number | null;
   packPrice?: number | null;
   packLabel?: string | null;
+  permanentDiscountPercent?: number | null;
+  permanentDiscountFixed?: number | null;
   warrantyMonths?: number | null;
   isBatchTracked?: boolean;
   expiryAlertDays?: number | null;
@@ -1075,6 +1087,8 @@ export type Product = CatalogProduct & {
   pack_size?: number | null;
   pack_price?: number | null;
   pack_label?: string | null;
+  permanent_discount_percent?: number | null;
+  permanent_discount_fixed?: number | null;
   warranty_months?: number | null;
   is_batch_tracked?: boolean;
   expiry_alert_days?: number | null;
@@ -1083,6 +1097,38 @@ export type Product = CatalogProduct & {
   created_at: string;
   updated_at?: string | null;
   product_suppliers?: ProductSupplierRecord[];
+};
+
+export type PromotionScope = "all" | "category" | "product";
+export type PromotionValueType = "percent" | "fixed";
+
+export type Promotion = {
+  id: string;
+  name: string;
+  description?: string | null;
+  scope: PromotionScope;
+  category_id?: string | null;
+  product_id?: string | null;
+  value_type: PromotionValueType;
+  value: number;
+  starts_at_utc: string;
+  ends_at_utc: string;
+  is_active: boolean;
+  created_at_utc: string;
+  updated_at_utc?: string | null;
+};
+
+export type UpsertPromotionRequest = {
+  name: string;
+  description?: string | null;
+  scope: PromotionScope;
+  category_id?: string | null;
+  product_id?: string | null;
+  value_type: PromotionValueType;
+  value: number;
+  starts_at_utc: string;
+  ends_at_utc: string;
+  is_active?: boolean;
 };
 
 export type PurchaseOcrTotalsValidation = {
@@ -2034,8 +2080,11 @@ type CreateSaleRequest = {
     custom_price?: number;
     serial_number_id?: string;
     sale_item_id?: string;
+    cashier_line_discount_percent?: number | null;
+    cashier_line_discount_fixed?: number | null;
   }[];
   discount_percent?: number;
+  discount_fixed?: number | null;
   customer_id?: string;
   role: string;
   payments: { method: string; amount: number; reference_number?: string | null }[];
@@ -2054,8 +2103,11 @@ type HoldSaleRequest = {
     is_pack_sale?: boolean;
     custom_price?: number;
     serial_number_id?: string;
+    cashier_line_discount_percent?: number | null;
+    cashier_line_discount_fixed?: number | null;
   }[];
   discount_percent: number;
+  discount_fixed?: number | null;
   role: string;
 };
 
@@ -2686,6 +2738,10 @@ function mapProduct(item: BackendProductSearchItem): Product {
     pack_price: item.pack_price ?? null,
     packLabel: item.pack_label ?? null,
     pack_label: item.pack_label ?? null,
+    permanentDiscountPercent: item.permanent_discount_percent ?? null,
+    permanent_discount_percent: item.permanent_discount_percent ?? null,
+    permanentDiscountFixed: item.permanent_discount_fixed ?? null,
+    permanent_discount_fixed: item.permanent_discount_fixed ?? null,
     stockQuantity: Number(item.stockQuantity),
     stock: Number(item.stockQuantity),
     stock_quantity: Number(item.stockQuantity),
@@ -2745,6 +2801,10 @@ function mapSerialLookupProduct(item: BackendSerialLookupResponse["product"]): P
     pack_price: item.pack_price ?? null,
     packLabel: item.pack_label ?? null,
     pack_label: item.pack_label ?? null,
+    permanentDiscountPercent: item.permanent_discount_percent ?? null,
+    permanent_discount_percent: item.permanent_discount_percent ?? null,
+    permanentDiscountFixed: item.permanent_discount_fixed ?? null,
+    permanent_discount_fixed: item.permanent_discount_fixed ?? null,
     stock: Number(item.stock_quantity),
     stock_quantity: Number(item.stock_quantity),
     cost_price: Number(item.unit_price),
@@ -2794,6 +2854,10 @@ function mapCatalogProduct(item: BackendProductCatalogItem): Product {
     pack_price: item.pack_price ?? null,
     packLabel: item.pack_label ?? null,
     pack_label: item.pack_label ?? null,
+    permanentDiscountPercent: item.permanent_discount_percent ?? null,
+    permanent_discount_percent: item.permanent_discount_percent ?? null,
+    permanentDiscountFixed: item.permanent_discount_fixed ?? null,
+    permanent_discount_fixed: item.permanent_discount_fixed ?? null,
     stock: Number(item.stock_quantity),
     stock_quantity: Number(item.stock_quantity),
     cost_price: Number(item.cost_price),
@@ -2843,6 +2907,10 @@ function mapSaleItems(items: BackendSaleItem[]): CartItem[] {
       packSize: isPack ? salePackSize : undefined,
       packLabel: item.pack_label ?? undefined,
       baseUnitPrice: undefined,
+      catalogDiscountAmount: Number(item.catalog_discount_amount ?? 0),
+      cashierLineDiscountAmount: Number(item.cashier_line_discount_amount ?? 0),
+      discountAmount: Number(item.discount_amount ?? 0),
+      lineTotal: Number(item.line_total ?? 0),
       product: {
         id: isService
           ? `service:${item.service_id}`
@@ -3087,6 +3155,10 @@ function mapCatalogProductItem(item: BackendProductCatalogItem): Product {
     pack_price: item.pack_price ?? null,
     packLabel: item.pack_label ?? null,
     pack_label: item.pack_label ?? null,
+    permanentDiscountPercent: item.permanent_discount_percent ?? null,
+    permanent_discount_percent: item.permanent_discount_percent ?? null,
+    permanentDiscountFixed: item.permanent_discount_fixed ?? null,
+    permanent_discount_fixed: item.permanent_discount_fixed ?? null,
     warrantyMonths: item.warranty_months ?? null,
     warranty_months: item.warranty_months ?? null,
     isBatchTracked: item.is_batch_tracked ?? false,
@@ -3673,6 +3745,7 @@ type BackendCustomerSearchItem = {
   credit_limit?: number;
   outstanding_balance?: number;
   is_active: boolean;
+  fixed_discount_percent?: number | null;
   price_tier?: {
     price_tier_id: string;
     name: string;
@@ -3706,6 +3779,8 @@ export type CustomerLookupItem = {
   email?: string | null;
   creditLimit?: number;
   outstandingBalance?: number;
+  priceTierDiscountPercent?: number | null;
+  fixedDiscountPercent?: number | null;
 };
 
 export type CreateCustomerRequest = {
@@ -3733,6 +3808,8 @@ function mapCustomerLookupItem(item: BackendCustomerSearchItem): CustomerLookupI
     email: item.email ?? null,
     creditLimit: item.credit_limit == null ? undefined : Number(item.credit_limit),
     outstandingBalance: item.outstanding_balance == null ? undefined : Number(item.outstanding_balance),
+    priceTierDiscountPercent: item.price_tier?.discount_percent == null ? null : Number(item.price_tier.discount_percent),
+    fixedDiscountPercent: item.fixed_discount_percent == null ? null : Number(item.fixed_discount_percent),
   };
 }
 
@@ -3905,6 +3982,45 @@ export async function updateCategory(categoryId: string, requestBody: CreateCate
 
 export async function hardDeleteCategory(categoryId: string) {
   return request<void>(`/api/categories/${encodeURIComponent(categoryId)}/hard-delete`, {
+    method: "DELETE",
+  });
+}
+
+function mapPromotion(item: Promotion): Promotion {
+  return {
+    ...item,
+    value: Number(item.value),
+  };
+}
+
+export async function fetchPromotions() {
+  const response = await request<{ items: Promotion[] }>("/api/promotions");
+  return (response.items ?? []).map(mapPromotion);
+}
+
+export async function fetchPromotion(promotionId: string) {
+  const response = await request<Promotion>(`/api/promotions/${encodeURIComponent(promotionId)}`);
+  return mapPromotion(response);
+}
+
+export async function createPromotion(payload: UpsertPromotionRequest) {
+  const response = await request<Promotion>("/api/promotions", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return mapPromotion(response);
+}
+
+export async function updatePromotion(promotionId: string, payload: UpsertPromotionRequest) {
+  const response = await request<Promotion>(`/api/promotions/${encodeURIComponent(promotionId)}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+  return mapPromotion(response);
+}
+
+export async function deactivatePromotion(promotionId: string) {
+  await request<void>(`/api/promotions/${encodeURIComponent(promotionId)}`, {
     method: "DELETE",
   });
 }
@@ -4163,6 +4279,8 @@ type BackendSerialLookupResponse = {
     pack_size?: number | null;
     pack_price?: number | null;
     pack_label?: string | null;
+    permanent_discount_percent?: number | null;
+    permanent_discount_fixed?: number | null;
     warranty_months?: number | null;
     is_serial_tracked?: boolean;
   };
@@ -5259,6 +5377,8 @@ export type UpdateProductRequest = {
   pack_size?: number;
   pack_price?: number | null;
   pack_label?: string | null;
+  permanent_discount_percent?: number | null;
+  permanent_discount_fixed?: number | null;
   warranty_months?: number | null;
   is_batch_tracked?: boolean;
   expiry_alert_days?: number | null;
@@ -5408,7 +5528,11 @@ export async function updateCurrentCashDrawer(counts: DenominationCount[], total
   return mapCashSessionResponse(response);
 }
 
-export async function holdSale(items: CartItem[], role: "admin" | "manager" | "cashier") {
+export async function holdSale(
+  items: CartItem[],
+  role: "admin" | "manager" | "cashier",
+  cartDiscount: CartDiscount = {},
+) {
   const payload: HoldSaleRequest = {
     items: items.map((item) => {
       const sellMode = item.sellMode
@@ -5431,9 +5555,12 @@ export async function holdSale(items: CartItem[], role: "admin" | "manager" | "c
         ? (item.customPrice ?? item.product.price)
         : undefined,
       serial_number_id: item.selectedSerial?.id,
+      cashier_line_discount_percent: item.cashierLineDiscountPercent ?? null,
+      cashier_line_discount_fixed: item.cashierLineDiscountFixed ?? null,
     };
     }),
-    discount_percent: 0,
+    discount_percent: cartDiscount.cashierTransactionDiscountPercent ?? 0,
+    discount_fixed: cartDiscount.cashierTransactionDiscountFixed ?? null,
     role: toBackendRole(role),
   };
 
@@ -5449,6 +5576,7 @@ export async function completeSale(
   paymentMethod: PaymentMethod,
   amount: number,
   saleId?: string,
+  cartDiscount: CartDiscount = {},
   referenceNumber?: string,
   cashReceivedCounts?: DenominationCount[],
   cashChangeCounts?: DenominationCount[],
@@ -5456,9 +5584,7 @@ export async function completeSale(
   cashShortAmount?: number,
   customerId?: string
 ) {
-  const cartItemsPayload = saleId
-    ? undefined
-    : items.map((item) => {
+  const cartItemsPayload = items.map((item) => {
       const sellMode = item.sellMode
         ?? (item.product.isService || item.product.serviceId ? "service" : item.bundleId || item.product.isBundle ? "bundle" : "unit");
       const serviceId = item.product.serviceId || item.product.id.replace(/^service:/, "");
@@ -5480,13 +5606,16 @@ export async function completeSale(
           : undefined,
         serial_number_id: item.selectedSerial?.id,
         sale_item_id: item.saleItemId,
+        cashier_line_discount_percent: item.cashierLineDiscountPercent ?? null,
+        cashier_line_discount_fixed: item.cashierLineDiscountFixed ?? null,
       };
     });
 
   const payload: CreateSaleRequest = {
     sale_id: saleId,
     items: cartItemsPayload,
-    discount_percent: 0,
+    discount_percent: cartDiscount.cashierTransactionDiscountPercent ?? 0,
+    discount_fixed: cartDiscount.cashierTransactionDiscountFixed ?? null,
     role: toBackendRole(role),
     customer_id: customerId || undefined,
     payments: [

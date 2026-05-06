@@ -26,6 +26,8 @@ export interface Product {
   serviceId?: string;
   serviceDurationMinutes?: number | null;
   serviceDefaultPrice?: number;
+  permanentDiscountPercent?: number | null;
+  permanentDiscountFixed?: number | null;
   tracksStock?: boolean;
   stock: number;
 }
@@ -48,6 +50,17 @@ export interface CartItem {
   packLabel?: string | null;
   baseUnitPrice?: number;
   customPrice?: number;
+  cashierLineDiscountPercent?: number | null;
+  cashierLineDiscountFixed?: number | null;
+  catalogDiscountAmount?: number;
+  cashierLineDiscountAmount?: number;
+  discountAmount?: number;
+  lineTotal?: number;
+}
+
+export interface CartDiscount {
+  cashierTransactionDiscountPercent?: number;
+  cashierTransactionDiscountFixed?: number | null;
 }
 
 export interface HeldBill {

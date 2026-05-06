@@ -4,6 +4,7 @@ using SmartPos.Backend.Domain;
 using SmartPos.Backend.Features.CashSessions;
 using SmartPos.Backend.Features.Inventory;
 using SmartPos.Backend.Features.Batches;
+using SmartPos.Backend.Features.Promotions;
 using SmartPos.Backend.Infrastructure;
 using SmartPos.Backend.Security;
 
@@ -15,7 +16,8 @@ public sealed class CheckoutService(
     AuditLogService auditLogService,
     CashSessionService cashSessionService,
     StockMovementHelper stockMovementHelper,
-    BatchDepletionHelper batchDepletionHelper)
+    BatchDepletionHelper batchDepletionHelper,
+    PromotionService promotionService)
 {
     public async Task<SaleResponse> HoldAsync(
         HoldSaleRequest request,
@@ -25,14 +27,15 @@ public sealed class CheckoutService(
         var customer = request.CustomerId.HasValue
             ? await LoadCustomerAsync(request.CustomerId.Value, cancellationToken)
             : null;
-        var discountPercent = customer is null
-            ? request.DiscountPercent
-            : ResolveCustomerDiscountPercent(customer, request.DiscountPercent);
+        var customerDiscountPercent = customer is null
+            ? 0m
+            : ResolveCustomerDiscountPercent(customer, 0m);
         var cart = await BuildCartAsync(
             request.Items,
-            discountPercent,
+            customerDiscountPercent,
+            request.DiscountPercent,
+            request.DiscountFixed,
             request.Role,
-            bypassDiscountLimit: customer is not null,
             cancellationToken);
         if (cart.Items.Any(x => x.SerialNumberId.HasValue))
         {
@@ -53,6 +56,7 @@ public sealed class CheckoutService(
             Status = SaleStatus.Held,
             Subtotal = cart.Subtotal,
             DiscountTotal = cart.DiscountTotal,
+            TransactionDiscountAmount = cart.TransactionDiscountAmount,
             TaxTotal = 0m,
             GrandTotal = finalGrandTotal,
             CustomerId = customer?.Id,
@@ -75,6 +79,8 @@ public sealed class CheckoutService(
                 CustomPrice = x.CustomPrice,
                 UnitPrice = x.UnitPrice,
                 Quantity = x.Quantity,
+                CatalogDiscountAmount = x.CatalogDiscountAmount,
+                CashierLineDiscountAmount = x.CashierLineDiscountAmount,
                 DiscountAmount = x.DiscountAmount,
                 TaxAmount = 0m,
                 LineTotal = x.LineTotal,
@@ -127,12 +133,21 @@ public sealed class CheckoutService(
                 sale.Customer = saleCustomer;
             }
 
+            var effectiveCustomer = sale.CustomerId.HasValue
+                ? await LoadCustomerAsync(sale.CustomerId.Value, cancellationToken)
+                : null;
+            var customerDiscountPercent = effectiveCustomer is null
+                ? 0m
+                : ResolveCustomerDiscountPercent(effectiveCustomer, 0m);
+
             if (request.Items.Count > 0)
             {
                 var cart = await BuildEditableHeldCartAsync(
                     sale,
                     request.Items,
+                    customerDiscountPercent,
                     request.DiscountPercent,
+                    request.DiscountFixed,
                     request.Role,
                     cancellationToken);
                 ApplyCartToHeldSale(sale, cart, requestedSerialBySaleItemId);
@@ -143,14 +158,15 @@ public sealed class CheckoutService(
             var saleCustomer = request.CustomerId.HasValue
                 ? await LoadCustomerAsync(request.CustomerId.Value, cancellationToken)
                 : null;
-            var discountPercent = saleCustomer is null
-                ? request.DiscountPercent
-                : ResolveCustomerDiscountPercent(saleCustomer, request.DiscountPercent);
+            var customerDiscountPercent = saleCustomer is null
+                ? 0m
+                : ResolveCustomerDiscountPercent(saleCustomer, 0m);
             var cart = await BuildCartAsync(
                 request.Items,
-                discountPercent,
+                customerDiscountPercent,
+                request.DiscountPercent,
+                request.DiscountFixed,
                 request.Role,
-                bypassDiscountLimit: saleCustomer is not null,
                 cancellationToken);
             var loyaltyPointsRedeemed = saleCustomer is null
                 ? 0m
@@ -174,6 +190,8 @@ public sealed class CheckoutService(
                     CustomPrice = line.CustomPrice,
                     UnitPrice = line.UnitPrice,
                     Quantity = line.Quantity,
+                    CatalogDiscountAmount = line.CatalogDiscountAmount,
+                    CashierLineDiscountAmount = line.CashierLineDiscountAmount,
                     DiscountAmount = line.DiscountAmount,
                     TaxAmount = 0m,
                     LineTotal = line.LineTotal,
@@ -197,6 +215,7 @@ public sealed class CheckoutService(
                 Status = SaleStatus.Held,
                 Subtotal = cart.Subtotal,
                 DiscountTotal = cart.DiscountTotal,
+                TransactionDiscountAmount = cart.TransactionDiscountAmount,
                 TaxTotal = 0m,
                 GrandTotal = finalGrandTotal,
                 CustomPayoutUsed = request.CustomPayoutUsed,
@@ -639,9 +658,10 @@ public sealed class CheckoutService(
 
     private async Task<CartComputation> BuildCartAsync(
         IReadOnlyCollection<CartItemRequest> requestItems,
-        decimal discountPercent,
+        decimal customerDiscountPercent,
+        decimal cashierTransactionDiscountPercent,
+        decimal? cashierTransactionDiscountFixed,
         string role,
-        bool bypassDiscountLimit,
         CancellationToken cancellationToken)
     {
         if (requestItems.Count == 0)
@@ -651,14 +671,38 @@ public sealed class CheckoutService(
 
         var normalizedRole = role.Trim().ToLowerInvariant();
         var maxDiscount = GetDiscountLimitForRole(normalizedRole);
-        if (discountPercent < 0m || discountPercent > 100m)
+        if (customerDiscountPercent < 0m || customerDiscountPercent > 100m)
         {
             throw new InvalidOperationException("Discount percent must be between 0 and 100.");
         }
 
-        if (!bypassDiscountLimit && discountPercent > maxDiscount)
+        var normalizedCashierTxnPercent = RoundMoney(cashierTransactionDiscountPercent);
+        var normalizedCashierTxnFixed = cashierTransactionDiscountFixed.HasValue
+            ? RoundMoney(cashierTransactionDiscountFixed.Value)
+            : (decimal?)null;
+
+        ValidateOperatorTransactionDiscountInputs(
+            normalizedCashierTxnPercent,
+            normalizedCashierTxnFixed,
+            maxDiscount);
+
+        if (requestItems.Any(x =>
+                x.CashierLineDiscountPercent.HasValue &&
+                x.CashierLineDiscountFixed.HasValue))
         {
-            throw new InvalidOperationException($"Discount exceeds role limit ({maxDiscount}%).");
+            throw new InvalidOperationException("Each line can have only one cashier discount type.");
+        }
+
+        if (requestItems.Any(x =>
+                x.CashierLineDiscountPercent.HasValue &&
+                (x.CashierLineDiscountPercent.Value < 0m || x.CashierLineDiscountPercent.Value > maxDiscount)))
+        {
+            throw new InvalidOperationException($"Line discount exceeds role limit ({maxDiscount}%).");
+        }
+
+        if (requestItems.Any(x => x.CashierLineDiscountFixed.HasValue && x.CashierLineDiscountFixed.Value < 0m))
+        {
+            throw new InvalidOperationException("Line fixed discount cannot be negative.");
         }
 
         if (requestItems.Any(x => x.Quantity <= 0m))
@@ -703,21 +747,36 @@ public sealed class CheckoutService(
 
         var groupedProductItems = requestItems
             .Where(x => x.ProductId.HasValue && !x.SerialNumberId.HasValue)
-            .GroupBy(x => new { ProductId = x.ProductId!.Value, x.IsPackSale })
+            .GroupBy(x => new
+            {
+                ProductId = x.ProductId!.Value,
+                x.IsPackSale,
+                x.CashierLineDiscountPercent,
+                x.CashierLineDiscountFixed
+            })
             .Select(x => new
             {
                 x.Key.ProductId,
                 x.Key.IsPackSale,
+                x.Key.CashierLineDiscountPercent,
+                x.Key.CashierLineDiscountFixed,
                 Quantity = x.Sum(y => y.Quantity)
             })
             .ToList();
 
         var groupedBundleItems = requestItems
             .Where(x => x.BundleId.HasValue)
-            .GroupBy(x => x.BundleId!.Value)
+            .GroupBy(x => new
+            {
+                BundleId = x.BundleId!.Value,
+                x.CashierLineDiscountPercent,
+                x.CashierLineDiscountFixed
+            })
             .Select(x => new
             {
-                BundleId = x.Key,
+                x.Key.BundleId,
+                x.Key.CashierLineDiscountPercent,
+                x.Key.CashierLineDiscountFixed,
                 Quantity = x.Sum(y => y.Quantity)
             })
             .ToList();
@@ -726,12 +785,16 @@ public sealed class CheckoutService(
             .GroupBy(x => new
             {
                 ServiceId = x.ServiceId!.Value,
-                CustomPrice = x.CustomPrice
+                CustomPrice = x.CustomPrice,
+                x.CashierLineDiscountPercent,
+                x.CashierLineDiscountFixed
             })
             .Select(x => new
             {
                 x.Key.ServiceId,
                 x.Key.CustomPrice,
+                x.Key.CashierLineDiscountPercent,
+                x.Key.CashierLineDiscountFixed,
                 Quantity = x.Sum(y => y.Quantity)
             })
             .ToList();
@@ -770,6 +833,13 @@ public sealed class CheckoutService(
         {
             throw new InvalidOperationException("Some services are missing or inactive.");
         }
+
+        var activePromotionDiscounts = await promotionService.GetActivePromotionDiscountsAsync(
+            products.Values
+                .Select(x => (x.Id, x.CategoryId))
+                .ToList(),
+            DateTimeOffset.UtcNow,
+            cancellationToken);
 
         Dictionary<Guid, SerialNumber> serialsById;
         if (serialSpecificItems.Count == 0)
@@ -831,7 +901,9 @@ public sealed class CheckoutService(
                     PackLabel = product.PackLabel,
                     Quantity = stockQty,
                     UnitPrice = product.PackPrice.Value,
-                    LineGross = lineGross
+                    LineGross = lineGross,
+                    RawCashierLineDiscountPercent = item.CashierLineDiscountPercent,
+                    RawCashierLineDiscountFixed = item.CashierLineDiscountFixed
                 });
                 continue;
             }
@@ -847,7 +919,9 @@ public sealed class CheckoutService(
                 SalePackSize = 0,
                 Quantity = item.Quantity,
                 UnitPrice = product.UnitPrice,
-                LineGross = productLineGross
+                LineGross = productLineGross,
+                RawCashierLineDiscountPercent = item.CashierLineDiscountPercent,
+                RawCashierLineDiscountFixed = item.CashierLineDiscountFixed
             });
         }
 
@@ -881,7 +955,9 @@ public sealed class CheckoutService(
                 UnitPrice = product.UnitPrice,
                 LineGross = lineGross,
                 SerialNumberId = serial.Id,
-                SerialValue = serial.SerialValue
+                SerialValue = serial.SerialValue,
+                RawCashierLineDiscountPercent = item.CashierLineDiscountPercent,
+                RawCashierLineDiscountFixed = item.CashierLineDiscountFixed
             });
         }
 
@@ -897,7 +973,9 @@ public sealed class CheckoutService(
                 ProductName = bundle.Name,
                 Quantity = item.Quantity,
                 UnitPrice = bundle.Price,
-                LineGross = lineGross
+                LineGross = lineGross,
+                RawCashierLineDiscountPercent = item.CashierLineDiscountPercent,
+                RawCashierLineDiscountFixed = item.CashierLineDiscountFixed
             });
         }
         foreach (var item in groupedServiceItems)
@@ -919,31 +997,41 @@ public sealed class CheckoutService(
                 Quantity = item.Quantity,
                 UnitPrice = unitPrice,
                 CustomPrice = item.CustomPrice,
-                LineGross = lineGross
+                LineGross = lineGross,
+                RawCashierLineDiscountPercent = item.CashierLineDiscountPercent,
+                RawCashierLineDiscountFixed = item.CashierLineDiscountFixed
             });
         }
 
-        var discountTotal = decimal.Round(subtotal * (discountPercent / 100m), 2, MidpointRounding.AwayFromZero);
-        decimal allocatedDiscount = 0m;
-        for (var i = 0; i < cartLines.Count; i++)
+        foreach (var line in cartLines)
         {
-            var line = cartLines[i];
-            decimal lineDiscount;
-            if (i == cartLines.Count - 1)
-            {
-                lineDiscount = discountTotal - allocatedDiscount;
-            }
-            else
-            {
-                lineDiscount = decimal.Round(line.LineGross * (discountPercent / 100m), 2, MidpointRounding.AwayFromZero);
-                allocatedDiscount += lineDiscount;
-            }
+            var catalogDiscountAmount = ResolveCatalogDiscountAmount(
+                line,
+                activePromotionDiscounts);
+            var lineBaseAfterCatalog = RoundMoney(Math.Max(0m, line.LineGross - catalogDiscountAmount));
+            var cashierLineDiscountAmount = ResolveCashierLineDiscountAmount(
+                lineBaseAfterCatalog,
+                line.RawCashierLineDiscountPercent,
+                line.RawCashierLineDiscountFixed,
+                maxDiscount);
 
-            line.DiscountAmount = lineDiscount;
-            line.LineTotal = line.LineGross - lineDiscount;
+            line.CatalogDiscountAmount = catalogDiscountAmount;
+            line.CashierLineDiscountAmount = cashierLineDiscountAmount;
+            line.DiscountAmount = RoundMoney(catalogDiscountAmount + cashierLineDiscountAmount);
+            line.LineTotal = RoundMoney(Math.Max(0m, line.LineGross - line.DiscountAmount));
         }
 
-        var grandTotal = decimal.Round(subtotal - discountTotal, 2, MidpointRounding.AwayFromZero);
+        var subtotalAfterLines = RoundMoney(cartLines.Sum(x => x.LineTotal));
+        var customerTransactionDiscountAmount = RoundMoney(subtotalAfterLines * (customerDiscountPercent / 100m));
+        var subtotalAfterCustomerDiscount = RoundMoney(Math.Max(0m, subtotalAfterLines - customerTransactionDiscountAmount));
+        var cashierTransactionDiscountAmount = ResolveCashierTransactionDiscountAmount(
+            subtotalAfterCustomerDiscount,
+            normalizedCashierTxnPercent,
+            normalizedCashierTxnFixed,
+            maxDiscount);
+        var transactionDiscountAmount = RoundMoney(customerTransactionDiscountAmount + cashierTransactionDiscountAmount);
+        var discountTotal = RoundMoney(cartLines.Sum(x => x.DiscountAmount) + transactionDiscountAmount);
+        var grandTotal = RoundMoney(Math.Max(0m, subtotalAfterCustomerDiscount - cashierTransactionDiscountAmount));
 
         return new CartComputation
         {
@@ -955,6 +1043,7 @@ public sealed class CheckoutService(
                     .Concat(cartLines.Select(x => x.Service?.StoreId)),
                 "Cart"),
             Subtotal = subtotal,
+            TransactionDiscountAmount = transactionDiscountAmount,
             DiscountTotal = discountTotal,
             GrandTotal = grandTotal
         };
@@ -963,7 +1052,9 @@ public sealed class CheckoutService(
     private async Task<CartComputation> BuildEditableHeldCartAsync(
         Sale sale,
         IReadOnlyCollection<CartItemRequest> requestItems,
-        decimal discountPercent,
+        decimal customerDiscountPercent,
+        decimal cashierTransactionDiscountPercent,
+        decimal? cashierTransactionDiscountFixed,
         string role,
         CancellationToken cancellationToken)
     {
@@ -974,9 +1065,37 @@ public sealed class CheckoutService(
 
         var normalizedRole = role.Trim().ToLowerInvariant();
         var maxDiscount = GetDiscountLimitForRole(normalizedRole);
-        if (discountPercent < 0m || discountPercent > maxDiscount)
+        if (customerDiscountPercent < 0m || customerDiscountPercent > 100m)
         {
-            throw new InvalidOperationException($"Discount exceeds role limit ({maxDiscount}%).");
+            throw new InvalidOperationException("Discount percent must be between 0 and 100.");
+        }
+
+        var normalizedCashierTxnPercent = RoundMoney(cashierTransactionDiscountPercent);
+        var normalizedCashierTxnFixed = cashierTransactionDiscountFixed.HasValue
+            ? RoundMoney(cashierTransactionDiscountFixed.Value)
+            : (decimal?)null;
+        ValidateOperatorTransactionDiscountInputs(
+            normalizedCashierTxnPercent,
+            normalizedCashierTxnFixed,
+            maxDiscount);
+
+        if (requestItems.Any(x =>
+                x.CashierLineDiscountPercent.HasValue &&
+                x.CashierLineDiscountFixed.HasValue))
+        {
+            throw new InvalidOperationException("Each line can have only one cashier discount type.");
+        }
+
+        if (requestItems.Any(x =>
+                x.CashierLineDiscountPercent.HasValue &&
+                (x.CashierLineDiscountPercent.Value < 0m || x.CashierLineDiscountPercent.Value > maxDiscount)))
+        {
+            throw new InvalidOperationException($"Line discount exceeds role limit ({maxDiscount}%).");
+        }
+
+        if (requestItems.Any(x => x.CashierLineDiscountFixed.HasValue && x.CashierLineDiscountFixed.Value < 0m))
+        {
+            throw new InvalidOperationException("Line fixed discount cannot be negative.");
         }
 
         if (requestItems.Any(x => x.Quantity <= 0m))
@@ -1102,6 +1221,13 @@ public sealed class CheckoutService(
             throw new InvalidOperationException("Some services are missing or inactive.");
         }
 
+        var activePromotionDiscounts = await promotionService.GetActivePromotionDiscountsAsync(
+            products.Values
+                .Select(x => (x.Id, x.CategoryId))
+                .ToList(),
+            DateTimeOffset.UtcNow,
+            cancellationToken);
+
         Dictionary<Guid, SerialNumber> serialsById;
         if (serialSpecificItems.Count == 0)
         {
@@ -1168,7 +1294,9 @@ public sealed class CheckoutService(
                         UnitPrice = unitPrice,
                         LineGross = lineGross,
                         SerialNumberId = serial.Id,
-                        SerialValue = serial.SerialValue
+                        SerialValue = serial.SerialValue,
+                        RawCashierLineDiscountPercent = item.CashierLineDiscountPercent,
+                        RawCashierLineDiscountFixed = item.CashierLineDiscountFixed
                     });
 
                     continue;
@@ -1201,7 +1329,9 @@ public sealed class CheckoutService(
                         PackLabel = product.PackLabel,
                         Quantity = stockQty,
                         UnitPrice = unitPrice,
-                        LineGross = lineGross
+                        LineGross = lineGross,
+                        RawCashierLineDiscountPercent = item.CashierLineDiscountPercent,
+                        RawCashierLineDiscountFixed = item.CashierLineDiscountFixed
                     });
 
                     continue;
@@ -1224,7 +1354,9 @@ public sealed class CheckoutService(
                     ProductName = existingSaleItem?.ProductNameSnapshot ?? product.Name,
                     Quantity = item.Quantity,
                     UnitPrice = genericUnitPrice,
-                    LineGross = genericLineGross
+                    LineGross = genericLineGross,
+                    RawCashierLineDiscountPercent = item.CashierLineDiscountPercent,
+                    RawCashierLineDiscountFixed = item.CashierLineDiscountFixed
                 });
 
                 continue;
@@ -1244,7 +1376,9 @@ public sealed class CheckoutService(
                     ProductName = existingSaleItem?.ProductNameSnapshot ?? bundle.Name,
                     Quantity = item.Quantity,
                     UnitPrice = unitPrice,
-                    LineGross = lineGross
+                    LineGross = lineGross,
+                    RawCashierLineDiscountPercent = item.CashierLineDiscountPercent,
+                    RawCashierLineDiscountFixed = item.CashierLineDiscountFixed
                 });
 
                 continue;
@@ -1276,31 +1410,41 @@ public sealed class CheckoutService(
                 Quantity = item.Quantity,
                 UnitPrice = unitPriceForService,
                 CustomPrice = item.CustomPrice ?? existingSaleItem?.CustomPrice,
-                LineGross = serviceLineGross
+                LineGross = serviceLineGross,
+                RawCashierLineDiscountPercent = item.CashierLineDiscountPercent,
+                RawCashierLineDiscountFixed = item.CashierLineDiscountFixed
             });
         }
 
-        var discountTotal = decimal.Round(subtotal * (discountPercent / 100m), 2, MidpointRounding.AwayFromZero);
-        decimal allocatedDiscount = 0m;
-        for (var i = 0; i < cartLines.Count; i++)
+        foreach (var line in cartLines)
         {
-            var line = cartLines[i];
-            decimal lineDiscount;
-            if (i == cartLines.Count - 1)
-            {
-                lineDiscount = discountTotal - allocatedDiscount;
-            }
-            else
-            {
-                lineDiscount = decimal.Round(line.LineGross * (discountPercent / 100m), 2, MidpointRounding.AwayFromZero);
-                allocatedDiscount += lineDiscount;
-            }
+            var catalogDiscountAmount = ResolveCatalogDiscountAmount(
+                line,
+                activePromotionDiscounts);
+            var lineBaseAfterCatalog = RoundMoney(Math.Max(0m, line.LineGross - catalogDiscountAmount));
+            var cashierLineDiscountAmount = ResolveCashierLineDiscountAmount(
+                lineBaseAfterCatalog,
+                line.RawCashierLineDiscountPercent,
+                line.RawCashierLineDiscountFixed,
+                maxDiscount);
 
-            line.DiscountAmount = lineDiscount;
-            line.LineTotal = line.LineGross - lineDiscount;
+            line.CatalogDiscountAmount = catalogDiscountAmount;
+            line.CashierLineDiscountAmount = cashierLineDiscountAmount;
+            line.DiscountAmount = RoundMoney(catalogDiscountAmount + cashierLineDiscountAmount);
+            line.LineTotal = RoundMoney(Math.Max(0m, line.LineGross - line.DiscountAmount));
         }
 
-        var grandTotal = decimal.Round(subtotal - discountTotal, 2, MidpointRounding.AwayFromZero);
+        var subtotalAfterLines = RoundMoney(cartLines.Sum(x => x.LineTotal));
+        var customerTransactionDiscountAmount = RoundMoney(subtotalAfterLines * (customerDiscountPercent / 100m));
+        var subtotalAfterCustomerDiscount = RoundMoney(Math.Max(0m, subtotalAfterLines - customerTransactionDiscountAmount));
+        var cashierTransactionDiscountAmount = ResolveCashierTransactionDiscountAmount(
+            subtotalAfterCustomerDiscount,
+            normalizedCashierTxnPercent,
+            normalizedCashierTxnFixed,
+            maxDiscount);
+        var transactionDiscountAmount = RoundMoney(customerTransactionDiscountAmount + cashierTransactionDiscountAmount);
+        var discountTotal = RoundMoney(cartLines.Sum(x => x.DiscountAmount) + transactionDiscountAmount);
+        var grandTotal = RoundMoney(Math.Max(0m, subtotalAfterCustomerDiscount - cashierTransactionDiscountAmount));
 
         return new CartComputation
         {
@@ -1312,6 +1456,7 @@ public sealed class CheckoutService(
                     .Concat(cartLines.Select(x => x.Service?.StoreId)),
                 "Cart"),
             Subtotal = subtotal,
+            TransactionDiscountAmount = transactionDiscountAmount,
             DiscountTotal = discountTotal,
             GrandTotal = grandTotal
         };
@@ -1354,6 +1499,8 @@ public sealed class CheckoutService(
                 saleItem.SalePackSize = line.SalePackSize;
                 saleItem.IsService = line.Service is not null;
                 saleItem.CustomPrice = line.CustomPrice;
+                saleItem.CatalogDiscountAmount = line.CatalogDiscountAmount;
+                saleItem.CashierLineDiscountAmount = line.CashierLineDiscountAmount;
                 saleItem.DiscountAmount = line.DiscountAmount;
                 saleItem.TaxAmount = 0m;
                 saleItem.LineTotal = line.LineTotal;
@@ -1378,10 +1525,12 @@ public sealed class CheckoutService(
                 IsPack = line.IsPackSale,
                 SalePackSize = line.SalePackSize,
                 IsService = line.Service is not null,
-                CustomPrice = line.CustomPrice,
-                UnitPrice = line.UnitPrice,
-                Quantity = line.Quantity,
-                DiscountAmount = line.DiscountAmount,
+                    CustomPrice = line.CustomPrice,
+                    UnitPrice = line.UnitPrice,
+                    Quantity = line.Quantity,
+                    CatalogDiscountAmount = line.CatalogDiscountAmount,
+                    CashierLineDiscountAmount = line.CashierLineDiscountAmount,
+                    DiscountAmount = line.DiscountAmount,
                 TaxAmount = 0m,
                 LineTotal = line.LineTotal,
                 Sale = sale,
@@ -1400,6 +1549,7 @@ public sealed class CheckoutService(
 
         sale.StoreId = cart.StoreId;
         sale.Subtotal = cart.Subtotal;
+        sale.TransactionDiscountAmount = cart.TransactionDiscountAmount;
         sale.DiscountTotal = cart.DiscountTotal;
         sale.TaxTotal = 0m;
         sale.GrandTotal = cart.GrandTotal;
@@ -1571,6 +1721,7 @@ public sealed class CheckoutService(
             Status = sale.Status.ToString().ToLowerInvariant(),
             Subtotal = sale.Subtotal,
             DiscountTotal = sale.DiscountTotal,
+            TransactionDiscountAmount = sale.TransactionDiscountAmount,
             DiscountPercent = discountPercent,
             TaxTotal = sale.TaxTotal,
             GrandTotal = sale.GrandTotal,
@@ -1602,6 +1753,9 @@ public sealed class CheckoutService(
                     : null,
                 UnitPrice = x.UnitPrice,
                 Quantity = x.Quantity,
+                CatalogDiscountAmount = x.CatalogDiscountAmount,
+                CashierLineDiscountAmount = x.CashierLineDiscountAmount,
+                DiscountAmount = x.DiscountAmount,
                 LineTotal = x.LineTotal
             }).ToList(),
             Payments = sale.Payments
@@ -1747,6 +1901,208 @@ public sealed class CheckoutService(
         return pointsToRedeem;
     }
 
+    private static void ValidateOperatorTransactionDiscountInputs(
+        decimal cashierTransactionDiscountPercent,
+        decimal? cashierTransactionDiscountFixed,
+        decimal maxDiscountPercent)
+    {
+        if (cashierTransactionDiscountPercent < 0m || cashierTransactionDiscountPercent > maxDiscountPercent)
+        {
+            throw new InvalidOperationException($"Transaction discount exceeds role limit ({maxDiscountPercent}%).");
+        }
+
+        if (cashierTransactionDiscountFixed.HasValue && cashierTransactionDiscountFixed.Value < 0m)
+        {
+            throw new InvalidOperationException("Transaction fixed discount cannot be negative.");
+        }
+
+        if (cashierTransactionDiscountPercent > 0m && cashierTransactionDiscountFixed.HasValue)
+        {
+            throw new InvalidOperationException("Use either transaction discount percent or fixed amount, not both.");
+        }
+    }
+
+    private static decimal ResolveCatalogDiscountAmount(
+        CartLine line,
+        IReadOnlyDictionary<Guid, ActivePromotionDiscount> activePromotionDiscounts)
+    {
+        if (line.Product is null)
+        {
+            return 0m;
+        }
+
+        if (activePromotionDiscounts.TryGetValue(line.Product.Id, out var promotion))
+        {
+            return ResolveValueDiscountAmount(line.LineGross, promotion.ValueType, promotion.Value, strictLimit: false, "Promotion");
+        }
+
+        if (line.Product.PermanentDiscountPercent.HasValue)
+        {
+            return ResolveValueDiscountAmount(
+                line.LineGross,
+                PromotionValueType.Percent,
+                line.Product.PermanentDiscountPercent.Value,
+                strictLimit: false,
+                "Product permanent");
+        }
+
+        if (line.Product.PermanentDiscountFixed.HasValue)
+        {
+            return ResolveValueDiscountAmount(
+                line.LineGross,
+                PromotionValueType.Fixed,
+                line.Product.PermanentDiscountFixed.Value,
+                strictLimit: false,
+                "Product permanent");
+        }
+
+        return 0m;
+    }
+
+    private static decimal ResolveCashierLineDiscountAmount(
+        decimal eligibleBase,
+        decimal? discountPercent,
+        decimal? discountFixed,
+        decimal maxDiscountPercent)
+    {
+        if (eligibleBase <= 0m)
+        {
+            return 0m;
+        }
+
+        if (discountPercent.HasValue && discountFixed.HasValue)
+        {
+            throw new InvalidOperationException("Each line can have only one cashier discount type.");
+        }
+
+        if (discountPercent.HasValue)
+        {
+            if (discountPercent.Value < 0m || discountPercent.Value > maxDiscountPercent)
+            {
+                throw new InvalidOperationException($"Line discount exceeds role limit ({maxDiscountPercent}%).");
+            }
+
+            return ResolveValueDiscountAmount(
+                eligibleBase,
+                PromotionValueType.Percent,
+                discountPercent.Value,
+                strictLimit: true,
+                "Line");
+        }
+
+        if (!discountFixed.HasValue)
+        {
+            return 0m;
+        }
+
+        if (discountFixed.Value < 0m)
+        {
+            throw new InvalidOperationException("Line fixed discount cannot be negative.");
+        }
+
+        var capAmount = RoundMoney(eligibleBase * (maxDiscountPercent / 100m));
+        if (RoundMoney(discountFixed.Value) > capAmount)
+        {
+            throw new InvalidOperationException($"Line fixed discount exceeds role limit ({maxDiscountPercent}%).");
+        }
+
+        return ResolveValueDiscountAmount(
+            eligibleBase,
+            PromotionValueType.Fixed,
+            discountFixed.Value,
+            strictLimit: true,
+            "Line");
+    }
+
+    private static decimal ResolveCashierTransactionDiscountAmount(
+        decimal eligibleBase,
+        decimal discountPercent,
+        decimal? discountFixed,
+        decimal maxDiscountPercent)
+    {
+        if (eligibleBase <= 0m)
+        {
+            return 0m;
+        }
+
+        if (discountPercent > 0m && discountFixed.HasValue)
+        {
+            throw new InvalidOperationException("Use either transaction discount percent or fixed amount, not both.");
+        }
+
+        if (discountPercent > 0m)
+        {
+            if (discountPercent > maxDiscountPercent)
+            {
+                throw new InvalidOperationException($"Transaction discount exceeds role limit ({maxDiscountPercent}%).");
+            }
+
+            return ResolveValueDiscountAmount(
+                eligibleBase,
+                PromotionValueType.Percent,
+                discountPercent,
+                strictLimit: true,
+                "Transaction");
+        }
+
+        if (!discountFixed.HasValue)
+        {
+            return 0m;
+        }
+
+        var normalizedFixed = RoundMoney(discountFixed.Value);
+        if (normalizedFixed < 0m)
+        {
+            throw new InvalidOperationException("Transaction fixed discount cannot be negative.");
+        }
+
+        var capAmount = RoundMoney(eligibleBase * (maxDiscountPercent / 100m));
+        if (normalizedFixed > capAmount)
+        {
+            throw new InvalidOperationException($"Transaction fixed discount exceeds role limit ({maxDiscountPercent}%).");
+        }
+
+        return ResolveValueDiscountAmount(
+            eligibleBase,
+            PromotionValueType.Fixed,
+            normalizedFixed,
+            strictLimit: true,
+            "Transaction");
+    }
+
+    private static decimal ResolveValueDiscountAmount(
+        decimal baseAmount,
+        PromotionValueType valueType,
+        decimal value,
+        bool strictLimit,
+        string label)
+    {
+        if (baseAmount <= 0m)
+        {
+            return 0m;
+        }
+
+        var normalizedValue = RoundMoney(value);
+        if (normalizedValue <= 0m)
+        {
+            return 0m;
+        }
+
+        decimal rawDiscount = valueType switch
+        {
+            PromotionValueType.Percent => RoundMoney(baseAmount * (normalizedValue / 100m)),
+            PromotionValueType.Fixed => normalizedValue,
+            _ => 0m
+        };
+
+        if (strictLimit && rawDiscount > baseAmount)
+        {
+            throw new InvalidOperationException($"{label} fixed discount cannot exceed eligible amount.");
+        }
+
+        return RoundMoney(Math.Min(baseAmount, Math.Max(0m, rawDiscount)));
+    }
+
     private static List<SerialNumber> ResolveSerialAssignmentsForSaleItem(
         SaleItem saleItem,
         Product product,
@@ -1800,6 +2156,7 @@ public sealed class CheckoutService(
         public List<CartLine> Items { get; set; } = [];
         public Guid? StoreId { get; set; }
         public decimal Subtotal { get; set; }
+        public decimal TransactionDiscountAmount { get; set; }
         public decimal DiscountTotal { get; set; }
         public decimal GrandTotal { get; set; }
     }
@@ -1818,6 +2175,10 @@ public sealed class CheckoutService(
         public decimal Quantity { get; set; }
         public decimal UnitPrice { get; set; }
         public decimal LineGross { get; set; }
+        public decimal? RawCashierLineDiscountPercent { get; set; }
+        public decimal? RawCashierLineDiscountFixed { get; set; }
+        public decimal CatalogDiscountAmount { get; set; }
+        public decimal CashierLineDiscountAmount { get; set; }
         public decimal DiscountAmount { get; set; }
         public decimal LineTotal { get; set; }
         public Guid? SerialNumberId { get; set; }

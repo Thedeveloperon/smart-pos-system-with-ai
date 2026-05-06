@@ -5,6 +5,7 @@ import ProductsTab from "@/components/manager/ProductsTab";
 import CatalogueTab from "@/components/manager/CatalogueTab";
 import SuppliersTab from "@/components/manager/SuppliersTab";
 import ServicesTab from "@/components/manager/ServicesTab";
+import PromotionsTab from "@/components/manager/PromotionsTab";
 
 type Props = { onBack: () => void };
 
@@ -37,11 +38,12 @@ export default function ManagerPage({ onBack }: Props) {
 
       <main className="mx-auto max-w-7xl px-4 py-6">
         <Tabs defaultValue="products" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-4 border border-border/60 bg-secondary/60 md:w-fit">
+          <TabsList className="grid w-full grid-cols-5 border border-border/60 bg-secondary/60 md:w-fit">
             <TabsTrigger value="products">Products</TabsTrigger>
             <TabsTrigger value="services">Services</TabsTrigger>
             <TabsTrigger value="catalogue">Categories & Brands</TabsTrigger>
             <TabsTrigger value="suppliers">Suppliers</TabsTrigger>
+            <TabsTrigger value="promotions">Promotions</TabsTrigger>
           </TabsList>
 
           <TabsContent value="products" className="mt-0">
@@ -58,6 +60,10 @@ export default function ManagerPage({ onBack }: Props) {
 
           <TabsContent value="suppliers" className="mt-0">
             <SuppliersTab />
+          </TabsContent>
+
+          <TabsContent value="promotions" className="mt-0">
+            <PromotionsTab />
           </TabsContent>
         </Tabs>
       </main>

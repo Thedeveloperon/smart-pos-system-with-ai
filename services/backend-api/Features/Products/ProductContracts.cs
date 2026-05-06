@@ -28,6 +28,10 @@ public sealed class ProductSearchItem
 
     public decimal UnitPrice { get; set; }
     public decimal CostPrice { get; set; }
+    [JsonPropertyName("permanent_discount_percent")]
+    public decimal? PermanentDiscountPercent { get; set; }
+    [JsonPropertyName("permanent_discount_fixed")]
+    public decimal? PermanentDiscountFixed { get; set; }
     public decimal StockQuantity { get; set; }
     [JsonPropertyName("is_low_stock")]
     public bool IsLowStock { get; set; }
@@ -360,6 +364,10 @@ public sealed class ProductCatalogItemResponse
 
     [JsonPropertyName("cost_price")]
     public decimal CostPrice { get; set; }
+    [JsonPropertyName("permanent_discount_percent")]
+    public decimal? PermanentDiscountPercent { get; set; }
+    [JsonPropertyName("permanent_discount_fixed")]
+    public decimal? PermanentDiscountFixed { get; set; }
 
     [JsonPropertyName("stock_quantity")]
     public decimal StockQuantity { get; set; }
@@ -443,6 +451,10 @@ public sealed class CreateProductRequest
 
     [JsonPropertyName("cost_price")]
     public decimal CostPrice { get; set; }
+    [JsonPropertyName("permanent_discount_percent")]
+    public decimal? PermanentDiscountPercent { get; set; }
+    [JsonPropertyName("permanent_discount_fixed")]
+    public decimal? PermanentDiscountFixed { get; set; }
 
     [JsonPropertyName("initial_stock_quantity")]
     public decimal InitialStockQuantity { get; set; }
@@ -508,6 +520,10 @@ public sealed class UpdateProductRequest
 
     [JsonPropertyName("cost_price")]
     public decimal CostPrice { get; set; }
+    [JsonPropertyName("permanent_discount_percent")]
+    public decimal? PermanentDiscountPercent { get; set; }
+    [JsonPropertyName("permanent_discount_fixed")]
+    public decimal? PermanentDiscountFixed { get; set; }
 
     [JsonPropertyName("initial_stock_quantity")]
     public decimal? InitialStockQuantity { get; set; }
