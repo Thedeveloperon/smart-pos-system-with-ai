@@ -1,5 +1,7 @@
 using System.Security.Claims;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Infrastructure;
 
@@ -11,104 +13,120 @@ public sealed class PromotionService(
 {
     public async Task<List<PromotionResponse>> ListPromotionsAsync(CancellationToken cancellationToken)
     {
-        var storeId = await GetCurrentStoreIdAsync(cancellationToken);
-        var query = dbContext.Promotions.AsNoTracking().AsQueryable();
-        if (storeId.HasValue)
+        return await ExecuteWithPromotionSchemaRecoveryAsync(async token =>
         {
-            query = query.Where(x => x.StoreId == storeId.Value);
-        }
+            var storeId = await GetCurrentStoreIdAsync(token);
+            var query = dbContext.Promotions.AsNoTracking().AsQueryable();
+            if (storeId.HasValue)
+            {
+                query = query.Where(x => x.StoreId == storeId.Value);
+            }
 
-        var items = await query
-            .OrderByDescending(x => x.CreatedAtUtc)
-            .ToListAsync(cancellationToken);
+            var items = await query.ToListAsync(token);
 
-        return items.Select(MapResponse).ToList();
+            return items
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Select(MapResponse)
+                .ToList();
+        }, cancellationToken);
     }
 
     public async Task<PromotionResponse?> GetPromotionAsync(Guid id, CancellationToken cancellationToken)
     {
-        var storeId = await GetCurrentStoreIdAsync(cancellationToken);
-        var query = dbContext.Promotions.AsNoTracking().Where(x => x.Id == id);
-        if (storeId.HasValue)
+        return await ExecuteWithPromotionSchemaRecoveryAsync(async token =>
         {
-            query = query.Where(x => x.StoreId == storeId.Value);
-        }
+            var storeId = await GetCurrentStoreIdAsync(token);
+            var query = dbContext.Promotions.AsNoTracking().Where(x => x.Id == id);
+            if (storeId.HasValue)
+            {
+                query = query.Where(x => x.StoreId == storeId.Value);
+            }
 
-        var entity = await query.FirstOrDefaultAsync(cancellationToken);
-        return entity is null ? null : MapResponse(entity);
+            var entity = await query.FirstOrDefaultAsync(token);
+            return entity is null ? null : MapResponse(entity);
+        }, cancellationToken);
     }
 
     public async Task<PromotionResponse> CreatePromotionAsync(UpsertPromotionRequest request, CancellationToken cancellationToken)
     {
-        var now = DateTimeOffset.UtcNow;
-        var storeId = await GetCurrentStoreIdAsync(cancellationToken);
-        var (scope, valueType, value) = await NormalizeRequestAsync(request, storeId, null, cancellationToken);
-
-        var entity = new Promotion
+        return await ExecuteWithPromotionSchemaRecoveryAsync(async token =>
         {
-            StoreId = storeId,
-            Name = request.Name.Trim(),
-            Description = NormalizeOptional(request.Description),
-            Scope = scope,
-            CategoryId = scope == PromotionScope.Category ? request.CategoryId : null,
-            ProductId = scope == PromotionScope.Product ? request.ProductId : null,
-            ValueType = valueType,
-            Value = value,
-            StartsAtUtc = request.StartsAtUtc,
-            EndsAtUtc = request.EndsAtUtc,
-            IsActive = request.IsActive,
-            CreatedAtUtc = now,
-            UpdatedAtUtc = now
-        };
+            var now = DateTimeOffset.UtcNow;
+            var storeId = await GetCurrentStoreIdAsync(token);
+            var (scope, valueType, value) = await NormalizeRequestAsync(request, storeId, null, token);
 
-        dbContext.Promotions.Add(entity);
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return MapResponse(entity);
+            var entity = new Promotion
+            {
+                StoreId = storeId,
+                Name = request.Name.Trim(),
+                Description = NormalizeOptional(request.Description),
+                Scope = scope,
+                CategoryId = scope == PromotionScope.Category ? request.CategoryId : null,
+                ProductId = scope == PromotionScope.Product ? request.ProductId : null,
+                ValueType = valueType,
+                Value = value,
+                StartsAtUtc = request.StartsAtUtc,
+                EndsAtUtc = request.EndsAtUtc,
+                IsActive = request.IsActive,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            };
+
+            dbContext.Promotions.Add(entity);
+            await dbContext.SaveChangesAsync(token);
+            return MapResponse(entity);
+        }, cancellationToken);
     }
 
     public async Task<PromotionResponse> UpdatePromotionAsync(Guid id, UpsertPromotionRequest request, CancellationToken cancellationToken)
     {
-        var storeId = await GetCurrentStoreIdAsync(cancellationToken);
-        var entity = await dbContext.Promotions.FirstOrDefaultAsync(x => x.Id == id, cancellationToken)
-            ?? throw new KeyNotFoundException("Promotion not found.");
-
-        if (storeId.HasValue && entity.StoreId != storeId.Value)
+        return await ExecuteWithPromotionSchemaRecoveryAsync(async token =>
         {
-            throw new KeyNotFoundException("Promotion not found.");
-        }
+            var storeId = await GetCurrentStoreIdAsync(token);
+            var entity = await dbContext.Promotions.FirstOrDefaultAsync(x => x.Id == id, token)
+                ?? throw new KeyNotFoundException("Promotion not found.");
 
-        var (scope, valueType, value) = await NormalizeRequestAsync(request, storeId, id, cancellationToken);
+            if (storeId.HasValue && entity.StoreId != storeId.Value)
+            {
+                throw new KeyNotFoundException("Promotion not found.");
+            }
 
-        entity.Name = request.Name.Trim();
-        entity.Description = NormalizeOptional(request.Description);
-        entity.Scope = scope;
-        entity.CategoryId = scope == PromotionScope.Category ? request.CategoryId : null;
-        entity.ProductId = scope == PromotionScope.Product ? request.ProductId : null;
-        entity.ValueType = valueType;
-        entity.Value = value;
-        entity.StartsAtUtc = request.StartsAtUtc;
-        entity.EndsAtUtc = request.EndsAtUtc;
-        entity.IsActive = request.IsActive;
-        entity.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            var (scope, valueType, value) = await NormalizeRequestAsync(request, storeId, id, token);
 
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return MapResponse(entity);
+            entity.Name = request.Name.Trim();
+            entity.Description = NormalizeOptional(request.Description);
+            entity.Scope = scope;
+            entity.CategoryId = scope == PromotionScope.Category ? request.CategoryId : null;
+            entity.ProductId = scope == PromotionScope.Product ? request.ProductId : null;
+            entity.ValueType = valueType;
+            entity.Value = value;
+            entity.StartsAtUtc = request.StartsAtUtc;
+            entity.EndsAtUtc = request.EndsAtUtc;
+            entity.IsActive = request.IsActive;
+            entity.UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+            await dbContext.SaveChangesAsync(token);
+            return MapResponse(entity);
+        }, cancellationToken);
     }
 
     public async Task DeactivatePromotionAsync(Guid id, CancellationToken cancellationToken)
     {
-        var storeId = await GetCurrentStoreIdAsync(cancellationToken);
-        var entity = await dbContext.Promotions.FirstOrDefaultAsync(x => x.Id == id, cancellationToken)
-            ?? throw new KeyNotFoundException("Promotion not found.");
-
-        if (storeId.HasValue && entity.StoreId != storeId.Value)
+        await ExecuteWithPromotionSchemaRecoveryAsync(async token =>
         {
-            throw new KeyNotFoundException("Promotion not found.");
-        }
+            var storeId = await GetCurrentStoreIdAsync(token);
+            var entity = await dbContext.Promotions.FirstOrDefaultAsync(x => x.Id == id, token)
+                ?? throw new KeyNotFoundException("Promotion not found.");
 
-        entity.IsActive = false;
-        entity.UpdatedAtUtc = DateTimeOffset.UtcNow;
-        await dbContext.SaveChangesAsync(cancellationToken);
+            if (storeId.HasValue && entity.StoreId != storeId.Value)
+            {
+                throw new KeyNotFoundException("Promotion not found.");
+            }
+
+            entity.IsActive = false;
+            entity.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            await dbContext.SaveChangesAsync(token);
+        }, cancellationToken);
     }
 
     public async Task<Dictionary<Guid, ActivePromotionDiscount>> GetActivePromotionDiscountsAsync(
@@ -116,60 +134,63 @@ public sealed class PromotionService(
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
-        if (products.Count == 0)
+        return await ExecuteWithPromotionSchemaRecoveryAsync(async token =>
         {
-            return [];
-        }
-
-        var storeId = await GetCurrentStoreIdAsync(cancellationToken);
-        var productIds = products.Select(x => x.ProductId).Distinct().ToArray();
-        var categoryIds = products
-            .Where(x => x.CategoryId.HasValue)
-            .Select(x => x.CategoryId!.Value)
-            .Distinct()
-            .ToArray();
-
-        var query = dbContext.Promotions
-            .AsNoTracking();
-
-        if (storeId.HasValue)
-        {
-            query = query.Where(x => x.StoreId == storeId.Value);
-        }
-
-        var promotions = (await query.ToListAsync(cancellationToken))
-            .Where(x =>
-                x.IsActive &&
-                x.StartsAtUtc <= now &&
-                x.EndsAtUtc >= now &&
-                (x.Scope == PromotionScope.All ||
-                 (x.Scope == PromotionScope.Category && x.CategoryId.HasValue && categoryIds.Contains(x.CategoryId.Value)) ||
-                 (x.Scope == PromotionScope.Product && x.ProductId.HasValue && productIds.Contains(x.ProductId.Value))))
-            .ToList();
-        var productCategoryLookup = products
-            .GroupBy(x => x.ProductId)
-            .ToDictionary(x => x.Key, x => x.Select(y => y.CategoryId).FirstOrDefault());
-
-        var result = new Dictionary<Guid, ActivePromotionDiscount>();
-        foreach (var productId in productIds)
-        {
-            var categoryId = productCategoryLookup[productId];
-            var best = promotions
-                .Where(x =>
-                    (x.Scope == PromotionScope.Product && x.ProductId == productId) ||
-                    (x.Scope == PromotionScope.Category && categoryId.HasValue && x.CategoryId == categoryId.Value) ||
-                    x.Scope == PromotionScope.All)
-                .OrderBy(x => GetScopePriority(x.Scope))
-                .ThenByDescending(x => x.Value)
-                .FirstOrDefault();
-
-            if (best is not null)
+            if (products.Count == 0)
             {
-                result[productId] = new ActivePromotionDiscount(best.ValueType, best.Value);
+                return [];
             }
-        }
 
-        return result;
+            var storeId = await GetCurrentStoreIdAsync(token);
+            var productIds = products.Select(x => x.ProductId).Distinct().ToArray();
+            var categoryIds = products
+                .Where(x => x.CategoryId.HasValue)
+                .Select(x => x.CategoryId!.Value)
+                .Distinct()
+                .ToArray();
+
+            var query = dbContext.Promotions
+                .AsNoTracking();
+
+            if (storeId.HasValue)
+            {
+                query = query.Where(x => x.StoreId == storeId.Value);
+            }
+
+            var promotions = (await query.ToListAsync(token))
+                .Where(x =>
+                    x.IsActive &&
+                    x.StartsAtUtc <= now &&
+                    x.EndsAtUtc >= now &&
+                    (x.Scope == PromotionScope.All ||
+                     (x.Scope == PromotionScope.Category && x.CategoryId.HasValue && categoryIds.Contains(x.CategoryId.Value)) ||
+                     (x.Scope == PromotionScope.Product && x.ProductId.HasValue && productIds.Contains(x.ProductId.Value))))
+                .ToList();
+            var productCategoryLookup = products
+                .GroupBy(x => x.ProductId)
+                .ToDictionary(x => x.Key, x => x.Select(y => y.CategoryId).FirstOrDefault());
+
+            var result = new Dictionary<Guid, ActivePromotionDiscount>();
+            foreach (var productId in productIds)
+            {
+                var categoryId = productCategoryLookup[productId];
+                var best = promotions
+                    .Where(x =>
+                        (x.Scope == PromotionScope.Product && x.ProductId == productId) ||
+                        (x.Scope == PromotionScope.Category && categoryId.HasValue && x.CategoryId == categoryId.Value) ||
+                        x.Scope == PromotionScope.All)
+                    .OrderBy(x => GetScopePriority(x.Scope))
+                    .ThenByDescending(x => x.Value)
+                    .FirstOrDefault();
+
+                if (best is not null)
+                {
+                    result[productId] = new ActivePromotionDiscount(best.ValueType, best.Value);
+                }
+            }
+
+            return result;
+        }, cancellationToken);
     }
 
     private async Task<(PromotionScope Scope, PromotionValueType ValueType, decimal Value)> NormalizeRequestAsync(
@@ -314,5 +335,55 @@ public sealed class PromotionService(
             .Where(x => x.Id == userId)
             .Select(x => x.StoreId)
             .SingleOrDefaultAsync(cancellationToken);
+    }
+
+    private async Task<T> ExecuteWithPromotionSchemaRecoveryAsync<T>(
+        Func<CancellationToken, Task<T>> operation,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await operation(cancellationToken);
+        }
+        catch (Exception exception) when (IsMissingPromotionSchemaException(exception))
+        {
+            dbContext.ChangeTracker.Clear();
+            await DbSchemaUpdater.EnsureDiscountSchemaAsync(dbContext, cancellationToken);
+            return await operation(cancellationToken);
+        }
+    }
+
+    private async Task ExecuteWithPromotionSchemaRecoveryAsync(
+        Func<CancellationToken, Task> operation,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await operation(cancellationToken);
+        }
+        catch (Exception exception) when (IsMissingPromotionSchemaException(exception))
+        {
+            dbContext.ChangeTracker.Clear();
+            await DbSchemaUpdater.EnsureDiscountSchemaAsync(dbContext, cancellationToken);
+            await operation(cancellationToken);
+        }
+    }
+
+    private static bool IsMissingPromotionSchemaException(Exception exception)
+    {
+        return exception switch
+        {
+            SqliteException sqliteException => sqliteException.SqliteErrorCode == 1 &&
+                sqliteException.Message.Contains("no such table", StringComparison.OrdinalIgnoreCase) &&
+                sqliteException.Message.Contains("promotion", StringComparison.OrdinalIgnoreCase),
+            PostgresException postgresException => string.Equals(
+                    postgresException.SqlState,
+                    PostgresErrorCodes.UndefinedTable,
+                    StringComparison.Ordinal) &&
+                (string.Equals(postgresException.TableName, "promotions", StringComparison.OrdinalIgnoreCase) ||
+                 postgresException.MessageText.Contains("promotions", StringComparison.OrdinalIgnoreCase)),
+            _ when exception.InnerException is not null => IsMissingPromotionSchemaException(exception.InnerException),
+            _ => false
+        };
     }
 }
