@@ -9,6 +9,10 @@ export type ParseResult = {
   error: string | null;
 };
 
+function hasRowData(row: ParsedRow): boolean {
+  return Object.values(row).some((value) => String(value ?? "").trim() !== "");
+}
+
 function normalizeHeader(header: string): string {
   return header.trim().toLowerCase().replace(/\s+/g, "_");
 }
@@ -17,11 +21,11 @@ function parseCsv(file: File): Promise<ParseResult> {
   return new Promise((resolve) => {
     Papa.parse<ParsedRow>(file, {
       header: true,
-      skipEmptyLines: true,
+      skipEmptyLines: "greedy",
       transformHeader: normalizeHeader,
       complete: (result) => {
         resolve({
-          rows: result.data,
+          rows: result.data.filter(hasRowData),
           headers: result.meta.fields ?? [],
           error: result.errors.length > 0 ? result.errors[0].message : null,
         });

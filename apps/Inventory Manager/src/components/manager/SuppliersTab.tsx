@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from "react";
 import { Check, ChevronDown, Loader2, PencilLine, Plus, Power, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -196,10 +204,16 @@ export default function SuppliersTab() {
     setActionPending(true);
     try {
       if (actionState.mode === "activate") {
-        await updateSupplier(actionState.supplier.supplier_id, toSupplierUpdatePayload(actionState.supplier, true));
+        await updateSupplier(
+          actionState.supplier.supplier_id,
+          toSupplierUpdatePayload(actionState.supplier, true),
+        );
         toast.success("Sales rep activated.");
       } else if (actionState.mode === "deactivate") {
-        await updateSupplier(actionState.supplier.supplier_id, toSupplierUpdatePayload(actionState.supplier, false));
+        await updateSupplier(
+          actionState.supplier.supplier_id,
+          toSupplierUpdatePayload(actionState.supplier, false),
+        );
         toast.success("Sales rep deactivated.");
       } else {
         await hardDeleteSupplier(actionState.supplier.supplier_id);
@@ -223,7 +237,9 @@ export default function SuppliersTab() {
 
   const selectedBrandNames = useMemo(() => {
     const lookup = new Map(brandOptions.map((brand) => [brand.brand_id, brand.name]));
-    return supplierForm.brandIds.map((brandId) => lookup.get(brandId)).filter((name): name is string => Boolean(name));
+    return supplierForm.brandIds
+      .map((brandId) => lookup.get(brandId))
+      .filter((name): name is string => Boolean(name));
   }, [brandOptions, supplierForm.brandIds]);
 
   return (
@@ -507,7 +523,9 @@ function SupplierEditorDialog({
             <Label>Sales Rep Name</Label>
             <Input
               value={supplierForm.name}
-              onChange={(event) => setSupplierForm((prev) => ({ ...prev, name: event.target.value }))}
+              onChange={(event) =>
+                setSupplierForm((prev) => ({ ...prev, name: event.target.value }))
+              }
             />
           </div>
 
@@ -635,6 +653,16 @@ function BrandMultiSelect({
   onChange: (brandIds: string[]) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLDivElement | null>(null);
+  const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    setPortalContainer(triggerRef.current?.closest('[role="dialog"]') as HTMLElement | null);
+  }, [open]);
 
   const toggleBrand = (brandId: string) => {
     if (selectedBrandIds.includes(brandId)) {
@@ -649,6 +677,7 @@ function BrandMultiSelect({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <div
+          ref={triggerRef}
           role="button"
           tabIndex={0}
           className="flex min-h-11 w-full items-center justify-between gap-2 rounded-md border bg-background px-3 py-2 text-left text-sm shadow-sm outline-none transition-colors hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
@@ -658,7 +687,11 @@ function BrandMultiSelect({
               selectedBrandNames.map((brandName, index) => {
                 const brandId = selectedBrandIds[index];
                 return (
-                  <Badge key={`${brandId}-${brandName}`} variant="secondary" className="gap-1 rounded-full">
+                  <Badge
+                    key={`${brandId}-${brandName}`}
+                    variant="secondary"
+                    className="gap-1 rounded-full"
+                  >
                     <span>{brandName}</span>
                     <button
                       type="button"
@@ -681,10 +714,25 @@ function BrandMultiSelect({
           <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
         </div>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-[--radix-popover-trigger-width] p-0">
+      <PopoverContent
+        align="start"
+        container={portalContainer}
+        className="w-[--radix-popover-trigger-width] p-0"
+      >
         <Command>
           <CommandInput placeholder="Search brands..." />
-          <CommandList>
+          <CommandList
+            onWheelCapture={(event) => {
+              const list = event.currentTarget;
+              if (list.scrollHeight <= list.clientHeight) {
+                return;
+              }
+
+              list.scrollTop += event.deltaY;
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+          >
             <CommandEmpty>{loading ? "Loading brands..." : "No brands found."}</CommandEmpty>
             <CommandGroup>
               {brands.map((brand) => {
@@ -698,7 +746,9 @@ function BrandMultiSelect({
                     <Check className={`mr-2 h-4 w-4 ${selected ? "opacity-100" : "opacity-0"}`} />
                     <div className="flex flex-1 items-center justify-between gap-2">
                       <span>{brand.name}</span>
-                      {brand.code ? <span className="text-xs text-muted-foreground">{brand.code}</span> : null}
+                      {brand.code ? (
+                        <span className="text-xs text-muted-foreground">{brand.code}</span>
+                      ) : null}
                     </div>
                   </CommandItem>
                 );

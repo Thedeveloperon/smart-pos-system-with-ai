@@ -62,6 +62,26 @@ describe("BulkImportDialog", () => {
     expect(screen.getByRole("button", { name: "Import 1 row(s)" })).toBeDisabled();
   });
 
+  it("filters blank template rows before showing the preview count", async () => {
+    parseFileMock.mockResolvedValue({
+      rows: [{ name: "Nike" }, { name: "", code: "", description: "" }, { name: "Adidas" }],
+      headers: ["name", "code", "description"],
+      error: null,
+    });
+
+    render(<BulkImportDialog open onOpenChange={vi.fn()} entityType="brand" onImportComplete={vi.fn()} />);
+
+    const fileInput = document.querySelector("input[type='file']") as HTMLInputElement;
+    fireEvent.change(fileInput, {
+      target: { files: [new File(["name\nNike"], "brands.csv", { type: "text/csv" })] },
+    });
+    fireEvent.click(screen.getByText("Skip duplicates"));
+    fireEvent.click(screen.getByRole("button", { name: "Next: Preview" }));
+
+    expect(await screen.findByText("2 row(s) found")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Import 2 row(s)" })).toBeEnabled();
+  });
+
   it("renders result metrics after successful import", async () => {
     parseFileMock.mockResolvedValue({
       rows: [{ name: "Nike" }],

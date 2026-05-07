@@ -1,5 +1,22 @@
-import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import { Check, ChevronDown, Loader2, PencilLine, Plus, Power, Trash2, X } from "lucide-react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from "react";
+import {
+  Check,
+  ChevronDown,
+  Loader2,
+  PencilLine,
+  Plus,
+  Power,
+  Trash2,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,7 +40,11 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -70,7 +91,10 @@ const emptySupplierForm = (): SupplierFormState => ({
   brandIds: [],
 });
 
-const toSupplierUpdatePayload = (supplier: Supplier, isActive = supplier.is_active) => ({
+const toSupplierUpdatePayload = (
+  supplier: Supplier,
+  isActive = supplier.is_active,
+) => ({
   name: supplier.name,
   phone: supplier.phone ?? "",
   company_name: supplier.company_name ?? "",
@@ -87,7 +111,8 @@ export default function SuppliersTab() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorMode, setEditorMode] = useState<SupplierMode>("simple");
   const [saving, setSaving] = useState(false);
-  const [supplierForm, setSupplierForm] = useState<SupplierFormState>(emptySupplierForm());
+  const [supplierForm, setSupplierForm] =
+    useState<SupplierFormState>(emptySupplierForm());
   const [brandOptions, setBrandOptions] = useState<Brand[]>([]);
   const [loadingBrands, setLoadingBrands] = useState(false);
   const [actionState, setActionState] = useState<SupplierActionState>(null);
@@ -98,7 +123,9 @@ export default function SuppliersTab() {
     try {
       setSuppliers(await fetchSuppliers(true));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load suppliers.");
+      toast.error(
+        error instanceof Error ? error.message : "Failed to load suppliers.",
+      );
     } finally {
       setLoading(false);
     }
@@ -109,7 +136,9 @@ export default function SuppliersTab() {
     try {
       setBrandOptions(await fetchBrands(true));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load brands.");
+      toast.error(
+        error instanceof Error ? error.message : "Failed to load brands.",
+      );
     } finally {
       setLoadingBrands(false);
     }
@@ -165,8 +194,10 @@ export default function SuppliersTab() {
       const payload = {
         name: supplierForm.name.trim(),
         phone: supplierForm.phone.trim(),
-        company_name: editorMode === "extended" ? supplierForm.companyName.trim() : "",
-        company_phone: editorMode === "extended" ? supplierForm.companyPhone.trim() : "",
+        company_name:
+          editorMode === "extended" ? supplierForm.companyName.trim() : "",
+        company_phone:
+          editorMode === "extended" ? supplierForm.companyPhone.trim() : "",
         address: editorMode === "extended" ? supplierForm.address.trim() : "",
         is_active: supplierForm.isActive,
         brand_ids: supplierForm.brandIds,
@@ -182,7 +213,9 @@ export default function SuppliersTab() {
       closeEditor();
       await loadData();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to save sales rep.");
+      toast.error(
+        error instanceof Error ? error.message : "Failed to save sales rep.",
+      );
     } finally {
       setSaving(false);
     }
@@ -196,10 +229,16 @@ export default function SuppliersTab() {
     setActionPending(true);
     try {
       if (actionState.mode === "activate") {
-        await updateSupplier(actionState.supplier.supplier_id, toSupplierUpdatePayload(actionState.supplier, true));
+        await updateSupplier(
+          actionState.supplier.supplier_id,
+          toSupplierUpdatePayload(actionState.supplier, true),
+        );
         toast.success("Sales rep activated.");
       } else if (actionState.mode === "deactivate") {
-        await updateSupplier(actionState.supplier.supplier_id, toSupplierUpdatePayload(actionState.supplier, false));
+        await updateSupplier(
+          actionState.supplier.supplier_id,
+          toSupplierUpdatePayload(actionState.supplier, false),
+        );
         toast.success("Sales rep deactivated.");
       } else {
         await hardDeleteSupplier(actionState.supplier.supplier_id);
@@ -222,8 +261,12 @@ export default function SuppliersTab() {
   };
 
   const selectedBrandNames = useMemo(() => {
-    const lookup = new Map(brandOptions.map((brand) => [brand.brand_id, brand.name]));
-    return supplierForm.brandIds.map((brandId) => lookup.get(brandId)).filter((name): name is string => Boolean(name));
+    const lookup = new Map(
+      brandOptions.map((brand) => [brand.brand_id, brand.name]),
+    );
+    return supplierForm.brandIds
+      .map((brandId) => lookup.get(brandId))
+      .filter((name): name is string => Boolean(name));
   }, [brandOptions, supplierForm.brandIds]);
 
   return (
@@ -233,7 +276,8 @@ export default function SuppliersTab() {
           <div>
             <CardTitle className="text-lg">Sales Reps</CardTitle>
             <p className="text-sm text-muted-foreground">
-              Maintain sales rep contacts, optional company details, and brand coverage.
+              Maintain sales rep contacts, optional company details, and brand
+              coverage.
             </p>
           </div>
         </CardHeader>
@@ -243,7 +287,8 @@ export default function SuppliersTab() {
             <div>
               <p className="font-medium">Sales rep directory</p>
               <p className="text-sm text-muted-foreground">
-                Use the active switch to hide sales reps without deleting historical links.
+                Use the active switch to hide sales reps without deleting
+                historical links.
               </p>
             </div>
             <Button type="button" onClick={() => openEditor()}>
@@ -268,7 +313,11 @@ export default function SuppliersTab() {
                 item.brands.length > 0 ? (
                   <div key="brands" className="flex flex-wrap gap-1.5">
                     {item.brands.map((brand) => (
-                      <Badge key={brand.brand_id} variant="outline" className="rounded-full">
+                      <Badge
+                        key={brand.brand_id}
+                        variant="outline"
+                        className="rounded-full"
+                      >
                         {brand.name}
                       </Badge>
                     ))}
@@ -277,7 +326,10 @@ export default function SuppliersTab() {
                   "—"
                 ),
                 String(item.linked_product_count),
-                <Badge key="badge" variant={item.is_active ? "default" : "secondary"}>
+                <Badge
+                  key="badge"
+                  variant={item.is_active ? "default" : "secondary"}
+                >
                   {item.is_active ? "Active" : "Inactive"}
                 </Badge>,
                 <div key="action" className="flex flex-wrap justify-end gap-2">
@@ -387,10 +439,16 @@ export default function SuppliersTab() {
               ? "Activate"
               : "Deactivate"
         }
-        confirmVariant={actionState?.mode === "delete" ? "destructive" : "default"}
+        confirmVariant={
+          actionState?.mode === "delete" ? "destructive" : "default"
+        }
         confirmDisabled={actionPending}
         cancelDisabled={actionPending}
-        confirmContent={actionPending ? <Loader2 className="h-4 w-4 animate-spin" /> : undefined}
+        confirmContent={
+          actionPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : undefined
+        }
       />
     </>
   );
@@ -405,7 +463,14 @@ function Table({
   emptyText: string;
   rows: Array<{ key: string; cells: ReactNode[] }>;
 }) {
-  const columns = ["Sales Rep", "Phone", "Brands", "Products", "Status", "Actions"];
+  const columns = [
+    "Sales Rep",
+    "Phone",
+    "Brands",
+    "Products",
+    "Status",
+    "Actions",
+  ];
   return (
     <div className="overflow-hidden rounded-xl border">
       <table className="w-full">
@@ -421,13 +486,19 @@ function Table({
         <tbody>
           {loading ? (
             <tr>
-              <td colSpan={columns.length} className="px-4 py-10 text-center text-muted-foreground">
+              <td
+                colSpan={columns.length}
+                className="px-4 py-10 text-center text-muted-foreground"
+              >
                 Loading...
               </td>
             </tr>
           ) : rows.length === 0 ? (
             <tr>
-              <td colSpan={columns.length} className="px-4 py-10 text-center text-muted-foreground">
+              <td
+                colSpan={columns.length}
+                className="px-4 py-10 text-center text-muted-foreground"
+              >
                 {emptyText}
               </td>
             </tr>
@@ -477,9 +548,12 @@ function SupplierEditorDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>{supplierForm.name ? "Edit sales rep" : "Add sales rep"}</DialogTitle>
+          <DialogTitle>
+            {supplierForm.name ? "Edit sales rep" : "Add sales rep"}
+          </DialogTitle>
           <DialogDescription>
-            Capture the sales rep first, then add optional company details and brand coverage.
+            Capture the sales rep first, then add optional company details and
+            brand coverage.
           </DialogDescription>
         </DialogHeader>
 
@@ -507,7 +581,12 @@ function SupplierEditorDialog({
             <Label>Sales Rep Name</Label>
             <Input
               value={supplierForm.name}
-              onChange={(event) => setSupplierForm((prev) => ({ ...prev, name: event.target.value }))}
+              onChange={(event) =>
+                setSupplierForm((prev) => ({
+                  ...prev,
+                  name: event.target.value,
+                }))
+              }
             />
           </div>
 
@@ -518,7 +597,10 @@ function SupplierEditorDialog({
                 <Input
                   value={supplierForm.phone}
                   onChange={(event) =>
-                    setSupplierForm((prev) => ({ ...prev, phone: event.target.value }))
+                    setSupplierForm((prev) => ({
+                      ...prev,
+                      phone: event.target.value,
+                    }))
                   }
                 />
               </div>
@@ -529,7 +611,9 @@ function SupplierEditorDialog({
                   loading={loadingBrands}
                   selectedBrandIds={supplierForm.brandIds}
                   selectedBrandNames={selectedBrandNames}
-                  onChange={(brandIds) => setSupplierForm((prev) => ({ ...prev, brandIds }))}
+                  onChange={(brandIds) =>
+                    setSupplierForm((prev) => ({ ...prev, brandIds }))
+                  }
                 />
               </div>
             </>
@@ -541,7 +625,10 @@ function SupplierEditorDialog({
                   <Input
                     value={supplierForm.phone}
                     onChange={(event) =>
-                      setSupplierForm((prev) => ({ ...prev, phone: event.target.value }))
+                      setSupplierForm((prev) => ({
+                        ...prev,
+                        phone: event.target.value,
+                      }))
                     }
                   />
                 </div>
@@ -550,7 +637,10 @@ function SupplierEditorDialog({
                   <Input
                     value={supplierForm.companyName}
                     onChange={(event) =>
-                      setSupplierForm((prev) => ({ ...prev, companyName: event.target.value }))
+                      setSupplierForm((prev) => ({
+                        ...prev,
+                        companyName: event.target.value,
+                      }))
                     }
                   />
                 </div>
@@ -561,7 +651,10 @@ function SupplierEditorDialog({
                   <Input
                     value={supplierForm.companyPhone}
                     onChange={(event) =>
-                      setSupplierForm((prev) => ({ ...prev, companyPhone: event.target.value }))
+                      setSupplierForm((prev) => ({
+                        ...prev,
+                        companyPhone: event.target.value,
+                      }))
                     }
                   />
                 </div>
@@ -572,7 +665,9 @@ function SupplierEditorDialog({
                     loading={loadingBrands}
                     selectedBrandIds={supplierForm.brandIds}
                     selectedBrandNames={selectedBrandNames}
-                    onChange={(brandIds) => setSupplierForm((prev) => ({ ...prev, brandIds }))}
+                    onChange={(brandIds) =>
+                      setSupplierForm((prev) => ({ ...prev, brandIds }))
+                    }
                   />
                 </div>
               </div>
@@ -581,7 +676,10 @@ function SupplierEditorDialog({
                 <Textarea
                   value={supplierForm.address}
                   onChange={(event) =>
-                    setSupplierForm((prev) => ({ ...prev, address: event.target.value }))
+                    setSupplierForm((prev) => ({
+                      ...prev,
+                      address: event.target.value,
+                    }))
                   }
                   rows={4}
                 />
@@ -608,7 +706,11 @@ function SupplierEditorDialog({
         <Separator />
 
         <DialogFooter>
-          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+          >
             Cancel
           </Button>
           <Button type="button" onClick={onSave} disabled={saving}>
@@ -635,7 +737,20 @@ function BrandMultiSelect({
   onChange: (brandIds: string[]) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const brandLookup = useMemo(() => new Map(brands.map((brand) => [brand.brand_id, brand])), [brands]);
+  const triggerRef = useRef<HTMLDivElement | null>(null);
+  const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(
+    null,
+  );
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    setPortalContainer(
+      triggerRef.current?.closest('[role="dialog"]') as HTMLElement | null,
+    );
+  }, [open]);
 
   const toggleBrand = (brandId: string) => {
     if (selectedBrandIds.includes(brandId)) {
@@ -650,6 +765,7 @@ function BrandMultiSelect({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <div
+          ref={triggerRef}
           role="button"
           tabIndex={0}
           className="flex min-h-11 w-full items-center justify-between gap-2 rounded-md border bg-background px-3 py-2 text-left text-sm shadow-sm outline-none transition-colors hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
@@ -659,7 +775,11 @@ function BrandMultiSelect({
               selectedBrandNames.map((brandName, index) => {
                 const brandId = selectedBrandIds[index];
                 return (
-                  <Badge key={`${brandId}-${brandName}`} variant="secondary" className="gap-1 rounded-full">
+                  <Badge
+                    key={`${brandId}-${brandName}`}
+                    variant="secondary"
+                    className="gap-1 rounded-full"
+                  >
                     <span>{brandName}</span>
                     <button
                       type="button"
@@ -676,17 +796,36 @@ function BrandMultiSelect({
                 );
               })
             ) : (
-              <span className="text-muted-foreground">Select one or more brands</span>
+              <span className="text-muted-foreground">
+                Select one or more brands
+              </span>
             )}
           </div>
           <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
         </div>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-[--radix-popover-trigger-width] p-0">
+      <PopoverContent
+        align="start"
+        container={portalContainer}
+        className="w-[--radix-popover-trigger-width] p-0"
+      >
         <Command>
           <CommandInput placeholder="Search brands..." />
-          <CommandList>
-            <CommandEmpty>{loading ? "Loading brands..." : "No brands found."}</CommandEmpty>
+          <CommandList
+            onWheelCapture={(event) => {
+              const list = event.currentTarget;
+              if (list.scrollHeight <= list.clientHeight) {
+                return;
+              }
+
+              list.scrollTop += event.deltaY;
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+          >
+            <CommandEmpty>
+              {loading ? "Loading brands..." : "No brands found."}
+            </CommandEmpty>
             <CommandGroup>
               {brands.map((brand) => {
                 const selected = selectedBrandIds.includes(brand.brand_id);
@@ -696,10 +835,16 @@ function BrandMultiSelect({
                     value={brand.name}
                     onSelect={() => toggleBrand(brand.brand_id)}
                   >
-                    <Check className={`mr-2 h-4 w-4 ${selected ? "opacity-100" : "opacity-0"}`} />
+                    <Check
+                      className={`mr-2 h-4 w-4 ${selected ? "opacity-100" : "opacity-0"}`}
+                    />
                     <div className="flex flex-1 items-center justify-between gap-2">
                       <span>{brand.name}</span>
-                      {brand.code ? <span className="text-xs text-muted-foreground">{brand.code}</span> : null}
+                      {brand.code ? (
+                        <span className="text-xs text-muted-foreground">
+                          {brand.code}
+                        </span>
+                      ) : null}
                     </div>
                   </CommandItem>
                 );
