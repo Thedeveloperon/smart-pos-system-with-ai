@@ -610,7 +610,7 @@ public sealed class ProductService(
 
         var normalizedName = NormalizeRequired(request.Name, "Product name is required.");
         var normalizedSku = NormalizeOptional(request.Sku);
-        var normalizedBarcode = NormalizeOptionalBarcode(request.Barcode);
+        var normalizedBarcode = NormalizeOptionalBarcode(request.Barcode, product.Barcode);
         var normalizedImageUrl = NormalizeOptional(request.ImageUrl);
         var (permanentDiscountPercent, permanentDiscountFixed) = NormalizePermanentDiscount(
             request.PermanentDiscountPercent,
@@ -2472,12 +2472,19 @@ public sealed class ProductService(
         return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
     }
 
-    private static string? NormalizeOptionalBarcode(string? value)
+    private static string? NormalizeOptionalBarcode(string? value, string? existingValue = null)
     {
         var normalized = ProductBarcodeRules.NormalizeOptionalForStorage(value);
         if (string.IsNullOrWhiteSpace(normalized))
         {
             return null;
+        }
+
+        var normalizedExisting = ProductBarcodeRules.NormalizeOptionalForStorage(existingValue);
+        if (!string.IsNullOrWhiteSpace(normalizedExisting) &&
+            string.Equals(normalized, normalizedExisting, StringComparison.Ordinal))
+        {
+            return normalizedExisting;
         }
 
         var validation = ProductBarcodeRules.Validate(normalized);

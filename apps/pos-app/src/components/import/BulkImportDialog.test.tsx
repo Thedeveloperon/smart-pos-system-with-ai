@@ -139,4 +139,47 @@ describe("BulkImportDialog", () => {
     expect(dialog.className).toContain("overflow-hidden");
     expect(screen.getAllByRole("button", { name: "Close" })).toHaveLength(1);
   });
+
+  it("uses an inner scroll viewport for the preview table so the horizontal scrollbar stays pinned", async () => {
+    parseFileMock.mockResolvedValue({
+      rows: Array.from({ length: 20 }, (_, index) => ({
+        name: `Product ${index + 1}`,
+        sku: `SKU-${index + 1}`,
+        barcode: `BARCODE-${index + 1}`,
+        category_name: "Category",
+        brand_name: "Brand",
+        unit_price: "100.00",
+        cost_price: "80.00",
+        initial_stock_quantity: "10",
+      })),
+      headers: [
+        "name",
+        "sku",
+        "barcode",
+        "category_name",
+        "brand_name",
+        "unit_price",
+        "cost_price",
+        "initial_stock_quantity",
+      ],
+      error: null,
+    });
+
+    render(<BulkImportDialog open onOpenChange={vi.fn()} entityType="product" onImportComplete={vi.fn()} />);
+
+    const fileInput = document.querySelector("input[type='file']") as HTMLInputElement;
+    fireEvent.change(fileInput, {
+      target: { files: [new File(["name\nProduct 1"], "products.csv", { type: "text/csv" })] },
+    });
+    fireEvent.click(screen.getByText("Skip duplicates"));
+    fireEvent.click(screen.getByRole("button", { name: "Next: Preview" }));
+
+    await screen.findByRole("button", { name: "Import 20 row(s)" });
+
+    expect(screen.getByTestId("bulk-import-body").className).toContain("overflow-hidden");
+
+    const previewScroller = screen.getByTestId("bulk-import-preview-table-scroll");
+    expect(previewScroller.className).toContain("flex-1");
+    expect(previewScroller.className).toContain("overflow-auto");
+  });
 });

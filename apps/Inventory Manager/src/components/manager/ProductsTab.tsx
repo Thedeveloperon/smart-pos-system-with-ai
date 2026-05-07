@@ -255,15 +255,15 @@ export default function ProductsTab() {
               <Table className="table-fixed">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[28%]">Product</TableHead>
-                    <TableHead className="hidden w-[12%] md:table-cell">Barcode</TableHead>
-                    <TableHead className="hidden w-[13%] lg:table-cell">Category</TableHead>
-                    <TableHead className="hidden w-[13%] lg:table-cell">Brand</TableHead>
-                    <TableHead className="w-[11%] text-right">Unit price</TableHead>
-                    <TableHead className="w-[11%] text-right">Discount</TableHead>
-                    <TableHead className="w-[8%] text-right">Stock</TableHead>
-                    <TableHead className="w-[8%]">Status</TableHead>
-                    <TableHead className="w-[17%] text-right">Actions</TableHead>
+                    <TableHead className="w-[30%]">Product</TableHead>
+                    <TableHead className="hidden w-[8.5rem] lg:table-cell">Barcode</TableHead>
+                    <TableHead className="hidden w-[8rem] xl:table-cell">Category</TableHead>
+                    <TableHead className="hidden w-[7rem] xl:table-cell">Brand</TableHead>
+                    <TableHead className="w-[8rem] text-right">Unit price</TableHead>
+                    <TableHead className="hidden w-[7rem] text-right lg:table-cell">Discount</TableHead>
+                    <TableHead className="w-[7rem] text-right">Stock</TableHead>
+                    <TableHead className="w-[7rem]">Status</TableHead>
+                    <TableHead className="w-[7rem] text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -285,7 +285,7 @@ export default function ProductsTab() {
                       return (
                         <TableRow key={product.id}>
                           <TableCell className="max-w-0">
-                            <div className="flex min-w-0 items-center gap-3">
+                            <div className="flex min-w-0 items-start gap-3">
                               <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted/50">
                                 {product.image_url || product.image ? (
                                   <img
@@ -298,33 +298,35 @@ export default function ProductsTab() {
                                 )}
                               </div>
                               <div className="min-w-0 flex-1">
-                                <div className="truncate font-medium leading-tight">{product.name}</div>
+                                <div className="line-clamp-2 break-words text-sm font-medium leading-5">
+                                  {product.name}
+                                </div>
                                 <div className="truncate text-xs text-muted-foreground">
                                   {product.sku || "—"}
                                 </div>
                               </div>
                             </div>
                           </TableCell>
-                          <TableCell className="hidden truncate font-mono text-xs md:table-cell">
+                          <TableCell className="hidden truncate font-mono text-xs lg:table-cell">
                             {product.barcode || "—"}
                           </TableCell>
-                          <TableCell className="hidden truncate text-sm text-muted-foreground lg:table-cell">
+                          <TableCell className="hidden truncate text-sm text-muted-foreground xl:table-cell">
                             {product.category_name || "—"}
                           </TableCell>
-                          <TableCell className="hidden truncate text-sm text-muted-foreground lg:table-cell">
+                          <TableCell className="hidden truncate text-sm text-muted-foreground xl:table-cell">
                             {product.brand_name || "—"}
                           </TableCell>
-                          <TableCell className="text-right font-medium">
+                          <TableCell className="whitespace-nowrap text-right font-medium">
                             {currencyFormatter.format(product.unit_price ?? product.price ?? 0)}
                           </TableCell>
-                          <TableCell className="text-right text-xs text-muted-foreground">
+                          <TableCell className="hidden whitespace-nowrap text-right text-xs text-muted-foreground lg:table-cell">
                             {product.permanent_discount_percent != null
                               ? `${product.permanent_discount_percent}%`
                               : product.permanent_discount_fixed != null
                                 ? currencyFormatter.format(product.permanent_discount_fixed)
                                 : "—"}
                           </TableCell>
-                          <TableCell className="text-right">
+                          <TableCell className="whitespace-nowrap text-right">
                             <div className="flex items-center justify-end gap-2">
                               <span>
                                 {(product.stock_quantity ?? product.stock ?? 0).toLocaleString()}
@@ -337,7 +339,7 @@ export default function ProductsTab() {
                             </div>
                           </TableCell>
                           <TableCell>
-                            <Badge variant={isActive ? "default" : "secondary"}>
+                            <Badge variant={isActive ? "default" : "secondary"} className="whitespace-nowrap">
                               {isActive ? "Active" : "Inactive"}
                             </Badge>
                           </TableCell>
@@ -345,42 +347,45 @@ export default function ProductsTab() {
                             <div className="flex flex-wrap justify-end gap-1">
                               <Button
                                 type="button"
-                                size="sm"
+                                size="icon-sm"
                                 variant="ghost"
-                                className="h-8 px-2 text-xs"
+                                title={`Edit ${product.name}`}
+                                aria-label={`Edit ${product.name}`}
                                 onClick={() => {
                                   setDialogProduct(product);
                                   setDialogOpen(true);
                                 }}
                               >
                                 <PencilLine className="h-4 w-4" />
-                                Edit
                               </Button>
                               <Button
                                 type="button"
-                                size="sm"
+                                size="icon-sm"
                                 variant="ghost"
-                                className="h-8 px-2 text-xs text-destructive hover:text-destructive"
+                                title={`Delete ${product.name}`}
+                                aria-label={`Delete ${product.name}`}
+                                className="text-destructive hover:text-destructive"
                                 onClick={() => {
                                   setDeleteTarget(product);
                                   setDeleteMode("soft");
                                 }}
                               >
                                 <Trash2 className="h-4 w-4" />
-                                Delete
                               </Button>
                               {!isActive ? (
                                 <Button
                                   type="button"
-                                  size="sm"
+                                  size="icon-sm"
                                   variant="outline"
-                                  className="h-8 px-2 text-xs text-destructive"
+                                  title={`Hard delete ${product.name}`}
+                                  aria-label={`Hard delete ${product.name}`}
+                                  className="border-destructive/30 text-destructive hover:bg-destructive/5 hover:text-destructive"
                                   onClick={() => {
                                     setDeleteTarget(product);
                                     setDeleteMode("hard");
                                   }}
                                 >
-                                  Hard delete
+                                  <Trash2 className="h-4 w-4" />
                                 </Button>
                               ) : null}
                             </div>
