@@ -47,6 +47,10 @@ function parseNum(value: string | undefined, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function hasRowData(row: ParsedRow) {
+  return Object.values(row).some((value) => String(value ?? "").trim() !== "");
+}
+
 function mapBrandRows(rows: ParsedRow[]): BulkImportBrandRow[] {
   return rows.map((row, index) => ({
     row_index: index,
@@ -165,7 +169,7 @@ export default function BulkImportDialog({ open, onOpenChange, entityType, onImp
         throw new Error(result.error);
       }
 
-      setParsedRows(result.rows);
+      setParsedRows(result.rows.filter(hasRowData));
       setHeaders(result.headers);
       setStep("preview");
     } catch (error) {
