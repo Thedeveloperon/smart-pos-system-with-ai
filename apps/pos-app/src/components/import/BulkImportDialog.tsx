@@ -225,7 +225,13 @@ export default function BulkImportDialog({ open, onOpenChange, entityType, onImp
           </DialogDescription>
         </DialogHeader>
 
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
+        <div
+          data-testid="bulk-import-body"
+          className={cn(
+            "min-h-0 flex-1 px-6 py-5",
+            step === "preview" ? "flex flex-col overflow-hidden" : "space-y-5 overflow-y-auto",
+          )}
+        >
           {step === "upload" && (
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/20 p-4">
@@ -280,7 +286,7 @@ export default function BulkImportDialog({ open, onOpenChange, entityType, onImp
           )}
 
           {step === "preview" && (
-            <div className="space-y-4">
+            <div className="flex min-h-0 flex-1 flex-col gap-4">
               {config.hint && <p className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">{config.hint}</p>}
 
               {missingColumns.length > 0 && (
@@ -301,7 +307,10 @@ export default function BulkImportDialog({ open, onOpenChange, entityType, onImp
                 <Badge variant="secondary">{config.label}</Badge>
               </div>
 
-              <div className="overflow-x-auto rounded-md border">
+              <div
+                data-testid="bulk-import-preview-table-scroll"
+                className="min-h-0 flex-1 overflow-auto rounded-md border"
+              >
                 <Table>
                   <TableHeader>
                     <TableRow>
