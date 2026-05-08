@@ -41,6 +41,8 @@ const DEFAULT_CATEGORY = "Uncategorized";
 const DEFAULT_BRAND = "Unbranded";
 const isSerialTrackedProduct = (product: Product) =>
   Boolean(product.isSerialTracked ?? product.is_serial_tracked);
+const hasPackSellingChoice = (product: Product) =>
+  Boolean(product.hasPackOption && (product.packSize ?? 0) >= 2 && (product.packPrice ?? 0) > 0);
 
 type StockFilter = "all" | "in" | "out" | "low";
 type SortOption = "name_asc" | "name_desc" | "price_asc" | "price_desc" | "stock_asc" | "stock_desc";
@@ -177,7 +179,7 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
                 bundleId: matchedProduct.bundleId,
                 bundleName: matchedProduct.name,
               });
-            } else if (matchedProduct.hasPackOption && (matchedProduct.packSize ?? 0) >= 2 && (matchedProduct.packPrice ?? 0) > 0) {
+            } else if (hasPackSellingChoice(matchedProduct)) {
               setPackChoiceProduct(matchedProduct);
             } else {
               onAddToCart(matchedProduct, 1, undefined, { sellMode: "unit" });
@@ -207,14 +209,16 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
         product: Product,
         qty: number,
         selectedSerial?: SelectedSerial,
-        mode: "unit" | "pack" | "bundle" | "service" = "unit",
+        mode?: "unit" | "pack" | "bundle" | "service",
       ) => {
-        if (mode === "service" || product.isService) {
+        const resolvedMode = mode ?? "unit";
+
+        if (resolvedMode === "service" || product.isService) {
           onAddToCart(product, qty, undefined, { sellMode: "service" });
           return;
         }
 
-        if (mode === "bundle" || product.isBundle) {
+        if (resolvedMode === "bundle" || product.isBundle) {
           onAddToCart(product, qty, undefined, {
             sellMode: "bundle",
             bundleId: product.bundleId,
@@ -228,7 +232,7 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
           return;
         }
 
-        if (mode === "pack") {
+        if (resolvedMode === "pack") {
           onAddToCart(product, qty, undefined, {
             sellMode: "pack",
             packSize: product.packSize ?? undefined,
@@ -237,12 +241,12 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
           return;
         }
 
-        if (product.hasPackOption && (product.packSize ?? 0) >= 2 && (product.packPrice ?? 0) > 0) {
+        if (!mode && hasPackSellingChoice(product)) {
           setPackChoiceProduct(product);
           return;
         }
 
-        onAddToCart(product, qty, undefined, { sellMode: "unit" });
+        onAddToCart(product, qty, undefined, { sellMode: resolvedMode });
       },
       [onAddToCart],
     );
@@ -1236,6 +1240,7 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
             <div className="grid gap-2">
               <Button
                 variant="outline"
+                className="h-auto w-full whitespace-normal px-4 py-3 text-center"
                 onClick={() => {
                   if (packChoiceProduct) {
                     addProductToCart(packChoiceProduct, 1, undefined, "unit");
@@ -1247,6 +1252,7 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
                 Sell by Unit (Rs. {packChoiceProduct?.price.toLocaleString() ?? "0"})
               </Button>
               <Button
+                className="h-auto w-full whitespace-normal px-4 py-3 text-center"
                 onClick={() => {
                   if (packChoiceProduct) {
                     const packProduct: Product = {

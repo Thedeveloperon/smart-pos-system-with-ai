@@ -5,6 +5,8 @@ import ProductSearchPanel from "./ProductSearchPanel";
 import type { Product } from "./types";
 
 const lookupSerialMock = vi.fn();
+const searchBundlesMock = vi.fn();
+const searchServicesMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   ApiError: class ApiError extends Error {
@@ -16,6 +18,8 @@ vi.mock("@/lib/api", () => ({
     }
   },
   lookupSerial: (...args: unknown[]) => lookupSerialMock(...args),
+  searchBundles: (...args: unknown[]) => searchBundlesMock(...args),
+  searchServices: (...args: unknown[]) => searchServicesMock(...args),
 }));
 
 const products: Product[] = [
@@ -55,6 +59,22 @@ const products: Product[] = [
     brandName: "Anchor",
     isLowStock: false,
   },
+  {
+    id: "4",
+    name: "Happy Cow Cheese 1 Portion 120g",
+    sku: "SKU-004",
+    barcode: "BAR-444",
+    price: 110,
+    stock: 120,
+    category: "Dairy",
+    categoryName: "Dairy",
+    brandName: "Happy Cow",
+    isLowStock: false,
+    hasPackOption: true,
+    packSize: 8,
+    packPrice: 800,
+    packLabel: "Happy Cow Cheese 8 Portion Pack",
+  },
 ];
 
 const openSelectAndChoose = async (index: number, optionLabel: string) => {
@@ -83,34 +103,38 @@ describe("ProductSearchPanel", () => {
   beforeEach(() => {
     lookupSerialMock.mockReset();
     lookupSerialMock.mockRejectedValue(new ApiError("Serial number not found.", 404));
+    searchBundlesMock.mockReset();
+    searchBundlesMock.mockResolvedValue([]);
+    searchServicesMock.mockReset();
+    searchServicesMock.mockResolvedValue([]);
   });
 
   it("filters by stock and brand, then clears filters back to default", async () => {
     render(<ProductSearchPanel products={products} onAddToCart={vi.fn()} />);
 
-    expect(screen.getByText("3 products")).toBeInTheDocument();
+    expect(screen.getByText("4 items")).toBeInTheDocument();
 
     await openSelectAndChoose(1, "Atlas");
     await waitFor(() => {
-      expect(screen.getByText("2 products")).toBeInTheDocument();
+      expect(screen.getByText("2 items")).toBeInTheDocument();
     });
 
     await openSelectAndChoose(2, "Out of stock");
     await waitFor(() => {
-      expect(screen.getByText("1 products")).toBeInTheDocument();
+      expect(screen.getByText("1 items")).toBeInTheDocument();
     });
 
     fireEvent.change(screen.getByPlaceholderText("Search products by name, SKU, serial..."), {
       target: { value: "ball" },
     });
     await waitFor(() => {
-      expect(screen.getByText("1 products")).toBeInTheDocument();
+      expect(screen.getByText("1 items")).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Clear" }));
 
     await waitFor(() => {
-      expect(screen.getByText("3 products")).toBeInTheDocument();
+      expect(screen.getByText("4 items")).toBeInTheDocument();
       expect(screen.getByPlaceholderText("Search products by name, SKU, serial...")).toHaveValue("");
     });
   });
@@ -124,7 +148,7 @@ describe("ProductSearchPanel", () => {
     fireEvent.click(matches[matches.length - 1]);
 
     await waitFor(() => {
-      expect(screen.getByText("1 products")).toBeInTheDocument();
+      expect(screen.getByText("1 items")).toBeInTheDocument();
     });
   });
 
@@ -187,6 +211,7 @@ describe("ProductSearchPanel", () => {
         expect.objectContaining({ id: "serial-product", name: "Serial Camera" }),
         1,
         { id: "serial-1", value: "SERIAL-0001" },
+        { sellMode: "unit" },
       );
     });
     expect(onAddToCart).toHaveBeenCalledTimes(1);
@@ -246,7 +271,51 @@ describe("ProductSearchPanel", () => {
         expect.objectContaining({ id: "serial-product", name: "Serial Camera" }),
         1,
         { id: "serial-2", value: "CAM-SN-002" },
+        { sellMode: "unit" },
       );
     });
+  });
+
+  it("adds pack-choice products to the cart when unit selling is selected", async () => {
+    const onAddToCart = vi.fn();
+
+    render(<ProductSearchPanel products={products} onAddToCart={onAddToCart} expertMode />);
+
+    fireEvent.change(screen.getByPlaceholderText("Search products by name, SKU, serial..."), {
+      target: { value: "Happy Cow" },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: /Happy Cow Cheese 1 Portion 120g/i }));
+
+    const unitButton = await screen.findByRole("button", { name: "Sell by Unit (Rs. 110)" });
+    fireEvent.click(unitButton);
+
+    await waitFor(() => {
+      expect(onAddToCart).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "4", name: "Happy Cow Cheese 1 Portion 120g" }),
+        1,
+        undefined,
+        { sellMode: "unit" },
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText("Choose Selling Mode")).not.toBeInTheDocument();
+    });
+  });
+
+  it("stretches both pack-choice actions to the dialog width", async () => {
+    render(<ProductSearchPanel products={products} onAddToCart={vi.fn()} expertMode />);
+
+    fireEvent.change(screen.getByPlaceholderText("Search products by name, SKU, serial..."), {
+      target: { value: "Happy Cow" },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: /Happy Cow Cheese 1 Portion 120g/i }));
+
+    expect(await screen.findByRole("button", { name: "Sell by Unit (Rs. 110)" })).toHaveClass("w-full");
+    expect(
+      screen.getByRole("button", {
+        name: "Sell by Pack (Rs. 800) · Happy Cow Cheese 8 Portion Pack",
+      }),
+    ).toHaveClass("w-full");
   });
 });
