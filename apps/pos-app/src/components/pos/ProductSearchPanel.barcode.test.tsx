@@ -7,6 +7,8 @@ import ProductSearchPanel, { type ProductSearchPanelHandle } from "./ProductSear
 import type { Product } from "./types";
 
 const lookupSerialMock = vi.fn();
+const searchBundlesMock = vi.fn();
+const searchServicesMock = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   ApiError: class ApiError extends Error {
@@ -18,6 +20,8 @@ vi.mock("@/lib/api", () => ({
     }
   },
   lookupSerial: (...args: unknown[]) => lookupSerialMock(...args),
+  searchBundles: (...args: unknown[]) => searchBundlesMock(...args),
+  searchServices: (...args: unknown[]) => searchServicesMock(...args),
 }));
 
 const sampleProducts: Product[] = [
@@ -35,6 +39,10 @@ describe("ProductSearchPanel barcode mode", () => {
   beforeEach(() => {
     lookupSerialMock.mockReset();
     lookupSerialMock.mockRejectedValue(new ApiError("Serial number not found.", 404));
+    searchBundlesMock.mockReset();
+    searchBundlesMock.mockResolvedValue([]);
+    searchServicesMock.mockReset();
+    searchServicesMock.mockResolvedValue([]);
   });
 
   it("adds exact barcode match to cart when Enter is pressed in barcode mode", () => {
@@ -48,7 +56,7 @@ describe("ProductSearchPanel barcode mode", () => {
     fireEvent.change(input, { target: { value: "1234567890128" } });
     fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
 
-    expect(onAddToCart).toHaveBeenCalledWith(sampleProducts[0], 1);
+    expect(onAddToCart).toHaveBeenCalledWith(sampleProducts[0], 1, undefined, { sellMode: "unit" });
     expect(input).toHaveValue("");
   });
 
