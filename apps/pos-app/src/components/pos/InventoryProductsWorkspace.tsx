@@ -5,6 +5,8 @@ import { fetchProducts } from "@/lib/api";
 import ProductCard from "./ProductCard";
 import type { Product } from "./types";
 
+const productGridClassName = "grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]";
+
 const InventoryProductsWorkspace = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -34,7 +36,7 @@ const InventoryProductsWorkspace = () => {
       </div>
 
       {loading ? (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className={productGridClassName}>
           {Array.from({ length: 4 }).map((_, index) => (
             <div
               key={`skeleton-${index}`}
@@ -49,7 +51,7 @@ const InventoryProductsWorkspace = () => {
           <p className="text-xs">There are no products to display yet.</p>
         </div>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className={productGridClassName}>
           {products.map((product) => (
             <ProductCard
               key={product.id}

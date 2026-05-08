@@ -11,6 +11,14 @@ const BatchesTab = lazy(() => import("@/components/inventory/BatchesTab"));
 const StocktakeTab = lazy(() => import("@/components/inventory/StocktakeTab"));
 const WarrantyClaimsTab = lazy(() => import("@/components/inventory/WarrantyClaimsTab"));
 
+const versionLabel = `v${__APP_VERSION__}`;
+const versionTitle = [
+  `Version ${__APP_VERSION__}`,
+  `Build ${__APP_BUILD_SHA__}`,
+  `Mode ${__APP_BUILD_MODE__}`,
+  `Built ${__APP_BUILD_TIME__}`,
+].join(" • ");
+
 const Fallback = () => (
   <div className="space-y-3">
     <Skeleton className="h-32" />
@@ -39,6 +47,12 @@ export default function InventoryPage({ onBack }: Props) {
             <Package className="h-5 w-5 text-primary" />
             <h1 className="text-base font-semibold">Inventory Management</h1>
           </div>
+          <span
+            className="ml-auto hidden items-center rounded-full border border-white/15 bg-white/8 px-2.5 py-1 text-[11px] font-medium text-pos-header-foreground/75 md:inline-flex"
+            title={versionTitle}
+          >
+            {versionLabel}
+          </span>
         </div>
       </header>
 

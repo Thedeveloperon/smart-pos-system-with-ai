@@ -3,7 +3,7 @@ param(
     [string]$Configuration = "Release",
     [string]$PackageOutputDir = "release/lanka-pos-win-x64",
     [string]$InstallerOutputDir = "release/installer",
-    [string]$AppVersion = "1.0.0",
+    [string]$AppVersion = "",
     [string]$ReleaseChannel = "stable",
     [string]$ReleaseNotesUrl = "",
     [string]$ExpectedInstallerSha256 = "",
@@ -148,6 +148,18 @@ $trustVerificationScript = Join-Path $repoRoot "scripts/verify-installer-trust-c
 $issFile = Join-Path $repoRoot "installer/SmartPOS.iss"
 $packageDir = Join-Path $repoRoot $PackageOutputDir
 $installerOutDir = Join-Path $repoRoot $InstallerOutputDir
+$versionFile = Join-Path $repoRoot "VERSION"
+
+if ([string]::IsNullOrWhiteSpace($AppVersion)) {
+    if (-not (Test-Path $versionFile)) {
+        throw "Version file not found: $versionFile"
+    }
+
+    $AppVersion = (Get-Content -Path $versionFile -Raw).Trim()
+    if ([string]::IsNullOrWhiteSpace($AppVersion)) {
+        throw "Version file is empty: $versionFile"
+    }
+}
 
 if (-not (Test-Path $issFile)) {
     throw "Installer definition not found: $issFile"
