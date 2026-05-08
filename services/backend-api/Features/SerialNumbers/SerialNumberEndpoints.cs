@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
+using SmartPos.Backend.Features.Promotions;
 using SmartPos.Backend.Infrastructure;
 using SmartPos.Backend.Security;
 
@@ -280,6 +281,7 @@ public static class SerialNumberEndpoints
             string? serial,
             ClaimsPrincipal user,
             SmartPosDbContext dbContext,
+            PromotionService promotionService,
             CancellationToken cancellationToken) =>
         {
             var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
@@ -310,6 +312,14 @@ public static class SerialNumberEndpoints
             var stockQuantity = record.Product.Inventory?.QuantityOnHand ?? 0m;
             var reorderLevel = record.Product.Inventory?.ReorderLevel ?? 0m;
             var lowStockThreshold = Math.Max(reorderLevel, 5m);
+            var activePromotionDiscounts = await promotionService.GetActivePromotionDiscountsAsync(
+                new List<(Guid ProductId, Guid? CategoryId)>
+                {
+                    (record.Product.Id, record.Product.CategoryId)
+                },
+                DateTimeOffset.UtcNow,
+                cancellationToken);
+            activePromotionDiscounts.TryGetValue(record.Product.Id, out var promotionDiscount);
 
             return Results.Ok(new
             {
@@ -340,8 +350,12 @@ public static class SerialNumberEndpoints
                     unit_price = record.Product.UnitPrice,
                     stock_quantity = stockQuantity,
                     is_low_stock = stockQuantity <= lowStockThreshold,
+                    permanent_discount_percent = record.Product.PermanentDiscountPercent,
+                    permanent_discount_fixed = record.Product.PermanentDiscountFixed,
                     warranty_months = record.Product.WarrantyMonths,
-                    is_serial_tracked = record.Product.IsSerialTracked
+                    is_serial_tracked = record.Product.IsSerialTracked,
+                    active_promotion_discount_type = promotionDiscount?.ValueType.ToString().ToLowerInvariant(),
+                    active_promotion_discount_value = promotionDiscount?.Value
                 },
                 sale = record.Sale is null ? null : new
                 {

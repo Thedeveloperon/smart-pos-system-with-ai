@@ -257,10 +257,20 @@ public sealed class PromotionService(
                 productQuery = productQuery.Where(x => x.StoreId == storeId.Value);
             }
 
-            var exists = await productQuery.AnyAsync(cancellationToken);
-            if (!exists)
+            var product = await productQuery
+                .Select(x => new
+                {
+                    x.UnitPrice
+                })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (product is null)
             {
                 throw new InvalidOperationException("Product not found.");
+            }
+
+            if (valueType == PromotionValueType.Fixed && value > product.UnitPrice)
+            {
+                throw new InvalidOperationException("Fixed discount value cannot exceed the product price.");
             }
         }
 

@@ -3,7 +3,7 @@ import { mergeHeldCartWithCurrentProducts } from "@/components/pos/heldCart";
 import type { CartItem, Product } from "@/components/pos/types";
 
 describe("mergeHeldCartWithCurrentProducts", () => {
-  it("preserves held pricing while refreshing stock and normalizing the cart line id", () => {
+  it("preserves held pricing while refreshing stock and keeping the held cart line id", () => {
     const heldItems: CartItem[] = [
       {
         saleItemId: "sale-item-1",
@@ -31,7 +31,7 @@ describe("mergeHeldCartWithCurrentProducts", () => {
     const [item] = mergeHeldCartWithCurrentProducts(heldItems, currentProducts);
 
     expect(item.saleItemId).toBe("sale-item-1");
-    expect(item.lineId).toBe("product:prod-1");
+    expect(item.lineId).toBe("sale-item-1");
     expect(item.product.stock).toBe(12);
     expect(item.product.price).toBe(80);
     expect(item.product.name).toBe("Ball Pen");
@@ -55,7 +55,7 @@ describe("mergeHeldCartWithCurrentProducts", () => {
 
     const [item] = mergeHeldCartWithCurrentProducts(heldItems, []);
 
-    expect(item.lineId).toBe("product:prod-2");
+    expect(item.lineId).toBe("sale-item-2");
     expect(item.product.stock).toBe(1);
     expect(item.product.price).toBe(250);
   });

@@ -20,6 +20,10 @@ export interface Product {
   packSize?: number | null;
   packPrice?: number | null;
   packLabel?: string | null;
+  activePromotionDiscountType?: "percent" | "fixed" | null;
+  activePromotionDiscountValue?: number | null;
+  active_promotion_discount_type?: "percent" | "fixed" | null;
+  active_promotion_discount_value?: number | null;
   isBundle?: boolean;
   bundleId?: string;
   isService?: boolean;

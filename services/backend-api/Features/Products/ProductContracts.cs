@@ -45,6 +45,10 @@ public sealed class ProductSearchItem
     public decimal? PackPrice { get; set; }
     [JsonPropertyName("pack_label")]
     public string? PackLabel { get; set; }
+    [JsonPropertyName("active_promotion_discount_type")]
+    public string? ActivePromotionDiscountType { get; set; }
+    [JsonPropertyName("active_promotion_discount_value")]
+    public decimal? ActivePromotionDiscountValue { get; set; }
 }
 
 public sealed class BrandListResponse

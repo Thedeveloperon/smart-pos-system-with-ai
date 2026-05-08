@@ -187,6 +187,8 @@ type BackendProductSearchItem = {
   pack_label?: string | null;
   permanent_discount_percent?: number | null;
   permanent_discount_fixed?: number | null;
+  active_promotion_discount_type?: "percent" | "fixed" | null;
+  active_promotion_discount_value?: number | null;
 };
 
 type BackendProductSearchResponse = {
@@ -1057,6 +1059,8 @@ export type CatalogProduct = {
   packLabel?: string | null;
   permanentDiscountPercent?: number | null;
   permanentDiscountFixed?: number | null;
+  activePromotionDiscountType?: "percent" | "fixed" | null;
+  activePromotionDiscountValue?: number | null;
   warrantyMonths?: number | null;
   isBatchTracked?: boolean;
   expiryAlertDays?: number | null;
@@ -1091,6 +1095,8 @@ export type Product = CatalogProduct & {
   pack_label?: string | null;
   permanent_discount_percent?: number | null;
   permanent_discount_fixed?: number | null;
+  active_promotion_discount_type?: "percent" | "fixed" | null;
+  active_promotion_discount_value?: number | null;
   warranty_months?: number | null;
   is_batch_tracked?: boolean;
   expiry_alert_days?: number | null;
@@ -2744,6 +2750,10 @@ function mapProduct(item: BackendProductSearchItem): Product {
     permanent_discount_percent: item.permanent_discount_percent ?? null,
     permanentDiscountFixed: item.permanent_discount_fixed ?? null,
     permanent_discount_fixed: item.permanent_discount_fixed ?? null,
+    activePromotionDiscountType: item.active_promotion_discount_type ?? null,
+    active_promotion_discount_type: item.active_promotion_discount_type ?? null,
+    activePromotionDiscountValue: item.active_promotion_discount_value ?? null,
+    active_promotion_discount_value: item.active_promotion_discount_value ?? null,
     stockQuantity: Number(item.stockQuantity),
     stock: Number(item.stockQuantity),
     stock_quantity: Number(item.stockQuantity),
@@ -2807,6 +2817,10 @@ function mapSerialLookupProduct(item: BackendSerialLookupResponse["product"]): P
     permanent_discount_percent: item.permanent_discount_percent ?? null,
     permanentDiscountFixed: item.permanent_discount_fixed ?? null,
     permanent_discount_fixed: item.permanent_discount_fixed ?? null,
+    activePromotionDiscountType: item.active_promotion_discount_type ?? null,
+    active_promotion_discount_type: item.active_promotion_discount_type ?? null,
+    activePromotionDiscountValue: item.active_promotion_discount_value ?? null,
+    active_promotion_discount_value: item.active_promotion_discount_value ?? null,
     stock: Number(item.stock_quantity),
     stock_quantity: Number(item.stock_quantity),
     cost_price: Number(item.unit_price),
@@ -4285,6 +4299,8 @@ type BackendSerialLookupResponse = {
     pack_label?: string | null;
     permanent_discount_percent?: number | null;
     permanent_discount_fixed?: number | null;
+    active_promotion_discount_type?: "percent" | "fixed" | null;
+    active_promotion_discount_value?: number | null;
     warranty_months?: number | null;
     is_serial_tracked?: boolean;
   };
