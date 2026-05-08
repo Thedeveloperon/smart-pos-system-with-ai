@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
+  ApiError,
   createWarrantyClaim,
   fetchSerialNumbers,
   fetchWarrantyClaims,
@@ -51,7 +52,7 @@ export default function WarrantyClaimsTab() {
   const [serialValue, setSerialValue] = useState("");
   const [serialId, setSerialId] = useState<string | null>(null);
   const [serialError, setSerialError] = useState<string | null>(null);
-  const [notes, setNotes] = useState("");
+  const [issueDescription, setIssueDescription] = useState("");
   const [saving, setSaving] = useState(false);
 
   const [active, setActive] = useState<WarrantyClaim | null>(null);
@@ -105,11 +106,34 @@ export default function WarrantyClaimsTab() {
     setSerialId(null);
     try {
       const res = await lookupSerial(serialValue.trim());
+      if (res.status !== "Sold" && res.status !== "UnderWarranty") {
+        setSerialError("Warranty claims can only be created for sold or under-warranty serials.");
+        return;
+      }
+
+      if (res.warranty_expiry_date) {
+        const expiry = new Date(res.warranty_expiry_date);
+        if (!Number.isNaN(expiry.getTime()) && expiry < new Date()) {
+          setSerialError("Warranty has expired for this serial number.");
+          return;
+        }
+      }
+
       const serials = await fetchSerialNumbers(res.product_id);
       const match = serials.find(
         (s) => s.serial_value.toLowerCase() === serialValue.trim().toLowerCase(),
       );
       if (!match) throw new Error("Serial not found");
+      const hasActiveClaim = claims.some(
+        (claim) =>
+          claim.serial_number_id === match.id &&
+          (claim.status === "Open" || claim.status === "InRepair"),
+      );
+      if (hasActiveClaim) {
+        setSerialError("An active warranty claim already exists for this serial number.");
+        return;
+      }
+
       setSerialId(match.id);
     } catch (error) {
       setSerialError((error as Error).message);
@@ -118,18 +142,27 @@ export default function WarrantyClaimsTab() {
 
   const handleCreate = async () => {
     if (!serialId) return;
+    const normalizedIssueDescription = issueDescription.trim();
+    if (!normalizedIssueDescription) {
+      setSerialError("Issue description is required.");
+      return;
+    }
+
     setSaving(true);
     try {
       await createWarrantyClaim({
         serial_number_id: serialId,
-        resolution_notes: notes || undefined,
+        issue_description: normalizedIssueDescription,
       });
       setOpen(false);
       setSerialValue("");
       setSerialId(null);
-      setNotes("");
+      setIssueDescription("");
       await reload();
     } catch (error) {
+      if (error instanceof ApiError && error.status === 400) {
+        setSerialError(error.message);
+      }
       toast.error(error instanceof Error ? error.message : "Failed to create warranty claim.");
     } finally {
       setSaving(false);
@@ -241,7 +274,18 @@ export default function WarrantyClaimsTab() {
                 </SelectContent>
               </Select>
             </div>
-            <Dialog open={open} onOpenChange={setOpen}>
+            <Dialog
+              open={open}
+              onOpenChange={(nextOpen) => {
+                setOpen(nextOpen);
+                if (!nextOpen) {
+                  setSerialValue("");
+                  setSerialId(null);
+                  setSerialError(null);
+                  setIssueDescription("");
+                }
+              }}
+            >
               <DialogTrigger asChild>
                 <Button size="sm">New claim</Button>
               </DialogTrigger>
@@ -272,15 +316,21 @@ export default function WarrantyClaimsTab() {
                     The claim date and time are recorded automatically when you create the claim.
                   </p>
                   <div className="grid gap-1">
-                    <Label>Notes (optional)</Label>
-                    <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+                    <Label>Issue description</Label>
+                    <Textarea
+                      value={issueDescription}
+                      onChange={(e) => setIssueDescription(e.target.value)}
+                      rows={3}
+                      placeholder="Describe the issue reported by the customer."
+                      required
+                    />
                   </div>
                 </div>
                 <DialogFooter>
                   <Button variant="ghost" onClick={() => setOpen(false)}>
                     Cancel
                   </Button>
-                  <Button onClick={handleCreate} disabled={!serialId || saving}>
+                  <Button onClick={handleCreate} disabled={!serialId || !issueDescription.trim() || saving}>
                     {saving ? "Saving..." : "Create claim"}
                   </Button>
                 </DialogFooter>

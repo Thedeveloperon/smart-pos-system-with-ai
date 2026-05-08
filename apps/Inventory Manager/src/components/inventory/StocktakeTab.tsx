@@ -81,6 +81,7 @@ export default function StocktakeTab() {
   const [revertSession, setRevertSession] = useState<StocktakeSession | null>(null);
   const [reverting, setReverting] = useState(false);
   const itemsRef = useRef<StocktakeItem[]>([]);
+  const inProgressSession = sessions.find((session) => session.status === "InProgress") ?? null;
 
   useEffect(() => {
     itemsRef.current = items;
@@ -191,6 +192,11 @@ export default function StocktakeTab() {
   };
 
   const handleStart = async (s: StocktakeSession) => {
+    if (inProgressSession && inProgressSession.id !== s.id) {
+      toast.error("A stocktake session is already in progress. Complete or remove it before starting another.");
+      return;
+    }
+
     try {
       await startStocktakeSession(s.id);
       await reload();
@@ -200,6 +206,11 @@ export default function StocktakeTab() {
   };
 
   const handleNew = async () => {
+    if (inProgressSession) {
+      toast.error("A stocktake session is already in progress. Complete or remove it before creating a new one.");
+      return;
+    }
+
     try {
       const created = await createStocktakeSession();
       await startStocktakeSession(created.id);
@@ -391,11 +402,16 @@ export default function StocktakeTab() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base">Stocktake sessions</CardTitle>
-          <Button size="sm" onClick={handleNew}>
+          <Button size="sm" onClick={handleNew} disabled={Boolean(inProgressSession)}>
             New session
           </Button>
         </CardHeader>
         <CardContent>
+          {inProgressSession && (
+            <p className="mb-3 text-sm text-muted-foreground">
+              A stocktake session is currently in progress. Complete or remove it before creating another session.
+            </p>
+          )}
           {loading ? (
             <div className="space-y-2">
               {Array.from({ length: 3 }).map((_, i) => (
@@ -436,7 +452,11 @@ export default function StocktakeTab() {
                     <TableCell className="text-right space-x-2">
                       {s.status === "Draft" && (
                         <>
-                          <Button size="sm" onClick={() => handleStart(s)}>
+                          <Button
+                            size="sm"
+                            onClick={() => handleStart(s)}
+                            disabled={Boolean(inProgressSession && inProgressSession.id !== s.id)}
+                          >
                             Start
                           </Button>
                           <Button
@@ -585,6 +605,7 @@ export default function StocktakeTab() {
                         ) : (
                           <Input
                             type="number"
+                            min={0}
                             step={it.is_serial_tracked ? "1" : "0.001"}
                             className="text-right"
                             value={draftCount}

@@ -249,6 +249,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
         {
             entity.ToTable("warranty_claims");
             entity.Property(x => x.Status).HasConversion<string>().HasMaxLength(32);
+            entity.Property(x => x.IssueDescription).HasMaxLength(2000);
             entity.Property(x => x.ResolutionNotes).HasMaxLength(1000);
             entity.Property(x => x.SupplierName).HasMaxLength(200);
             entity.Property(x => x.PickupPersonName).HasMaxLength(200);

@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
+using SmartPos.Backend.Features.Inventory;
 using SmartPos.Backend.Infrastructure;
 using SmartPos.Backend.Infrastructure.Json;
 using SmartPos.Backend.Security;
@@ -68,6 +69,7 @@ public static class BatchEndpoints
             CreateBatchRequest request,
             ClaimsPrincipal user,
             SmartPosDbContext dbContext,
+            StockMovementHelper stockMovementHelper,
             CancellationToken cancellationToken) =>
         {
             var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
@@ -99,6 +101,17 @@ public static class BatchEndpoints
                 return Results.BadRequest(new { message = "Batch number already exists for this product." });
             }
 
+            if (request.InitialQuantity <= 0m)
+            {
+                return Results.BadRequest(new { message = "initial_quantity must be greater than zero." });
+            }
+
+            var remainingQuantity = request.RemainingQuantity ?? request.InitialQuantity;
+            if (remainingQuantity <= 0m)
+            {
+                return Results.BadRequest(new { message = "remaining_quantity must be greater than zero." });
+            }
+
             var now = DateTimeOffset.UtcNow;
             var batch = new ProductBatch
             {
@@ -110,7 +123,7 @@ public static class BatchEndpoints
                 ManufactureDate = request.ManufactureDate,
                 ExpiryDate = request.ExpiryDate,
                 InitialQuantity = request.InitialQuantity,
-                RemainingQuantity = request.RemainingQuantity ?? request.InitialQuantity,
+                RemainingQuantity = remainingQuantity,
                 CostPrice = request.CostPrice,
                 ReceivedAtUtc = request.ReceivedAtUtc ?? now,
                 CreatedAtUtc = now,
@@ -119,6 +132,26 @@ public static class BatchEndpoints
             };
 
             dbContext.ProductBatches.Add(batch);
+            try
+            {
+                await stockMovementHelper.RecordMovementAsync(
+                    storeId: product.StoreId,
+                    productId: product.Id,
+                    type: StockMovementType.Adjustment,
+                    quantityChange: batch.RemainingQuantity,
+                    refType: StockMovementRef.Adjustment,
+                    refId: batch.Id,
+                    batchId: batch.Id,
+                    serialNumber: null,
+                    reason: "batch_manual_create",
+                    userId: ParseUserId(user),
+                    cancellationToken: cancellationToken);
+            }
+            catch (InvalidOperationException error)
+            {
+                return Results.BadRequest(new { message = error.Message });
+            }
+
             try
             {
                 await dbContext.SaveChangesAsync(cancellationToken);
@@ -139,6 +172,7 @@ public static class BatchEndpoints
             UpdateBatchRequest request,
             ClaimsPrincipal user,
             SmartPosDbContext dbContext,
+            StockMovementHelper stockMovementHelper,
             CancellationToken cancellationToken) =>
         {
             var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
@@ -163,6 +197,13 @@ public static class BatchEndpoints
                 }
             }
 
+            if (request.RemainingQuantity < 0m)
+            {
+                return Results.BadRequest(new { message = "remaining_quantity cannot be negative." });
+            }
+
+            var previousRemainingQuantity = batch.RemainingQuantity;
+
             batch.SupplierId = request.SupplierId;
             batch.PurchaseBillId = request.PurchaseBillId;
             batch.BatchNumber = Normalize(request.BatchNumber) ?? batch.BatchNumber;
@@ -171,6 +212,33 @@ public static class BatchEndpoints
             batch.CostPrice = request.CostPrice;
             batch.RemainingQuantity = request.RemainingQuantity;
             batch.UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+            var quantityDelta = decimal.Round(
+                batch.RemainingQuantity - previousRemainingQuantity,
+                3,
+                MidpointRounding.AwayFromZero);
+            if (quantityDelta != 0m)
+            {
+                try
+                {
+                    await stockMovementHelper.RecordMovementAsync(
+                        storeId: batch.StoreId,
+                        productId: batch.ProductId,
+                        type: StockMovementType.Adjustment,
+                        quantityChange: quantityDelta,
+                        refType: StockMovementRef.Adjustment,
+                        refId: batch.Id,
+                        batchId: batch.Id,
+                        serialNumber: null,
+                        reason: "batch_manual_adjustment",
+                        userId: ParseUserId(user),
+                        cancellationToken: cancellationToken);
+                }
+                catch (InvalidOperationException error)
+                {
+                    return Results.BadRequest(new { message = error.Message });
+                }
+            }
 
             try
             {
@@ -270,6 +338,12 @@ public static class BatchEndpoints
             created_at = batch.CreatedAtUtc,
             updated_at = batch.UpdatedAtUtc
         };
+    }
+
+    private static Guid? ParseUserId(ClaimsPrincipal user)
+    {
+        var value = user.FindFirstValue(ClaimTypes.NameIdentifier) ?? user.FindFirstValue("sub");
+        return Guid.TryParse(value, out var parsed) ? parsed : null;
     }
 }
 

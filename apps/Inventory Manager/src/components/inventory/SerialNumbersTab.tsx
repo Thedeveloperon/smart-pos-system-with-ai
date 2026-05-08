@@ -1,14 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   addSerialNumbers,
   deleteSerialNumber,
+  fetchSerialHistory,
   fetchProducts,
   fetchSerialNumbers,
   lookupSerial,
   replaceSerialNumber,
   updateSerialNumber,
   type Product,
+  type SerialHistoryEvent,
   type SerialLookupResult,
   type SerialNumberRecord,
 } from "@/lib/api";
@@ -99,6 +101,10 @@ export default function SerialNumbersTab() {
   const [lookupValue, setLookupValue] = useState("");
   const [lookupResult, setLookupResult] = useState<SerialLookupResult | null>(null);
   const [lookupError, setLookupError] = useState<string | null>(null);
+  const [lookupHistory, setLookupHistory] = useState<SerialHistoryEvent[]>([]);
+  const [lookupHistoryLoading, setLookupHistoryLoading] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<"All" | SerialNumberRecord["status"]>("All");
+  const [warrantyWindowFilter, setWarrantyWindowFilter] = useState<"All" | 30 | 60 | 90>("All");
 
   const [addOpen, setAddOpen] = useState(false);
   const [newSerials, setNewSerials] = useState<string[]>([]);
@@ -106,16 +112,19 @@ export default function SerialNumbersTab() {
 
   const [editOpen, setEditOpen] = useState(false);
   const [editSerial, setEditSerial] = useState<SerialNumberRecord | null>(null);
+  const [editProductId, setEditProductId] = useState<string>("");
   const [editStatus, setEditStatus] = useState<SerialNumberRecord["status"]>("Available");
   const [editWarrantyDate, setEditWarrantyDate] = useState("");
   const [updating, setUpdating] = useState(false);
 
   const [replaceOpen, setReplaceOpen] = useState(false);
   const [replaceSerial, setReplaceSerial] = useState<SerialNumberRecord | null>(null);
+  const [replaceProductId, setReplaceProductId] = useState<string>("");
   const [replaceValue, setReplaceValue] = useState("");
   const [replacing, setReplacing] = useState(false);
 
   const [deleteSerial, setDeleteSerial] = useState<SerialNumberRecord | null>(null);
+  const [deleteProductId, setDeleteProductId] = useState<string>("");
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
@@ -162,51 +171,122 @@ export default function SerialNumbersTab() {
     };
   }, [productId]);
 
+  const filteredSerials = useMemo(() => {
+    const now = new Date();
+    const windowEnd =
+      warrantyWindowFilter === "All"
+        ? null
+        : new Date(now.getTime() + warrantyWindowFilter * 24 * 60 * 60 * 1000);
+
+    return serials.filter((serial) => {
+      if (statusFilter !== "All" && serial.status !== statusFilter) {
+        return false;
+      }
+
+      if (!windowEnd) {
+        return true;
+      }
+
+      if (!serial.warranty_expiry_date) {
+        return false;
+      }
+
+      const expiry = new Date(serial.warranty_expiry_date);
+      if (Number.isNaN(expiry.getTime())) {
+        return false;
+      }
+
+      return expiry >= now && expiry <= windowEnd;
+    });
+  }, [serials, statusFilter, warrantyWindowFilter]);
+
+  const lookupAsSerialRecord = useMemo<SerialNumberRecord | null>(() => {
+    if (!lookupResult) {
+      return null;
+    }
+
+    return {
+      id: lookupResult.serial_id,
+      product_id: lookupResult.product_id,
+      serial_value: lookupResult.serial_value,
+      status: lookupResult.status as SerialNumberRecord["status"],
+      sale_id: lookupResult.sale_id,
+      sale_item_id: lookupResult.sale_item_id,
+      refund_id: lookupResult.refund_id,
+      warranty_expiry_date: lookupResult.warranty_expiry_date,
+      created_at: lookupResult.created_at ?? new Date().toISOString(),
+      updated_at: lookupResult.updated_at,
+    };
+  }, [lookupResult]);
+
   const handleLookup = async () => {
     setLookupError(null);
     setLookupResult(null);
+    setLookupHistory([]);
     if (!lookupValue.trim()) return;
     try {
       const r = await lookupSerial(lookupValue.trim());
       setLookupResult(r);
+      setLookupHistoryLoading(true);
+      try {
+        setLookupHistory(await fetchSerialHistory(r.serial_id));
+      } finally {
+        setLookupHistoryLoading(false);
+      }
     } catch (e) {
       setLookupError((e as Error).message);
+      setLookupHistoryLoading(false);
     }
   };
 
-  const handleOpenEdit = (serial: SerialNumberRecord) => {
+  const handleOpenEdit = (serial: SerialNumberRecord, targetProductId = productId) => {
+    if (!targetProductId) return;
     setEditSerial(serial);
+    setEditProductId(targetProductId);
     setEditStatus(serial.status);
     setEditWarrantyDate(toDateInputValue(serial.warranty_expiry_date));
     setEditOpen(true);
   };
 
-  const handleMarkDefective = async (serial: SerialNumberRecord) => {
-    if (!productId) return;
+  const handleMarkDefective = async (serial: SerialNumberRecord, targetProductId = productId) => {
+    if (!targetProductId) return;
     try {
-      const updated = await updateSerialNumber(productId, serial.id, {
+      const updated = await updateSerialNumber(targetProductId, serial.id, {
         status: "Defective",
         warranty_expiry_date: serial.warranty_expiry_date ?? null,
       });
       setSerials((prev) =>
         prev.map((current) => (current.id === serial.id ? { ...current, ...updated } : current)),
       );
+      if (lookupResult?.serial_id === serial.id) {
+        setLookupResult((previous) =>
+          previous ? { ...previous, status: updated.status, warranty_expiry_date: updated.warranty_expiry_date } : previous,
+        );
+      }
       toast.success(`Marked ${serial.serial_value} as defective.`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to mark serial defective.");
     }
   };
 
-  const handleUnmarkDefective = async (serial: SerialNumberRecord) => {
-    if (!productId) return;
+  const handleUnmarkDefective = async (
+    serial: SerialNumberRecord,
+    targetProductId = productId,
+  ) => {
+    if (!targetProductId) return;
     try {
-      const updated = await updateSerialNumber(productId, serial.id, {
+      const updated = await updateSerialNumber(targetProductId, serial.id, {
         status: "Available",
         warranty_expiry_date: serial.warranty_expiry_date ?? null,
       });
       setSerials((prev) =>
         prev.map((current) => (current.id === serial.id ? { ...current, ...updated } : current)),
       );
+      if (lookupResult?.serial_id === serial.id) {
+        setLookupResult((previous) =>
+          previous ? { ...previous, status: updated.status, warranty_expiry_date: updated.warranty_expiry_date } : previous,
+        );
+      }
       toast.success(`Unmarked ${serial.serial_value} as defective.`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to unmark serial defective.");
@@ -214,10 +294,10 @@ export default function SerialNumbersTab() {
   };
 
   const handleSaveSerial = async () => {
-    if (!productId || !editSerial) return;
+    if (!editProductId || !editSerial) return;
     setUpdating(true);
     try {
-      const updated = await updateSerialNumber(productId, editSerial.id, {
+      const updated = await updateSerialNumber(editProductId, editSerial.id, {
         status: editStatus,
         warranty_expiry_date: toIsoDateString(editWarrantyDate),
       });
@@ -226,6 +306,19 @@ export default function SerialNumbersTab() {
       );
       setEditOpen(false);
       setEditSerial(null);
+      setEditProductId("");
+      if (lookupResult?.serial_id === editSerial.id) {
+        setLookupResult((previous) =>
+          previous
+            ? {
+                ...previous,
+                status: updated.status,
+                warranty_expiry_date: updated.warranty_expiry_date,
+                updated_at: updated.updated_at,
+              }
+            : previous,
+        );
+      }
       toast.success("Serial updated.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to update serial number.");
@@ -234,14 +327,16 @@ export default function SerialNumbersTab() {
     }
   };
 
-  const handleOpenReplace = (serial: SerialNumberRecord) => {
+  const handleOpenReplace = (serial: SerialNumberRecord, targetProductId = productId) => {
+    if (!targetProductId) return;
     setReplaceSerial(serial);
+    setReplaceProductId(targetProductId);
     setReplaceValue("");
     setReplaceOpen(true);
   };
 
   const handleReplaceSerial = async () => {
-    if (!productId || !replaceSerial) return;
+    if (!replaceProductId || !replaceSerial) return;
     const nextValue = replaceValue.trim();
     if (!nextValue) {
       toast.error("New serial number is required.");
@@ -250,7 +345,7 @@ export default function SerialNumbersTab() {
 
     setReplacing(true);
     try {
-      const updated = await replaceSerialNumber(productId, replaceSerial.id, {
+      const updated = await replaceSerialNumber(replaceProductId, replaceSerial.id, {
         new_serial_value: nextValue,
       });
       setSerials((prev) =>
@@ -258,7 +353,21 @@ export default function SerialNumbersTab() {
       );
       setReplaceOpen(false);
       setReplaceSerial(null);
+      setReplaceProductId("");
       setReplaceValue("");
+      if (lookupResult?.serial_id === replaceSerial.id) {
+        setLookupResult((previous) =>
+          previous
+            ? {
+                ...previous,
+                serial_value: updated.serial_value,
+                status: updated.status,
+                warranty_expiry_date: updated.warranty_expiry_date,
+                updated_at: updated.updated_at,
+              }
+            : previous,
+        );
+      }
       toast.success("Serial replaced.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to replace serial number.");
@@ -283,12 +392,16 @@ export default function SerialNumbersTab() {
   };
 
   const handleDeleteSerial = async () => {
-    if (!productId || !deleteSerial) return;
+    if (!deleteProductId || !deleteSerial) return;
     setDeleting(true);
     try {
-      await deleteSerialNumber(productId, deleteSerial.id);
+      await deleteSerialNumber(deleteProductId, deleteSerial.id);
       setSerials((prev) => prev.filter((serial) => serial.id !== deleteSerial.id));
+      if (lookupResult?.serial_id === deleteSerial.id) {
+        setLookupResult(null);
+      }
       setDeleteSerial(null);
+      setDeleteProductId("");
       toast.success("Serial deleted.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to delete serial number.");
@@ -296,6 +409,50 @@ export default function SerialNumbersTab() {
       setDeleting(false);
     }
   };
+
+  const renderSerialActions = (serial: SerialNumberRecord, serialProductId: string) => (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className="h-8 w-8">
+          <MoreHorizontal className="h-4 w-4" />
+          <span className="sr-only">Open serial actions</span>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={() => handleOpenEdit(serial, serialProductId)}>
+          <PencilLine className="mr-2 h-4 w-4" />
+          Update
+        </DropdownMenuItem>
+        {serial.status === "Defective" ? (
+          <>
+            <DropdownMenuItem onClick={() => handleOpenReplace(serial, serialProductId)}>
+              <ArrowLeftRight className="mr-2 h-4 w-4" />
+              Replace
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => void handleUnmarkDefective(serial, serialProductId)}>
+              <BadgeAlert className="mr-2 h-4 w-4" />
+              Unmark defective
+            </DropdownMenuItem>
+          </>
+        ) : (
+          <DropdownMenuItem onClick={() => void handleMarkDefective(serial, serialProductId)}>
+            <BadgeAlert className="mr-2 h-4 w-4" />
+            Mark defective
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuItem
+          className="text-destructive focus:text-destructive"
+          onClick={() => {
+            setDeleteSerial(serial);
+            setDeleteProductId(serialProductId);
+          }}
+        >
+          <Trash2 className="mr-2 h-4 w-4" />
+          Delete
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 
   return (
     <div className="space-y-4">
@@ -316,33 +473,64 @@ export default function SerialNumbersTab() {
             <Button onClick={handleLookup}>Look up</Button>
           </div>
           {lookupError && <p className="text-sm text-destructive">{lookupError}</p>}
-          {lookupResult && (
-            <div className="grid gap-1 rounded-md border p-3 text-sm">
-              <div>
-                <span className="text-muted-foreground">Serial:</span>{" "}
-                <span className="font-mono">{lookupResult.serial_value}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Product:</span> {lookupResult.product_name}
-              </div>
-              <div>
-                <span className="text-muted-foreground">Status:</span>{" "}
-                <Badge className={STATUS_TONES[lookupResult.status] ?? ""}>
-                  {lookupResult.status}
-                </Badge>
-              </div>
-              {lookupResult.sale_date && (
-                <div>
-                  <span className="text-muted-foreground">Sold:</span>{" "}
-                  {new Date(lookupResult.sale_date).toLocaleDateString()}
+          {lookupResult && lookupAsSerialRecord && (
+            <div className="space-y-3 rounded-md border p-3 text-sm">
+              <div className="flex items-start justify-between gap-2">
+                <div className="grid gap-1">
+                  <div>
+                    <span className="text-muted-foreground">Serial:</span>{" "}
+                    <span className="font-mono">{lookupResult.serial_value}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Product:</span> {lookupResult.product_name}
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Status:</span>{" "}
+                    <Badge className={STATUS_TONES[lookupResult.status] ?? ""}>
+                      {lookupResult.status}
+                    </Badge>
+                  </div>
+                  {lookupResult.sale_date && (
+                    <div>
+                      <span className="text-muted-foreground">Sold:</span>{" "}
+                      {new Date(lookupResult.sale_date).toLocaleDateString()}
+                    </div>
+                  )}
+                  {lookupResult.warranty_expiry_date && (
+                    <div>
+                      <span className="text-muted-foreground">Warranty until:</span>{" "}
+                      {new Date(lookupResult.warranty_expiry_date).toLocaleDateString()}
+                    </div>
+                  )}
                 </div>
-              )}
-              {lookupResult.warranty_expiry_date && (
-                <div>
-                  <span className="text-muted-foreground">Warranty until:</span>{" "}
-                  {new Date(lookupResult.warranty_expiry_date).toLocaleDateString()}
-                </div>
-              )}
+                {renderSerialActions(lookupAsSerialRecord, lookupResult.product_id)}
+              </div>
+
+              <div className="rounded-md border bg-muted/30 p-2">
+                <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Serial history
+                </p>
+                {lookupHistoryLoading ? (
+                  <p className="text-xs text-muted-foreground">Loading history...</p>
+                ) : lookupHistory.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No history events found for this serial.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {lookupHistory.map((event, index) => (
+                      <li
+                        key={`${event.event_type}-${event.at}-${index}`}
+                        className="rounded border bg-background p-2"
+                      >
+                        <p className="text-xs font-medium">{event.title}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(event.at).toLocaleString()}
+                        </p>
+                        {event.description && <p className="text-xs">{event.description}</p>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
           )}
         </CardContent>
@@ -351,7 +539,7 @@ export default function SerialNumbersTab() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base">Serials by product</CardTitle>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Select value={productId} onValueChange={setProductId}>
               <SelectTrigger className="w-[220px]">
                 <SelectValue placeholder="Select product" />
@@ -364,6 +552,50 @@ export default function SerialNumbersTab() {
                 ))}
               </SelectContent>
             </Select>
+            <Select
+              value={statusFilter}
+              onValueChange={(value) =>
+                setStatusFilter(value as "All" | SerialNumberRecord["status"])
+              }
+            >
+              <SelectTrigger className="w-[170px]">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All">All statuses</SelectItem>
+                {STATUS_OPTIONS.map((status) => (
+                  <SelectItem key={status} value={status}>
+                    {status}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={String(warrantyWindowFilter)}
+              onValueChange={(value) =>
+                setWarrantyWindowFilter(value === "All" ? "All" : (Number(value) as 30 | 60 | 90))
+              }
+            >
+              <SelectTrigger className="w-[210px]">
+                <SelectValue placeholder="Warranty window" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All">All warranty windows</SelectItem>
+                <SelectItem value="30">Expiring in 30 days</SelectItem>
+                <SelectItem value="60">Expiring in 60 days</SelectItem>
+                <SelectItem value="90">Expiring in 90 days</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setStatusFilter("All");
+                setWarrantyWindowFilter("All");
+              }}
+            >
+              Clear filters
+            </Button>
 
             <Dialog open={addOpen} onOpenChange={setAddOpen}>
               <DialogTrigger asChild>
@@ -396,10 +628,10 @@ export default function SerialNumbersTab() {
                 <Skeleton key={i} className="h-10" />
               ))}
             </div>
-          ) : serials.length === 0 ? (
+          ) : filteredSerials.length === 0 ? (
             <div className="py-12 text-center text-muted-foreground">
               <Hash className="mx-auto mb-2 h-8 w-8 opacity-50" />
-              No serials recorded for this product yet.
+              No serials found for the selected filters.
             </div>
           ) : (
             <Table>
@@ -413,7 +645,7 @@ export default function SerialNumbersTab() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {serials.map((s) => (
+                {filteredSerials.map((s) => (
                   <TableRow key={s.id}>
                     <TableCell className="font-mono">{s.serial_value}</TableCell>
                     <TableCell>
@@ -426,44 +658,7 @@ export default function SerialNumbersTab() {
                         : "-"}
                     </TableCell>
                     <TableCell className="text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <MoreHorizontal className="h-4 w-4" />
-                            <span className="sr-only">Open serial actions</span>
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleOpenEdit(s)}>
-                            <PencilLine className="mr-2 h-4 w-4" />
-                            Update
-                          </DropdownMenuItem>
-                          {s.status === "Defective" ? (
-                            <>
-                              <DropdownMenuItem onClick={() => handleOpenReplace(s)}>
-                                <ArrowLeftRight className="mr-2 h-4 w-4" />
-                                Replace
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => void handleUnmarkDefective(s)}>
-                                <BadgeAlert className="mr-2 h-4 w-4" />
-                                Unmark defective
-                              </DropdownMenuItem>
-                            </>
-                          ) : (
-                            <DropdownMenuItem onClick={() => void handleMarkDefective(s)}>
-                              <BadgeAlert className="mr-2 h-4 w-4" />
-                              Mark defective
-                            </DropdownMenuItem>
-                          )}
-                          <DropdownMenuItem
-                            className="text-destructive focus:text-destructive"
-                            onClick={() => setDeleteSerial(s)}
-                          >
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                      {renderSerialActions(s, productId)}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -479,6 +674,7 @@ export default function SerialNumbersTab() {
           setEditOpen(open);
           if (!open) {
             setEditSerial(null);
+            setEditProductId("");
           }
         }}
       >
@@ -522,6 +718,7 @@ export default function SerialNumbersTab() {
                 type="date"
                 value={editWarrantyDate}
                 onChange={(e) => setEditWarrantyDate(e.target.value)}
+                min={toDateInputValue(editSerial?.created_at)}
               />
             </div>
           </div>
@@ -532,6 +729,7 @@ export default function SerialNumbersTab() {
               onClick={() => {
                 setEditOpen(false);
                 setEditSerial(null);
+                setEditProductId("");
               }}
             >
               Cancel
@@ -549,6 +747,7 @@ export default function SerialNumbersTab() {
           setReplaceOpen(open);
           if (!open) {
             setReplaceSerial(null);
+            setReplaceProductId("");
             setReplaceValue("");
           }
         }}
@@ -585,6 +784,7 @@ export default function SerialNumbersTab() {
               onClick={() => {
                 setReplaceOpen(false);
                 setReplaceSerial(null);
+                setReplaceProductId("");
                 setReplaceValue("");
               }}
             >
@@ -599,8 +799,16 @@ export default function SerialNumbersTab() {
 
       <ConfirmationDialog
         open={!!deleteSerial}
-        onOpenChange={(open) => !open && setDeleteSerial(null)}
-        onCancel={() => setDeleteSerial(null)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteSerial(null);
+            setDeleteProductId("");
+          }
+        }}
+        onCancel={() => {
+          setDeleteSerial(null);
+          setDeleteProductId("");
+        }}
         onConfirm={() => void handleDeleteSerial()}
         title="Delete serial?"
         description={

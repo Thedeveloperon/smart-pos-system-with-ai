@@ -1,6 +1,10 @@
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
 using System.Net;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using SmartPos.Backend.Domain;
+using SmartPos.Backend.Infrastructure;
 
 namespace SmartPos.Backend.IntegrationTests;
 
@@ -335,6 +339,105 @@ public sealed class ProductInventoryTests(CustomWebApplicationFactory factory)
         Assert.Equal(2, serialValues.Length);
         Assert.Contains(serialOne, serialValues);
         Assert.Contains(serialTwo, serialValues);
+    }
+
+    [Fact]
+    public async Task ProductSerialNumbers_Add_ShouldIncreaseInventoryAndCreateStockMovement()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+        var createProduct = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"Serial Intake Product {runId}",
+                sku = $"SER-IN-{runId}",
+                unit_price = 220m,
+                cost_price = 150m,
+                initial_stock_quantity = 0m,
+                reorder_level = 0m,
+                allow_negative_stock = false,
+                is_active = true,
+                is_serial_tracked = true,
+                warranty_months = 12
+            }));
+
+        var productId = Guid.Parse(TestJson.GetString(createProduct, "product_id"));
+
+        var addResponse = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync($"/api/products/{productId}/serials", new
+            {
+                serials = new[] { $"SER-IN-{runId}-001", $"SER-IN-{runId}-002" }
+            }));
+        var addedItems = addResponse["items"]?.AsArray()
+            ?? throw new InvalidOperationException("Missing added serial items.");
+        Assert.Equal(2, addedItems.Count);
+
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+
+        var quantityOnHand = await dbContext.Inventory
+            .Where(x => x.ProductId == productId)
+            .Select(x => x.QuantityOnHand)
+            .SingleAsync();
+        Assert.Equal(2m, quantityOnHand);
+
+        var movement = await dbContext.StockMovements
+            .AsNoTracking()
+            .Where(x => x.ProductId == productId && x.Reason == "manual_serial_add")
+            .ToListAsync();
+        var latestMovement = movement
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .FirstOrDefault();
+        Assert.NotNull(latestMovement);
+        Assert.Equal(StockMovementType.Adjustment, latestMovement!.MovementType);
+        Assert.Equal(StockMovementRef.Adjustment, latestMovement.ReferenceType);
+        Assert.Equal(2m, latestMovement.QuantityChange);
+    }
+
+    [Fact]
+    public async Task ProductSerialNumbers_Update_ShouldRejectWarrantyExpiryBeforeSerialCreatedAt()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+        var createProduct = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"Serial Warranty Guard Product {runId}",
+                sku = $"SER-GRD-{runId}",
+                unit_price = 210m,
+                cost_price = 140m,
+                initial_stock_quantity = 1m,
+                reorder_level = 0m,
+                allow_negative_stock = false,
+                is_active = true,
+                is_serial_tracked = true,
+                warranty_months = 12
+            }));
+
+        var productId = Guid.Parse(TestJson.GetString(createProduct, "product_id"));
+        var added = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync($"/api/products/{productId}/serials", new
+            {
+                serials = new[] { $"SER-GRD-{runId}-001" }
+            }));
+        var serial = added["items"]?.AsArray()?.OfType<JsonObject>().FirstOrDefault()
+            ?? throw new InvalidOperationException("Missing serial.");
+        var serialId = Guid.Parse(TestJson.GetString(serial, "id"));
+        var createdAt = DateTimeOffset.Parse(TestJson.GetString(serial, "created_at"));
+
+        var invalidWarrantyDate = createdAt.AddDays(-1).ToString("O");
+        var response = await client.PutAsJsonAsync($"/api/products/{productId}/serials/{serialId}", new
+        {
+            status = "Available",
+            warranty_expiry_date = invalidWarrantyDate
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonObject>()
+            ?? throw new InvalidOperationException("Expected validation error payload.");
+        Assert.Equal("Warranty expiry date cannot be earlier than the serial receipt date.", TestJson.GetString(payload, "message"));
     }
 
     [Fact]

@@ -36,6 +36,7 @@ public sealed class DbSchemaUpdaterWarrantyTimelineSchemaTests
 
             await DbSchemaUpdater.EnsureWarrantyTimelineSchemaAsync(dbContext);
 
+            Assert.True(await ColumnExistsAsync(dbContext, "warranty_claims", "IssueDescription"));
             Assert.True(await ColumnExistsAsync(dbContext, "warranty_claims", "SupplierName"));
             Assert.True(await ColumnExistsAsync(dbContext, "warranty_claims", "HandoverDate"));
             Assert.True(await ColumnExistsAsync(dbContext, "warranty_claims", "PickupPersonName"));

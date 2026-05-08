@@ -87,6 +87,19 @@ public static class StocktakeEndpoints
         {
             request ??= new CreateStocktakeSessionRequest();
             var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
+            var targetStoreId = currentStoreId ?? request.StoreId;
+            var hasInProgressSession = targetStoreId.HasValue
+                ? await dbContext.StocktakeSessions.AnyAsync(
+                    x => x.Status == StocktakeStatus.InProgress && x.StoreId == targetStoreId.Value,
+                    cancellationToken)
+                : await dbContext.StocktakeSessions.AnyAsync(
+                    x => x.Status == StocktakeStatus.InProgress && x.StoreId == null,
+                    cancellationToken);
+            if (hasInProgressSession)
+            {
+                return Results.BadRequest(new { message = "A stocktake session is already in progress for this store." });
+            }
+
             var now = DateTimeOffset.UtcNow;
             var products = await dbContext.Products
                 .AsNoTracking()
@@ -97,7 +110,7 @@ public static class StocktakeEndpoints
 
             var session = new StocktakeSession
             {
-                StoreId = currentStoreId ?? request.StoreId,
+                StoreId = targetStoreId,
                 Status = StocktakeStatus.Draft,
                 StartedAtUtc = now,
                 CreatedAtUtc = now,
@@ -173,6 +186,16 @@ public static class StocktakeEndpoints
                 return Results.BadRequest(new { message = "Only draft sessions can be started." });
             }
 
+            var hasAnotherInProgressSession = await dbContext.StocktakeSessions.AnyAsync(
+                x => x.Id != session.Id &&
+                     x.Status == StocktakeStatus.InProgress &&
+                     x.StoreId == session.StoreId,
+                cancellationToken);
+            if (hasAnotherInProgressSession)
+            {
+                return Results.BadRequest(new { message = "A stocktake session is already in progress for this store." });
+            }
+
             session.Status = StocktakeStatus.InProgress;
             session.UpdatedAtUtc = DateTimeOffset.UtcNow;
             try
@@ -212,13 +235,13 @@ public static class StocktakeEndpoints
                 return Results.BadRequest(new { message = "Only in-progress sessions can be updated." });
             }
 
+            if (request.CountedQuantity < 0m)
+            {
+                return Results.BadRequest(new { message = $"'{item.Product.Name}' cannot use a negative counted quantity." });
+            }
+
             if (item.Product.IsSerialTracked)
             {
-                if (request.CountedQuantity < 0m)
-                {
-                    return Results.BadRequest(new { message = $"'{item.Product.Name}' cannot use a negative counted quantity because it is serial tracked." });
-                }
-
                 if (request.CountedQuantity != decimal.Truncate(request.CountedQuantity))
                 {
                     return Results.BadRequest(new { message = $"'{item.Product.Name}' must use a whole-number counted quantity because it is serial tracked." });
@@ -397,13 +420,13 @@ public static class StocktakeEndpoints
                 item.VarianceQuantity = variance;
                 item.UpdatedAtUtc = now;
 
+                if (counted < 0m)
+                {
+                    return Results.BadRequest(new { message = $"'{item.Product.Name}' cannot use a negative counted quantity." });
+                }
+
                 if (item.Product.IsSerialTracked)
                 {
-                    if (counted < 0m)
-                    {
-                        return Results.BadRequest(new { message = $"'{item.Product.Name}' cannot use a negative counted quantity because it is serial tracked." });
-                    }
-
                     if (counted != decimal.Truncate(counted))
                     {
                         return Results.BadRequest(new { message = $"'{item.Product.Name}' must use a whole-number counted quantity because it is serial tracked." });

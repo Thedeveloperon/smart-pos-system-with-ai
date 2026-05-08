@@ -31,6 +31,7 @@ public sealed class WarrantyClaimTimelineEndpointTests(CustomWebApplicationFacto
             {
                 serial_number_id = serialId,
                 claim_date = "2026-04-15T10:30:00Z",
+                issue_description = "Display issue",
                 resolution_notes = "Screen cracked on left corner"
             }));
         var claimId = TestJson.GetString(createResponse, "id");
@@ -107,7 +108,8 @@ public sealed class WarrantyClaimTimelineEndpointTests(CustomWebApplicationFacto
             await client.PostAsJsonAsync("/api/warranty-claims", new
             {
                 serial_number_id = serialId,
-                claim_date = "2026-04-20T08:00:00Z"
+                claim_date = "2026-04-20T08:00:00Z",
+                issue_description = "Battery drain"
             }));
         var claimId = TestJson.GetString(createResponse, "id");
 
@@ -140,6 +142,7 @@ public sealed class WarrantyClaimTimelineEndpointTests(CustomWebApplicationFacto
             await client.PostAsJsonAsync("/api/warranty-claims", new
             {
                 serial_number_id = serialId,
+                issue_description = "Speaker issue",
                 resolution_notes = "Speaker issue"
             }));
         var createFinishedAt = DateTimeOffset.UtcNow;
@@ -202,6 +205,7 @@ public sealed class WarrantyClaimTimelineEndpointTests(CustomWebApplicationFacto
             await client.PostAsJsonAsync("/api/warranty-claims", new
             {
                 serial_number_id = fixture.OriginalSerialId,
+                issue_description = "Customer reported display issue",
                 resolution_notes = "Customer reported display issue"
             }));
         var claimId = Guid.Parse(TestJson.GetString(createResponse, "id"));
@@ -277,14 +281,151 @@ public sealed class WarrantyClaimTimelineEndpointTests(CustomWebApplicationFacto
         Assert.StartsWith("2026-04-22T11:15:00", TestJson.GetString(item, "replacement_date"));
     }
 
-    private async Task<Guid> CreateClaimableSerialIdAsync()
+    [Fact]
+    public async Task CreateWarrantyClaim_ShouldRejectWhenIssueDescriptionMissing()
+    {
+        await TestAuth.SignInAsOwnerAsync(client);
+
+        var serialId = await CreateClaimableSerialIdAsync();
+        var response = await client.PostAsJsonAsync("/api/warranty-claims", new
+        {
+            serial_number_id = serialId
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonObject>()
+            ?? throw new InvalidOperationException("Expected validation payload.");
+        Assert.Equal("issue_description is required.", TestJson.GetString(payload, "message"));
+    }
+
+    [Fact]
+    public async Task CreateWarrantyClaim_ShouldRejectExpiredWarrantySerial()
+    {
+        await TestAuth.SignInAsOwnerAsync(client);
+
+        var serialId = await CreateClaimableSerialIdAsync(DateTimeOffset.UtcNow.AddDays(-1));
+        var response = await client.PostAsJsonAsync("/api/warranty-claims", new
+        {
+            serial_number_id = serialId,
+            issue_description = "Touchscreen not responsive"
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonObject>()
+            ?? throw new InvalidOperationException("Expected validation payload.");
+        Assert.Equal("Warranty has expired for this serial number.", TestJson.GetString(payload, "message"));
+    }
+
+    [Fact]
+    public async Task CreateWarrantyClaim_ShouldRejectDuplicateActiveClaimsForSameSerial()
+    {
+        await TestAuth.SignInAsOwnerAsync(client);
+
+        var serialId = await CreateClaimableSerialIdAsync();
+
+        var first = await client.PostAsJsonAsync("/api/warranty-claims", new
+        {
+            serial_number_id = serialId,
+            issue_description = "Camera focus issue"
+        });
+        first.EnsureSuccessStatusCode();
+
+        var duplicate = await client.PostAsJsonAsync("/api/warranty-claims", new
+        {
+            serial_number_id = serialId,
+            issue_description = "Second claim should be blocked"
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, duplicate.StatusCode);
+        var payload = await duplicate.Content.ReadFromJsonAsync<JsonObject>()
+            ?? throw new InvalidOperationException("Expected duplicate claim payload.");
+        Assert.Equal("An active warranty claim already exists for this serial number.", TestJson.GetString(payload, "message"));
+    }
+
+    [Fact]
+    public async Task UpdateWarrantyClaim_ShouldRequireResolutionNotesWhenRejecting()
+    {
+        await TestAuth.SignInAsOwnerAsync(client);
+
+        var serialId = await CreateClaimableSerialIdAsync();
+        var claim = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/warranty-claims", new
+            {
+                serial_number_id = serialId,
+                issue_description = "Audio distortion"
+            }));
+        var claimId = TestJson.GetString(claim, "id");
+
+        var rejectResponse = await client.PutAsJsonAsync($"/api/warranty-claims/{claimId}", new
+        {
+            status = "Rejected"
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, rejectResponse.StatusCode);
+        var payload = await rejectResponse.Content.ReadFromJsonAsync<JsonObject>()
+            ?? throw new InvalidOperationException("Expected rejection validation payload.");
+        Assert.Equal("resolution_notes is required when rejecting a warranty claim.", TestJson.GetString(payload, "message"));
+    }
+
+    [Fact]
+    public async Task SerialHistory_ShouldReturnOrderedSaleAndClaimLifecycleEvents()
+    {
+        await TestAuth.SignInAsOwnerAsync(client);
+
+        var serialId = await CreateClaimableSerialIdAsync();
+        var createdClaim = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/warranty-claims", new
+            {
+                serial_number_id = serialId,
+                issue_description = "Screen flickering"
+            }));
+        var claimId = TestJson.GetString(createdClaim, "id");
+
+        await TestJson.ReadObjectAsync(
+            await client.PutAsJsonAsync($"/api/warranty-claims/{claimId}", new
+            {
+                status = "InRepair",
+                supplier_name = "Service Center A",
+                handover_date = DateTimeOffset.UtcNow.AddHours(1).ToString("O")
+            }));
+
+        await TestJson.ReadObjectAsync(
+            await client.PutAsJsonAsync($"/api/warranty-claims/{claimId}", new
+            {
+                status = "Resolved",
+                resolution_notes = "Panel replaced",
+                received_back_date = DateTimeOffset.UtcNow.AddHours(2).ToString("O")
+            }));
+
+        var history = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/serials/{serialId}/history"));
+        var items = history["items"]?.AsArray()
+            ?? throw new InvalidOperationException("Expected serial history items.");
+
+        var eventTypes = items
+            .OfType<JsonObject>()
+            .Select(item => TestJson.GetString(item, "event_type"))
+            .ToArray();
+        Assert.Contains("sale", eventTypes);
+        Assert.Contains("claim_opened", eventTypes);
+        Assert.Contains("claim_status_changed", eventTypes);
+        Assert.Contains("claim_resolved", eventTypes);
+
+        var timestamps = items
+            .OfType<JsonObject>()
+            .Select(item => DateTimeOffset.Parse(TestJson.GetString(item, "at")))
+            .ToArray();
+        Assert.Equal(timestamps.OrderBy(x => x).ToArray(), timestamps);
+    }
+
+    private async Task<Guid> CreateClaimableSerialIdAsync(DateTimeOffset? warrantyExpiryDate = null)
     {
         using var scope = factory.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
-        var storeId = await dbContext.Shops
+        var owner = await dbContext.Users
             .AsNoTracking()
-            .Select(x => x.Id)
-            .FirstAsync();
+            .SingleAsync(x => x.Username == "owner");
+        var storeId = owner.StoreId ?? throw new InvalidOperationException("Owner store is required.");
         var now = DateTimeOffset.UtcNow;
         var runId = Guid.NewGuid().ToString("N")[..8];
 
@@ -303,18 +444,34 @@ public sealed class WarrantyClaimTimelineEndpointTests(CustomWebApplicationFacto
             CreatedAtUtc = now
         };
 
+        var sale = new Sale
+        {
+            StoreId = storeId,
+            SaleNumber = $"SALE-WARRANTY-{runId}",
+            Status = SaleStatus.Completed,
+            Subtotal = product.UnitPrice,
+            DiscountTotal = 0m,
+            TaxTotal = 0m,
+            GrandTotal = product.UnitPrice,
+            CreatedAtUtc = now,
+            CompletedAtUtc = now
+        };
+
         var serial = new SerialNumber
         {
             StoreId = storeId,
             Product = product,
+            Sale = sale,
+            SaleItem = null,
             SerialValue = $"SN-WARRANTY-{runId}",
             Status = SerialNumberStatus.Sold,
-            WarrantyExpiryDate = now.AddMonths(12),
+            WarrantyExpiryDate = warrantyExpiryDate ?? now.AddMonths(12),
             CreatedAtUtc = now,
             UpdatedAtUtc = now
         };
 
         dbContext.Products.Add(product);
+        dbContext.Sales.Add(sale);
         dbContext.SerialNumbers.Add(serial);
         await dbContext.SaveChangesAsync();
         return serial.Id;
@@ -324,10 +481,10 @@ public sealed class WarrantyClaimTimelineEndpointTests(CustomWebApplicationFacto
     {
         using var scope = factory.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
-        var storeId = await dbContext.Shops
+        var owner = await dbContext.Users
             .AsNoTracking()
-            .Select(x => x.Id)
-            .FirstAsync();
+            .SingleAsync(x => x.Username == "owner");
+        var storeId = owner.StoreId ?? throw new InvalidOperationException("Owner store is required.");
         var now = DateTimeOffset.UtcNow;
         var runId = Guid.NewGuid().ToString("N")[..8];
 

@@ -37,6 +37,7 @@ public sealed class InventoryManagerOverviewEndpointTests(CustomWebApplicationFa
     public async Task CreateStocktakeSession_ShouldAcceptEmptyJsonBody()
     {
         await TestAuth.SignInAsManagerAsync(client);
+        await EnsureNoInProgressStocktakeSessionsAsync();
 
         var response = await client.PostAsJsonAsync("/api/stocktake/sessions", new { });
         var session = await TestJson.ReadObjectAsync(response);
@@ -50,6 +51,7 @@ public sealed class InventoryManagerOverviewEndpointTests(CustomWebApplicationFa
     public async Task CreateStocktakeSession_ShouldAcceptMissingBody()
     {
         await TestAuth.SignInAsManagerAsync(client);
+        await EnsureNoInProgressStocktakeSessionsAsync();
 
         var response = await client.PostAsync("/api/stocktake/sessions", null);
         var session = await TestJson.ReadObjectAsync(response);
@@ -62,6 +64,7 @@ public sealed class InventoryManagerOverviewEndpointTests(CustomWebApplicationFa
     public async Task StocktakeSessionItems_ShouldIncludeSessionId_WhenLoadingSessionDetails()
     {
         await TestAuth.SignInAsManagerAsync(client);
+        await EnsureNoInProgressStocktakeSessionsAsync();
 
         var createdSession = await TestJson.ReadObjectAsync(
             await client.PostAsJsonAsync("/api/stocktake/sessions", new { }));
@@ -82,6 +85,7 @@ public sealed class InventoryManagerOverviewEndpointTests(CustomWebApplicationFa
     public async Task DeleteStocktakeSession_ShouldAllowInProgressSessions()
     {
         await TestAuth.SignInAsManagerAsync(client);
+        await EnsureNoInProgressStocktakeSessionsAsync();
 
         var createdSession = await TestJson.ReadObjectAsync(
             await client.PostAsJsonAsync("/api/stocktake/sessions", new { }));
@@ -101,6 +105,7 @@ public sealed class InventoryManagerOverviewEndpointTests(CustomWebApplicationFa
     public async Task RevertStocktakeSession_ShouldRestoreInventoryAndRecordReversalMovement()
     {
         await TestAuth.SignInAsManagerAsync(client);
+        await EnsureNoInProgressStocktakeSessionsAsync();
 
         var createdSession = await TestJson.ReadObjectAsync(
             await client.PostAsJsonAsync("/api/stocktake/sessions", new { }));
@@ -162,6 +167,7 @@ public sealed class InventoryManagerOverviewEndpointTests(CustomWebApplicationFa
     public async Task CompleteStocktakeSession_ShouldRequireSerialReconciliationForSerialTrackedVariance()
     {
         await TestAuth.SignInAsManagerAsync(client);
+        await EnsureNoInProgressStocktakeSessionsAsync();
 
         var runId = Guid.NewGuid().ToString("N")[..8];
         var serialOne = $"STK-REQ-{runId}-001";
@@ -224,6 +230,7 @@ public sealed class InventoryManagerOverviewEndpointTests(CustomWebApplicationFa
     public async Task CompleteStocktakeSession_ShouldReconcileSerialTrackedItemsByRemovingAndAddingSerials()
     {
         await TestAuth.SignInAsManagerAsync(client);
+        await EnsureNoInProgressStocktakeSessionsAsync();
 
         var runId = Guid.NewGuid().ToString("N")[..8];
         var removedSerial = $"STK-REC-{runId}-001";
@@ -499,6 +506,192 @@ public sealed class InventoryManagerOverviewEndpointTests(CustomWebApplicationFa
     }
 
     [Fact]
+    public async Task CreateProductBatch_ShouldRejectNonPositiveInitialQuantity()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+        var createProduct = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"Batch Quantity Guard {runId}",
+                sku = $"BATCH-GRD-{runId}",
+                unit_price = 100m,
+                cost_price = 70m,
+                initial_stock_quantity = 0m,
+                reorder_level = 0m,
+                allow_negative_stock = false,
+                is_batch_tracked = true,
+                is_active = true
+            }));
+
+        var productId = Guid.Parse(TestJson.GetString(createProduct, "product_id"));
+        var response = await client.PostAsJsonAsync($"/api/products/{productId}/batches", new
+        {
+            batch_number = $"LOT-GRD-{runId}",
+            initial_quantity = 0m,
+            remaining_quantity = 0m,
+            cost_price = 42m
+        });
+
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonObject>()
+            ?? throw new InvalidOperationException("Expected quantity guard payload.");
+        Assert.Equal("initial_quantity must be greater than zero.", TestJson.GetString(payload, "message"));
+    }
+
+    [Fact]
+    public async Task CreateAndUpdateBatch_ShouldAdjustInventoryAndRecordMovements()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+        var createProduct = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"Batch Movement Product {runId}",
+                sku = $"BATCH-MOVE-{runId}",
+                unit_price = 130m,
+                cost_price = 80m,
+                initial_stock_quantity = 0m,
+                reorder_level = 0m,
+                allow_negative_stock = false,
+                is_batch_tracked = true,
+                is_active = true
+            }));
+
+        var productId = Guid.Parse(TestJson.GetString(createProduct, "product_id"));
+
+        var createdBatch = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync($"/api/products/{productId}/batches", new
+            {
+                batch_number = $"LOT-MOVE-{runId}",
+                initial_quantity = 10m,
+                remaining_quantity = 10m,
+                cost_price = 50m
+            }));
+        var batchId = Guid.Parse(TestJson.GetString(createdBatch, "id"));
+
+        var updatedBatch = await TestJson.ReadObjectAsync(
+            await client.PutAsJsonAsync($"/api/products/{productId}/batches/{batchId}", new
+            {
+                batch_number = $"LOT-MOVE-{runId}",
+                remaining_quantity = 13m,
+                cost_price = 50m
+            }));
+        Assert.Equal(13m, TestJson.GetDecimal(updatedBatch, "remaining_quantity"));
+
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+
+        var quantityOnHand = await dbContext.Inventory
+            .Where(x => x.ProductId == productId)
+            .Select(x => x.QuantityOnHand)
+            .SingleAsync();
+        Assert.Equal(13m, quantityOnHand);
+
+        var createMovement = await dbContext.StockMovements
+            .AsNoTracking()
+            .Where(x => x.BatchId == batchId && x.Reason == "batch_manual_create")
+            .ToListAsync();
+        var latestCreateMovement = createMovement
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .FirstOrDefault();
+        Assert.NotNull(latestCreateMovement);
+        Assert.Equal(10m, latestCreateMovement!.QuantityChange);
+
+        var adjustMovement = await dbContext.StockMovements
+            .AsNoTracking()
+            .Where(x => x.BatchId == batchId && x.Reason == "batch_manual_adjustment")
+            .ToListAsync();
+        var latestAdjustMovement = adjustMovement
+            .OrderByDescending(x => x.CreatedAtUtc)
+            .FirstOrDefault();
+        Assert.NotNull(latestAdjustMovement);
+        Assert.Equal(3m, latestAdjustMovement!.QuantityChange);
+    }
+
+    [Fact]
+    public async Task Stocktake_ShouldBlockSecondInProgressSessionAndRejectNegativeCounts()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+        await EnsureNoInProgressStocktakeSessionsAsync();
+
+        var sessionOne = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/stocktake/sessions", new { }));
+        var sessionOneId = TestJson.GetString(sessionOne, "id");
+
+        var sessionTwo = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/stocktake/sessions", new { }));
+        var sessionTwoId = TestJson.GetString(sessionTwo, "id");
+
+        await TestJson.ReadObjectAsync(
+            await client.PutAsync($"/api/stocktake/sessions/{sessionOneId}/start", null));
+
+        var blockedStart = await client.PutAsync($"/api/stocktake/sessions/{sessionTwoId}/start", null);
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, blockedStart.StatusCode);
+
+        var blockedCreate = await client.PostAsJsonAsync("/api/stocktake/sessions", new { });
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, blockedCreate.StatusCode);
+
+        var sessionDetails = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/stocktake/sessions/{sessionOneId}"));
+        var nonSerialItem = sessionDetails["items"]?.AsArray()
+            .OfType<JsonObject>()
+            .FirstOrDefault(item => !(item["is_serial_tracked"]?.GetValue<bool>() ?? false));
+        Assert.NotNull(nonSerialItem);
+
+        var itemId = TestJson.GetString(nonSerialItem!, "id");
+        var negativeCount = await client.PutAsJsonAsync(
+            $"/api/stocktake/sessions/{sessionOneId}/items/{itemId}",
+            new { counted_quantity = -1m });
+
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, negativeCount.StatusCode);
+        var payload = await negativeCount.Content.ReadFromJsonAsync<JsonObject>()
+            ?? throw new InvalidOperationException("Expected negative count validation payload.");
+        Assert.Contains("cannot use a negative counted quantity", TestJson.GetString(payload, "message"), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CompleteStocktakeSession_ShouldRejectNegativeCountsForNonSerialItems()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+        await EnsureNoInProgressStocktakeSessionsAsync();
+
+        var createdSession = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/stocktake/sessions", new { }));
+        var sessionId = Guid.Parse(TestJson.GetString(createdSession, "id"));
+
+        await TestJson.ReadObjectAsync(
+            await client.PutAsync($"/api/stocktake/sessions/{sessionId}/start", null));
+
+        var sessionDetails = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/stocktake/sessions/{sessionId}"));
+        var nonSerialItemId = sessionDetails["items"]?.AsArray()
+            .OfType<JsonObject>()
+            .Where(item => !(item["is_serial_tracked"]?.GetValue<bool>() ?? false))
+            .Select(item => Guid.Parse(TestJson.GetString(item, "id")))
+            .FirstOrDefault()
+            ?? Guid.Empty;
+        Assert.NotEqual(Guid.Empty, nonSerialItemId);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+            var stocktakeItem = await dbContext.StocktakeItems.FirstAsync(x => x.Id == nonSerialItemId);
+            stocktakeItem.CountedQuantity = -2m;
+            stocktakeItem.VarianceQuantity = -2m - stocktakeItem.SystemQuantity;
+            await dbContext.SaveChangesAsync();
+        }
+
+        var completeResponse = await client.PostAsync($"/api/stocktake/sessions/{sessionId}/complete", null);
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, completeResponse.StatusCode);
+        var payload = await completeResponse.Content.ReadFromJsonAsync<JsonObject>()
+            ?? throw new InvalidOperationException("Expected complete validation payload.");
+        Assert.Contains("cannot use a negative counted quantity", TestJson.GetString(payload, "message"), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task InventoryMovements_ShouldLoadForOwnerWithAllFilter_WhenLegacyRowsReferenceMissingProducts()
     {
         await SeedLegacyMovementWithMissingProductAsync();
@@ -513,6 +706,29 @@ public sealed class InventoryManagerOverviewEndpointTests(CustomWebApplicationFa
             ?? throw new InvalidOperationException("Expected orphaned legacy movement to be returned.");
 
         Assert.Equal(string.Empty, TestJson.GetString(orphanedMovement, "product_name"));
+    }
+
+    private async Task EnsureNoInProgressStocktakeSessionsAsync()
+    {
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+
+        var inProgressSessions = await dbContext.StocktakeSessions
+            .Where(x => x.Status == SmartPos.Backend.Domain.StocktakeStatus.InProgress)
+            .ToListAsync();
+        if (inProgressSessions.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var session in inProgressSessions)
+        {
+            session.Status = SmartPos.Backend.Domain.StocktakeStatus.Reverted;
+            session.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            session.CompletedAtUtc = DateTimeOffset.UtcNow;
+        }
+
+        await dbContext.SaveChangesAsync();
     }
 
     private async Task SeedLegacyMovementWithMissingProductAsync()
