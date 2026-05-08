@@ -381,6 +381,7 @@ public sealed class WarrantyClaim
     public Guid? ReplacementSerialNumberId { get; set; }
     public DateTimeOffset ClaimDate { get; set; } = DateTimeOffset.UtcNow;
     public WarrantyClaimStatus Status { get; set; } = WarrantyClaimStatus.Open;
+    public string? IssueDescription { get; set; }
     public string? ResolutionNotes { get; set; }
     public string? SupplierName { get; set; }
     public DateTimeOffset? HandoverDate { get; set; }

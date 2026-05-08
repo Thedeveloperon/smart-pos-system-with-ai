@@ -41,7 +41,7 @@ function buildSteps(claim: WarrantyClaim): Step[] {
     title: "Claim Opened",
     date: claim.claim_date,
     details:
-      claim.resolution_notes && claim.status === "Open" ? [`Notes: ${claim.resolution_notes}`] : [],
+      claim.issue_description ? [`Issue: ${claim.issue_description}`] : [],
     completed: true,
     variant: "warning",
     Icon: Clock,

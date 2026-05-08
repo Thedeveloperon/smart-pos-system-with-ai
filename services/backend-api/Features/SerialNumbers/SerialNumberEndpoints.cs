@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
+using SmartPos.Backend.Features.Inventory;
 using SmartPos.Backend.Features.Promotions;
 using SmartPos.Backend.Infrastructure;
 using SmartPos.Backend.Security;
@@ -68,6 +69,7 @@ public static class SerialNumberEndpoints
             AddSerialNumbersRequest request,
             ClaimsPrincipal user,
             SmartPosDbContext dbContext,
+            StockMovementHelper stockMovementHelper,
             CancellationToken cancellationToken) =>
         {
             var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
@@ -120,11 +122,36 @@ public static class SerialNumberEndpoints
                 StoreId = product.StoreId,
                 SerialValue = serial,
                 Status = SerialNumberStatus.Available,
+                SaleId = null,
+                SaleItemId = null,
+                RefundId = null,
+                WarrantyExpiryDate = null,
                 CreatedAtUtc = now,
+                UpdatedAtUtc = null,
                 Product = product!
             }).ToList();
 
             dbContext.SerialNumbers.AddRange(items);
+            try
+            {
+                await stockMovementHelper.RecordMovementAsync(
+                    storeId: product.StoreId,
+                    productId: product.Id,
+                    type: StockMovementType.Adjustment,
+                    quantityChange: normalized.Count,
+                    refType: StockMovementRef.Adjustment,
+                    refId: null,
+                    batchId: null,
+                    serialNumber: null,
+                    reason: "manual_serial_add",
+                    userId: ParseUserId(user),
+                    cancellationToken: cancellationToken);
+            }
+            catch (InvalidOperationException error)
+            {
+                return Results.BadRequest(new { message = error.Message });
+            }
+
             try
             {
                 await dbContext.SaveChangesAsync(cancellationToken);
@@ -161,6 +188,11 @@ public static class SerialNumberEndpoints
             if (!IsValidStatusTransition(serial.Status, request.Status))
             {
                 return Results.BadRequest(new { message = "Invalid serial status transition." });
+            }
+
+            if (request.WarrantyExpiryDate.HasValue && request.WarrantyExpiryDate.Value < serial.CreatedAtUtc)
+            {
+                return Results.BadRequest(new { message = "Warranty expiry date cannot be earlier than the serial receipt date." });
             }
 
             serial.Status = request.Status;
@@ -382,6 +414,170 @@ public static class SerialNumberEndpoints
         .WithName("LookupSerialNumber")
         .WithOpenApi();
 
+        app.MapGet("/api/serials/{serialId:guid}/history", async (
+            Guid serialId,
+            ClaimsPrincipal user,
+            SmartPosDbContext dbContext,
+            CancellationToken cancellationToken) =>
+        {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
+            var serial = await dbContext.SerialNumbers
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    x => x.Id == serialId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value),
+                    cancellationToken);
+            if (serial is null)
+            {
+                return Results.NotFound(new { message = "Serial number not found." });
+            }
+
+            var events = new List<SerialHistoryEvent>
+            {
+                new(
+                    EventType: "serial_recorded",
+                    AtUtc: serial.CreatedAtUtc,
+                    Title: "Serial added to inventory",
+                    Description: $"Serial {serial.SerialValue} was recorded as {serial.Status}.")
+            };
+
+            if (serial.SaleId.HasValue)
+            {
+                var sale = await dbContext.Sales
+                    .AsNoTracking()
+                    .Where(x => x.Id == serial.SaleId.Value)
+                    .Select(x => new { x.SaleNumber, x.CompletedAtUtc, x.CreatedAtUtc })
+                    .FirstOrDefaultAsync(cancellationToken);
+                if (sale is not null)
+                {
+                    events.Add(new SerialHistoryEvent(
+                        EventType: "sale",
+                        AtUtc: sale.CompletedAtUtc ?? sale.CreatedAtUtc,
+                        Title: "Sold",
+                        Description: $"Sold via sale {sale.SaleNumber}."));
+                }
+            }
+
+            var claims = await dbContext.WarrantyClaims
+                .AsNoTracking()
+                .Where(x => x.SerialNumberId == serialId || x.ReplacementSerialNumberId == serialId)
+                .ToListAsync(cancellationToken);
+            claims = claims
+                .OrderBy(x => x.ClaimDate)
+                .ToList();
+
+            foreach (var claim in claims)
+            {
+                var isPrimarySerial = claim.SerialNumberId == serialId;
+                if (isPrimarySerial)
+                {
+                    events.Add(new SerialHistoryEvent(
+                        EventType: "claim_opened",
+                        AtUtc: claim.ClaimDate,
+                        Title: "Warranty claim opened",
+                        Description: claim.IssueDescription,
+                        ClaimId: claim.Id,
+                        ClaimStatus: claim.Status.ToString()));
+                }
+
+                if (claim.HandoverDate.HasValue && isPrimarySerial)
+                {
+                    events.Add(new SerialHistoryEvent(
+                        EventType: "claim_status_changed",
+                        AtUtc: claim.HandoverDate.Value,
+                        Title: "Claim moved to in-repair",
+                        Description: claim.SupplierName,
+                        ClaimId: claim.Id,
+                        ClaimStatus: WarrantyClaimStatus.InRepair.ToString()));
+                }
+
+                if (claim.ReceivedBackDate.HasValue && isPrimarySerial)
+                {
+                    events.Add(new SerialHistoryEvent(
+                        EventType: "claim_status_changed",
+                        AtUtc: claim.ReceivedBackDate.Value,
+                        Title: "Received back from supplier",
+                        Description: claim.ReceivedBackPersonName,
+                        ClaimId: claim.Id,
+                        ClaimStatus: claim.Status.ToString()));
+                }
+
+                if (claim.ReplacementSerialNumberId == serialId && claim.ReplacementDate.HasValue)
+                {
+                    events.Add(new SerialHistoryEvent(
+                        EventType: "claim_replacement_assigned",
+                        AtUtc: claim.ReplacementDate.Value,
+                        Title: "Assigned as warranty replacement",
+                        Description: "This serial was used to replace a claimed unit.",
+                        ClaimId: claim.Id,
+                        ClaimStatus: WarrantyClaimStatus.Resolved.ToString()));
+                }
+
+                if (!isPrimarySerial)
+                {
+                    continue;
+                }
+
+                if (claim.Status == WarrantyClaimStatus.Rejected)
+                {
+                    events.Add(new SerialHistoryEvent(
+                        EventType: "claim_rejected",
+                        AtUtc: claim.UpdatedAtUtc ?? claim.ClaimDate,
+                        Title: "Claim rejected",
+                        Description: claim.ResolutionNotes,
+                        ClaimId: claim.Id,
+                        ClaimStatus: claim.Status.ToString()));
+                    continue;
+                }
+
+                if (claim.ReplacementDate.HasValue)
+                {
+                    events.Add(new SerialHistoryEvent(
+                        EventType: "claim_resolved_replaced",
+                        AtUtc: claim.ReplacementDate.Value,
+                        Title: "Claim resolved with replacement",
+                        Description: claim.ResolutionNotes,
+                        ClaimId: claim.Id,
+                        ClaimStatus: WarrantyClaimStatus.Resolved.ToString()));
+                    continue;
+                }
+
+                if (claim.Status == WarrantyClaimStatus.Resolved)
+                {
+                    events.Add(new SerialHistoryEvent(
+                        EventType: "claim_resolved",
+                        AtUtc: claim.ReceivedBackDate ?? claim.UpdatedAtUtc ?? claim.ClaimDate,
+                        Title: "Claim resolved",
+                        Description: claim.ResolutionNotes,
+                        ClaimId: claim.Id,
+                        ClaimStatus: claim.Status.ToString()));
+                }
+            }
+
+            var orderedEvents = events
+                .OrderBy(x => x.AtUtc)
+                .Select(x => new
+                {
+                    event_type = x.EventType,
+                    at = x.AtUtc,
+                    title = x.Title,
+                    description = x.Description,
+                    claim_id = x.ClaimId,
+                    claim_status = x.ClaimStatus
+                })
+                .ToList();
+
+            return Results.Ok(new
+            {
+                serial_id = serial.Id,
+                serial_value = serial.SerialValue,
+                items = orderedEvents
+            });
+        })
+        .RequireAuthorization()
+        .WithTags("Serial Numbers")
+        .WithName("GetSerialHistory")
+        .WithOpenApi();
+
         return app;
     }
 
@@ -452,6 +648,20 @@ public static class SerialNumberEndpoints
             updated_at = serial.UpdatedAtUtc
         };
     }
+
+    private static Guid? ParseUserId(ClaimsPrincipal user)
+    {
+        var value = user.FindFirstValue(ClaimTypes.NameIdentifier) ?? user.FindFirstValue("sub");
+        return Guid.TryParse(value, out var parsed) ? parsed : null;
+    }
+
+    private sealed record SerialHistoryEvent(
+        string EventType,
+        DateTimeOffset AtUtc,
+        string Title,
+        string? Description = null,
+        Guid? ClaimId = null,
+        string? ClaimStatus = null);
 }
 
 public sealed class AddSerialNumbersRequest

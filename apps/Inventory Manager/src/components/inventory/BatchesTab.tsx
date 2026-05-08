@@ -153,7 +153,7 @@ export default function BatchesTab() {
       batch_number: b.batch_number,
       manufacture_date: b.manufacture_date?.slice(0, 10) ?? "",
       expiry_date: b.expiry_date?.slice(0, 10) ?? "",
-      initial_quantity: b.initial_quantity,
+      initial_quantity: b.remaining_quantity,
       cost_price: b.cost_price,
       supplier_id: b.supplier_id ?? "",
     });
@@ -161,6 +161,11 @@ export default function BatchesTab() {
   };
 
   const save = async () => {
+    if (Number(form.initial_quantity) <= 0) {
+      toast.error("Quantity must be at least 1.");
+      return;
+    }
+
     setSaving(true);
     try {
       const payload = {
@@ -245,7 +250,7 @@ export default function BatchesTab() {
                     <Label>Quantity</Label>
                     <Input
                       type="number"
-                      min={0}
+                      min={1}
                       value={form.initial_quantity}
                       onChange={(e) =>
                         setForm({ ...form, initial_quantity: Number(e.target.value) })
@@ -298,7 +303,7 @@ export default function BatchesTab() {
                   Cancel
                 </Button>
                 <Button onClick={save} disabled={saving || !form.batch_number}>
-                  {saving ? "Saving…" : editingId ? "Save changes" : "Create batch"}
+                  {saving ? "Saving..." : editingId ? "Save changes" : "Create batch"}
                 </Button>
               </DialogFooter>
             </DialogContent>

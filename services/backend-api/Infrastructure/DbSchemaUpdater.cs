@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
 
@@ -125,6 +126,12 @@ public static class DbSchemaUpdater
             await EnsureSqliteColumnAsync(
                 dbContext,
                 "warranty_claims",
+                "IssueDescription",
+                """ALTER TABLE "warranty_claims" ADD COLUMN "IssueDescription" TEXT NULL;""",
+                cancellationToken);
+            await EnsureSqliteColumnAsync(
+                dbContext,
+                "warranty_claims",
                 "SupplierName",
                 """ALTER TABLE "warranty_claims" ADD COLUMN "SupplierName" TEXT NULL;""",
                 cancellationToken);
@@ -172,6 +179,9 @@ public static class DbSchemaUpdater
 
         if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
         {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE warranty_claims ADD COLUMN IF NOT EXISTS "IssueDescription" varchar(2000) NULL;""",
+                cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync(
                 """ALTER TABLE warranty_claims ADD COLUMN IF NOT EXISTS "SupplierName" varchar(200) NULL;""",
                 cancellationToken);
@@ -531,7 +541,25 @@ public static class DbSchemaUpdater
             return;
         }
 
-        await dbContext.Database.ExecuteSqlRawAsync(alterSql, cancellationToken);
+        try
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(alterSql, cancellationToken);
+        }
+        catch (Exception error) when (IsSqliteDuplicateColumnError(error))
+        {
+            // Another initializer path may have created this column in parallel.
+        }
+    }
+
+    private static bool IsSqliteDuplicateColumnError(Exception error)
+    {
+        if (error is not DbUpdateException and not DbException)
+        {
+            return false;
+        }
+
+        var message = error.ToString();
+        return message.Contains("duplicate column name", StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task EnsureSqliteStockPlanningSchemaAsync(
@@ -657,6 +685,7 @@ public static class DbSchemaUpdater
               "SerialNumberId" TEXT NOT NULL,
               "ClaimDate" TEXT NOT NULL,
               "Status" TEXT NOT NULL DEFAULT 'Open',
+              "IssueDescription" TEXT NULL,
               "ResolutionNotes" TEXT NULL,
               "CreatedByUserId" TEXT NULL,
               "CreatedAtUtc" TEXT NOT NULL,
@@ -788,6 +817,7 @@ public static class DbSchemaUpdater
               "SerialNumberId" uuid NOT NULL REFERENCES serial_numbers("Id") ON DELETE CASCADE,
               "ClaimDate" timestamptz NOT NULL,
               "Status" varchar(32) NOT NULL DEFAULT 'Open',
+              "IssueDescription" varchar(2000) NULL,
               "ResolutionNotes" varchar(1000) NULL,
               "CreatedByUserId" uuid NULL REFERENCES users("Id") ON DELETE SET NULL,
               "CreatedAtUtc" timestamptz NOT NULL,
@@ -1269,8 +1299,10 @@ public static class DbSchemaUpdater
                 cancellationToken);
 
             await EnsureSqliteSaleItemsSupportsBundleSchemaAsync(dbContext, cancellationToken);
+            await EnsureSqliteSerialNumbersSaleItemForeignKeyAsync(dbContext, cancellationToken);
             await EnsureSqliteStockMovementsSupportsBundleSchemaAsync(dbContext, cancellationToken);
             await EnsureSqliteRefundItemsSupportsBundleSchemaAsync(dbContext, cancellationToken);
+            await EnsureSqliteWarrantyClaimsSerialForeignKeyAsync(dbContext, cancellationToken);
 
             await dbContext.Database.ExecuteSqlRawAsync("""CREATE INDEX IF NOT EXISTS "IX_bundles_StoreId_Name" ON "bundles" ("StoreId", "Name");""", cancellationToken);
             await dbContext.Database.ExecuteSqlRawAsync("""CREATE UNIQUE INDEX IF NOT EXISTS "IX_bundles_StoreId_Barcode" ON "bundles" ("StoreId", "Barcode");""", cancellationToken);
@@ -1543,6 +1575,239 @@ public static class DbSchemaUpdater
             """;
 
         await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+    }
+
+    private static async Task EnsureSqliteSerialNumbersSaleItemForeignKeyAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var referencesLegacySaleItemsTable = await SqliteSerialNumbersReferencesLegacySaleItemsTableAsync(
+            dbContext,
+            cancellationToken);
+        if (!referencesLegacySaleItemsTable)
+        {
+            return;
+        }
+
+        const string sql = """
+            PRAGMA foreign_keys = OFF;
+            BEGIN TRANSACTION;
+
+            ALTER TABLE "serial_numbers" RENAME TO "serial_numbers__sale_item_fk_old";
+
+            CREATE TABLE "serial_numbers" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_serial_numbers" PRIMARY KEY,
+              "StoreId" TEXT NULL,
+              "ProductId" TEXT NOT NULL,
+              "SerialValue" TEXT NOT NULL,
+              "Status" TEXT NOT NULL DEFAULT 'Available',
+              "SaleId" TEXT NULL,
+              "SaleItemId" TEXT NULL,
+              "RefundId" TEXT NULL,
+              "WarrantyExpiryDate" TEXT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "UpdatedAtUtc" TEXT NULL,
+              CONSTRAINT "FK_serial_numbers_products_ProductId" FOREIGN KEY ("ProductId") REFERENCES "products" ("Id") ON DELETE CASCADE,
+              CONSTRAINT "FK_serial_numbers_sales_SaleId" FOREIGN KEY ("SaleId") REFERENCES "sales" ("Id") ON DELETE SET NULL,
+              CONSTRAINT "FK_serial_numbers_sale_items_SaleItemId" FOREIGN KEY ("SaleItemId") REFERENCES "sale_items" ("Id") ON DELETE SET NULL,
+              CONSTRAINT "FK_serial_numbers_refunds_RefundId" FOREIGN KEY ("RefundId") REFERENCES "refunds" ("Id") ON DELETE SET NULL
+            );
+
+            INSERT INTO "serial_numbers" (
+              "Id",
+              "StoreId",
+              "ProductId",
+              "SerialValue",
+              "Status",
+              "SaleId",
+              "SaleItemId",
+              "RefundId",
+              "WarrantyExpiryDate",
+              "CreatedAtUtc",
+              "UpdatedAtUtc"
+            )
+            SELECT
+              "Id",
+              "StoreId",
+              "ProductId",
+              "SerialValue",
+              "Status",
+              "SaleId",
+              "SaleItemId",
+              "RefundId",
+              "WarrantyExpiryDate",
+              "CreatedAtUtc",
+              "UpdatedAtUtc"
+            FROM "serial_numbers__sale_item_fk_old";
+
+            DROP TABLE "serial_numbers__sale_item_fk_old";
+
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_serial_numbers_StoreId_SerialValue" ON "serial_numbers" ("StoreId", "SerialValue");
+            CREATE INDEX IF NOT EXISTS "IX_serial_numbers_ProductId" ON "serial_numbers" ("ProductId");
+            CREATE INDEX IF NOT EXISTS "IX_serial_numbers_SaleId" ON "serial_numbers" ("SaleId");
+            CREATE INDEX IF NOT EXISTS "IX_serial_numbers_SaleItemId" ON "serial_numbers" ("SaleItemId");
+            CREATE INDEX IF NOT EXISTS "IX_serial_numbers_RefundId" ON "serial_numbers" ("RefundId");
+
+            COMMIT;
+            PRAGMA foreign_keys = ON;
+            """;
+
+        await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+        await EnsureSqliteWarrantyClaimsSerialForeignKeyAsync(dbContext, cancellationToken);
+    }
+
+    private static async Task<bool> SqliteSerialNumbersReferencesLegacySaleItemsTableAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var connection = dbContext.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync(cancellationToken);
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """SELECT "table", "from" FROM pragma_foreign_key_list('serial_numbers');""";
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var referencedTable = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+            var fromColumn = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+            if (string.Equals(fromColumn, "SaleItemId", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(referencedTable, "sale_items__pack_bundle_old", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static async Task EnsureSqliteWarrantyClaimsSerialForeignKeyAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var referencesLegacySerialTable = await SqliteWarrantyClaimsReferencesLegacySerialNumbersTableAsync(
+            dbContext,
+            cancellationToken);
+        if (!referencesLegacySerialTable)
+        {
+            return;
+        }
+
+        const string sql = """
+            PRAGMA foreign_keys = OFF;
+            BEGIN TRANSACTION;
+
+            ALTER TABLE "warranty_claims" RENAME TO "warranty_claims__serial_fk_old";
+
+            CREATE TABLE "warranty_claims" (
+              "Id" TEXT NOT NULL CONSTRAINT "PK_warranty_claims" PRIMARY KEY,
+              "StoreId" TEXT NULL,
+              "SerialNumberId" TEXT NOT NULL,
+              "ClaimDate" TEXT NOT NULL,
+              "Status" TEXT NOT NULL DEFAULT 'Open',
+              "IssueDescription" TEXT NULL,
+              "ResolutionNotes" TEXT NULL,
+              "CreatedByUserId" TEXT NULL,
+              "CreatedAtUtc" TEXT NOT NULL,
+              "UpdatedAtUtc" TEXT NULL,
+              "SupplierName" TEXT NULL,
+              "HandoverDate" TEXT NULL,
+              "PickupPersonName" TEXT NULL,
+              "ReceivedBackDate" TEXT NULL,
+              "ReceivedBackPersonName" TEXT NULL,
+              "ReplacementSerialNumberId" TEXT NULL,
+              "ReplacementDate" TEXT NULL,
+              CONSTRAINT "FK_warranty_claims_serial_numbers_SerialNumberId" FOREIGN KEY ("SerialNumberId") REFERENCES "serial_numbers" ("Id") ON DELETE CASCADE,
+              CONSTRAINT "FK_warranty_claims_serial_numbers_ReplacementSerialNumberId" FOREIGN KEY ("ReplacementSerialNumberId") REFERENCES "serial_numbers" ("Id") ON DELETE SET NULL,
+              CONSTRAINT "FK_warranty_claims_users_CreatedByUserId" FOREIGN KEY ("CreatedByUserId") REFERENCES "users" ("Id") ON DELETE SET NULL
+            );
+
+            INSERT INTO "warranty_claims" (
+              "Id",
+              "StoreId",
+              "SerialNumberId",
+              "ClaimDate",
+              "Status",
+              "IssueDescription",
+              "ResolutionNotes",
+              "CreatedByUserId",
+              "CreatedAtUtc",
+              "UpdatedAtUtc",
+              "SupplierName",
+              "HandoverDate",
+              "PickupPersonName",
+              "ReceivedBackDate",
+              "ReceivedBackPersonName",
+              "ReplacementSerialNumberId",
+              "ReplacementDate"
+            )
+            SELECT
+              "Id",
+              "StoreId",
+              "SerialNumberId",
+              "ClaimDate",
+              "Status",
+              "IssueDescription",
+              "ResolutionNotes",
+              "CreatedByUserId",
+              "CreatedAtUtc",
+              "UpdatedAtUtc",
+              "SupplierName",
+              "HandoverDate",
+              "PickupPersonName",
+              "ReceivedBackDate",
+              "ReceivedBackPersonName",
+              "ReplacementSerialNumberId",
+              "ReplacementDate"
+            FROM "warranty_claims__serial_fk_old";
+
+            DROP TABLE "warranty_claims__serial_fk_old";
+
+            CREATE INDEX IF NOT EXISTS "IX_warranty_claims_StoreId_Status" ON "warranty_claims" ("StoreId", "Status");
+            CREATE INDEX IF NOT EXISTS "IX_warranty_claims_SerialNumberId" ON "warranty_claims" ("SerialNumberId");
+            CREATE INDEX IF NOT EXISTS "IX_warranty_claims_ReplacementSerialNumberId" ON "warranty_claims" ("ReplacementSerialNumberId");
+
+            COMMIT;
+            PRAGMA foreign_keys = ON;
+            """;
+
+        await dbContext.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+    }
+
+    private static async Task<bool> SqliteWarrantyClaimsReferencesLegacySerialNumbersTableAsync(
+        SmartPosDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var connection = dbContext.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync(cancellationToken);
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """SELECT "table", "from" FROM pragma_foreign_key_list('warranty_claims');""";
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var referencedTable = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+            var fromColumn = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+            if (!string.Equals(referencedTable, "serial_numbers__sale_item_fk_old", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (string.Equals(fromColumn, "SerialNumberId", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(fromColumn, "ReplacementSerialNumberId", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static async Task EnsureSqliteStockMovementsSupportsBundleSchemaAsync(

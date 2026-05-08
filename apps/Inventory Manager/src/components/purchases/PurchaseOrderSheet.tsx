@@ -63,6 +63,7 @@ export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }:
     supplier?: boolean;
     poNumber?: boolean;
     lines?: boolean;
+    lineItems?: Record<number, { product?: boolean; quantity?: boolean }>;
   }>({});
   const readOnly = mode === "view";
 
@@ -105,15 +106,41 @@ export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }:
   const subtotal = lines.reduce((s, l) => s + l.quantity_ordered * l.unit_cost_estimate, 0);
 
   const addLine = () => {
-    setErrors((previous) => ({ ...previous, lines: false }));
+    setErrors((previous) => ({ ...previous, lines: false, lineItems: previous.lineItems ?? {} }));
     setLines((prev) => [
       ...prev,
       { product_id: "", product_name: "", quantity_ordered: 1, unit_cost_estimate: 0 },
     ]);
   };
 
+  const clearLineError = (idx: number, field: "product" | "quantity") => {
+    setErrors((previous) => {
+      if (!previous.lineItems || !previous.lineItems[idx]) {
+        return previous;
+      }
+
+      const nextLineItems = { ...previous.lineItems };
+      const nextLineError = { ...(nextLineItems[idx] ?? {}) };
+      delete nextLineError[field];
+
+      if (!nextLineError.product && !nextLineError.quantity) {
+        delete nextLineItems[idx];
+      } else {
+        nextLineItems[idx] = nextLineError;
+      }
+
+      return { ...previous, lineItems: nextLineItems };
+    });
+  };
+
   const updateLine = (idx: number, patch: Partial<LineItem>) => {
     setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
+    if (patch.product_id && patch.product_id.trim().length > 0) {
+      clearLineError(idx, "product");
+    }
+    if (patch.quantity_ordered != null && patch.quantity_ordered > 0) {
+      clearLineError(idx, "quantity");
+    }
   };
 
   const setLineProduct = (idx: number, productId: string) => {
@@ -137,17 +164,29 @@ export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }:
       nextErrors.lines = true;
     }
 
-    if (Object.keys(nextErrors).length > 0) {
-      setErrors(nextErrors);
-      toast.error("Supplier, PO number, and at least one line are required.");
+    const lineItems: Record<number, { product?: boolean; quantity?: boolean }> = {};
+    lines.forEach((line, idx) => {
+      const productMissing = !line.product_id;
+      const quantityInvalid = line.quantity_ordered <= 0;
+      if (productMissing || quantityInvalid) {
+        lineItems[idx] = {
+          product: productMissing || undefined,
+          quantity: quantityInvalid || undefined,
+        };
+      }
+    });
+
+    if (Object.keys(nextErrors).length > 0 || Object.keys(lineItems).length > 0) {
+      setErrors({ ...nextErrors, lineItems });
+      if (nextErrors.supplier || nextErrors.poNumber || nextErrors.lines) {
+        toast.error("Supplier, PO number, and at least one line are required.");
+      } else {
+        toast.error("Each line needs a product and a positive quantity.");
+      }
       return;
     }
 
     setErrors({});
-    if (lines.some((l) => !l.product_id || l.quantity_ordered <= 0)) {
-      toast.error("Each line needs a product and a positive quantity.");
-      return;
-    }
     setSaving(true);
     try {
       if (mode === "create") {
@@ -311,7 +350,12 @@ export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }:
                         l.product_name
                       ) : (
                         <Select value={l.product_id} onValueChange={(v) => setLineProduct(idx, v)}>
-                          <SelectTrigger>
+                          <SelectTrigger
+                            className={cn(
+                              errors.lineItems?.[idx]?.product &&
+                                "border-red-500 ring-1 ring-red-500",
+                            )}
+                          >
                             <SelectValue placeholder="Select product" />
                           </SelectTrigger>
                           <SelectContent>
@@ -332,6 +376,9 @@ export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }:
                         onChange={(e) =>
                           updateLine(idx, { quantity_ordered: Number(e.target.value) || 0 })
                         }
+                        className={cn(
+                          errors.lineItems?.[idx]?.quantity && "border-red-500 ring-1 ring-red-500",
+                        )}
                         disabled={readOnly}
                       />
                     </TableCell>
@@ -355,7 +402,24 @@ export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }:
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={() => setLines(lines.filter((_, i) => i !== idx))}
+                          onClick={() => {
+                            setLines(lines.filter((_, i) => i !== idx));
+                            setErrors((previous) => {
+                              if (!previous.lineItems) {
+                                return previous;
+                              }
+
+                              const nextLineItems = Object.fromEntries(
+                                Object.entries(previous.lineItems)
+                                  .filter(([key]) => Number(key) !== idx)
+                                  .map(([key, value]) => {
+                                    const numeric = Number(key);
+                                    return [numeric > idx ? numeric - 1 : numeric, value];
+                                  }),
+                              ) as Record<number, { product?: boolean; quantity?: boolean }>;
+                              return { ...previous, lineItems: nextLineItems };
+                            });
+                          }}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>

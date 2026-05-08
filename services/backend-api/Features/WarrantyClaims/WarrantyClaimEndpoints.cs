@@ -73,6 +73,7 @@ public static class WarrantyClaimEndpoints
                         replacement_date = x.ReplacementDate,
                         claim_date = x.ClaimDate,
                         status = x.Status,
+                        issue_description = x.IssueDescription,
                         resolution_notes = x.ResolutionNotes,
                         supplier_name = x.SupplierName,
                         handover_date = x.HandoverDate,
@@ -113,6 +114,7 @@ public static class WarrantyClaimEndpoints
                         replacement_date = x.ReplacementDate,
                         claim_date = x.ClaimDate,
                         status = x.Status,
+                        issue_description = x.IssueDescription,
                         resolution_notes = x.ResolutionNotes,
                         supplier_name = x.SupplierName,
                         handover_date = x.HandoverDate,
@@ -151,6 +153,27 @@ public static class WarrantyClaimEndpoints
                 return Results.BadRequest(new { message = "Warranty claims can only be created for sold or under-warranty serials." });
             }
 
+            if (serial.WarrantyExpiryDate.HasValue && serial.WarrantyExpiryDate.Value < DateTimeOffset.UtcNow)
+            {
+                return Results.BadRequest(new { message = "Warranty has expired for this serial number." });
+            }
+
+            var issueDescription = NormalizeOptional(request.IssueDescription);
+            if (string.IsNullOrWhiteSpace(issueDescription))
+            {
+                return Results.BadRequest(new { message = "issue_description is required." });
+            }
+
+            var hasActiveClaim = await dbContext.WarrantyClaims.AnyAsync(
+                x => x.SerialNumberId == serial.Id &&
+                     x.StoreId == serial.StoreId &&
+                     (x.Status == WarrantyClaimStatus.Open || x.Status == WarrantyClaimStatus.InRepair),
+                cancellationToken);
+            if (hasActiveClaim)
+            {
+                return Results.BadRequest(new { message = "An active warranty claim already exists for this serial number." });
+            }
+
             var now = DateTimeOffset.UtcNow;
             var claim = new WarrantyClaim
             {
@@ -158,6 +181,7 @@ public static class WarrantyClaimEndpoints
                 SerialNumberId = serial.Id,
                 ClaimDate = request.ClaimDate ?? now,
                 Status = WarrantyClaimStatus.Open,
+                IssueDescription = issueDescription,
                 ResolutionNotes = request.ResolutionNotes,
                 CreatedByUserId = request.CreatedByUserId,
                 CreatedAtUtc = now,
@@ -212,6 +236,7 @@ public static class WarrantyClaimEndpoints
                 replacement_date = claim.ReplacementDate,
                 claim_date = claim.ClaimDate,
                 status = claim.Status,
+                issue_description = claim.IssueDescription,
                 resolution_notes = claim.ResolutionNotes,
                 supplier_name = claim.SupplierName,
                 handover_date = claim.HandoverDate,
@@ -255,6 +280,14 @@ public static class WarrantyClaimEndpoints
             var isTransitionToResolved =
                 claim.Status != WarrantyClaimStatus.Resolved &&
                 request.Status == WarrantyClaimStatus.Resolved;
+            var isTransitionToRejected =
+                claim.Status != WarrantyClaimStatus.Rejected &&
+                request.Status == WarrantyClaimStatus.Rejected;
+
+            if (isTransitionToRejected && string.IsNullOrWhiteSpace(request.ResolutionNotes))
+            {
+                return Results.BadRequest(new { message = "resolution_notes is required when rejecting a warranty claim." });
+            }
 
             claim.Status = request.Status;
             if (request.ResolutionNotes is not null)
@@ -473,6 +506,7 @@ public static class WarrantyClaimEndpoints
             replacement_date = claim.ReplacementDate,
             claim_date = claim.ClaimDate,
             status = claim.Status,
+            issue_description = claim.IssueDescription,
             resolution_notes = claim.ResolutionNotes,
             supplier_name = claim.SupplierName,
             handover_date = claim.HandoverDate,
@@ -490,6 +524,16 @@ public static class WarrantyClaimEndpoints
         var value = user.FindFirstValue(ClaimTypes.NameIdentifier) ?? user.FindFirstValue("sub");
         return Guid.TryParse(value, out var parsed) ? parsed : null;
     }
+
+    private static string? NormalizeOptional(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return value.Trim();
+    }
 }
 
 public sealed class CreateWarrantyClaimRequest
@@ -500,6 +544,9 @@ public sealed class CreateWarrantyClaimRequest
     [JsonPropertyName("claim_date")]
     [JsonConverter(typeof(FlexibleNullableDateTimeOffsetJsonConverter))]
     public DateTimeOffset? ClaimDate { get; set; }
+
+    [JsonPropertyName("issue_description")]
+    public string? IssueDescription { get; set; }
 
     [JsonPropertyName("resolution_notes")]
     public string? ResolutionNotes { get; set; }

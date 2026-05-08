@@ -249,12 +249,28 @@ export type SerialNumberRecord = {
 };
 
 export type SerialLookupResult = {
+  serial_id: string;
   serial_value: string;
   product_id: string;
   product_name: string;
   status: string;
+  sale_id?: string;
+  sale_item_id?: string;
+  refund_id?: string;
   sale_date?: string;
   warranty_expiry_date?: string;
+  created_at?: string;
+  updated_at?: string;
+  product?: Product;
+};
+
+export type SerialHistoryEvent = {
+  event_type: string;
+  at: string;
+  title: string;
+  description?: string;
+  claim_id?: string;
+  claim_status?: string;
 };
 
 export type ProductBatch = {
@@ -310,6 +326,7 @@ export type WarrantyClaim = {
   product_id: string;
   serial_value: string;
   product_name: string;
+  issue_description?: string;
   replacement_serial_number_id?: string;
   replacement_serial_value?: string;
   replacement_date?: string;
@@ -320,6 +337,7 @@ export type WarrantyClaim = {
   handover_date?: string;
   pickup_person_name?: string;
   received_back_date?: string;
+  received_back_person_name?: string;
   created_at: string;
   updated_at?: string;
 };
@@ -481,12 +499,43 @@ type BackendStockMovementPage = {
 };
 
 type BackendSerialLookupResult = {
-  serial_value: string;
-  product_id: string;
-  product_name: string;
-  status: string;
-  sale_date?: string | null;
-  warranty_expiry_date?: string | null;
+  serial: {
+    id: string;
+    product_id: string;
+    serial_value: string;
+    status: string;
+    sale_id?: string | null;
+    sale_item_id?: string | null;
+    refund_id?: string | null;
+    warranty_expiry_date?: string | null;
+    created_at?: string | null;
+    updated_at?: string | null;
+  };
+  product: {
+    id: string;
+    name: string;
+    sku?: string | null;
+    barcode?: string | null;
+    image_url?: string | null;
+    category_id?: string | null;
+    category_name?: string | null;
+    brand_id?: string | null;
+    brand_name?: string | null;
+    unit_price: number;
+    stock_quantity: number;
+    is_low_stock?: boolean;
+    permanent_discount_percent?: number | null;
+    permanent_discount_fixed?: number | null;
+    active_promotion_discount_type?: "percent" | "fixed" | null;
+    active_promotion_discount_value?: number | null;
+    warranty_months?: number | null;
+    is_serial_tracked?: boolean;
+  };
+  sale?: {
+    id: string;
+    sale_number: string;
+    completed_at?: string | null;
+  } | null;
 };
 
 type BackendProductBatch = {
@@ -533,6 +582,7 @@ type BackendWarrantyClaim = {
   product_id: string;
   serial_value: string;
   product_name: string;
+  issue_description?: string | null;
   replacement_serial_number_id?: string | null;
   replacement_serial_value?: string | null;
   replacement_date?: string | null;
@@ -543,6 +593,7 @@ type BackendWarrantyClaim = {
   handover_date?: string | null;
   pickup_person_name?: string | null;
   received_back_date?: string | null;
+  received_back_person_name?: string | null;
   created_at: string;
   updated_at?: string | null;
 };
@@ -1034,6 +1085,30 @@ function mapBatch(item: BackendProductBatch): ProductBatch {
   };
 }
 
+function mapSerialLookupProduct(item: BackendSerialLookupResult["product"]): Product {
+  return {
+    id: item.id,
+    name: item.name,
+    sku: item.sku ?? item.id.slice(0, 8),
+    barcode: item.barcode ?? undefined,
+    image_url: item.image_url ?? null,
+    category_id: item.category_id ?? null,
+    category_name: item.category_name ?? null,
+    brand_id: item.brand_id ?? null,
+    brand_name: item.brand_name ?? null,
+    price: Number(item.unit_price),
+    unit_price: Number(item.unit_price),
+    stock: Number(item.stock_quantity),
+    stock_quantity: Number(item.stock_quantity),
+    is_low_stock: item.is_low_stock ?? false,
+    is_serial_tracked: item.is_serial_tracked ?? false,
+    permanent_discount_percent: item.permanent_discount_percent ?? null,
+    permanent_discount_fixed: item.permanent_discount_fixed ?? null,
+    warranty_months: item.warranty_months ?? undefined,
+    is_active: true,
+  };
+}
+
 function mapStocktakeSession(item: BackendStocktakeSession): StocktakeSession {
   const items = item.items ?? [];
   return {
@@ -1079,6 +1154,7 @@ function mapWarrantyClaim(item: BackendWarrantyClaim): WarrantyClaim {
     product_id: item.product_id,
     serial_value: item.serial_value,
     product_name: item.product_name,
+    issue_description: item.issue_description ?? undefined,
     replacement_serial_number_id: item.replacement_serial_number_id ?? undefined,
     replacement_serial_value: item.replacement_serial_value ?? undefined,
     replacement_date: item.replacement_date ?? undefined,
@@ -1089,6 +1165,7 @@ function mapWarrantyClaim(item: BackendWarrantyClaim): WarrantyClaim {
     handover_date: item.handover_date ?? undefined,
     pickup_person_name: item.pickup_person_name ?? undefined,
     received_back_date: item.received_back_date ?? undefined,
+    received_back_person_name: item.received_back_person_name ?? undefined,
     created_at: item.created_at,
     updated_at: item.updated_at ?? undefined,
   };
@@ -1756,14 +1833,31 @@ export async function lookupSerial(serialValue: string): Promise<SerialLookupRes
   const response = await requestJson<BackendSerialLookupResult>(
     `/api/serials/lookup${buildQuery({ serial: serialValue })}`,
   );
+  const product = mapSerialLookupProduct(response.product);
+
   return {
-    serial_value: response.serial_value,
-    product_id: response.product_id,
-    product_name: response.product_name,
-    status: response.status,
-    sale_date: response.sale_date ?? undefined,
-    warranty_expiry_date: response.warranty_expiry_date ?? undefined,
+    serial_id: response.serial.id,
+    serial_value: response.serial.serial_value,
+    product_id: response.product.id,
+    product_name: response.product.name,
+    status: response.serial.status,
+    sale_id: response.serial.sale_id ?? undefined,
+    sale_item_id: response.serial.sale_item_id ?? undefined,
+    refund_id: response.serial.refund_id ?? undefined,
+    sale_date: response.sale?.completed_at ?? undefined,
+    warranty_expiry_date: response.serial.warranty_expiry_date ?? undefined,
+    created_at: response.serial.created_at ?? undefined,
+    updated_at: response.serial.updated_at ?? undefined,
+    product,
   };
+}
+
+export async function fetchSerialHistory(serialId: string): Promise<SerialHistoryEvent[]> {
+  const response = await safeRequestJson<{ items: SerialHistoryEvent[] }>(
+    `/api/serials/${serialId}/history`,
+    { items: [] },
+  );
+  return response.items;
 }
 
 // ---------- Batches ----------
@@ -1928,6 +2022,7 @@ export async function fetchWarrantyClaims(
 
 export async function createWarrantyClaim(data: {
   serial_number_id: string;
+  issue_description: string;
   claim_date?: string;
   resolution_notes?: string;
 }): Promise<WarrantyClaim> {
