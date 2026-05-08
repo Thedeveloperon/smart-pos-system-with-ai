@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Features.Inventory;
+using SmartPos.Backend.Features.Promotions;
 using SmartPos.Backend.Infrastructure;
 using SmartPos.Backend.Security;
 
@@ -12,7 +13,8 @@ public sealed class ProductService(
     SmartPosDbContext dbContext,
     AuditLogService auditLogService,
     StockMovementHelper stockMovementHelper,
-    IHttpContextAccessor httpContextAccessor)
+    IHttpContextAccessor httpContextAccessor,
+    PromotionService promotionService)
 {
     private const decimal DefaultLowStockThreshold = 5m;
     private const int MaxBarcodeGenerationAttempts = 40;
@@ -87,12 +89,18 @@ public sealed class ProductService(
             })
             .ToListAsync(cancellationToken);
 
+        var activePromotionDiscounts = await promotionService.GetActivePromotionDiscountsAsync(
+            items.Select(item => (item.Id, item.CategoryId)).ToList(),
+            DateTimeOffset.UtcNow,
+            cancellationToken);
+
         return new ProductSearchResponse
         {
             Items = items.Select(item =>
             {
                 var stockQuantity = RoundQuantity(item.StockQuantity);
                 var alertLevel = RoundQuantity(Math.Max(RoundQuantity(item.ReorderLevel), DefaultLowStockThreshold));
+                activePromotionDiscounts.TryGetValue(item.Id, out var promotionDiscount);
                 return new ProductSearchItem
                 {
                     Id = item.Id,
@@ -114,7 +122,9 @@ public sealed class ProductService(
                     HasPackOption = item.HasPackOption,
                     PackSize = item.PackSize,
                     PackPrice = item.PackPrice,
-                    PackLabel = item.PackLabel
+                    PackLabel = item.PackLabel,
+                    ActivePromotionDiscountType = promotionDiscount?.ValueType.ToString().ToLowerInvariant(),
+                    ActivePromotionDiscountValue = promotionDiscount?.Value
                 };
             }).ToList()
         };

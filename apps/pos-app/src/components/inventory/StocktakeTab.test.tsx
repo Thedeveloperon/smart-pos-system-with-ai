@@ -116,7 +116,9 @@ describe("StocktakeTab", () => {
     });
 
     await waitFor(() => {
-      expect(completeStocktakeSession).toHaveBeenCalledWith("session-1");
+      expect(completeStocktakeSession).toHaveBeenCalledWith("session-1", {
+        serial_reconciliations: [],
+      });
     });
   });
 

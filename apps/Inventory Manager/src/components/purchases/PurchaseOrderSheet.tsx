@@ -22,6 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 import { fetchProducts, fetchSuppliers, type Product, type Supplier } from "@/lib/api";
 import { createPurchaseOrder, updatePurchaseOrder, type PurchaseOrder } from "@/lib/purchases";
 import { fmtCurrency, todayIso } from "./utils";
@@ -58,6 +59,11 @@ export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }:
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState<{
+    supplier?: boolean;
+    poNumber?: boolean;
+    lines?: boolean;
+  }>({});
   const readOnly = mode === "view";
 
   useEffect(() => {
@@ -84,6 +90,7 @@ export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }:
           unit_cost_estimate: l.unit_cost_estimate,
         })),
       );
+      setErrors({});
     } else {
       setSupplierId("");
       setPoNumber(`PO-${Date.now().toString().slice(-6)}`);
@@ -91,12 +98,14 @@ export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }:
       setExpectedDelivery("");
       setNotes("");
       setLines([]);
+      setErrors({});
     }
   }, [open, po, mode]);
 
   const subtotal = lines.reduce((s, l) => s + l.quantity_ordered * l.unit_cost_estimate, 0);
 
   const addLine = () => {
+    setErrors((previous) => ({ ...previous, lines: false }));
     setLines((prev) => [
       ...prev,
       { product_id: "", product_name: "", quantity_ordered: 1, unit_cost_estimate: 0 },
@@ -117,10 +126,24 @@ export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }:
   };
 
   const handleSave = async () => {
-    if (!supplierId || !poNumber || lines.length === 0) {
+    const nextErrors: typeof errors = {};
+    if (!supplierId) {
+      nextErrors.supplier = true;
+    }
+    if (!poNumber.trim()) {
+      nextErrors.poNumber = true;
+    }
+    if (lines.length === 0) {
+      nextErrors.lines = true;
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      setErrors(nextErrors);
       toast.error("Supplier, PO number, and at least one line are required.");
       return;
     }
+
+    setErrors({});
     if (lines.some((l) => !l.product_id || l.quantity_ordered <= 0)) {
       toast.error("Each line needs a product and a positive quantity.");
       return;
@@ -182,8 +205,18 @@ export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }:
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Supplier</Label>
-              <Select value={supplierId} onValueChange={setSupplierId} disabled={readOnly}>
-                <SelectTrigger>
+              <Select
+                value={supplierId}
+                onValueChange={(value) => {
+                  setSupplierId(value);
+                  setErrors((previous) => ({ ...previous, supplier: false }));
+                }}
+                disabled={readOnly}
+              >
+                <SelectTrigger
+                  data-invalid={errors.supplier ? "true" : undefined}
+                  className="data-[invalid=true]:ring-1 data-[invalid=true]:ring-red-500 data-[invalid=true]:border-red-500"
+                >
                   <SelectValue placeholder="Select supplier" />
                 </SelectTrigger>
                 <SelectContent>
@@ -199,7 +232,13 @@ export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }:
               <Label>PO Number</Label>
               <Input
                 value={poNumber}
-                onChange={(e) => setPoNumber(e.target.value)}
+                onChange={(e) => {
+                  setPoNumber(e.target.value);
+                  if (e.target.value.trim().length > 0) {
+                    setErrors((previous) => ({ ...previous, poNumber: false }));
+                  }
+                }}
+                className={cn(errors.poNumber && "border-red-500 ring-1 ring-red-500")}
                 disabled={readOnly}
               />
             </div>
@@ -327,6 +366,9 @@ export default function PurchaseOrderSheet({ open, mode, po, onClose, onSaved }:
               )}
             </TableBody>
           </Table>
+          {errors.lines ? (
+            <p className="text-sm text-red-600">At least one line item is required.</p>
+          ) : null}
 
           {readOnly && po && po.bills.length > 0 && (
             <>

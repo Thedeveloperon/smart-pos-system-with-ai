@@ -45,6 +45,17 @@ const resolveCatalogDiscount = (item: CartItem, lineGross: number) => {
     return 0;
   }
 
+  const promoType = item.product.activePromotionDiscountType ?? item.product.active_promotion_discount_type;
+  const promoValue = item.product.activePromotionDiscountValue ?? item.product.active_promotion_discount_value;
+  if (promoType && typeof promoValue === "number" && promoValue > 0) {
+    if (promoType === "fixed") {
+      return roundMoney(clamp(promoValue, 0, lineGross));
+    }
+    if (promoType === "percent") {
+      return roundMoney(clamp(lineGross * (promoValue / 100), 0, lineGross));
+    }
+  }
+
   const fixed = item.product.permanentDiscountFixed;
   const percent = item.product.permanentDiscountPercent;
   if (typeof fixed === "number" && fixed > 0) {

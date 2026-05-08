@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
 using SmartPos.Backend.Features.Inventory;
 using SmartPos.Backend.Features.Products;
+using SmartPos.Backend.Features.Promotions;
 using SmartPos.Backend.Infrastructure;
 using SmartPos.Backend.Security;
 
@@ -55,7 +56,13 @@ public sealed class ProductServiceTests
         var httpContextAccessor = new HttpContextAccessor();
         var auditLogService = new AuditLogService(dbContext, httpContextAccessor);
         var stockMovementHelper = new StockMovementHelper(dbContext);
-        var productService = new ProductService(dbContext, auditLogService, stockMovementHelper, httpContextAccessor);
+        var promotionService = new PromotionService(dbContext, httpContextAccessor);
+        var productService = new ProductService(
+            dbContext,
+            auditLogService,
+            stockMovementHelper,
+            httpContextAccessor,
+            promotionService);
 
         var result = await productService.UpdateProductAsync(
             product.Id,

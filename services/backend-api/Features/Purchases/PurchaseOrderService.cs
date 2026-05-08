@@ -496,6 +496,18 @@ public sealed class PurchaseOrderService(
         }
 
         var invoiceNumber = NormalizeRequired(request.InvoiceNumber, "invoice_number is required.");
+        var duplicateInvoice = await dbContext.PurchaseBills
+            .AsNoTracking()
+            .AnyAsync(x =>
+                    x.SupplierId == order.SupplierId &&
+                    x.InvoiceNumber.ToLower() == invoiceNumber.ToLower() &&
+                    (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value),
+                cancellationToken);
+        if (duplicateInvoice)
+        {
+            throw new InvalidOperationException("A purchase bill with this supplier and invoice number already exists.");
+        }
+
         var now = DateTimeOffset.UtcNow;
         var subtotal = RoundMoney(normalizedLines.Sum(x => x.LineTotal));
 

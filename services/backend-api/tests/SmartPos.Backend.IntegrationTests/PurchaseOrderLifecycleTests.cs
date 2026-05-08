@@ -551,4 +551,91 @@ public sealed class PurchaseOrderLifecycleTests(CustomWebApplicationFactory fact
         Assert.Equal(HttpStatusCode.BadRequest, reverseResponse.StatusCode);
         Assert.Contains("serial-tracked product", reverseBody, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task ReceivePurchaseOrder_ShouldRejectDuplicateSupplierInvoiceNumber()
+    {
+        await TestAuth.SignInAsOwnerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+        var supplier = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/suppliers", new
+            {
+                name = $"PO Duplicate Invoice Supplier {runId}",
+                is_active = true,
+                brand_ids = Array.Empty<Guid>()
+            }));
+        var supplierId = Guid.Parse(TestJson.GetString(supplier, "supplier_id"));
+
+        var product = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"PO Duplicate Invoice Product {runId}",
+                sku = $"PO-DUP-INV-{runId}",
+                unit_price = 500m,
+                cost_price = 420m,
+                initial_stock_quantity = 0m,
+                allow_negative_stock = false,
+                is_active = true
+            }));
+        var productId = Guid.Parse(TestJson.GetString(product, "product_id"));
+
+        var purchaseOrder = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/purchase-orders", new
+            {
+                supplier_id = supplierId,
+                po_number = $"PO-DUP-INV-{runId}",
+                lines = new[]
+                {
+                    new
+                    {
+                        product_id = productId,
+                        quantity_ordered = 4m,
+                        unit_cost_estimate = 410m
+                    }
+                }
+            }));
+        var purchaseOrderId = Guid.Parse(TestJson.GetString(purchaseOrder, "id"));
+
+        var invoiceNumber = $"INV-DUP-{runId}";
+        await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync($"/api/purchase-orders/{purchaseOrderId}/receive", new
+            {
+                invoice_number = invoiceNumber,
+                invoice_date = DateTimeOffset.UtcNow,
+                update_cost_price = false,
+                lines = new[]
+                {
+                    new
+                    {
+                        product_id = productId,
+                        quantity_received = 2m,
+                        unit_cost = 410m
+                    }
+                }
+            }));
+
+        var duplicateResponse = await client.PostAsJsonAsync($"/api/purchase-orders/{purchaseOrderId}/receive", new
+        {
+            invoice_number = invoiceNumber,
+            invoice_date = DateTimeOffset.UtcNow,
+            update_cost_price = false,
+            lines = new[]
+            {
+                new
+                {
+                    product_id = productId,
+                    quantity_received = 1m,
+                    unit_cost = 410m
+                }
+            }
+        });
+        var duplicateBody = await duplicateResponse.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.BadRequest, duplicateResponse.StatusCode);
+        Assert.Contains(
+            "A purchase bill with this supplier and invoice number already exists.",
+            duplicateBody,
+            StringComparison.Ordinal);
+    }
 }
