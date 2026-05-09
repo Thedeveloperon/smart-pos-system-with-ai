@@ -4147,6 +4147,20 @@ export async function updateSupplier(supplierId: string, requestBody: CreateSupp
   return mapSupplier(response);
 }
 
+export async function updateSupplierStatus(supplierId: string, isActive: boolean) {
+  const response = await request<BackendSupplierItem>(
+    `/api/suppliers/${encodeURIComponent(supplierId)}/status`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        is_active: isActive,
+      }),
+    },
+  );
+
+  return mapSupplier(response);
+}
+
 export async function hardDeleteSupplier(supplierId: string) {
   return request<void>(`/api/suppliers/${encodeURIComponent(supplierId)}/hard-delete`, {
     method: "DELETE",
