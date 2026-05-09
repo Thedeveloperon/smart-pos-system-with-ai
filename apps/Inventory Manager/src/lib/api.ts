@@ -1577,6 +1577,19 @@ export async function updateSupplier(
   return mapSupplier(response);
 }
 
+export async function updateSupplierStatus(
+  supplierId: string,
+  isActive: boolean,
+): Promise<Supplier> {
+  const response = await requestJson<BackendSupplierItem>(`/api/suppliers/${supplierId}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      is_active: isActive,
+    }),
+  });
+  return mapSupplier(response);
+}
+
 export async function hardDeleteSupplier(supplierId: string): Promise<void> {
   await requestJson<void>(`/api/suppliers/${supplierId}/hard-delete`, {
     method: "DELETE",

@@ -192,6 +192,12 @@ public sealed class UpsertSupplierRequest
     public List<Guid> BrandIds { get; set; } = [];
 }
 
+public sealed class UpdateSupplierStatusRequest
+{
+    [JsonPropertyName("is_active")]
+    public bool IsActive { get; set; }
+}
+
 public sealed class ProductSupplierListResponse
 {
     [JsonPropertyName("items")]
