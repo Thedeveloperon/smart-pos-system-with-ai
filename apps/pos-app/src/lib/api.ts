@@ -799,6 +799,7 @@ export type WarrantyClaim = {
   product_id: string;
   serial_value: string;
   product_name: string;
+  issue_description?: string;
   replacement_serial_number_id?: string;
   replacement_serial_value?: string;
   replacement_date?: string;
@@ -4355,6 +4356,7 @@ type BackendWarrantyClaim = {
   product_id: string;
   serial_value: string;
   product_name: string;
+  issue_description?: string | null;
   replacement_serial_number_id?: string | null;
   replacement_serial_value?: string | null;
   replacement_date?: string | null;
@@ -4507,6 +4509,7 @@ function mapWarrantyClaim(item: BackendWarrantyClaim): WarrantyClaim {
     product_id: item.product_id,
     serial_value: item.serial_value,
     product_name: item.product_name,
+    issue_description: item.issue_description ?? undefined,
     replacement_serial_number_id: item.replacement_serial_number_id ?? undefined,
     replacement_serial_value: item.replacement_serial_value ?? undefined,
     replacement_date: item.replacement_date ?? undefined,
@@ -4771,8 +4774,8 @@ export async function fetchWarrantyClaims(
 
 export async function createWarrantyClaim(data: {
   serial_number_id: string;
+  issue_description: string;
   claim_date?: string;
-  resolution_notes?: string;
 }): Promise<WarrantyClaim> {
   const response = await request<BackendWarrantyClaim>("/api/warranty-claims", {
     method: "POST",
