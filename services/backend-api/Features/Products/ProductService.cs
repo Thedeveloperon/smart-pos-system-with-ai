@@ -30,6 +30,7 @@ public sealed class ProductService(
     private const string SupplierDeleteRequiresDeactivateMessage = "Deactivate the supplier before deleting.";
     private const string SupplierDeleteOnlyInactiveMessage = "Only inactive suppliers can be permanently deleted.";
     private const string SupplierDeleteProductLinksMessage = "This supplier has product links and cannot be permanently deleted.";
+    private const string SupplierDeletePurchaseOrderHistoryMessage = "This supplier has purchase order history and cannot be permanently deleted.";
     private const string SupplierDeletePurchaseHistoryMessage = "This supplier has purchase history and cannot be permanently deleted.";
     private const string SupplierDeleteBatchHistoryMessage = "This supplier has batch history and cannot be permanently deleted.";
 
@@ -1406,12 +1407,15 @@ public sealed class ProductService(
                 LinkedProductCount = x.ProductSuppliers.Count(y => y.IsActive),
                 CanDelete = !x.IsActive &&
                             !x.ProductSuppliers.Any() &&
+                            !x.PurchaseOrders.Any() &&
                             !x.PurchaseBills.Any() &&
                             !x.ProductBatches.Any(),
                 DeleteBlockReason = x.IsActive
                     ? SupplierDeleteRequiresDeactivateMessage
                     : x.ProductSuppliers.Any()
                         ? SupplierDeleteProductLinksMessage
+                        : x.PurchaseOrders.Any()
+                            ? SupplierDeletePurchaseOrderHistoryMessage
                         : x.PurchaseBills.Any()
                             ? SupplierDeletePurchaseHistoryMessage
                             : x.ProductBatches.Any()
@@ -2340,6 +2344,14 @@ public sealed class ProductService(
         if (hasPurchaseHistory)
         {
             return new SupplierDeleteAvailability(false, SupplierDeletePurchaseHistoryMessage);
+        }
+
+        var hasPurchaseOrderHistory = await dbContext.PurchaseOrders
+            .AsNoTracking()
+            .AnyAsync(x => x.SupplierId == supplierId, cancellationToken);
+        if (hasPurchaseOrderHistory)
+        {
+            return new SupplierDeleteAvailability(false, SupplierDeletePurchaseOrderHistoryMessage);
         }
 
         var hasBatchHistory = await dbContext.ProductBatches
