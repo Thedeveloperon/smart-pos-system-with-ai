@@ -295,6 +295,74 @@ public sealed class StockPlanningTests(CustomWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task SupplierHardDelete_ShouldRejectSupplierWithPurchaseOrders()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+
+        var supplier = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/suppliers", new
+            {
+                name = $"PO Linked Supplier {runId}",
+                is_active = true,
+                brand_ids = Array.Empty<Guid>()
+            }));
+        var supplierId = Guid.Parse(TestJson.GetString(supplier, "supplier_id"));
+
+        var product = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"PO Linked Product {runId}",
+                sku = $"PO-LINK-{runId}",
+                barcode = (string?)null,
+                category_id = (Guid?)null,
+                brand_id = (Guid?)null,
+                unit_price = 100m,
+                cost_price = 60m,
+                initial_stock_quantity = 2m,
+                reorder_level = 1m,
+                safety_stock = 0m,
+                target_stock_level = 4m,
+                allow_negative_stock = false,
+                is_active = true
+            }));
+        var productId = Guid.Parse(TestJson.GetString(product, "product_id"));
+
+        var createPurchaseOrderResponse = await client.PostAsJsonAsync("/api/purchase-orders", new
+        {
+            supplier_id = supplierId,
+            po_number = $"PO-LINK-{runId}",
+            po_date = DateTimeOffset.UtcNow,
+            lines = new[]
+            {
+                new
+                {
+                    product_id = productId,
+                    quantity_ordered = 3m,
+                    unit_cost_estimate = 60m
+                }
+            }
+        });
+        Assert.Equal(HttpStatusCode.OK, createPurchaseOrderResponse.StatusCode);
+
+        var deactivateResponse = await client.PatchAsJsonAsync($"/api/suppliers/{supplierId}/status", new
+        {
+            is_active = false
+        });
+        Assert.Equal(HttpStatusCode.OK, deactivateResponse.StatusCode);
+
+        var hardDeleteResponse = await client.DeleteAsync($"/api/suppliers/{supplierId}/hard-delete");
+        Assert.Equal(HttpStatusCode.BadRequest, hardDeleteResponse.StatusCode);
+
+        var errorPayload = JsonNode.Parse(await hardDeleteResponse.Content.ReadAsStringAsync())?.AsObject()
+                           ?? throw new InvalidOperationException("Response body was empty.");
+        Assert.Equal(
+            "This supplier has purchase order history and cannot be permanently deleted.",
+            TestJson.GetString(errorPayload, "message"));
+    }
+
+    [Fact]
     public async Task BrandHardDelete_ShouldRemoveInactiveBrandWithoutLinkedProducts()
     {
         await TestAuth.SignInAsManagerAsync(client);
