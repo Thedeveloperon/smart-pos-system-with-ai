@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Net.Mail;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
@@ -481,6 +482,7 @@ public sealed class ProductService(
 
         ValidateMoneyValue(request.UnitPrice, "Unit price cannot be negative.");
         ValidateMoneyValue(request.CostPrice, "Cost price cannot be negative.");
+        EnsureCostPriceNotAboveUnitPrice(request.CostPrice, request.UnitPrice);
         ValidateQuantityValue(request.InitialStockQuantity, "Initial stock cannot be negative.");
         ValidateQuantityValue(request.ReorderLevel, "Reorder level cannot be negative.");
         ValidateQuantityValue(request.SafetyStock, "Safety stock cannot be negative.");
@@ -503,6 +505,7 @@ public sealed class ProductService(
         await EnsureUniqueSkuAsync(normalizedSku, null, currentStoreId, cancellationToken);
         await EnsureCategoryExistsIfProvidedAsync(request.CategoryId, null, currentStoreId, cancellationToken);
         await EnsureBrandExistsIfProvidedAsync(request.BrandId, null, currentStoreId, cancellationToken);
+        var currentUserId = GetCurrentUserId();
 
         var now = DateTimeOffset.UtcNow;
         var product = new Product
@@ -591,7 +594,7 @@ public sealed class ProductService(
                 batchId: null,
                 serialNumber: null,
                 reason: "initial_stock",
-                userId: null,
+                userId: currentUserId,
                 cancellationToken: cancellationToken,
                 quantityBeforeOverride: 0m,
                 updateInventory: false);
@@ -628,6 +631,7 @@ public sealed class ProductService(
 
         ValidateMoneyValue(request.UnitPrice, "Unit price cannot be negative.");
         ValidateMoneyValue(request.CostPrice, "Cost price cannot be negative.");
+        EnsureCostPriceNotAboveUnitPrice(request.CostPrice, request.UnitPrice);
         ValidateQuantityValue(request.InitialStockQuantity, "Initial stock cannot be negative.");
         ValidateQuantityValue(request.ReorderLevel, "Reorder level cannot be negative.");
         ValidateQuantityValue(request.SafetyStock, "Safety stock cannot be negative.");
@@ -897,6 +901,7 @@ public sealed class ProductService(
         CancellationToken cancellationToken)
     {
         var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
+        var currentUserId = GetCurrentUserId();
         if (request.DeltaQuantity == 0m)
         {
             throw new InvalidOperationException("Delta quantity cannot be zero.");
@@ -976,7 +981,7 @@ public sealed class ProductService(
             batchId: request.BatchId,
             serialNumber: null,
             reason,
-            userId: null,
+            userId: currentUserId,
             cancellationToken);
 
         if (request.BatchId.HasValue && product.IsBatchTracked)
@@ -1384,6 +1389,7 @@ public sealed class ProductService(
                 SupplierId = x.Id,
                 Name = x.Name,
                 Phone = x.Phone,
+                Email = x.Email,
                 CompanyName = x.CompanyName,
                 CompanyPhone = x.CompanyPhone,
                 Address = x.Address,
@@ -1425,6 +1431,7 @@ public sealed class ProductService(
     {
         var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
         var normalizedName = NormalizeRequired(request.Name, "Supplier name is required.");
+        var normalizedEmail = NormalizeOptionalEmail(request.Email);
         var brandIds = NormalizeBrandIds(request.BrandIds ?? []);
         await EnsureUniqueSupplierNameAsync(normalizedName, null, currentStoreId, cancellationToken);
         await ValidateBrandIdsAsync(brandIds, currentStoreId, cancellationToken);
@@ -1435,6 +1442,7 @@ public sealed class ProductService(
             StoreId = currentStoreId,
             Name = normalizedName,
             Phone = NormalizeOptional(request.Phone),
+            Email = normalizedEmail,
             CompanyName = NormalizeOptional(request.CompanyName),
             CompanyPhone = NormalizeOptional(request.CompanyPhone),
             Address = NormalizeOptional(request.Address),
@@ -1468,12 +1476,14 @@ public sealed class ProductService(
             ?? throw new KeyNotFoundException("Supplier not found.");
 
         var normalizedName = NormalizeRequired(request.Name, "Supplier name is required.");
+        var normalizedEmail = NormalizeOptionalEmail(request.Email);
         var brandIds = NormalizeBrandIds(request.BrandIds ?? []);
         await EnsureUniqueSupplierNameAsync(normalizedName, supplierId, currentStoreId, cancellationToken);
         await ValidateBrandIdsAsync(brandIds, currentStoreId, cancellationToken);
 
         supplier.Name = normalizedName;
         supplier.Phone = NormalizeOptional(request.Phone);
+        supplier.Email = normalizedEmail;
         supplier.CompanyName = NormalizeOptional(request.CompanyName);
         supplier.CompanyPhone = NormalizeOptional(request.CompanyPhone);
         supplier.Address = NormalizeOptional(request.Address);
@@ -2324,6 +2334,7 @@ public sealed class ProductService(
             SupplierId = supplier.Id,
             Name = supplier.Name,
             Phone = supplier.Phone,
+            Email = supplier.Email,
             CompanyName = supplier.CompanyName,
             CompanyPhone = supplier.CompanyPhone,
             Address = supplier.Address,
@@ -2480,6 +2491,39 @@ public sealed class ProductService(
     {
         var normalized = value?.Trim();
         return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
+    private static string? NormalizeOptionalEmail(string? value)
+    {
+        var normalized = NormalizeOptional(value);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        try
+        {
+            return new MailAddress(normalized).Address;
+        }
+        catch (FormatException)
+        {
+            throw new InvalidOperationException("Supplier email is invalid.");
+        }
+    }
+
+    private static void EnsureCostPriceNotAboveUnitPrice(decimal costPrice, decimal unitPrice)
+    {
+        if (costPrice > unitPrice)
+        {
+            throw new InvalidOperationException("Cost price cannot exceed selling price.");
+        }
+    }
+
+    private Guid? GetCurrentUserId()
+    {
+        var user = httpContextAccessor.HttpContext?.User;
+        var userIdValue = user?.FindFirstValue(ClaimTypes.NameIdentifier) ?? user?.FindFirstValue("sub");
+        return Guid.TryParse(userIdValue, out var userId) ? userId : null;
     }
 
     private static string? NormalizeOptionalBarcode(string? value, string? existingValue = null)

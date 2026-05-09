@@ -42,6 +42,9 @@ public sealed class UpdateServiceRequest
 
     [JsonPropertyName("duration_minutes")]
     public int? DurationMinutes { get; set; }
+
+    [JsonPropertyName("is_active")]
+    public bool? IsActive { get; set; }
 }
 
 public sealed class ServiceResponse

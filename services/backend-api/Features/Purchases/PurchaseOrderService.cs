@@ -75,6 +75,10 @@ public sealed class PurchaseOrderService(
         var supplier = await dbContext.Suppliers
             .FirstOrDefaultAsync(x => x.Id == request.SupplierId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken)
             ?? throw new KeyNotFoundException("Supplier not found.");
+        if (!supplier.IsActive)
+        {
+            throw new InvalidOperationException("Inactive suppliers cannot be assigned to purchase orders.");
+        }
 
         var poNumber = NormalizeRequired(request.PoNumber, "po_number is required.");
         if (request.Lines.Count == 0)
@@ -197,6 +201,10 @@ public sealed class PurchaseOrderService(
             order.Supplier = await dbContext.Suppliers
                 .FirstOrDefaultAsync(x => x.Id == request.SupplierId.Value && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken)
                 ?? throw new KeyNotFoundException("Supplier not found.");
+            if (!order.Supplier.IsActive)
+            {
+                throw new InvalidOperationException("Inactive suppliers cannot be assigned to purchase orders.");
+            }
             order.SupplierId = order.Supplier.Id;
         }
 

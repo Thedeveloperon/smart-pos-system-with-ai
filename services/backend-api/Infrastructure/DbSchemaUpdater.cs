@@ -2960,6 +2960,7 @@ public static class DbSchemaUpdater
               "StoreId" TEXT NULL,
               "Name" TEXT NOT NULL,
               "Phone" TEXT NULL,
+              "Email" TEXT NULL,
               "CompanyName" TEXT NULL,
               "CompanyPhone" TEXT NULL,
               "Address" TEXT NULL,
@@ -3088,6 +3089,13 @@ public static class DbSchemaUpdater
         {
             await dbContext.Database.ExecuteSqlRawAsync(
                 """ALTER TABLE "suppliers" ADD COLUMN "CompanyName" TEXT NULL;""",
+                cancellationToken);
+        }
+
+        if (!await ColumnExistsAsync(dbContext, "suppliers", "Email", cancellationToken))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "suppliers" ADD COLUMN "Email" TEXT NULL;""",
                 cancellationToken);
         }
 
@@ -3580,6 +3588,7 @@ public static class DbSchemaUpdater
               "StoreId" uuid NULL,
               "Name" varchar(160) NOT NULL,
               "Phone" varchar(32) NULL,
+              "Email" varchar(120) NULL,
               "CompanyName" varchar(160) NULL,
               "CompanyPhone" varchar(32) NULL,
               "Address" varchar(500) NULL,
@@ -3696,6 +3705,13 @@ public static class DbSchemaUpdater
         {
             await dbContext.Database.ExecuteSqlRawAsync(
                 """ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS "CompanyName" varchar(160) NULL;""",
+                cancellationToken);
+        }
+
+        if (!await ColumnExistsAsync(dbContext, "suppliers", "Email", cancellationToken))
+        {
+            await dbContext.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS "Email" varchar(120) NULL;""",
                 cancellationToken);
         }
 

@@ -124,6 +124,7 @@ export default function CatalogueTab() {
   const [actionPending, setActionPending] = useState(false);
   const [categoryActionPending, setCategoryActionPending] = useState(false);
   const [productActionProductId, setProductActionProductId] = useState<string | null>(null);
+  const [categoryNameError, setCategoryNameError] = useState<string | null>(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -147,8 +148,15 @@ export default function CatalogueTab() {
     void loadData();
   }, []);
 
+  useEffect(() => {
+    if (categoryNameError && categoryForm.name.trim()) {
+      setCategoryNameError(null);
+    }
+  }, [categoryForm.name, categoryNameError]);
+
   const openEditor = (kind: "category" | "brand", id?: string) => {
     setEditor({ kind, id });
+    setCategoryNameError(null);
     if (kind === "category") {
       const item = categories.find((entry) => entry.category_id === id);
       setCategoryForm(
@@ -170,6 +178,7 @@ export default function CatalogueTab() {
   const closeEditor = () => {
     setEditorOpen(false);
     setEditor(null);
+    setCategoryNameError(null);
   };
 
   const handleSave = async () => {
@@ -181,8 +190,11 @@ export default function CatalogueTab() {
     try {
       if (editor.kind === "category") {
         if (!categoryForm.name.trim()) {
-          throw new Error("Category name is required.");
+          setCategoryNameError("Category name is required.");
+          toast.error("Category name is required.");
+          return;
         }
+        setCategoryNameError(null);
         if (editor.id) {
           await updateCategory(editor.id, {
             name: categoryForm.name.trim(),
@@ -506,6 +518,7 @@ export default function CatalogueTab() {
         editor={editor}
         categoryForm={categoryForm}
         setCategoryForm={setCategoryForm}
+        categoryNameError={categoryNameError}
         brandForm={brandForm}
         setBrandForm={setBrandForm}
         saving={saving}
@@ -755,6 +768,7 @@ function EditorDialog({
   editor,
   categoryForm,
   setCategoryForm,
+  categoryNameError,
   brandForm,
   setBrandForm,
   saving,
@@ -765,6 +779,7 @@ function EditorDialog({
   editor: EditorState;
   categoryForm: CategoryFormState;
   setCategoryForm: Dispatch<SetStateAction<CategoryFormState>>;
+  categoryNameError: string | null;
   brandForm: BrandFormState;
   setBrandForm: Dispatch<SetStateAction<BrandFormState>>;
   saving: boolean;
@@ -785,7 +800,18 @@ function EditorDialog({
           <div className="grid gap-4">
             <div className="grid gap-1.5">
               <Label>Name</Label>
-              <Input value={categoryForm.name} onChange={(event) => setCategoryForm((prev) => ({ ...prev, name: event.target.value }))} />
+              <Input
+                value={categoryForm.name}
+                onChange={(event) =>
+                  setCategoryForm((prev) => ({ ...prev, name: event.target.value }))
+                }
+                className={
+                  categoryNameError ? "border-destructive focus-visible:ring-destructive" : undefined
+                }
+              />
+              {categoryNameError ? (
+                <p className="text-xs text-destructive">{categoryNameError}</p>
+              ) : null}
             </div>
             <div className="grid gap-1.5">
               <Label>Description</Label>

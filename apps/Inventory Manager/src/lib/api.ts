@@ -53,6 +53,7 @@ export type Supplier = {
   id: string;
   name: string;
   phone?: string | null;
+  email?: string | null;
   company_name?: string | null;
   companyName?: string | null;
   company_phone?: string | null;
@@ -194,7 +195,7 @@ export type Promotion = {
 export type UpsertPromotionRequest = {
   name: string;
   description?: string | null;
-  scope: PromotionScope;
+  scope: Exclude<PromotionScope, "all">;
   category_id?: string | null;
   product_id?: string | null;
   value_type: PromotionValueType;
@@ -225,6 +226,7 @@ export type StockMovement = {
   serial_number?: string;
   reason?: string;
   created_by_user_id?: string;
+  created_by_username?: string;
   created_at: string;
 };
 
@@ -437,6 +439,7 @@ type BackendSupplierItem = {
   supplier_id: string;
   name: string;
   phone?: string | null;
+  email?: string | null;
   company_name?: string | null;
   company_phone?: string | null;
   address?: string | null;
@@ -491,6 +494,7 @@ type BackendStockMovementPage = {
     serial_number?: string | null;
     reason?: string | null;
     created_by_user_id?: string | null;
+    created_by_username?: string | null;
     created_at: string;
   }>;
   total: number;
@@ -1010,6 +1014,7 @@ function mapSupplier(item: BackendSupplierItem): Supplier {
     id: item.supplier_id,
     name: item.name,
     phone: item.phone ?? undefined,
+    email: item.email ?? undefined,
     company_name: item.company_name ?? undefined,
     companyName: item.company_name ?? undefined,
     company_phone: item.company_phone ?? undefined,
@@ -1065,6 +1070,7 @@ function mapMovement(item: BackendStockMovementPage["items"][number]): StockMove
     serial_number: item.serial_number ?? undefined,
     reason: item.reason ?? undefined,
     created_by_user_id: item.created_by_user_id ?? undefined,
+    created_by_username: item.created_by_username ?? undefined,
     created_at: item.created_at,
   };
 }
@@ -1301,7 +1307,7 @@ export async function hardDeleteProduct(productId: string): Promise<void> {
 export async function adjustStock(
   productId: string,
   deltaQuantity: number,
-  reason = "manual_adjustment",
+  reason: string,
   batchId?: string | null,
 ): Promise<StockAdjustmentResponse> {
   return requestJson<StockAdjustmentResponse>(`/api/products/${productId}/stock-adjustments`, {
@@ -1458,10 +1464,14 @@ export type UpdateServiceRequest = {
   description?: string | null;
   category_id?: string | null;
   duration_minutes?: number | null;
+  is_active?: boolean | null;
 };
 
-export async function fetchServices(): Promise<Service[]> {
-  const response = await safeRequestJson<BackendServiceListResponse>("/api/services", { items: [] });
+export async function fetchServices(includeInactive = false): Promise<Service[]> {
+  const response = await safeRequestJson<BackendServiceListResponse>(
+    `/api/services${buildQuery({ include_inactive: includeInactive })}`,
+    { items: [] },
+  );
   return response.items.map(mapService);
 }
 
@@ -1491,6 +1501,7 @@ export async function updateService(serviceId: string, payload: UpdateServiceReq
       description: payload.description?.trim() || null,
       category_id: payload.category_id ?? null,
       duration_minutes: payload.duration_minutes ?? null,
+      is_active: payload.is_active ?? null,
     }),
   });
 
@@ -1514,6 +1525,7 @@ export async function fetchSuppliers(includeInactive = false): Promise<Supplier[
 export async function createSupplier(payload: {
   name: string;
   phone?: string;
+  email?: string;
   company_name?: string;
   company_phone?: string;
   address?: string;
@@ -1525,6 +1537,7 @@ export async function createSupplier(payload: {
     body: JSON.stringify({
       name: payload.name,
       phone: payload.phone?.trim() || null,
+      email: payload.email?.trim() || null,
       company_name: payload.company_name?.trim() || null,
       company_phone: payload.company_phone?.trim() || null,
       address: payload.address?.trim() || null,
@@ -1540,6 +1553,7 @@ export async function updateSupplier(
   payload: Partial<{
     name: string;
     phone: string;
+    email: string;
     company_name: string;
     company_phone: string;
     address: string;
@@ -1552,6 +1566,7 @@ export async function updateSupplier(
     body: JSON.stringify({
       name: payload.name,
       phone: payload.phone?.trim() || null,
+      email: payload.email?.trim() || null,
       company_name: payload.company_name?.trim() || null,
       company_phone: payload.company_phone?.trim() || null,
       address: payload.address?.trim() || null,

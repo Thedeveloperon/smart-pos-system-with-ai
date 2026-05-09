@@ -21,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -48,6 +49,12 @@ type FormState = {
   durationMinutes: string;
 };
 
+type FormErrors = {
+  name?: string;
+  price?: string;
+  durationMinutes?: string;
+};
+
 const emptyForm = (): FormState => ({
   name: "",
   sku: "",
@@ -64,15 +71,17 @@ export default function ServicesTab() {
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [includeInactive, setIncludeInactive] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingService, setEditingService] = useState<Service | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm());
+  const [errors, setErrors] = useState<FormErrors>({});
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const [serviceItems, categoryItems] = await Promise.all([
-        fetchServices(),
+        fetchServices(includeInactive),
         fetchCategories(true),
       ]);
       setServices(serviceItems);
@@ -83,7 +92,7 @@ export default function ServicesTab() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [includeInactive]);
 
   useEffect(() => {
     void loadData();
@@ -111,6 +120,7 @@ export default function ServicesTab() {
   const openCreateDialog = () => {
     setEditingService(null);
     setForm(emptyForm());
+    setErrors({});
     setDialogOpen(true);
   };
 
@@ -124,28 +134,50 @@ export default function ServicesTab() {
       categoryId: service.category_id ?? "none",
       durationMinutes: service.duration_minutes ? String(service.duration_minutes) : "",
     });
+    setErrors({});
     setDialogOpen(true);
+  };
+
+  const updateFormField = <TKey extends keyof FormState>(key: TKey, value: FormState[TKey]) => {
+    setForm((prev) => ({ ...prev, [key]: value }));
+    if (key === "name") {
+      setErrors((prev) => ({ ...prev, name: undefined }));
+    }
+    if (key === "price") {
+      setErrors((prev) => ({ ...prev, price: undefined }));
+    }
+    if (key === "durationMinutes") {
+      setErrors((prev) => ({ ...prev, durationMinutes: undefined }));
+    }
   };
 
   const handleSave = async () => {
     const trimmedName = form.name.trim();
+    const nextErrors: FormErrors = {};
     if (!trimmedName) {
-      toast.error("Service name is required.");
-      return;
+      nextErrors.name = "Service name is required.";
     }
-
     const parsedPrice = Number(form.price);
-    if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) {
-      toast.error("Service price must be a positive number.");
-      return;
+    if (!Number.isFinite(parsedPrice)) {
+      nextErrors.price = "Service price must be a valid number.";
+    } else if (parsedPrice <= 0) {
+      nextErrors.price = "Service price must be greater than zero.";
     }
 
     const parsedDuration = form.durationMinutes.trim() ? Number(form.durationMinutes) : null;
-    if (parsedDuration != null && (!Number.isInteger(parsedDuration) || parsedDuration <= 0)) {
-      toast.error("Duration must be a positive whole number.");
+    if (parsedDuration != null && !Number.isInteger(parsedDuration)) {
+      nextErrors.durationMinutes = "Duration must be a whole number.";
+    } else if (parsedDuration != null && parsedDuration <= 0) {
+      nextErrors.durationMinutes = "Duration must be greater than zero.";
+    }
+
+    if (nextErrors.name || nextErrors.price || nextErrors.durationMinutes) {
+      setErrors(nextErrors);
+      toast.error("Fix the highlighted service fields.");
       return;
     }
 
+    setErrors({});
     setSaving(true);
     try {
       const payload = {
@@ -192,6 +224,19 @@ export default function ServicesTab() {
     }
   };
 
+  const handleToggleActive = async (service: Service, nextActive: boolean) => {
+    setDeletingId(service.id);
+    try {
+      const updated = await updateService(service.id, { is_active: nextActive });
+      setServices((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      toast.success(nextActive ? "Service activated." : "Service deactivated.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update service status.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   return (
     <>
       <Card>
@@ -216,6 +261,15 @@ export default function ServicesTab() {
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search by name, SKU, category..."
               className="pl-9"
+            />
+          </div>
+
+          <div className="flex items-center justify-between rounded-lg border px-3 py-2">
+            <Label htmlFor="services-include-inactive">Show inactive services</Label>
+            <Switch
+              id="services-include-inactive"
+              checked={includeInactive}
+              onCheckedChange={setIncludeInactive}
             />
           </div>
         </CardHeader>
@@ -280,19 +334,34 @@ export default function ServicesTab() {
                             <PencilLine className="h-4 w-4" />
                             Edit
                           </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className="text-destructive hover:text-destructive"
-                            disabled={deletingId === service.id}
-                            onClick={() => {
-                              void handleDelete(service);
-                            }}
-                          >
-                            {deletingId === service.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                            Deactivate
-                          </Button>
+                          {service.is_active ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="text-destructive hover:text-destructive"
+                              disabled={deletingId === service.id}
+                              onClick={() => {
+                                void handleDelete(service);
+                              }}
+                            >
+                              {deletingId === service.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                              Deactivate
+                            </Button>
+                          ) : (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              disabled={deletingId === service.id}
+                              onClick={() => {
+                                void handleToggleActive(service, true);
+                              }}
+                            >
+                              {deletingId === service.id ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                              Activate
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -319,8 +388,10 @@ export default function ServicesTab() {
               <Input
                 id="service-name"
                 value={form.name}
-                onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
+                onChange={(event) => updateFormField("name", event.target.value)}
+                className={errors.name ? "border-destructive focus-visible:ring-destructive" : undefined}
               />
+              {errors.name ? <p className="text-xs text-destructive">{errors.name}</p> : null}
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
@@ -329,7 +400,7 @@ export default function ServicesTab() {
                 <Input
                   id="service-sku"
                   value={form.sku}
-                  onChange={(event) => setForm((prev) => ({ ...prev, sku: event.target.value }))}
+                  onChange={(event) => updateFormField("sku", event.target.value)}
                 />
               </div>
               <div className="grid gap-1.5">
@@ -338,8 +409,10 @@ export default function ServicesTab() {
                   id="service-price"
                   inputMode="decimal"
                   value={form.price}
-                  onChange={(event) => setForm((prev) => ({ ...prev, price: event.target.value }))}
+                  onChange={(event) => updateFormField("price", event.target.value)}
+                  className={errors.price ? "border-destructive focus-visible:ring-destructive" : undefined}
                 />
+                {errors.price ? <p className="text-xs text-destructive">{errors.price}</p> : null}
               </div>
             </div>
 
@@ -348,7 +421,7 @@ export default function ServicesTab() {
                 <Label>Category</Label>
                 <Select
                   value={form.categoryId}
-                  onValueChange={(value) => setForm((prev) => ({ ...prev, categoryId: value }))}
+                  onValueChange={(value) => updateFormField("categoryId", value)}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select category" />
@@ -369,8 +442,12 @@ export default function ServicesTab() {
                   id="service-duration"
                   inputMode="numeric"
                   value={form.durationMinutes}
-                  onChange={(event) => setForm((prev) => ({ ...prev, durationMinutes: event.target.value }))}
+                  onChange={(event) => updateFormField("durationMinutes", event.target.value)}
+                  className={errors.durationMinutes ? "border-destructive focus-visible:ring-destructive" : undefined}
                 />
+                {errors.durationMinutes ? (
+                  <p className="text-xs text-destructive">{errors.durationMinutes}</p>
+                ) : null}
               </div>
             </div>
 
@@ -380,7 +457,7 @@ export default function ServicesTab() {
                 id="service-description"
                 rows={4}
                 value={form.description}
-                onChange={(event) => setForm((prev) => ({ ...prev, description: event.target.value }))}
+                onChange={(event) => updateFormField("description", event.target.value)}
               />
             </div>
           </div>

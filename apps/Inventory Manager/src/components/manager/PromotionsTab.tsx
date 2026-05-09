@@ -38,7 +38,7 @@ import {
 type FormState = {
   name: string;
   description: string;
-  scope: PromotionScope;
+  scope: Exclude<PromotionScope, "all">;
   categoryId: string;
   productId: string;
   valueType: PromotionValueType;
@@ -53,11 +53,12 @@ type PromotionScopeFilter = "all-scopes" | "all" | "category" | "product";
 
 const nowLocal = () => new Date().toISOString().slice(0, 16);
 const afterOneWeekLocal = () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16);
+const todayLocal = () => new Date().toISOString().slice(0, 10);
 
 const emptyForm = (): FormState => ({
   name: "",
   description: "",
-  scope: "all",
+  scope: "category",
   categoryId: "",
   productId: "",
   valueType: "percent",
@@ -68,10 +69,11 @@ const emptyForm = (): FormState => ({
 });
 
 function toForm(item: Promotion): FormState {
+  const scope = item.scope === "product" ? "product" : "category";
   return {
     name: item.name,
     description: item.description ?? "",
-    scope: item.scope,
+    scope,
     categoryId: item.category_id ?? "",
     productId: item.product_id ?? "",
     valueType: item.value_type,
@@ -105,6 +107,7 @@ export default function PromotionsTab() {
   const [scopeFilter, setScopeFilter] = useState<PromotionScopeFilter>("all-scopes");
   const [pendingDeactivate, setPendingDeactivate] = useState<Promotion | null>(null);
   const [deactivating, setDeactivating] = useState(false);
+  const startsAtMin = `${todayLocal()}T00:00`;
 
   const load = async () => {
     setLoading(true);
@@ -167,7 +170,7 @@ export default function PromotionsTab() {
     setOpen(true);
   };
 
-  const handleScopeChange = (value: PromotionScope) => {
+  const handleScopeChange = (value: Exclude<PromotionScope, "all">) => {
     setForm((prev) => ({
       ...prev,
       scope: value,
@@ -182,6 +185,30 @@ export default function PromotionsTab() {
       return;
     }
 
+    const startsAt = new Date(form.startsAt);
+    const endsAt = new Date(form.endsAt);
+    const now = new Date();
+    const startOfTodayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    if (!Number.isFinite(startsAt.getTime()) || startsAt.getTime() < startOfTodayUtc) {
+      toast.error("Start date must be today or later.");
+      return;
+    }
+
+    if (!Number.isFinite(endsAt.getTime()) || endsAt.getTime() <= startsAt.getTime()) {
+      toast.error("End date must be after start date.");
+      return;
+    }
+
+    if (form.scope === "category" && !form.categoryId) {
+      toast.error("Select a category for this promotion.");
+      return;
+    }
+
+    if (form.scope === "product" && !form.productId) {
+      toast.error("Select a product for this promotion.");
+      return;
+    }
+
     setSaving(true);
     try {
       const payload = {
@@ -192,8 +219,8 @@ export default function PromotionsTab() {
         product_id: form.scope === "product" ? form.productId || null : null,
         value_type: form.valueType,
         value: Number(form.value) || 0,
-        starts_at_utc: new Date(form.startsAt).toISOString(),
-        ends_at_utc: new Date(form.endsAt).toISOString(),
+        starts_at_utc: startsAt.toISOString(),
+        ends_at_utc: endsAt.toISOString(),
         is_active: form.isActive,
       } as const;
 
@@ -373,10 +400,12 @@ export default function PromotionsTab() {
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-1.5">
                 <Label>Scope</Label>
-                <Select value={form.scope} onValueChange={(value) => handleScopeChange(value as PromotionScope)}>
+                <Select
+                  value={form.scope}
+                  onValueChange={(value) => handleScopeChange(value as Exclude<PromotionScope, "all">)}
+                >
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All</SelectItem>
                     <SelectItem value="category">Category</SelectItem>
                     <SelectItem value="product">Product</SelectItem>
                   </SelectContent>
@@ -438,7 +467,12 @@ export default function PromotionsTab() {
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-1.5">
                 <Label>Starts at (UTC)</Label>
-                <Input type="datetime-local" value={form.startsAt} onChange={(event) => setForm((prev) => ({ ...prev, startsAt: event.target.value }))} />
+                <Input
+                  type="datetime-local"
+                  min={startsAtMin}
+                  value={form.startsAt}
+                  onChange={(event) => setForm((prev) => ({ ...prev, startsAt: event.target.value }))}
+                />
               </div>
               <div className="grid gap-1.5">
                 <Label>Ends at (UTC)</Label>

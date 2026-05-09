@@ -21,6 +21,7 @@ public static class InventoryEndpoints
         string? SerialNumber,
         string? Reason,
         Guid? CreatedByUserId,
+        string? CreatedByUsername,
         DateTimeOffset CreatedAtUtc);
 
     public static IEndpointRouteBuilder MapInventoryEndpoints(this IEndpointRouteBuilder app)
@@ -184,6 +185,11 @@ public static class InventoryEndpoints
                         x.SerialNumber,
                         x.Reason,
                         x.CreatedByUserId,
+                        x.CreatedByUser != null
+                            ? (!string.IsNullOrWhiteSpace(x.CreatedByUser.FullName)
+                                ? x.CreatedByUser.FullName
+                                : x.CreatedByUser.Username)
+                            : null,
                         x.CreatedAtUtc))
                     .ToListAsync(cancellationToken);
 
@@ -224,6 +230,11 @@ public static class InventoryEndpoints
                         x.SerialNumber,
                         x.Reason,
                         x.CreatedByUserId,
+                        x.CreatedByUser != null
+                            ? (!string.IsNullOrWhiteSpace(x.CreatedByUser.FullName)
+                                ? x.CreatedByUser.FullName
+                                : x.CreatedByUser.Username)
+                            : null,
                         x.CreatedAtUtc))
                     .ToListAsync(cancellationToken);
             }
@@ -260,6 +271,7 @@ public static class InventoryEndpoints
                     serial_number = x.SerialNumber,
                     reason = x.Reason,
                     created_by_user_id = x.CreatedByUserId,
+                    created_by_username = x.CreatedByUsername,
                     created_at = x.CreatedAtUtc
                 })
                 .ToList();
