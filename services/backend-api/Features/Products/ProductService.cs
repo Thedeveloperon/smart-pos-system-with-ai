@@ -1506,6 +1506,36 @@ public sealed class ProductService(
             cancellationToken);
     }
 
+    public async Task<SupplierItemResponse> UpdateSupplierStatusAsync(
+        Guid supplierId,
+        UpdateSupplierStatusRequest request,
+        CancellationToken cancellationToken)
+    {
+        var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);
+        var supplier = await dbContext.Suppliers
+            .FirstOrDefaultAsync(
+                x => x.Id == supplierId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value),
+                cancellationToken)
+            ?? throw new KeyNotFoundException("Supplier not found.");
+
+        supplier.IsActive = request.IsActive;
+        supplier.UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var deleteAvailability = await GetSupplierDeleteAvailabilityAsync(
+            supplierId,
+            supplier.IsActive,
+            cancellationToken);
+
+        return await BuildSupplierItemResponseAsync(
+            supplierId,
+            currentStoreId,
+            deleteAvailability.CanDelete,
+            deleteAvailability.BlockReason,
+            cancellationToken);
+    }
+
     public async Task HardDeleteSupplierAsync(Guid supplierId, CancellationToken cancellationToken)
     {
         var currentStoreId = await GetCurrentStoreIdAsync(cancellationToken);

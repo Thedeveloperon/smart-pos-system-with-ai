@@ -43,6 +43,7 @@ import {
   type Brand,
   type Supplier,
   updateSupplier,
+  updateSupplierStatus,
 } from "@/lib/api";
 
 type EditorState = {
@@ -85,16 +86,48 @@ const emptySupplierForm = (): SupplierFormState => ({
   brandIds: [],
 });
 
-const toSupplierUpdatePayload = (supplier: Supplier, isActive = supplier.is_active) => ({
-  name: supplier.name,
-  phone: supplier.phone ?? "",
-  email: supplier.email ?? "",
-  company_name: supplier.company_name ?? "",
-  company_phone: supplier.company_phone ?? "",
-  address: supplier.address ?? "",
-  is_active: isActive,
-  brand_ids: supplier.brands.map((brand) => brand.brand_id),
-});
+const normalizeText = (value: string | null | undefined) => value?.trim() ?? "";
+
+const areSameBrandIds = (left: string[], right: string[]) => {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  const normalizedLeft = [...left].sort();
+  const normalizedRight = [...right].sort();
+  return normalizedLeft.every((value, index) => value === normalizedRight[index]);
+};
+
+const isStatusOnlySupplierUpdate = (
+  existingSupplier: Supplier,
+  nextForm: SupplierFormState,
+  mode: SupplierMode,
+) => {
+  const profileChanged =
+    normalizeText(existingSupplier.name) !== normalizeText(nextForm.name) ||
+    normalizeText(existingSupplier.phone) !== normalizeText(nextForm.phone) ||
+    normalizeText(existingSupplier.email) !== normalizeText(nextForm.email) ||
+    !areSameBrandIds(
+      existingSupplier.brands.map((brand) => brand.brand_id),
+      nextForm.brandIds,
+    );
+
+  if (profileChanged) {
+    return false;
+  }
+
+  if (mode === "extended") {
+    const companyChanged =
+      normalizeText(existingSupplier.company_name) !== normalizeText(nextForm.companyName) ||
+      normalizeText(existingSupplier.company_phone) !== normalizeText(nextForm.companyPhone) ||
+      normalizeText(existingSupplier.address) !== normalizeText(nextForm.address);
+    if (companyChanged) {
+      return false;
+    }
+  }
+
+  return existingSupplier.is_active !== nextForm.isActive;
+};
 
 export default function SuppliersTab() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -230,7 +263,12 @@ export default function SuppliersTab() {
       };
 
       if (editor?.id) {
-        await updateSupplier(editor.id, payload);
+        const existingSupplier = suppliers.find((item) => item.supplier_id === editor.id);
+        if (existingSupplier && isStatusOnlySupplierUpdate(existingSupplier, supplierForm, editorMode)) {
+          await updateSupplierStatus(editor.id, supplierForm.isActive);
+        } else {
+          await updateSupplier(editor.id, payload);
+        }
       } else {
         await createSupplier(payload);
       }
@@ -253,16 +291,10 @@ export default function SuppliersTab() {
     setActionPending(true);
     try {
       if (actionState.mode === "activate") {
-        await updateSupplier(
-          actionState.supplier.supplier_id,
-          toSupplierUpdatePayload(actionState.supplier, true),
-        );
+        await updateSupplierStatus(actionState.supplier.supplier_id, true);
         toast.success("Sales rep activated.");
       } else if (actionState.mode === "deactivate") {
-        await updateSupplier(
-          actionState.supplier.supplier_id,
-          toSupplierUpdatePayload(actionState.supplier, false),
-        );
+        await updateSupplierStatus(actionState.supplier.supplier_id, false);
         toast.success("Sales rep deactivated.");
       } else {
         await hardDeleteSupplier(actionState.supplier.supplier_id);

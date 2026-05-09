@@ -521,6 +521,33 @@ public static class ProductEndpoints
         .WithName("CreateSupplier")
         .WithOpenApi();
 
+        supplierGroup.MapPatch("/{supplierId:guid}/status", async (
+            Guid supplierId,
+            UpdateSupplierStatusRequest request,
+            ProductService productService,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var result = await productService.UpdateSupplierStatusAsync(
+                    supplierId,
+                    request,
+                    cancellationToken);
+                return Results.Ok(result);
+            }
+            catch (KeyNotFoundException exception)
+            {
+                return Results.NotFound(new { message = exception.Message });
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        })
+        .RequireAuthorization(SmartPosPolicies.ManagerOrOwner)
+        .WithName("UpdateSupplierStatus")
+        .WithOpenApi();
+
         supplierGroup.MapPut("/{supplierId:guid}", async (
             Guid supplierId,
             UpsertSupplierRequest request,
