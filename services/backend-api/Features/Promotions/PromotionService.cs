@@ -210,9 +210,19 @@ public sealed class PromotionService(
             throw new InvalidOperationException("Promotion end date must be after start date.");
         }
 
+        if (request.StartsAtUtc.UtcDateTime.Date < DateTime.UtcNow.Date)
+        {
+            throw new InvalidOperationException("Promotion start date cannot be earlier than today.");
+        }
+
         var scope = ParseScope(request.Scope);
         var valueType = ParseValueType(request.ValueType);
         var value = decimal.Round(request.Value, 2, MidpointRounding.AwayFromZero);
+
+        if (scope == PromotionScope.All)
+        {
+            throw new InvalidOperationException("Promotion scope must be category or product.");
+        }
 
         if (value <= 0m)
         {

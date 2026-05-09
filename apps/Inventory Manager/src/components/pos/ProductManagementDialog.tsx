@@ -76,6 +76,22 @@ type ProductFormState = {
   isActive: boolean;
 };
 
+type ProductFormErrors = Partial<
+  Record<
+    | "unitPrice"
+    | "costPrice"
+    | "initialStockQuantity"
+    | "reorderLevel"
+    | "safetyStock"
+    | "targetStockLevel"
+    | "permanentDiscountPercent"
+    | "permanentDiscountFixed"
+    | "warrantyMonths"
+    | "expiryAlertDays",
+    string
+  >
+>;
+
 const emptyFormState = (): ProductFormState => ({
   name: "",
   sku: "",
@@ -352,8 +368,9 @@ export default function ProductManagementDialog({
   const [deleteMode, setDeleteMode] = useState<"soft" | "hard" | null>(null);
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [adjustQuantity, setAdjustQuantity] = useState("0");
-  const [adjustReason, setAdjustReason] = useState("manual_adjustment");
+  const [adjustReason, setAdjustReason] = useState("");
   const [adjustBatchId, setAdjustBatchId] = useState("");
+  const [formErrors, setFormErrors] = useState<ProductFormErrors>({});
 
   const isEditing = Boolean(product);
   const title = useMemo(() => (isEditing ? "Edit product" : "Add product"), [isEditing]);
@@ -369,8 +386,9 @@ export default function ProductManagementDialog({
     setBarcodeTone("neutral");
     setDeleteMode(null);
     setAdjustQuantity("0");
-    setAdjustReason("manual_adjustment");
+    setAdjustReason("");
     setAdjustBatchId("");
+    setFormErrors({});
 
     let alive = true;
     setLoadingLookups(true);
@@ -449,6 +467,9 @@ export default function ProductManagementDialog({
 
   const updateField = <K extends keyof ProductFormState>(field: K, value: ProductFormState[K]) => {
     setForm((prev) => ({ ...prev, [field]: value }));
+    if (field in formErrors) {
+      setFormErrors((prev) => ({ ...prev, [field]: undefined }));
+    }
   };
 
   const clearPermanentDiscounts = () => {
@@ -511,13 +532,85 @@ export default function ProductManagementDialog({
       return;
     }
 
-    const permanentDiscountPercent = form.permanentDiscountPercent === "" ? null : toNumber(form.permanentDiscountPercent);
-    const permanentDiscountFixed = form.permanentDiscountFixed === "" ? null : toNumber(form.permanentDiscountFixed);
+    const errors: ProductFormErrors = {};
+    const parseNonNegativeNumber = (
+      field: keyof ProductFormErrors,
+      rawValue: string,
+      label: string,
+      allowEmpty = false,
+    ) => {
+      const normalized = rawValue.trim();
+      if (!normalized) {
+        if (allowEmpty) {
+          return null;
+        }
+
+        errors[field] = `${label} is required.`;
+        return null;
+      }
+
+      const parsed = Number(normalized);
+      if (!Number.isFinite(parsed)) {
+        errors[field] = `${label} must be a valid number.`;
+        return null;
+      }
+
+      if (parsed < 0) {
+        errors[field] = `${label} cannot be negative.`;
+        return null;
+      }
+
+      return parsed;
+    };
+
+    const unitPrice = parseNonNegativeNumber("unitPrice", form.unitPrice, "Unit price");
+    const costPrice = parseNonNegativeNumber("costPrice", form.costPrice, "Cost price");
+    const initialStockQuantity = isEditing
+      ? null
+      : parseNonNegativeNumber("initialStockQuantity", form.initialStockQuantity, "Initial stock");
+    const reorderLevel = parseNonNegativeNumber("reorderLevel", form.reorderLevel, "Reorder level");
+    const safetyStock = parseNonNegativeNumber("safetyStock", form.safetyStock, "Safety stock");
+    const targetStockLevel = parseNonNegativeNumber("targetStockLevel", form.targetStockLevel, "Target stock level");
+    const warrantyMonths = form.serialTracked
+      ? parseNonNegativeNumber("warrantyMonths", form.warrantyMonths, "Warranty months")
+      : 0;
+    const expiryAlertDays = form.batchTracked
+      ? parseNonNegativeNumber("expiryAlertDays", form.expiryAlertDays, "Expiry alert days")
+      : 30;
+
+    const permanentDiscountPercent = parseNonNegativeNumber(
+      "permanentDiscountPercent",
+      form.permanentDiscountPercent,
+      "Permanent discount percent",
+      true,
+    );
+    const permanentDiscountFixed = parseNonNegativeNumber(
+      "permanentDiscountFixed",
+      form.permanentDiscountFixed,
+      "Permanent discount amount",
+      true,
+    );
+
     if (permanentDiscountPercent != null && permanentDiscountFixed != null) {
       toast.error("Use either permanent discount percent or fixed amount.");
       return;
     }
 
+    if (permanentDiscountPercent != null && permanentDiscountPercent > 100) {
+      errors.permanentDiscountPercent = "Permanent discount percent cannot exceed 100.";
+    }
+
+    if (unitPrice != null && costPrice != null && costPrice > unitPrice) {
+      errors.costPrice = "Cost price cannot exceed selling price.";
+    }
+
+    if (Object.values(errors).some((message) => typeof message === "string" && message.length > 0)) {
+      setFormErrors(errors);
+      toast.error("Fix the highlighted product fields.");
+      return;
+    }
+
+    setFormErrors({});
     setSaving(true);
     try {
       const payload = {
@@ -527,19 +620,19 @@ export default function ProductManagementDialog({
         image_url: form.imageUrl.trim() || undefined,
         category_id: form.categoryId || undefined,
         brand_id: form.brandId || undefined,
-        unit_price: toNumber(form.unitPrice),
-        cost_price: toNumber(form.costPrice),
+        unit_price: unitPrice ?? 0,
+        cost_price: costPrice ?? 0,
         permanent_discount_percent: permanentDiscountPercent,
         permanent_discount_fixed: permanentDiscountFixed,
-        initial_stock_quantity: isEditing ? undefined : toNumber(form.initialStockQuantity),
-        reorder_level: toNumber(form.reorderLevel),
-        safety_stock: toNumber(form.safetyStock),
-        target_stock_level: toNumber(form.targetStockLevel),
+        initial_stock_quantity: isEditing ? undefined : (initialStockQuantity ?? 0),
+        reorder_level: reorderLevel ?? 0,
+        safety_stock: safetyStock ?? 0,
+        target_stock_level: targetStockLevel ?? 0,
         allow_negative_stock: form.allowNegativeStock,
         is_serial_tracked: form.serialTracked,
-        warranty_months: form.serialTracked ? toNumber(form.warrantyMonths) : 0,
+        warranty_months: form.serialTracked ? (warrantyMonths ?? 0) : 0,
         is_batch_tracked: form.batchTracked,
-        expiry_alert_days: form.batchTracked ? toNumber(form.expiryAlertDays) : 30,
+        expiry_alert_days: form.batchTracked ? (expiryAlertDays ?? 30) : 30,
         is_active: form.isActive,
         product_suppliers: form.preferredSupplierId
           ? [{ supplier_id: form.preferredSupplierId, is_preferred: true }]
@@ -599,12 +692,17 @@ export default function ProductManagementDialog({
       return;
     }
 
+    if (!adjustReason.trim()) {
+      toast.error("Stock adjustment reason is required.");
+      return;
+    }
+
     setSaving(true);
     try {
       await adjustStock(
         product.id,
         delta,
-        adjustReason.trim() || "manual_adjustment",
+        adjustReason.trim(),
         adjustBatchId || null,
       );
       const nextStock = currentStock + delta;
@@ -620,6 +718,15 @@ export default function ProductManagementDialog({
   };
 
   const statusLabel = form.isActive ? "Active" : "Inactive";
+  const activeCategories = categories.filter((item) => item.is_active);
+  const selectableCategories = (() => {
+    const selected = categories.find((item) => item.category_id === form.categoryId);
+    if (!selected || selected.is_active || activeCategories.some((item) => item.category_id === selected.category_id)) {
+      return activeCategories;
+    }
+
+    return [selected, ...activeCategories];
+  })();
   const selectedCategory = categories.find((item) => item.category_id === form.categoryId);
   const selectedBrand = brands.find((item) => item.brand_id === form.brandId);
   const selectedSupplier = suppliers.find((item) => item.supplier_id === form.preferredSupplierId);
@@ -756,9 +863,9 @@ export default function ProductManagementDialog({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">No category</SelectItem>
-                    {categories.map((item) => (
+                    {selectableCategories.map((item) => (
                       <SelectItem key={item.category_id} value={item.category_id}>
-                        {item.name}
+                        {item.is_active ? item.name : `${item.name} (inactive)`}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -835,7 +942,11 @@ export default function ProductManagementDialog({
                   step="0.01"
                   value={form.unitPrice}
                   onChange={(event) => updateField("unitPrice", event.target.value)}
+                  className={formErrors.unitPrice ? "border-destructive focus-visible:ring-destructive" : undefined}
                 />
+                {formErrors.unitPrice ? (
+                  <p className="text-xs text-destructive">{formErrors.unitPrice}</p>
+                ) : null}
               </div>
 
               <div className="grid gap-1.5">
@@ -847,7 +958,11 @@ export default function ProductManagementDialog({
                   step="0.01"
                   value={form.costPrice}
                   onChange={(event) => updateField("costPrice", event.target.value)}
+                  className={formErrors.costPrice ? "border-destructive focus-visible:ring-destructive" : undefined}
                 />
+                {formErrors.costPrice ? (
+                  <p className="text-xs text-destructive">{formErrors.costPrice}</p>
+                ) : null}
               </div>
 
               <div className="grid gap-1.5">
@@ -865,7 +980,11 @@ export default function ProductManagementDialog({
                       updateField("permanentDiscountFixed", "");
                     }
                   }}
+                  className={formErrors.permanentDiscountPercent ? "border-destructive focus-visible:ring-destructive" : undefined}
                 />
+                {formErrors.permanentDiscountPercent ? (
+                  <p className="text-xs text-destructive">{formErrors.permanentDiscountPercent}</p>
+                ) : null}
               </div>
 
               <div className="grid gap-1.5">
@@ -882,7 +1001,11 @@ export default function ProductManagementDialog({
                       updateField("permanentDiscountPercent", "");
                     }
                   }}
+                  className={formErrors.permanentDiscountFixed ? "border-destructive focus-visible:ring-destructive" : undefined}
                 />
+                {formErrors.permanentDiscountFixed ? (
+                  <p className="text-xs text-destructive">{formErrors.permanentDiscountFixed}</p>
+                ) : null}
               </div>
 
               <div className="md:col-span-2 flex items-end">
@@ -917,7 +1040,11 @@ export default function ProductManagementDialog({
                     step="1"
                     value={form.initialStockQuantity}
                     onChange={(event) => updateField("initialStockQuantity", event.target.value)}
+                    className={formErrors.initialStockQuantity ? "border-destructive focus-visible:ring-destructive" : undefined}
                   />
+                  {formErrors.initialStockQuantity ? (
+                    <p className="text-xs text-destructive">{formErrors.initialStockQuantity}</p>
+                  ) : null}
                 </div>
               )}
             </div>
@@ -932,7 +1059,11 @@ export default function ProductManagementDialog({
                   step="1"
                   value={form.reorderLevel}
                   onChange={(event) => updateField("reorderLevel", event.target.value)}
+                  className={formErrors.reorderLevel ? "border-destructive focus-visible:ring-destructive" : undefined}
                 />
+                {formErrors.reorderLevel ? (
+                  <p className="text-xs text-destructive">{formErrors.reorderLevel}</p>
+                ) : null}
               </div>
 
               <div className="grid gap-1.5">
@@ -944,7 +1075,11 @@ export default function ProductManagementDialog({
                   step="1"
                   value={form.safetyStock}
                   onChange={(event) => updateField("safetyStock", event.target.value)}
+                  className={formErrors.safetyStock ? "border-destructive focus-visible:ring-destructive" : undefined}
                 />
+                {formErrors.safetyStock ? (
+                  <p className="text-xs text-destructive">{formErrors.safetyStock}</p>
+                ) : null}
               </div>
 
               <div className="grid gap-1.5">
@@ -956,7 +1091,11 @@ export default function ProductManagementDialog({
                   step="1"
                   value={form.targetStockLevel}
                   onChange={(event) => updateField("targetStockLevel", event.target.value)}
+                  className={formErrors.targetStockLevel ? "border-destructive focus-visible:ring-destructive" : undefined}
                 />
+                {formErrors.targetStockLevel ? (
+                  <p className="text-xs text-destructive">{formErrors.targetStockLevel}</p>
+                ) : null}
               </div>
             </div>
 
@@ -1016,7 +1155,11 @@ export default function ProductManagementDialog({
                       step="1"
                       value={form.warrantyMonths}
                       onChange={(event) => updateField("warrantyMonths", event.target.value)}
+                      className={formErrors.warrantyMonths ? "border-destructive focus-visible:ring-destructive" : undefined}
                     />
+                    {formErrors.warrantyMonths ? (
+                      <p className="text-xs text-destructive">{formErrors.warrantyMonths}</p>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
@@ -1044,7 +1187,11 @@ export default function ProductManagementDialog({
                       step="1"
                       value={form.expiryAlertDays}
                       onChange={(event) => updateField("expiryAlertDays", event.target.value)}
+                      className={formErrors.expiryAlertDays ? "border-destructive focus-visible:ring-destructive" : undefined}
                     />
+                    {formErrors.expiryAlertDays ? (
+                      <p className="text-xs text-destructive">{formErrors.expiryAlertDays}</p>
+                    ) : null}
                   </div>
                 ) : null}
               </div>

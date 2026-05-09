@@ -122,6 +122,9 @@ public sealed class SupplierItemResponse
     [JsonPropertyName("phone")]
     public string? Phone { get; set; }
 
+    [JsonPropertyName("email")]
+    public string? Email { get; set; }
+
     [JsonPropertyName("company_name")]
     public string? CompanyName { get; set; }
 
@@ -169,6 +172,9 @@ public sealed class UpsertSupplierRequest
 
     [JsonPropertyName("phone")]
     public string? Phone { get; set; }
+
+    [JsonPropertyName("email")]
+    public string? Email { get; set; }
 
     [JsonPropertyName("company_name")]
     public string? CompanyName { get; set; }

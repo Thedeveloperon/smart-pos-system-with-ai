@@ -9,13 +9,18 @@ public sealed class ServiceService(
     SmartPosDbContext dbContext,
     IHttpContextAccessor httpContextAccessor)
 {
-    public async Task<ServiceListResponse> GetAllAsync(CancellationToken cancellationToken)
+    public async Task<ServiceListResponse> GetAllAsync(bool includeInactive, CancellationToken cancellationToken)
     {
         var storeId = await GetCurrentStoreIdAsync(cancellationToken);
         var query = dbContext.Services
             .AsNoTracking()
             .Include(x => x.Category)
-            .Where(x => x.IsActive);
+            .AsQueryable();
+
+        if (!includeInactive)
+        {
+            query = query.Where(x => x.IsActive);
+        }
 
         if (storeId.HasValue)
         {
@@ -139,6 +144,11 @@ public sealed class ServiceService(
             }
 
             service.DurationMinutes = request.DurationMinutes.Value;
+        }
+
+        if (request.IsActive.HasValue)
+        {
+            service.IsActive = request.IsActive.Value;
         }
 
         service.UpdatedAtUtc = DateTimeOffset.UtcNow;
