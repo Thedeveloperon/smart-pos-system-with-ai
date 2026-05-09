@@ -21,8 +21,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import {
   createService,
@@ -71,7 +77,8 @@ export default function ServicesTab() {
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [includeInactive, setIncludeInactive] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("active");
+  const [categoryFilter, setCategoryFilter] = useState("all");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingService, setEditingService] = useState<Service | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm());
@@ -81,7 +88,7 @@ export default function ServicesTab() {
     setLoading(true);
     try {
       const [serviceItems, categoryItems] = await Promise.all([
-        fetchServices(includeInactive),
+        fetchServices(true),
         fetchCategories(true),
       ]);
       setServices(serviceItems);
@@ -92,7 +99,7 @@ export default function ServicesTab() {
     } finally {
       setLoading(false);
     }
-  }, [includeInactive]);
+  }, []);
 
   useEffect(() => {
     void loadData();
@@ -100,17 +107,21 @@ export default function ServicesTab() {
 
   const filteredServices = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) {
-      return services;
-    }
-
-    return services.filter((service) =>
-      [service.name, service.sku ?? "", service.description ?? "", service.category_name ?? ""]
-        .join(" ")
-        .toLowerCase()
-        .includes(query),
-    );
-  }, [search, services]);
+    return services.filter((service) => {
+      const matchesQuery =
+        !query ||
+        [service.name, service.sku ?? "", service.description ?? "", service.category_name ?? ""]
+          .join(" ")
+          .toLowerCase()
+          .includes(query);
+      const matchesStatus =
+        statusFilter === "all" ||
+        (statusFilter === "active" && service.is_active) ||
+        (statusFilter === "inactive" && !service.is_active);
+      const matchesCategory = categoryFilter === "all" || service.category_id === categoryFilter;
+      return matchesQuery && matchesStatus && matchesCategory;
+    });
+  }, [search, services, statusFilter, categoryFilter]);
 
   const activeCategories = useMemo(
     () => categories.filter((category) => category.is_active),
@@ -254,23 +265,42 @@ export default function ServicesTab() {
             </Button>
           </div>
 
-          <div className="relative max-w-lg">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search by name, SKU, category..."
-              className="pl-9"
-            />
-          </div>
-
-          <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-            <Label htmlFor="services-include-inactive">Show inactive services</Label>
-            <Switch
-              id="services-include-inactive"
-              checked={includeInactive}
-              onCheckedChange={setIncludeInactive}
-            />
+          <div className="grid gap-3 lg:grid-cols-3">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search by name, SKU, category..."
+                className="pl-9"
+              />
+            </div>
+            <Select
+              value={statusFilter}
+              onValueChange={(value) => setStatusFilter(value as "all" | "active" | "inactive")}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="active">Active only</SelectItem>
+                <SelectItem value="inactive">Inactive only</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <SelectTrigger>
+                <SelectValue placeholder="Category" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All categories</SelectItem>
+                {activeCategories.map((category) => (
+                  <SelectItem key={category.category_id} value={category.category_id}>
+                    {category.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </CardHeader>
 
@@ -310,14 +340,18 @@ export default function ServicesTab() {
                           <div className="min-w-0">
                             <div className="truncate font-medium">{service.name}</div>
                             {service.description ? (
-                              <div className="truncate text-xs text-muted-foreground">{service.description}</div>
+                              <div className="truncate text-xs text-muted-foreground">
+                                {service.description}
+                              </div>
                             ) : null}
                           </div>
                         </div>
                       </TableCell>
                       <TableCell>{service.sku || "-"}</TableCell>
                       <TableCell>{service.category_name || "-"}</TableCell>
-                      <TableCell className="text-right font-medium">{currencyFormatter.format(service.price)}</TableCell>
+                      <TableCell className="text-right font-medium">
+                        {currencyFormatter.format(service.price)}
+                      </TableCell>
                       <TableCell className="text-right">
                         {service.duration_minutes && service.duration_minutes > 0
                           ? `${service.duration_minutes} min`
@@ -330,7 +364,12 @@ export default function ServicesTab() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
-                          <Button type="button" size="sm" variant="ghost" onClick={() => openEditDialog(service)}>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => openEditDialog(service)}
+                          >
                             <PencilLine className="h-4 w-4" />
                             Edit
                           </Button>
@@ -345,7 +384,11 @@ export default function ServicesTab() {
                                 void handleDelete(service);
                               }}
                             >
-                              {deletingId === service.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                              {deletingId === service.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-4 w-4" />
+                              )}
                               Deactivate
                             </Button>
                           ) : (
@@ -358,7 +401,9 @@ export default function ServicesTab() {
                                 void handleToggleActive(service, true);
                               }}
                             >
-                              {deletingId === service.id ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                              {deletingId === service.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : null}
                               Activate
                             </Button>
                           )}
@@ -389,7 +434,9 @@ export default function ServicesTab() {
                 id="service-name"
                 value={form.name}
                 onChange={(event) => updateFormField("name", event.target.value)}
-                className={errors.name ? "border-destructive focus-visible:ring-destructive" : undefined}
+                className={
+                  errors.name ? "border-destructive focus-visible:ring-destructive" : undefined
+                }
               />
               {errors.name ? <p className="text-xs text-destructive">{errors.name}</p> : null}
             </div>
@@ -410,7 +457,9 @@ export default function ServicesTab() {
                   inputMode="decimal"
                   value={form.price}
                   onChange={(event) => updateFormField("price", event.target.value)}
-                  className={errors.price ? "border-destructive focus-visible:ring-destructive" : undefined}
+                  className={
+                    errors.price ? "border-destructive focus-visible:ring-destructive" : undefined
+                  }
                 />
                 {errors.price ? <p className="text-xs text-destructive">{errors.price}</p> : null}
               </div>
@@ -443,7 +492,11 @@ export default function ServicesTab() {
                   inputMode="numeric"
                   value={form.durationMinutes}
                   onChange={(event) => updateFormField("durationMinutes", event.target.value)}
-                  className={errors.durationMinutes ? "border-destructive focus-visible:ring-destructive" : undefined}
+                  className={
+                    errors.durationMinutes
+                      ? "border-destructive focus-visible:ring-destructive"
+                      : undefined
+                  }
                 />
                 {errors.durationMinutes ? (
                   <p className="text-xs text-destructive">{errors.durationMinutes}</p>

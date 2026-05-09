@@ -7,7 +7,17 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
-import { Check, ChevronDown, Loader2, PencilLine, Plus, Power, Search, Trash2, X } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Loader2,
+  PencilLine,
+  Plus,
+  Power,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,6 +42,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -132,6 +149,7 @@ const isStatusOnlySupplierUpdate = (
 export default function SuppliersTab() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
   const [loading, setLoading] = useState(true);
   const [editor, setEditor] = useState<EditorState>(null);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -181,23 +199,26 @@ export default function SuppliersTab() {
 
   const filteredSuppliers = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) {
-      return suppliers;
-    }
-
-    return suppliers.filter((supplier) =>
-      [
-        supplier.name,
-        supplier.phone ?? "",
-        supplier.company_name ?? "",
-        supplier.company_phone ?? "",
-        supplier.email ?? "",
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(query),
-    );
-  }, [search, suppliers]);
+    return suppliers.filter((supplier) => {
+      const matchesQuery =
+        !query ||
+        [
+          supplier.name,
+          supplier.phone ?? "",
+          supplier.company_name ?? "",
+          supplier.company_phone ?? "",
+          supplier.email ?? "",
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(query);
+      const matchesStatus =
+        statusFilter === "all" ||
+        (statusFilter === "active" && supplier.is_active) ||
+        (statusFilter === "inactive" && !supplier.is_active);
+      return matchesQuery && matchesStatus;
+    });
+  }, [search, statusFilter, suppliers]);
 
   const openEditor = (id?: string) => {
     setEditor({ id });
@@ -235,10 +256,7 @@ export default function SuppliersTab() {
     }
 
     const normalizedEmail = supplierForm.email.trim();
-    if (
-      normalizedEmail &&
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)
-    ) {
+    if (normalizedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
       errors.email = "Email format is invalid.";
     }
 
@@ -264,7 +282,10 @@ export default function SuppliersTab() {
 
       if (editor?.id) {
         const existingSupplier = suppliers.find((item) => item.supplier_id === editor.id);
-        if (existingSupplier && isStatusOnlySupplierUpdate(existingSupplier, supplierForm, editorMode)) {
+        if (
+          existingSupplier &&
+          isStatusOnlySupplierUpdate(existingSupplier, supplierForm, editorMode)
+        ) {
           await updateSupplierStatus(editor.id, supplierForm.isActive);
         } else {
           await updateSupplier(editor.id, payload);
@@ -349,14 +370,29 @@ export default function SuppliersTab() {
             </Button>
           </div>
 
-          <div className="relative max-w-lg">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search by name, phone, company, or email"
-              className="pl-9"
-            />
+          <div className="grid gap-3 lg:grid-cols-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search by name, phone, company, or email"
+                className="pl-9"
+              />
+            </div>
+            <Select
+              value={statusFilter}
+              onValueChange={(value) => setStatusFilter(value as "all" | "active" | "inactive")}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="active">Active only</SelectItem>
+                <SelectItem value="inactive">Inactive only</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <Table
@@ -632,15 +668,17 @@ function SupplierEditorDialog({
         </div>
 
         <div className="grid gap-4">
-            <div className="grid gap-1.5">
-              <Label>Sales Rep Name</Label>
-              <Input
-                value={supplierForm.name}
-                onChange={(event) => updateField("name", event.target.value)}
-                className={formErrors.name ? "border-destructive focus-visible:ring-destructive" : undefined}
-              />
-              {formErrors.name ? <p className="text-xs text-destructive">{formErrors.name}</p> : null}
-            </div>
+          <div className="grid gap-1.5">
+            <Label>Sales Rep Name</Label>
+            <Input
+              value={supplierForm.name}
+              onChange={(event) => updateField("name", event.target.value)}
+              className={
+                formErrors.name ? "border-destructive focus-visible:ring-destructive" : undefined
+              }
+            />
+            {formErrors.name ? <p className="text-xs text-destructive">{formErrors.name}</p> : null}
+          </div>
 
           {mode === "simple" ? (
             <>
@@ -656,9 +694,15 @@ function SupplierEditorDialog({
                 <Input
                   value={supplierForm.email}
                   onChange={(event) => updateField("email", event.target.value)}
-                  className={formErrors.email ? "border-destructive focus-visible:ring-destructive" : undefined}
+                  className={
+                    formErrors.email
+                      ? "border-destructive focus-visible:ring-destructive"
+                      : undefined
+                  }
                 />
-                {formErrors.email ? <p className="text-xs text-destructive">{formErrors.email}</p> : null}
+                {formErrors.email ? (
+                  <p className="text-xs text-destructive">{formErrors.email}</p>
+                ) : null}
               </div>
               <div className="grid gap-1.5">
                 <Label>Brands</Label>
@@ -702,9 +746,15 @@ function SupplierEditorDialog({
                   <Input
                     value={supplierForm.email}
                     onChange={(event) => updateField("email", event.target.value)}
-                    className={formErrors.email ? "border-destructive focus-visible:ring-destructive" : undefined}
+                    className={
+                      formErrors.email
+                        ? "border-destructive focus-visible:ring-destructive"
+                        : undefined
+                    }
                   />
-                  {formErrors.email ? <p className="text-xs text-destructive">{formErrors.email}</p> : null}
+                  {formErrors.email ? (
+                    <p className="text-xs text-destructive">{formErrors.email}</p>
+                  ) : null}
                 </div>
               </div>
               <div className="grid gap-4 md:grid-cols-2">

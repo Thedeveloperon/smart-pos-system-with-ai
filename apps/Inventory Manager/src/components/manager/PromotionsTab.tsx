@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, PencilLine, Plus, Power, RefreshCw } from "lucide-react";
+import { Loader2, PencilLine, Plus, Power, RefreshCw, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
@@ -52,7 +52,8 @@ type PromotionStatusFilter = "all" | "active" | "expired";
 type PromotionScopeFilter = "all-scopes" | "all" | "category" | "product";
 
 const nowLocal = () => new Date().toISOString().slice(0, 16);
-const afterOneWeekLocal = () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16);
+const afterOneWeekLocal = () =>
+  new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16);
 const todayLocal = () => new Date().toISOString().slice(0, 10);
 
 const emptyForm = (): FormState => ({
@@ -103,6 +104,7 @@ export default function PromotionsTab() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Promotion | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm());
+  const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<PromotionStatusFilter>("all");
   const [scopeFilter, setScopeFilter] = useState<PromotionScopeFilter>("all-scopes");
   const [pendingDeactivate, setPendingDeactivate] = useState<Promotion | null>(null);
@@ -140,8 +142,17 @@ export default function PromotionsTab() {
     [products],
   );
   const filteredItems = useMemo(() => {
+    const query = search.trim().toLowerCase();
     const now = new Date();
     return items.filter((item) => {
+      if (
+        query &&
+        !item.name.toLowerCase().includes(query) &&
+        !(item.description ?? "").toLowerCase().includes(query)
+      ) {
+        return false;
+      }
+
       if (scopeFilter !== "all-scopes" && item.scope !== scopeFilter) {
         return false;
       }
@@ -156,7 +167,7 @@ export default function PromotionsTab() {
 
       return !item.is_active || new Date(item.ends_at_utc).getTime() < now.getTime();
     });
-  }, [items, scopeFilter, statusFilter]);
+  }, [items, search, scopeFilter, statusFilter]);
 
   const openCreate = () => {
     setEditing(null);
@@ -262,7 +273,11 @@ export default function PromotionsTab() {
           <CardTitle>Promotions</CardTitle>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => void load()} disabled={loading}>
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              {loading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
               Refresh
             </Button>
             <Button onClick={openCreate}>
@@ -272,7 +287,19 @@ export default function PromotionsTab() {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="mb-4 grid gap-3 md:grid-cols-2">
+          <div className="mb-4 grid gap-3 md:grid-cols-3">
+            <div className="grid gap-1.5">
+              <Label>Search</Label>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search promotions..."
+                  className="pl-9"
+                />
+              </div>
+            </div>
             <div className="grid gap-1.5">
               <Label>Status</Label>
               <Select
@@ -323,18 +350,24 @@ export default function PromotionsTab() {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td className="p-4 text-muted-foreground" colSpan={6}>Loading promotions...</td>
+                    <td className="p-4 text-muted-foreground" colSpan={6}>
+                      Loading promotions...
+                    </td>
                   </tr>
                 ) : filteredItems.length === 0 ? (
                   <tr>
-                    <td className="p-4 text-muted-foreground" colSpan={6}>No promotions found for selected filters.</td>
+                    <td className="p-4 text-muted-foreground" colSpan={6}>
+                      No promotions found for selected filters.
+                    </td>
                   </tr>
                 ) : (
                   filteredItems.map((item) => (
                     <tr key={item.id} className="border-t">
                       <td className="p-3">
                         <div className="font-medium">{item.name}</div>
-                        {item.description ? <div className="text-xs text-muted-foreground">{item.description}</div> : null}
+                        {item.description ? (
+                          <div className="text-xs text-muted-foreground">{item.description}</div>
+                        ) : null}
                       </td>
                       <td className="p-3 text-xs text-muted-foreground">
                         {item.scope === "all"
@@ -343,7 +376,11 @@ export default function PromotionsTab() {
                             ? `Category: ${categoryNameById.get(item.category_id || "") ?? "Unknown"}`
                             : `Product: ${productNameById.get(item.product_id || "") ?? "Unknown"}`}
                       </td>
-                      <td className="p-3">{item.value_type === "percent" ? `${item.value}%` : `Rs. ${item.value.toLocaleString()}`}</td>
+                      <td className="p-3">
+                        {item.value_type === "percent"
+                          ? `${item.value}%`
+                          : `Rs. ${item.value.toLocaleString()}`}
+                      </td>
                       <td className="p-3 text-xs text-muted-foreground">
                         <div>{new Date(item.starts_at_utc).toISOString()}</div>
                         <div>{new Date(item.ends_at_utc).toISOString()}</div>
@@ -389,12 +426,20 @@ export default function PromotionsTab() {
           <div className="grid gap-3 py-2">
             <div className="grid gap-1.5">
               <Label>Name</Label>
-              <Input value={form.name} onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))} />
+              <Input
+                value={form.name}
+                onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
+              />
             </div>
 
             <div className="grid gap-1.5">
               <Label>Description</Label>
-              <Input value={form.description} onChange={(event) => setForm((prev) => ({ ...prev, description: event.target.value }))} />
+              <Input
+                value={form.description}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, description: event.target.value }))
+                }
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -402,9 +447,13 @@ export default function PromotionsTab() {
                 <Label>Scope</Label>
                 <Select
                   value={form.scope}
-                  onValueChange={(value) => handleScopeChange(value as Exclude<PromotionScope, "all">)}
+                  onValueChange={(value) =>
+                    handleScopeChange(value as Exclude<PromotionScope, "all">)
+                  }
                 >
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="category">Category</SelectItem>
                     <SelectItem value="product">Product</SelectItem>
@@ -413,8 +462,15 @@ export default function PromotionsTab() {
               </div>
               <div className="grid gap-1.5">
                 <Label>Value type</Label>
-                <Select value={form.valueType} onValueChange={(value) => setForm((prev) => ({ ...prev, valueType: value as PromotionValueType }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                <Select
+                  value={form.valueType}
+                  onValueChange={(value) =>
+                    setForm((prev) => ({ ...prev, valueType: value as PromotionValueType }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="percent">Percent</SelectItem>
                     <SelectItem value="fixed">Fixed</SelectItem>
@@ -426,12 +482,21 @@ export default function PromotionsTab() {
             {form.scope === "category" && (
               <div className="grid gap-1.5">
                 <Label>Category</Label>
-                <Select value={form.categoryId || "__none__"} onValueChange={(value) => setForm((prev) => ({ ...prev, categoryId: value === "__none__" ? "" : value }))}>
-                  <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
+                <Select
+                  value={form.categoryId || "__none__"}
+                  onValueChange={(value) =>
+                    setForm((prev) => ({ ...prev, categoryId: value === "__none__" ? "" : value }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">Select category</SelectItem>
                     {categories.map((item) => (
-                      <SelectItem key={item.category_id} value={item.category_id}>{item.name}</SelectItem>
+                      <SelectItem key={item.category_id} value={item.category_id}>
+                        {item.name}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -441,12 +506,21 @@ export default function PromotionsTab() {
             {form.scope === "product" && (
               <div className="grid gap-1.5">
                 <Label>Product</Label>
-                <Select value={form.productId || "__none__"} onValueChange={(value) => setForm((prev) => ({ ...prev, productId: value === "__none__" ? "" : value }))}>
-                  <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
+                <Select
+                  value={form.productId || "__none__"}
+                  onValueChange={(value) =>
+                    setForm((prev) => ({ ...prev, productId: value === "__none__" ? "" : value }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select product" />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">Select product</SelectItem>
                     {products.map((item) => (
-                      <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>
+                      <SelectItem key={item.id} value={item.id}>
+                        {item.name}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -456,10 +530,19 @@ export default function PromotionsTab() {
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-1.5">
                 <Label>Value</Label>
-                <Input type="number" min={0} step="0.01" value={form.value} onChange={(event) => setForm((prev) => ({ ...prev, value: event.target.value }))} />
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={form.value}
+                  onChange={(event) => setForm((prev) => ({ ...prev, value: event.target.value }))}
+                />
               </div>
               <div className="flex items-end gap-2 rounded-md border px-3 py-2">
-                <Switch checked={form.isActive} onCheckedChange={(checked) => setForm((prev) => ({ ...prev, isActive: checked }))} />
+                <Switch
+                  checked={form.isActive}
+                  onCheckedChange={(checked) => setForm((prev) => ({ ...prev, isActive: checked }))}
+                />
                 <span className="text-sm">Active</span>
               </div>
             </div>
@@ -471,18 +554,26 @@ export default function PromotionsTab() {
                   type="datetime-local"
                   min={startsAtMin}
                   value={form.startsAt}
-                  onChange={(event) => setForm((prev) => ({ ...prev, startsAt: event.target.value }))}
+                  onChange={(event) =>
+                    setForm((prev) => ({ ...prev, startsAt: event.target.value }))
+                  }
                 />
               </div>
               <div className="grid gap-1.5">
                 <Label>Ends at (UTC)</Label>
-                <Input type="datetime-local" value={form.endsAt} onChange={(event) => setForm((prev) => ({ ...prev, endsAt: event.target.value }))} />
+                <Input
+                  type="datetime-local"
+                  value={form.endsAt}
+                  onChange={(event) => setForm((prev) => ({ ...prev, endsAt: event.target.value }))}
+                />
               </div>
             </div>
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
             <Button onClick={() => void handleSave()} disabled={saving}>
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               Save
