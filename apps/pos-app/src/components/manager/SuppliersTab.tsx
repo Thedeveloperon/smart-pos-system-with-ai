@@ -14,6 +14,7 @@ import {
   PencilLine,
   Plus,
   Power,
+  Search,
   Trash2,
   X,
 } from "lucide-react";
@@ -45,6 +46,13 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -101,7 +109,9 @@ const areSameBrandIds = (left: string[], right: string[]) => {
 
   const normalizedLeft = [...left].sort();
   const normalizedRight = [...right].sort();
-  return normalizedLeft.every((value, index) => value === normalizedRight[index]);
+  return normalizedLeft.every(
+    (value, index) => value === normalizedRight[index],
+  );
 };
 
 const isStatusOnlySupplierUpdate = (
@@ -123,9 +133,12 @@ const isStatusOnlySupplierUpdate = (
 
   if (mode === "extended") {
     const companyChanged =
-      normalizeText(existingSupplier.company_name) !== normalizeText(nextForm.companyName) ||
-      normalizeText(existingSupplier.company_phone) !== normalizeText(nextForm.companyPhone) ||
-      normalizeText(existingSupplier.address) !== normalizeText(nextForm.address);
+      normalizeText(existingSupplier.company_name) !==
+        normalizeText(nextForm.companyName) ||
+      normalizeText(existingSupplier.company_phone) !==
+        normalizeText(nextForm.companyPhone) ||
+      normalizeText(existingSupplier.address) !==
+        normalizeText(nextForm.address);
     if (companyChanged) {
       return false;
     }
@@ -136,6 +149,10 @@ const isStatusOnlySupplierUpdate = (
 
 export default function SuppliersTab() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "active" | "inactive"
+  >("all");
   const [loading, setLoading] = useState(true);
   const [editor, setEditor] = useState<EditorState>(null);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -187,6 +204,29 @@ export default function SuppliersTab() {
     void loadBrands();
   }, [editorOpen]);
 
+  const filteredSuppliers = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return suppliers.filter((supplier) => {
+      const matchesQuery =
+        !query ||
+        [
+          supplier.name,
+          supplier.phone ?? "",
+          supplier.company_name ?? "",
+          supplier.company_phone ?? "",
+          supplier.email ?? "",
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(query);
+      const matchesStatus =
+        statusFilter === "all" ||
+        (statusFilter === "active" && supplier.is_active) ||
+        (statusFilter === "inactive" && !supplier.is_active);
+      return matchesQuery && matchesStatus;
+    });
+  }, [search, statusFilter, suppliers]);
+
   const openEditor = (id?: string) => {
     setEditor({ id });
     const item = suppliers.find((entry) => entry.supplier_id === id);
@@ -234,8 +274,13 @@ export default function SuppliersTab() {
       };
 
       if (editor?.id) {
-        const existingSupplier = suppliers.find((item) => item.supplier_id === editor.id);
-        if (existingSupplier && isStatusOnlySupplierUpdate(existingSupplier, supplierForm, editorMode)) {
+        const existingSupplier = suppliers.find(
+          (item) => item.supplier_id === editor.id,
+        );
+        if (
+          existingSupplier &&
+          isStatusOnlySupplierUpdate(existingSupplier, supplierForm, editorMode)
+        ) {
           await updateSupplierStatus(editor.id, supplierForm.isActive);
         } else {
           await updateSupplier(editor.id, payload);
@@ -326,10 +371,37 @@ export default function SuppliersTab() {
             </Button>
           </div>
 
+          <div className="grid gap-3 lg:grid-cols-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search by name, phone, company, or email"
+                className="pl-9"
+              />
+            </div>
+            <Select
+              value={statusFilter}
+              onValueChange={(value) =>
+                setStatusFilter(value as "all" | "active" | "inactive")
+              }
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="active">Active only</SelectItem>
+                <SelectItem value="inactive">Inactive only</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
           <Table
             loading={loading}
             emptyText="No sales reps found."
-            rows={suppliers.map((item) => ({
+            rows={filteredSuppliers.map((item) => ({
               key: item.supplier_id,
               cells: [
                 <div key="name" className="space-y-1">

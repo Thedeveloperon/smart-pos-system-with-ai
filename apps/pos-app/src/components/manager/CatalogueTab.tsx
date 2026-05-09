@@ -1,6 +1,21 @@
-import { useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from "react";
 import { toast } from "sonner";
-import { Loader2, PencilLine, Plus, Power, Trash2, Upload } from "lucide-react";
+import {
+  Loader2,
+  PencilLine,
+  Plus,
+  Power,
+  Search,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,6 +30,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -116,9 +138,12 @@ const toProductStatusUpdatePayload = (
     0,
   reorder_level: product.reorder_level ?? product.reorderLevel ?? 0,
   safety_stock: product.safety_stock ?? product.safetyStock ?? 0,
-  target_stock_level: product.target_stock_level ?? product.targetStockLevel ?? 0,
-  allow_negative_stock: product.allow_negative_stock ?? product.allowNegativeStock ?? false,
-  is_serial_tracked: product.is_serial_tracked ?? product.isSerialTracked ?? false,
+  target_stock_level:
+    product.target_stock_level ?? product.targetStockLevel ?? 0,
+  allow_negative_stock:
+    product.allow_negative_stock ?? product.allowNegativeStock ?? false,
+  is_serial_tracked:
+    product.is_serial_tracked ?? product.isSerialTracked ?? false,
   warranty_months: product.warranty_months ?? product.warrantyMonths ?? 0,
   is_batch_tracked: product.is_batch_tracked ?? product.isBatchTracked ?? false,
   expiry_alert_days: product.expiry_alert_days ?? product.expiryAlertDays ?? 30,
@@ -126,6 +151,14 @@ const toProductStatusUpdatePayload = (
 });
 
 export default function CatalogueTab() {
+  const [categorySearch, setCategorySearch] = useState("");
+  const [categoryStatusFilter, setCategoryStatusFilter] = useState<
+    "all" | "active" | "inactive"
+  >("all");
+  const [brandSearch, setBrandSearch] = useState("");
+  const [brandStatusFilter, setBrandStatusFilter] = useState<
+    "all" | "active" | "inactive"
+  >("all");
   const [categories, setCategories] = useState<Category[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -133,15 +166,20 @@ export default function CatalogueTab() {
   const [editor, setEditor] = useState<EditorState>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [categoryForm, setCategoryForm] = useState<CategoryFormState>(emptyCategoryForm());
+  const [categoryForm, setCategoryForm] =
+    useState<CategoryFormState>(emptyCategoryForm());
   const [brandForm, setBrandForm] = useState<BrandFormState>(emptyBrandForm());
   const [actionState, setActionState] = useState<BrandActionState>(null);
-  const [categoryActionState, setCategoryActionState] = useState<CategoryActionState>(null);
+  const [categoryActionState, setCategoryActionState] =
+    useState<CategoryActionState>(null);
   const [actionPending, setActionPending] = useState(false);
   const [categoryActionPending, setCategoryActionPending] = useState(false);
-  const [productActionProductId, setProductActionProductId] = useState<string | null>(null);
+  const [productActionProductId, setProductActionProductId] = useState<
+    string | null
+  >(null);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
-  const [importEntityType, setImportEntityType] = useState<ImportEntityType>("brand");
+  const [importEntityType, setImportEntityType] =
+    useState<ImportEntityType>("brand");
 
   const loadData = async () => {
     setLoading(true);
@@ -155,7 +193,11 @@ export default function CatalogueTab() {
       setBrands(brandItems);
       setProducts(productItems);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load catalogue data.");
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to load catalogue data.",
+      );
     } finally {
       setLoading(false);
     }
@@ -171,14 +213,23 @@ export default function CatalogueTab() {
       const item = categories.find((entry) => entry.category_id === id);
       setCategoryForm(
         item
-          ? { name: item.name, description: item.description || "", isActive: item.is_active }
+          ? {
+              name: item.name,
+              description: item.description || "",
+              isActive: item.is_active,
+            }
           : emptyCategoryForm(),
       );
     } else {
       const item = brands.find((entry) => entry.brand_id === id);
       setBrandForm(
         item
-          ? { name: item.name, code: item.code || "", description: item.description || "", isActive: item.is_active }
+          ? {
+              name: item.name,
+              code: item.code || "",
+              description: item.description || "",
+              isActive: item.is_active,
+            }
           : emptyBrandForm(),
       );
     }
@@ -239,7 +290,11 @@ export default function CatalogueTab() {
       closeEditor();
       await loadData();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to save catalogue item.");
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to save catalogue item.",
+      );
     } finally {
       setSaving(false);
     }
@@ -325,31 +380,72 @@ export default function CatalogueTab() {
     }
   };
 
-  const handleProductStatusToggle = async (product: Product, isActive: boolean) => {
+  const handleProductStatusToggle = async (
+    product: Product,
+    isActive: boolean,
+  ) => {
     setProductActionProductId(product.id);
     try {
-      await updateProduct(product.id, toProductStatusUpdatePayload(product, isActive));
+      await updateProduct(
+        product.id,
+        toProductStatusUpdatePayload(product, isActive),
+      );
       toast.success(isActive ? "Product activated." : "Product deactivated.");
       await loadData();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to update product.");
+      toast.error(
+        error instanceof Error ? error.message : "Failed to update product.",
+      );
     } finally {
       setProductActionProductId(null);
     }
   };
 
-  const productsByBrand = products.reduce<Record<string, Product[]>>((accumulator, product) => {
-    if (!product.brand_id) {
+  const productsByBrand = products.reduce<Record<string, Product[]>>(
+    (accumulator, product) => {
+      if (!product.brand_id) {
+        return accumulator;
+      }
+
+      if (!accumulator[product.brand_id]) {
+        accumulator[product.brand_id] = [];
+      }
+
+      accumulator[product.brand_id].push(product);
       return accumulator;
-    }
+    },
+    {},
+  );
 
-    if (!accumulator[product.brand_id]) {
-      accumulator[product.brand_id] = [];
-    }
+  const filteredCategories = useMemo(() => {
+    const query = categorySearch.trim().toLowerCase();
+    return categories.filter((category) => {
+      const matchesQuery =
+        !query ||
+        category.name.toLowerCase().includes(query) ||
+        (category.description ?? "").toLowerCase().includes(query);
+      const matchesStatus =
+        categoryStatusFilter === "all" ||
+        (categoryStatusFilter === "active" && category.is_active) ||
+        (categoryStatusFilter === "inactive" && !category.is_active);
+      return matchesQuery && matchesStatus;
+    });
+  }, [categories, categorySearch, categoryStatusFilter]);
 
-    accumulator[product.brand_id].push(product);
-    return accumulator;
-  }, {});
+  const filteredBrands = useMemo(() => {
+    const query = brandSearch.trim().toLowerCase();
+    return brands.filter((brand) => {
+      const matchesQuery =
+        !query ||
+        brand.name.toLowerCase().includes(query) ||
+        (brand.code ?? "").toLowerCase().includes(query);
+      const matchesStatus =
+        brandStatusFilter === "all" ||
+        (brandStatusFilter === "active" && brand.is_active) ||
+        (brandStatusFilter === "inactive" && !brand.is_active);
+      return matchesQuery && matchesStatus;
+    });
+  }, [brands, brandSearch, brandStatusFilter]);
 
   return (
     <>
@@ -380,21 +476,63 @@ export default function CatalogueTab() {
                   setImportDialogOpen(true);
                 }}
               />
+              <div className="grid gap-3 lg:grid-cols-2">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={categorySearch}
+                    onChange={(event) => setCategorySearch(event.target.value)}
+                    placeholder="Search categories..."
+                    className="pl-9"
+                  />
+                </div>
+                <Select
+                  value={categoryStatusFilter}
+                  onValueChange={(value) =>
+                    setCategoryStatusFilter(
+                      value as "all" | "active" | "inactive",
+                    )
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All statuses</SelectItem>
+                    <SelectItem value="active">Active only</SelectItem>
+                    <SelectItem value="inactive">Inactive only</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <SectionTable
                 loading={loading}
                 emptyText="No categories found."
-                columns={["Name", "Description", "Products", "Status", "Actions"]}
-                rows={categories.map((item) => ({
+                columns={[
+                  "Name",
+                  "Description",
+                  "Products",
+                  "Status",
+                  "Actions",
+                ]}
+                rows={filteredCategories.map((item) => ({
                   key: item.category_id,
                   cells: [
                     item.name,
                     item.description || "—",
                     String(item.product_count),
-                    <Badge key="badge" variant={item.is_active ? "default" : "secondary"}>
+                    <Badge
+                      key="badge"
+                      variant={item.is_active ? "default" : "secondary"}
+                    >
                       {item.is_active ? "Active" : "Inactive"}
                     </Badge>,
                     <div key="action" className="flex flex-wrap gap-2">
-                      <Button type="button" size="sm" variant="ghost" onClick={() => openEditor("category", item.category_id)}>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => openEditor("category", item.category_id)}
+                      >
                         <PencilLine className="h-4 w-4" />
                         Edit
                       </Button>
@@ -446,17 +584,52 @@ export default function CatalogueTab() {
                   setImportDialogOpen(true);
                 }}
               />
+              <div className="grid gap-3 lg:grid-cols-2">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={brandSearch}
+                    onChange={(event) => setBrandSearch(event.target.value)}
+                    placeholder="Search brands..."
+                    className="pl-9"
+                  />
+                </div>
+                <Select
+                  value={brandStatusFilter}
+                  onValueChange={(value) =>
+                    setBrandStatusFilter(value as "all" | "active" | "inactive")
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All statuses</SelectItem>
+                    <SelectItem value="active">Active only</SelectItem>
+                    <SelectItem value="inactive">Inactive only</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <SectionTable
                 loading={loading}
                 emptyText="No brands found."
-                columns={["Name", "Code", "Description", "Product list", "Status", "Actions"]}
-                rows={brands.map((item) => ({
+                columns={[
+                  "Name",
+                  "Code",
+                  "Description",
+                  "Product list",
+                  "Status",
+                  "Actions",
+                ]}
+                rows={filteredBrands.map((item) => ({
                   key: item.brand_id,
                   cells: [
                     <div key="brand-name" className="space-y-1">
                       <div className="font-medium">{item.name}</div>
                       <div className="text-xs text-muted-foreground">
-                        {item.product_count === 1 ? "1 linked product" : `${item.product_count} linked products`}
+                        {item.product_count === 1
+                          ? "1 linked product"
+                          : `${item.product_count} linked products`}
                       </div>
                     </div>,
                     item.code || "—",
@@ -466,9 +639,14 @@ export default function CatalogueTab() {
                       products={productsByBrand[item.brand_id] ?? []}
                       totalProducts={item.product_count}
                       pendingProductId={productActionProductId}
-                      onToggleStatus={(product, isActive) => void handleProductStatusToggle(product, isActive)}
+                      onToggleStatus={(product, isActive) =>
+                        void handleProductStatusToggle(product, isActive)
+                      }
                     />,
-                    <Badge key="badge" variant={item.is_active ? "default" : "secondary"}>
+                    <Badge
+                      key="badge"
+                      variant={item.is_active ? "default" : "secondary"}
+                    >
                       {item.is_active ? "Active" : "Inactive"}
                     </Badge>,
                     <div key="action" className="flex flex-wrap gap-2">
@@ -578,10 +756,16 @@ export default function CatalogueTab() {
               ? "Activate"
               : "Deactivate"
         }
-        confirmVariant={actionState?.mode === "delete" ? "destructive" : "default"}
+        confirmVariant={
+          actionState?.mode === "delete" ? "destructive" : "default"
+        }
         confirmDisabled={actionPending}
         cancelDisabled={actionPending}
-        confirmContent={actionPending ? <Loader2 className="h-4 w-4 animate-spin" /> : undefined}
+        confirmContent={
+          actionPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : undefined
+        }
       />
 
       <ConfirmationDialog
@@ -624,10 +808,16 @@ export default function CatalogueTab() {
               ? "Activate"
               : "Deactivate"
         }
-        confirmVariant={categoryActionState?.mode === "delete" ? "destructive" : "default"}
+        confirmVariant={
+          categoryActionState?.mode === "delete" ? "destructive" : "default"
+        }
         confirmDisabled={categoryActionPending}
         cancelDisabled={categoryActionPending}
-        confirmContent={categoryActionPending ? <Loader2 className="h-4 w-4 animate-spin" /> : undefined}
+        confirmContent={
+          categoryActionPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : undefined
+        }
       />
       <BulkImportDialog
         open={importDialogOpen}
@@ -660,7 +850,12 @@ function SectionHeader({
         <p className="text-sm text-muted-foreground">{description}</p>
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" className="gap-2" onClick={onImport}>
+        <Button
+          type="button"
+          variant="outline"
+          className="gap-2"
+          onClick={onImport}
+        >
           <Upload className="h-4 w-4" />
           Import
         </Button>
@@ -685,7 +880,11 @@ function BrandProductList({
   onToggleStatus: (product: Product, isActive: boolean) => void;
 }) {
   if (products.length === 0) {
-    return <span className="text-sm text-muted-foreground">No products linked to this brand.</span>;
+    return (
+      <span className="text-sm text-muted-foreground">
+        No products linked to this brand.
+      </span>
+    );
   }
 
   return (
@@ -706,7 +905,9 @@ function BrandProductList({
             <div className="min-w-0 flex-1">
               <div className="truncate font-medium">{product.name}</div>
               <div className="truncate text-xs text-muted-foreground">
-                {[product.sku || null, product.barcode || null].filter(Boolean).join(" • ") || "No SKU or barcode"}
+                {[product.sku || null, product.barcode || null]
+                  .filter(Boolean)
+                  .join(" • ") || "No SKU or barcode"}
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -721,7 +922,11 @@ function BrandProductList({
                 aria-label={`${nextIsActive ? "Activate" : "Deactivate"} ${product.name}`}
                 onClick={() => onToggleStatus(product, nextIsActive)}
               >
-                {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Power className="h-4 w-4" />}
+                {isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Power className="h-4 w-4" />
+                )}
                 {nextIsActive ? "Activate" : "Deactivate"}
               </Button>
             </div>
@@ -758,13 +963,19 @@ function SectionTable({
         <tbody>
           {loading ? (
             <tr>
-              <td colSpan={columns.length} className="px-4 py-10 text-center text-muted-foreground">
+              <td
+                colSpan={columns.length}
+                className="px-4 py-10 text-center text-muted-foreground"
+              >
                 Loading...
               </td>
             </tr>
           ) : rows.length === 0 ? (
             <tr>
-              <td colSpan={columns.length} className="px-4 py-10 text-center text-muted-foreground">
+              <td
+                colSpan={columns.length}
+                className="px-4 py-10 text-center text-muted-foreground"
+              >
                 {emptyText}
               </td>
             </tr>
@@ -813,31 +1024,51 @@ function EditorDialog({
           <DialogTitle>
             {editor?.id ? "Edit" : "Add"} {editor?.kind || "item"}
           </DialogTitle>
-          <DialogDescription>Keep reference records up to date for product setup.</DialogDescription>
+          <DialogDescription>
+            Keep reference records up to date for product setup.
+          </DialogDescription>
         </DialogHeader>
 
         {editor?.kind === "category" ? (
           <div className="grid gap-4">
             <div className="grid gap-1.5">
               <Label>Name</Label>
-              <Input value={categoryForm.name} onChange={(event) => setCategoryForm((prev) => ({ ...prev, name: event.target.value }))} />
+              <Input
+                value={categoryForm.name}
+                onChange={(event) =>
+                  setCategoryForm((prev) => ({
+                    ...prev,
+                    name: event.target.value,
+                  }))
+                }
+              />
             </div>
             <div className="grid gap-1.5">
               <Label>Description</Label>
               <Textarea
                 value={categoryForm.description}
-                onChange={(event) => setCategoryForm((prev) => ({ ...prev, description: event.target.value }))}
+                onChange={(event) =>
+                  setCategoryForm((prev) => ({
+                    ...prev,
+                    description: event.target.value,
+                  }))
+                }
                 rows={4}
               />
             </div>
             <div className="flex items-center justify-between rounded-lg border p-4">
               <div>
                 <Label className="text-sm font-medium">Active</Label>
-                <p className="text-xs text-muted-foreground">Inactive categories stay in history but are hidden in selectors.</p>
+                <p className="text-xs text-muted-foreground">
+                  Inactive categories stay in history but are hidden in
+                  selectors.
+                </p>
               </div>
               <Switch
                 checked={categoryForm.isActive}
-                onCheckedChange={(checked) => setCategoryForm((prev) => ({ ...prev, isActive: checked }))}
+                onCheckedChange={(checked) =>
+                  setCategoryForm((prev) => ({ ...prev, isActive: checked }))
+                }
               />
             </div>
           </div>
@@ -847,28 +1078,53 @@ function EditorDialog({
           <div className="grid gap-4">
             <div className="grid gap-1.5">
               <Label>Name</Label>
-              <Input value={brandForm.name} onChange={(event) => setBrandForm((prev) => ({ ...prev, name: event.target.value }))} />
+              <Input
+                value={brandForm.name}
+                onChange={(event) =>
+                  setBrandForm((prev) => ({
+                    ...prev,
+                    name: event.target.value,
+                  }))
+                }
+              />
             </div>
             <div className="grid gap-1.5">
               <Label>Code</Label>
-              <Input value={brandForm.code} onChange={(event) => setBrandForm((prev) => ({ ...prev, code: event.target.value }))} />
+              <Input
+                value={brandForm.code}
+                onChange={(event) =>
+                  setBrandForm((prev) => ({
+                    ...prev,
+                    code: event.target.value,
+                  }))
+                }
+              />
             </div>
             <div className="grid gap-1.5">
               <Label>Description</Label>
               <Textarea
                 value={brandForm.description}
-                onChange={(event) => setBrandForm((prev) => ({ ...prev, description: event.target.value }))}
+                onChange={(event) =>
+                  setBrandForm((prev) => ({
+                    ...prev,
+                    description: event.target.value,
+                  }))
+                }
                 rows={4}
               />
             </div>
             <div className="flex items-center justify-between rounded-lg border p-4">
               <div>
                 <Label className="text-sm font-medium">Active</Label>
-                <p className="text-xs text-muted-foreground">Inactive brands remain available for historical products.</p>
+                <p className="text-xs text-muted-foreground">
+                  Inactive brands remain available for historical products.
+                </p>
               </div>
               <Switch
                 checked={brandForm.isActive}
-                onCheckedChange={(checked) => setBrandForm((prev) => ({ ...prev, isActive: checked }))}
+                onCheckedChange={(checked) =>
+                  setBrandForm((prev) => ({ ...prev, isActive: checked }))
+                }
               />
             </div>
           </div>
@@ -877,7 +1133,11 @@ function EditorDialog({
         <Separator />
 
         <DialogFooter>
-          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+          >
             Cancel
           </Button>
           <Button type="button" onClick={onSave} disabled={saving}>

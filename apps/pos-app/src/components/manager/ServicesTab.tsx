@@ -1,11 +1,31 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Wrench } from "lucide-react";
+import { Plus, Search, Wrench } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { deleteService, fetchServices, type Service } from "@/lib/api";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  deleteService,
+  fetchCategories,
+  fetchServices,
+  type Category,
+  type Service,
+} from "@/lib/api";
 import ServiceManagementDialog from "@/components/manager/ServiceManagementDialog";
 
 const currencyFormatter = new Intl.NumberFormat("en-LK", {
@@ -16,9 +36,14 @@ const currencyFormatter = new Intl.NumberFormat("en-LK", {
 });
 
 export default function ServicesTab() {
-  const [query, setQuery] = useState("");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "active" | "inactive"
+  >("active");
+  const [categoryFilter, setCategoryFilter] = useState("all");
   const [loading, setLoading] = useState(false);
   const [services, setServices] = useState<Service[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -26,10 +51,16 @@ export default function ServicesTab() {
   const loadServices = useCallback(async () => {
     setLoading(true);
     try {
-      const rows = await fetchServices();
+      const [rows, categoryRows] = await Promise.all([
+        fetchServices(),
+        fetchCategories(true),
+      ]);
       setServices(rows);
+      setCategories(categoryRows);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load services.");
+      toast.error(
+        error instanceof Error ? error.message : "Failed to load services.",
+      );
       setServices([]);
     } finally {
       setLoading(false);
@@ -41,18 +72,33 @@ export default function ServicesTab() {
   }, [loadServices]);
 
   const filtered = useMemo(() => {
-    if (!query.trim()) {
-      return services;
-    }
+    const normalized = search.trim().toLowerCase();
+    return services.filter((service) => {
+      const matchesSearch =
+        !normalized ||
+        [
+          service.name,
+          service.sku ?? "",
+          service.description ?? "",
+          service.category_name ?? "",
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(normalized);
+      const matchesStatus =
+        statusFilter === "all" ||
+        (statusFilter === "active" && service.is_active) ||
+        (statusFilter === "inactive" && !service.is_active);
+      const matchesCategory =
+        categoryFilter === "all" || service.category_id === categoryFilter;
+      return matchesSearch && matchesStatus && matchesCategory;
+    });
+  }, [search, services, statusFilter, categoryFilter]);
 
-    const normalized = query.trim().toLowerCase();
-    return services.filter((service) =>
-      [service.name, service.sku ?? "", service.description ?? "", service.category_name ?? ""]
-        .join(" ")
-        .toLowerCase()
-        .includes(normalized),
-    );
-  }, [query, services]);
+  const activeCategories = useMemo(
+    () => categories.filter((category) => category.is_active),
+    [categories],
+  );
 
   const handleSoftDelete = async (service: Service) => {
     setDeletingId(service.id);
@@ -61,7 +107,11 @@ export default function ServicesTab() {
       toast.success("Service deactivated.");
       setServices((prev) => prev.filter((row) => row.id !== service.id));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to deactivate service.");
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to deactivate service.",
+      );
     } finally {
       setDeletingId(null);
     }
@@ -80,13 +130,7 @@ export default function ServicesTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <Input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search services by name or SKU..."
-          className="sm:max-w-sm"
-        />
+      <div className="flex justify-end">
         <Button
           type="button"
           className="gap-2"
@@ -98,6 +142,49 @@ export default function ServicesTab() {
           <Plus className="h-4 w-4" />
           New Service
         </Button>
+      </div>
+
+      <div className="grid gap-3 lg:grid-cols-3">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search by name, SKU, category..."
+            className="pl-9"
+          />
+        </div>
+        <Select
+          value={statusFilter}
+          onValueChange={(value) =>
+            setStatusFilter(value as "all" | "active" | "inactive")
+          }
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All statuses</SelectItem>
+            <SelectItem value="active">Active only</SelectItem>
+            <SelectItem value="inactive">Inactive only</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+          <SelectTrigger>
+            <SelectValue placeholder="Category" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All categories</SelectItem>
+            {activeCategories.map((category) => (
+              <SelectItem
+                key={category.category_id}
+                value={category.category_id}
+              >
+                {category.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="rounded-lg border">
@@ -116,13 +203,19 @@ export default function ServicesTab() {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
+                <TableCell
+                  colSpan={7}
+                  className="text-center text-sm text-muted-foreground"
+                >
                   Loading services...
                 </TableCell>
               </TableRow>
             ) : filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
+                <TableCell
+                  colSpan={7}
+                  className="text-center text-sm text-muted-foreground"
+                >
                   No services found.
                 </TableCell>
               </TableRow>
@@ -135,19 +228,25 @@ export default function ServicesTab() {
                       <span>{service.name}</span>
                     </div>
                     {service.description ? (
-                      <p className="text-xs text-muted-foreground">{service.description}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {service.description}
+                      </p>
                     ) : null}
                   </TableCell>
                   <TableCell>{service.sku || "-"}</TableCell>
                   <TableCell>{service.category_name || "-"}</TableCell>
-                  <TableCell className="text-right">{currencyFormatter.format(service.price)}</TableCell>
+                  <TableCell className="text-right">
+                    {currencyFormatter.format(service.price)}
+                  </TableCell>
                   <TableCell className="text-right">
                     {service.duration_minutes && service.duration_minutes > 0
                       ? `${service.duration_minutes} min`
                       : "-"}
                   </TableCell>
                   <TableCell>
-                    <Badge variant={service.is_active ? "default" : "secondary"}>
+                    <Badge
+                      variant={service.is_active ? "default" : "secondary"}
+                    >
                       {service.is_active ? "Active" : "Inactive"}
                     </Badge>
                   </TableCell>
