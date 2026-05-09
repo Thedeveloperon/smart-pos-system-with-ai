@@ -320,7 +320,8 @@ describe("WarrantyClaimsTab", () => {
             product_name: "iPhone 15 Pro",
             claim_date: "2026-05-03T08:00:00.000Z",
             status: 1,
-            resolution_notes: body.resolution_notes ?? null,
+            issue_description: body.issue_description ?? null,
+            resolution_notes: null,
             created_at: "2026-05-03T08:00:00.000Z",
           });
         }
@@ -370,12 +371,12 @@ describe("WarrantyClaimsTab", () => {
     const createBody = JSON.parse(String(createInit?.body ?? "{}")) as {
       serial_number_id?: string;
       claim_date?: string;
-      resolution_notes?: string;
+      issue_description?: string;
     };
 
     expect(createBody.serial_number_id).toBe("serial-1");
     expect(createBody).not.toHaveProperty("claim_date");
-    expect(createBody.resolution_notes).toBe("Battery issue");
+    expect(createBody.issue_description).toBe("Battery issue");
   });
 
   it("shows a direct replacement action for open claims and posts the selected replacement serial", async () => {

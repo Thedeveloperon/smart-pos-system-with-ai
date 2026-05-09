@@ -52,7 +52,7 @@ export default function WarrantyClaimsTab() {
   const [serialValue, setSerialValue] = useState("");
   const [serialId, setSerialId] = useState<string | null>(null);
   const [serialError, setSerialError] = useState<string | null>(null);
-  const [notes, setNotes] = useState("");
+  const [issueDescription, setIssueDescription] = useState("");
   const [saving, setSaving] = useState(false);
 
   const [active, setActive] = useState<WarrantyClaim | null>(null);
@@ -120,16 +120,22 @@ export default function WarrantyClaimsTab() {
 
   const handleCreate = async () => {
     if (!serialId) return;
+    const normalizedIssueDescription = issueDescription.trim();
+    if (!normalizedIssueDescription) {
+      setSerialError("Issue description is required.");
+      return;
+    }
+
     setSaving(true);
     try {
       await createWarrantyClaim({
         serial_number_id: serialId,
-        resolution_notes: notes || undefined,
+        issue_description: normalizedIssueDescription,
       });
       setOpen(false);
       setSerialValue("");
       setSerialId(null);
-      setNotes("");
+      setIssueDescription("");
       await reload();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to create warranty claim.");
@@ -255,7 +261,18 @@ export default function WarrantyClaimsTab() {
                 </SelectContent>
               </Select>
             </div>
-            <Dialog open={open} onOpenChange={setOpen}>
+            <Dialog
+              open={open}
+              onOpenChange={(nextOpen) => {
+                setOpen(nextOpen);
+                if (!nextOpen) {
+                  setSerialValue("");
+                  setSerialId(null);
+                  setSerialError(null);
+                  setIssueDescription("");
+                }
+              }}
+            >
               <DialogTrigger asChild>
                 <Button size="sm">New claim</Button>
               </DialogTrigger>
@@ -286,15 +303,24 @@ export default function WarrantyClaimsTab() {
                     The claim date and time are recorded automatically when you create the claim.
                   </p>
                   <div className="grid gap-1">
-                    <Label>Notes (optional)</Label>
-                    <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+                    <Label>Issue description</Label>
+                    <Textarea
+                      value={issueDescription}
+                      onChange={(e) => setIssueDescription(e.target.value)}
+                      rows={3}
+                      placeholder="Describe the issue reported by the customer."
+                      required
+                    />
                   </div>
                 </div>
                 <DialogFooter>
                   <Button variant="ghost" onClick={() => setOpen(false)}>
                     Cancel
                   </Button>
-                  <Button onClick={handleCreate} disabled={!serialId || saving}>
+                  <Button
+                    onClick={handleCreate}
+                    disabled={!serialId || !issueDescription.trim() || saving}
+                  >
                     {saving ? "Saving..." : "Create claim"}
                   </Button>
                 </DialogFooter>
