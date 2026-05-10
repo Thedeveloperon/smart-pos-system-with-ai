@@ -65,6 +65,7 @@ public sealed class DbSchemaUpdaterPurchasingSchemaTests
 
             Assert.True(await ColumnExistsAsync(dbContext, "suppliers", "CompanyName"));
             Assert.True(await ColumnExistsAsync(dbContext, "suppliers", "CompanyPhone"));
+            Assert.True(await ColumnExistsAsync(dbContext, "suppliers", "Email"));
             Assert.True(await ColumnExistsAsync(dbContext, "purchase_bills", "PurchaseOrderId"));
             Assert.True(await ColumnExistsAsync(dbContext, "purchase_bills", "ImportRequestId"));
             Assert.True(await IndexExistsAsync(dbContext, "purchase_bills", "IX_purchase_bills_PurchaseOrderId"));

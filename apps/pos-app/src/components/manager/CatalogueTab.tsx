@@ -21,6 +21,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import BulkImportDialog from "@/components/import/BulkImportDialog";
 import { type ImportEntityType } from "@/components/import/importTemplates";
+import { cn } from "@/lib/utils";
 import {
   createBrand,
   createCategory,
@@ -135,6 +136,8 @@ export default function CatalogueTab() {
   const [saving, setSaving] = useState(false);
   const [categoryForm, setCategoryForm] = useState<CategoryFormState>(emptyCategoryForm());
   const [brandForm, setBrandForm] = useState<BrandFormState>(emptyBrandForm());
+  const [categoryNameError, setCategoryNameError] = useState<string | null>(null);
+  const [brandNameError, setBrandNameError] = useState<string | null>(null);
   const [actionState, setActionState] = useState<BrandActionState>(null);
   const [categoryActionState, setCategoryActionState] = useState<CategoryActionState>(null);
   const [actionPending, setActionPending] = useState(false);
@@ -142,6 +145,11 @@ export default function CatalogueTab() {
   const [productActionProductId, setProductActionProductId] = useState<string | null>(null);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [importEntityType, setImportEntityType] = useState<ImportEntityType>("brand");
+
+  const resetEditorErrors = () => {
+    setCategoryNameError(null);
+    setBrandNameError(null);
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -167,6 +175,7 @@ export default function CatalogueTab() {
 
   const openEditor = (kind: "category" | "brand", id?: string) => {
     setEditor({ kind, id });
+    resetEditorErrors();
     if (kind === "category") {
       const item = categories.find((entry) => entry.category_id === id);
       setCategoryForm(
@@ -188,6 +197,21 @@ export default function CatalogueTab() {
   const closeEditor = () => {
     setEditorOpen(false);
     setEditor(null);
+    resetEditorErrors();
+  };
+
+  const handleCategoryNameChange = (value: string) => {
+    setCategoryForm((prev) => ({ ...prev, name: value }));
+    if (categoryNameError) {
+      setCategoryNameError(null);
+    }
+  };
+
+  const handleBrandNameChange = (value: string) => {
+    setBrandForm((prev) => ({ ...prev, name: value }));
+    if (brandNameError) {
+      setBrandNameError(null);
+    }
   };
 
   const handleSave = async () => {
@@ -195,39 +219,51 @@ export default function CatalogueTab() {
       return;
     }
 
+    const categoryName = categoryForm.name.trim();
+    const brandName = brandForm.name.trim();
+
+    if (editor.kind === "category" && !categoryName) {
+      const message = "Category name is required.";
+      setCategoryNameError(message);
+      toast.error(message);
+      return;
+    }
+
+    if (editor.kind === "brand" && !brandName) {
+      const message = "Brand name is required.";
+      setBrandNameError(message);
+      toast.error(message);
+      return;
+    }
+
+    resetEditorErrors();
     setSaving(true);
     try {
       if (editor.kind === "category") {
-        if (!categoryForm.name.trim()) {
-          throw new Error("Category name is required.");
-        }
         if (editor.id) {
           await updateCategory(editor.id, {
-            name: categoryForm.name.trim(),
+            name: categoryName,
             description: categoryForm.description.trim(),
             is_active: categoryForm.isActive,
           });
         } else {
           await createCategory({
-            name: categoryForm.name.trim(),
+            name: categoryName,
             description: categoryForm.description.trim(),
             is_active: categoryForm.isActive,
           });
         }
       } else {
-        if (!brandForm.name.trim()) {
-          throw new Error("Brand name is required.");
-        }
         if (editor.id) {
           await updateBrand(editor.id, {
-            name: brandForm.name.trim(),
+            name: brandName,
             code: brandForm.code.trim(),
             description: brandForm.description.trim(),
             is_active: brandForm.isActive,
           });
         } else {
           await createBrand({
-            name: brandForm.name.trim(),
+            name: brandName,
             code: brandForm.code.trim(),
             description: brandForm.description.trim(),
             is_active: brandForm.isActive,
@@ -527,8 +563,12 @@ export default function CatalogueTab() {
         editor={editor}
         categoryForm={categoryForm}
         setCategoryForm={setCategoryForm}
+        categoryNameError={categoryNameError}
+        onCategoryNameChange={handleCategoryNameChange}
         brandForm={brandForm}
         setBrandForm={setBrandForm}
+        brandNameError={brandNameError}
+        onBrandNameChange={handleBrandNameChange}
         saving={saving}
         onOpenChange={(nextOpen) => {
           if (!nextOpen) {
@@ -790,8 +830,12 @@ function EditorDialog({
   editor,
   categoryForm,
   setCategoryForm,
+  categoryNameError,
+  onCategoryNameChange,
   brandForm,
   setBrandForm,
+  brandNameError,
+  onBrandNameChange,
   saving,
   onOpenChange,
   onSave,
@@ -800,8 +844,12 @@ function EditorDialog({
   editor: EditorState;
   categoryForm: CategoryFormState;
   setCategoryForm: Dispatch<SetStateAction<CategoryFormState>>;
+  categoryNameError: string | null;
+  onCategoryNameChange: (value: string) => void;
   brandForm: BrandFormState;
   setBrandForm: Dispatch<SetStateAction<BrandFormState>>;
+  brandNameError: string | null;
+  onBrandNameChange: (value: string) => void;
   saving: boolean;
   onOpenChange: (open: boolean) => void;
   onSave: () => void;
@@ -819,8 +867,22 @@ function EditorDialog({
         {editor?.kind === "category" ? (
           <div className="grid gap-4">
             <div className="grid gap-1.5">
-              <Label>Name</Label>
-              <Input value={categoryForm.name} onChange={(event) => setCategoryForm((prev) => ({ ...prev, name: event.target.value }))} />
+              <Label htmlFor="catalogue-category-name" className={cn(categoryNameError && "text-destructive")}>
+                Name
+              </Label>
+              <Input
+                id="catalogue-category-name"
+                value={categoryForm.name}
+                onChange={(event) => onCategoryNameChange(event.target.value)}
+                aria-invalid={Boolean(categoryNameError)}
+                aria-describedby={categoryNameError ? "catalogue-category-name-error" : undefined}
+                className={cn(categoryNameError && "border-destructive focus-visible:ring-destructive")}
+              />
+              {categoryNameError ? (
+                <p id="catalogue-category-name-error" className="text-sm text-destructive">
+                  {categoryNameError}
+                </p>
+              ) : null}
             </div>
             <div className="grid gap-1.5">
               <Label>Description</Label>
@@ -846,8 +908,22 @@ function EditorDialog({
         {editor?.kind === "brand" ? (
           <div className="grid gap-4">
             <div className="grid gap-1.5">
-              <Label>Name</Label>
-              <Input value={brandForm.name} onChange={(event) => setBrandForm((prev) => ({ ...prev, name: event.target.value }))} />
+              <Label htmlFor="catalogue-brand-name" className={cn(brandNameError && "text-destructive")}>
+                Name
+              </Label>
+              <Input
+                id="catalogue-brand-name"
+                value={brandForm.name}
+                onChange={(event) => onBrandNameChange(event.target.value)}
+                aria-invalid={Boolean(brandNameError)}
+                aria-describedby={brandNameError ? "catalogue-brand-name-error" : undefined}
+                className={cn(brandNameError && "border-destructive focus-visible:ring-destructive")}
+              />
+              {brandNameError ? (
+                <p id="catalogue-brand-name-error" className="text-sm text-destructive">
+                  {brandNameError}
+                </p>
+              ) : null}
             </div>
             <div className="grid gap-1.5">
               <Label>Code</Label>

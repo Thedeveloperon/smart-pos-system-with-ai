@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { toast } from "sonner";
 import PromotionsTab from "./PromotionsTab";
 import {
+  createPromotion,
   deactivatePromotion,
   fetchCategories,
   fetchProductCatalogItems,
@@ -177,5 +179,76 @@ describe("PromotionsTab", () => {
     fireEvent.click(await screen.findByRole("option", { name: "Category" }));
 
     expect(within(categorySection).getByRole("combobox")).not.toHaveTextContent("Groceries");
+  });
+
+  it("requires an explicit scope selection before creating a promotion", async () => {
+    render(<PromotionsTab />);
+    await screen.findByText("All Active");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Promotion" }));
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText("Create promotion");
+
+    const [scopeTrigger] = within(dialog).getAllByRole("combobox");
+    expect(scopeTrigger).toHaveTextContent("Select Scope");
+
+    fireEvent.mouseDown(scopeTrigger);
+    fireEvent.click(scopeTrigger);
+    expect(await screen.findByRole("option", { name: "Category" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Product" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "All" })).not.toBeInTheDocument();
+    fireEvent.keyDown(scopeTrigger, { key: "Escape" });
+
+    const [nameInput] = within(dialog).getAllByRole("textbox");
+    fireEvent.change(nameInput, { target: { value: "Scoped promotion" } });
+    fireEvent.change(within(dialog).getByRole("spinbutton"), { target: { value: "10" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(createPromotion).not.toHaveBeenCalled();
+    });
+    expect(toast.error).toHaveBeenCalledWith("Promotion scope is required.");
+  });
+
+  it("blocks creating a promotion with a past UTC start date", async () => {
+    render(<PromotionsTab />);
+    await screen.findByText("All Active");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Promotion" }));
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText("Create promotion");
+
+    const [scopeTrigger] = within(dialog).getAllByRole("combobox");
+    fireEvent.mouseDown(scopeTrigger);
+    fireEvent.click(scopeTrigger);
+    fireEvent.click(await screen.findByRole("option", { name: "Category" }));
+
+    const categoryLabel = within(dialog)
+      .getAllByText("Category")
+      .find((element) => element.tagName === "LABEL");
+    const categorySection = categoryLabel?.closest("div");
+    if (!categorySection) {
+      throw new Error("Missing category selector");
+    }
+
+    const categoryTrigger = within(categorySection).getByRole("combobox");
+    fireEvent.mouseDown(categoryTrigger);
+    fireEvent.click(categoryTrigger);
+    fireEvent.click(await screen.findByRole("option", { name: "Groceries" }));
+
+    const [nameInput] = within(dialog).getAllByRole("textbox");
+    fireEvent.change(nameInput, { target: { value: "Past-dated promotion" } });
+    fireEvent.change(within(dialog).getByRole("spinbutton"), { target: { value: "10" } });
+
+    const dateInputs = within(dialog).getAllByDisplayValue(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/);
+    fireEvent.change(dateInputs[0], { target: { value: "2000-01-01T00:00" } });
+    fireEvent.change(dateInputs[1], { target: { value: "2099-01-01T00:00" } });
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(createPromotion).not.toHaveBeenCalled();
+    });
+    expect(toast.error).toHaveBeenCalledWith("Promotion start date must be current UTC time or later.");
   });
 });

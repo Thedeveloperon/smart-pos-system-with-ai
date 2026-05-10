@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using SmartPos.Backend.Domain;
@@ -20,7 +21,6 @@ public sealed class ProductService(
     private const string BrandDeleteRequiresDeactivateMessage = "Deactivate the brand before deleting.";
     private const string BrandDeleteOnlyInactiveMessage = "Only inactive brands can be permanently deleted.";
     private const string BrandDeleteProductLinksMessage = "This brand is linked to products and cannot be permanently deleted.";
-    private const string BrandDeleteSupplierLinksMessage = "This brand is linked to suppliers and cannot be permanently deleted.";
     private const string CategoryDeleteRequiresDeactivateMessage = "Deactivate the category before deleting.";
     private const string CategoryDeleteOnlyInactiveMessage = "Only inactive categories can be permanently deleted.";
     private const string CategoryDeleteProductLinksMessage = "This category is linked to products and cannot be permanently deleted.";
@@ -29,6 +29,9 @@ public sealed class ProductService(
     private const string SupplierDeleteProductLinksMessage = "This supplier has product links and cannot be permanently deleted.";
     private const string SupplierDeletePurchaseHistoryMessage = "This supplier has purchase history and cannot be permanently deleted.";
     private const string SupplierDeleteBatchHistoryMessage = "This supplier has batch history and cannot be permanently deleted.";
+    private static readonly Regex OptionalEmailPattern = new(
+        @"^[^\s@]+@[^\s@]+\.[^\s@]+$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public async Task<ProductSearchResponse> SearchProductsAsync(
         string? query,
@@ -471,6 +474,7 @@ public sealed class ProductService(
 
         ValidateMoneyValue(request.UnitPrice, "Unit price cannot be negative.");
         ValidateMoneyValue(request.CostPrice, "Cost price cannot be negative.");
+        ValidateCostPriceAgainstUnitPrice(request.UnitPrice, request.CostPrice);
         ValidateQuantityValue(request.InitialStockQuantity, "Initial stock cannot be negative.");
         ValidateQuantityValue(request.ReorderLevel, "Reorder level cannot be negative.");
         ValidateQuantityValue(request.SafetyStock, "Safety stock cannot be negative.");
@@ -571,6 +575,7 @@ public sealed class ProductService(
 
         if (inventory.InitialStockQuantity > 0m)
         {
+            var currentUserId = await GetCurrentUserIdAsync();
             await stockMovementHelper.RecordMovementAsync(
                 storeId: product.StoreId,
                 productId: product.Id,
@@ -581,7 +586,7 @@ public sealed class ProductService(
                 batchId: null,
                 serialNumber: null,
                 reason: "initial_stock",
-                userId: null,
+                userId: currentUserId,
                 cancellationToken: cancellationToken,
                 quantityBeforeOverride: 0m,
                 updateInventory: false);
@@ -618,6 +623,7 @@ public sealed class ProductService(
 
         ValidateMoneyValue(request.UnitPrice, "Unit price cannot be negative.");
         ValidateMoneyValue(request.CostPrice, "Cost price cannot be negative.");
+        ValidateCostPriceAgainstUnitPrice(request.UnitPrice, request.CostPrice);
         ValidateQuantityValue(request.InitialStockQuantity, "Initial stock cannot be negative.");
         ValidateQuantityValue(request.ReorderLevel, "Reorder level cannot be negative.");
         ValidateQuantityValue(request.SafetyStock, "Safety stock cannot be negative.");
@@ -732,6 +738,7 @@ public sealed class ProductService(
 
         if (initialStockDelta != 0m)
         {
+            var currentUserId = await GetCurrentUserIdAsync();
             await stockMovementHelper.RecordMovementAsync(
                 storeId: product.StoreId,
                 productId: product.Id,
@@ -742,7 +749,7 @@ public sealed class ProductService(
                 batchId: null,
                 serialNumber: null,
                 reason: "stock_recount",
-                userId: null,
+                userId: currentUserId,
                 cancellationToken);
         }
 
@@ -956,6 +963,7 @@ public sealed class ProductService(
             }
         }
 
+        var currentUserId = await GetCurrentUserIdAsync();
         await stockMovementHelper.RecordMovementAsync(
             storeId: product.StoreId,
             productId: product.Id,
@@ -966,7 +974,7 @@ public sealed class ProductService(
             batchId: request.BatchId,
             serialNumber: null,
             reason,
-            userId: null,
+            userId: currentUserId,
             cancellationToken);
 
         if (request.BatchId.HasValue && product.IsBatchTracked)
@@ -1220,14 +1228,11 @@ public sealed class ProductService(
                 IsActive = x.IsActive,
                 ProductCount = x.Products.Count(y => y.IsActive && (!currentStoreId.HasValue || y.StoreId == currentStoreId.Value)),
                 CanDelete = !x.IsActive &&
-                            !x.Products.Any(y => y.IsActive && (!currentStoreId.HasValue || y.StoreId == currentStoreId.Value)) &&
-                            !x.SupplierBrands.Any(y => y.Supplier.IsActive && (!currentStoreId.HasValue || y.StoreId == currentStoreId.Value)),
+                            !x.Products.Any(y => y.IsActive && (!currentStoreId.HasValue || y.StoreId == currentStoreId.Value)),
                 DeleteBlockReason = x.IsActive
                     ? BrandDeleteRequiresDeactivateMessage
                     : x.Products.Any(y => y.IsActive && (!currentStoreId.HasValue || y.StoreId == currentStoreId.Value))
                         ? BrandDeleteProductLinksMessage
-                        : x.SupplierBrands.Any(y => y.Supplier.IsActive && (!currentStoreId.HasValue || y.StoreId == currentStoreId.Value))
-                            ? BrandDeleteSupplierLinksMessage
                         : null,
                 CreatedAt = x.CreatedAtUtc,
                 UpdatedAt = x.UpdatedAtUtc
@@ -1374,6 +1379,7 @@ public sealed class ProductService(
                 SupplierId = x.Id,
                 Name = x.Name,
                 Phone = x.Phone,
+                Email = x.Email,
                 CompanyName = x.CompanyName,
                 CompanyPhone = x.CompanyPhone,
                 Address = x.Address,
@@ -1390,12 +1396,15 @@ public sealed class ProductService(
                 LinkedProductCount = x.ProductSuppliers.Count(y => y.IsActive),
                 CanDelete = !x.IsActive &&
                             !x.ProductSuppliers.Any() &&
+                            !x.PurchaseOrders.Any() &&
                             !x.PurchaseBills.Any() &&
                             !x.ProductBatches.Any(),
                 DeleteBlockReason = x.IsActive
                     ? SupplierDeleteRequiresDeactivateMessage
                     : x.ProductSuppliers.Any()
                         ? SupplierDeleteProductLinksMessage
+                        : x.PurchaseOrders.Any()
+                            ? SupplierDeletePurchaseHistoryMessage
                         : x.PurchaseBills.Any()
                             ? SupplierDeletePurchaseHistoryMessage
                             : x.ProductBatches.Any()
@@ -1425,6 +1434,7 @@ public sealed class ProductService(
             StoreId = currentStoreId,
             Name = normalizedName,
             Phone = NormalizeOptional(request.Phone),
+            Email = NormalizeOptionalEmail(request.Email),
             CompanyName = NormalizeOptional(request.CompanyName),
             CompanyPhone = NormalizeOptional(request.CompanyPhone),
             Address = NormalizeOptional(request.Address),
@@ -1464,6 +1474,7 @@ public sealed class ProductService(
 
         supplier.Name = normalizedName;
         supplier.Phone = NormalizeOptional(request.Phone);
+        supplier.Email = NormalizeOptionalEmail(request.Email);
         supplier.CompanyName = NormalizeOptional(request.CompanyName);
         supplier.CompanyPhone = NormalizeOptional(request.CompanyPhone);
         supplier.Address = NormalizeOptional(request.Address);
@@ -1781,6 +1792,23 @@ public sealed class ProductService(
             .Where(x => x.Id == userId)
             .Select(x => x.StoreId)
             .SingleOrDefaultAsync(cancellationToken);
+    }
+
+    private Task<Guid?> GetCurrentUserIdAsync()
+    {
+        var user = httpContextAccessor.HttpContext?.User;
+        if (user is null)
+        {
+            return Task.FromResult<Guid?>(null);
+        }
+
+        var userIdValue = user.FindFirstValue(ClaimTypes.NameIdentifier) ?? user.FindFirstValue("sub");
+        if (!Guid.TryParse(userIdValue, out var userId))
+        {
+            return Task.FromResult<Guid?>(null);
+        }
+
+        return Task.FromResult<Guid?>(userId);
     }
 
     private async Task ClearOtherPreferredSuppliersAsync(
@@ -2228,18 +2256,6 @@ public sealed class ProductService(
             return new BrandDeleteAvailability(false, BrandDeleteProductLinksMessage);
         }
 
-        var hasActiveSupplierLinks = await dbContext.SupplierBrands
-            .AsNoTracking()
-            .AnyAsync(
-                x => x.BrandId == brandId &&
-                     x.Supplier.IsActive &&
-                     (!storeId.HasValue || x.StoreId == storeId.Value),
-                cancellationToken);
-        if (hasActiveSupplierLinks)
-        {
-            return new BrandDeleteAvailability(false, BrandDeleteSupplierLinksMessage);
-        }
-
         return new BrandDeleteAvailability(true, null);
     }
 
@@ -2292,6 +2308,14 @@ public sealed class ProductService(
             return new SupplierDeleteAvailability(false, SupplierDeletePurchaseHistoryMessage);
         }
 
+        hasPurchaseHistory = await dbContext.PurchaseOrders
+            .AsNoTracking()
+            .AnyAsync(x => x.SupplierId == supplierId, cancellationToken);
+        if (hasPurchaseHistory)
+        {
+            return new SupplierDeleteAvailability(false, SupplierDeletePurchaseHistoryMessage);
+        }
+
         var hasBatchHistory = await dbContext.ProductBatches
             .AsNoTracking()
             .AnyAsync(x => x.SupplierId == supplierId, cancellationToken);
@@ -2314,6 +2338,7 @@ public sealed class ProductService(
             SupplierId = supplier.Id,
             Name = supplier.Name,
             Phone = supplier.Phone,
+            Email = supplier.Email,
             CompanyName = supplier.CompanyName,
             CompanyPhone = supplier.CompanyPhone,
             Address = supplier.Address,
@@ -2472,6 +2497,22 @@ public sealed class ProductService(
         return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
     }
 
+    private static string? NormalizeOptionalEmail(string? value)
+    {
+        var normalized = NormalizeOptional(value);
+        if (normalized is null)
+        {
+            return null;
+        }
+
+        if (!OptionalEmailPattern.IsMatch(normalized))
+        {
+            throw new InvalidOperationException("Enter a valid email address or leave it empty.");
+        }
+
+        return normalized;
+    }
+
     private static string? NormalizeOptionalBarcode(string? value, string? existingValue = null)
     {
         var normalized = ProductBarcodeRules.NormalizeOptionalForStorage(value);
@@ -2514,6 +2555,14 @@ public sealed class ProductService(
         if (value < 0m)
         {
             throw new InvalidOperationException(errorMessage);
+        }
+    }
+
+    private static void ValidateCostPriceAgainstUnitPrice(decimal unitPrice, decimal costPrice)
+    {
+        if (costPrice > unitPrice)
+        {
+            throw new InvalidOperationException("Cost price cannot be greater than unit price.");
         }
     }
 

@@ -31,6 +31,7 @@ public sealed class StockPlanningTests(CustomWebApplicationFactory factory)
             {
                 name = $"Supplier {runId}",
                 phone = "+94-000-0000",
+                email = $"supplier-{runId}@example.com",
                 company_name = $"Supplier Co {runId}",
                 company_phone = "+94-000-0001",
                 address = "Integration Address",
@@ -38,6 +39,9 @@ public sealed class StockPlanningTests(CustomWebApplicationFactory factory)
                 brand_ids = Array.Empty<Guid>()
             }));
         var supplierId = Guid.Parse(TestJson.GetString(supplier, "supplier_id"));
+        Assert.Equal(
+            $"supplier-{runId}@example.com",
+            TestJson.GetString(supplier, "email"));
 
         var product = await TestJson.ReadObjectAsync(
             await client.PostAsJsonAsync("/api/products", new
@@ -173,6 +177,42 @@ public sealed class StockPlanningTests(CustomWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task SupplierEndpoints_ShouldRejectInvalidOptionalEmail()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+
+        var invalidResponse = await client.PostAsJsonAsync("/api/suppliers", new
+        {
+            name = $"Invalid Email Supplier {runId}",
+            email = "invalid-email",
+            is_active = true,
+            brand_ids = Array.Empty<Guid>()
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, invalidResponse.StatusCode);
+        var invalidPayload = JsonNode.Parse(await invalidResponse.Content.ReadAsStringAsync())?.AsObject()
+                             ?? throw new InvalidOperationException("Response body was empty.");
+        Assert.Equal(
+            "Enter a valid email address or leave it empty.",
+            TestJson.GetString(invalidPayload, "message"));
+
+        var validSupplier = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/suppliers", new
+            {
+                name = $"Valid Email Supplier {runId}",
+                email = $"valid-{runId}@example.com",
+                is_active = true,
+                brand_ids = Array.Empty<Guid>()
+            }));
+
+        Assert.Equal(
+            $"valid-{runId}@example.com",
+            TestJson.GetString(validSupplier, "email"));
+    }
+
+    [Fact]
     public async Task SupplierHardDelete_ShouldRejectSupplierWithProductLinks()
     {
         await TestAuth.SignInAsManagerAsync(client);
@@ -234,6 +274,90 @@ public sealed class StockPlanningTests(CustomWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task SupplierHardDelete_ShouldRejectSupplierWithPurchaseOrders()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+
+        var supplier = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/suppliers", new
+            {
+                name = $"PO Linked Supplier {runId}",
+                is_active = true,
+                brand_ids = Array.Empty<Guid>()
+            }));
+        var supplierId = Guid.Parse(TestJson.GetString(supplier, "supplier_id"));
+
+        var product = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"PO Linked Product {runId}",
+                sku = $"POL-{runId}",
+                barcode = (string?)null,
+                category_id = (Guid?)null,
+                brand_id = (Guid?)null,
+                unit_price = 100m,
+                cost_price = 60m,
+                initial_stock_quantity = 2m,
+                reorder_level = 1m,
+                safety_stock = 0m,
+                target_stock_level = 4m,
+                allow_negative_stock = false,
+                is_active = true
+            }));
+        var productId = Guid.Parse(TestJson.GetString(product, "product_id"));
+
+        var purchaseOrderResponse = await client.PostAsJsonAsync("/api/purchase-orders", new
+        {
+            supplier_id = supplierId,
+            po_number = $"PO-{runId}",
+            po_date = DateTimeOffset.UtcNow,
+            expected_delivery_date = DateTimeOffset.UtcNow.AddDays(7),
+            notes = "Supplier delete guard coverage",
+            lines = new[]
+            {
+                new
+                {
+                    product_id = productId,
+                    quantity_ordered = 5m,
+                    unit_cost_estimate = 72.5m
+                }
+            }
+        });
+        Assert.Equal(HttpStatusCode.OK, purchaseOrderResponse.StatusCode);
+
+        var deactivateResponse = await client.PutAsJsonAsync($"/api/suppliers/{supplierId}", new
+        {
+            name = $"PO Linked Supplier {runId}",
+            is_active = false,
+            brand_ids = Array.Empty<Guid>()
+        });
+        Assert.Equal(HttpStatusCode.OK, deactivateResponse.StatusCode);
+
+        var supplierList = await TestJson.ReadObjectAsync(
+            await client.GetAsync("/api/suppliers?include_inactive=true"));
+        var listItem = FindObjectInArray(
+            supplierList,
+            "items",
+            "supplier_id",
+            supplierId.ToString());
+        Assert.False(listItem["can_delete"]?.GetValue<bool>() ?? true);
+        Assert.Equal(
+            "This supplier has purchase history and cannot be permanently deleted.",
+            TestJson.GetString(listItem, "delete_block_reason"));
+
+        var hardDeleteResponse = await client.DeleteAsync($"/api/suppliers/{supplierId}/hard-delete");
+        Assert.Equal(HttpStatusCode.BadRequest, hardDeleteResponse.StatusCode);
+
+        var errorPayload = JsonNode.Parse(await hardDeleteResponse.Content.ReadAsStringAsync())?.AsObject()
+                           ?? throw new InvalidOperationException("Response body was empty.");
+        Assert.Equal(
+            "This supplier has purchase history and cannot be permanently deleted.",
+            TestJson.GetString(errorPayload, "message"));
+    }
+
+    [Fact]
     public async Task BrandHardDelete_ShouldRemoveInactiveBrandWithoutLinkedProducts()
     {
         await TestAuth.SignInAsManagerAsync(client);
@@ -288,7 +412,7 @@ public sealed class StockPlanningTests(CustomWebApplicationFactory factory)
     }
 
     [Fact]
-    public async Task BrandHardDelete_ShouldAllowInactiveBrandAfterLinkedProductAndSupplierAreInactive()
+    public async Task BrandHardDelete_ShouldAllowInactiveBrandWhenOnlySupplierLinksRemain()
     {
         await TestAuth.SignInAsManagerAsync(client);
 
@@ -345,45 +469,27 @@ public sealed class StockPlanningTests(CustomWebApplicationFactory factory)
 
         var brandListWhileSupplierActive = await TestJson.ReadObjectAsync(
             await client.GetAsync("/api/brands?include_inactive=true"));
-        var blockedListItem = FindObjectInArray(
+        var deletableListItem = FindObjectInArray(
             brandListWhileSupplierActive,
             "items",
             "brand_id",
             brandId.ToString());
-        Assert.False(blockedListItem["can_delete"]?.GetValue<bool>() ?? true);
-        Assert.Equal(
-            "This brand is linked to suppliers and cannot be permanently deleted.",
-            TestJson.GetString(blockedListItem, "delete_block_reason"));
-
-        var blockedDeleteResponse = await client.DeleteAsync($"/api/brands/{brandId}/hard-delete");
-        Assert.Equal(HttpStatusCode.BadRequest, blockedDeleteResponse.StatusCode);
-        var blockedDeletePayload = JsonNode.Parse(await blockedDeleteResponse.Content.ReadAsStringAsync())?.AsObject()
-                                  ?? throw new InvalidOperationException("Response body was empty.");
-        Assert.Equal(
-            "This brand is linked to suppliers and cannot be permanently deleted.",
-            TestJson.GetString(blockedDeletePayload, "message"));
-
-        var deactivateSupplier = await TestJson.ReadObjectAsync(
-            await client.PutAsJsonAsync($"/api/suppliers/{supplierId}", new
-            {
-                name = $"Brand Supplier {runId}",
-                is_active = false,
-                brand_ids = new[] { brandId }
-            }));
-        Assert.False(deactivateSupplier["is_active"]?.GetValue<bool>() ?? true);
-
-        var brandListAfterSupplierDeactivate = await TestJson.ReadObjectAsync(
-            await client.GetAsync("/api/brands?include_inactive=true"));
-        var deletableListItem = FindObjectInArray(
-            brandListAfterSupplierDeactivate,
-            "items",
-            "brand_id",
-            brandId.ToString());
-        Assert.Equal(0, TestJson.GetInt32(deletableListItem, "product_count"));
         Assert.True(deletableListItem["can_delete"]?.GetValue<bool>() ?? false);
+        Assert.Null(deletableListItem["delete_block_reason"]);
 
         var hardDeleteResponse = await client.DeleteAsync($"/api/brands/{brandId}/hard-delete");
         Assert.Equal(HttpStatusCode.NoContent, hardDeleteResponse.StatusCode);
+
+        var supplierList = await TestJson.ReadObjectAsync(
+            await client.GetAsync("/api/suppliers?include_inactive=true"));
+        var supplierListItem = FindObjectInArray(
+            supplierList,
+            "items",
+            "supplier_id",
+            supplierId.ToString());
+        var supplierBrands = supplierListItem["brands"]?.AsArray()
+                             ?? throw new InvalidOperationException("Missing array 'brands'.");
+        Assert.Empty(supplierBrands);
     }
 
     [Fact]

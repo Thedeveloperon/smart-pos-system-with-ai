@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchInventoryDashboard, fetchProducts, type Product } from "@/lib/api";
+import { computeSaleLinePricing } from "@/lib/salePricing";
 import { cn } from "@/lib/utils";
 import { Pencil } from "lucide-react";
 
@@ -48,7 +49,7 @@ export default function PosHome({
     });
   };
 
-  const total = cart.reduce((sum, c) => sum + c.product.price * c.qty, 0);
+  const total = cart.reduce((sum, c) => sum + computeSaleLinePricing(c.product, c.qty).lineTotal, 0);
   const hasActiveSale = cart.length > 0;
 
   return (
@@ -136,14 +137,25 @@ export default function PosHome({
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {cart.map((c) => (
-                  <div key={c.product.id} className="flex justify-between text-sm">
-                    <span>
-                      {c.product.name} <span className="text-muted-foreground">× {c.qty}</span>
-                    </span>
-                    <span className="font-medium">${(c.product.price * c.qty).toFixed(2)}</span>
-                  </div>
-                ))}
+                {cart.map((c) => {
+                  const pricing = computeSaleLinePricing(c.product, c.qty);
+
+                  return (
+                    <div key={c.product.id} className="flex justify-between gap-3 text-sm">
+                      <div>
+                        <span>
+                          {c.product.name} <span className="text-muted-foreground">× {c.qty}</span>
+                        </span>
+                        {pricing.catalogDiscountAmount > 0 ? (
+                          <div className="text-xs text-muted-foreground">
+                            Discount ${pricing.catalogDiscountAmount.toFixed(2)} on ${pricing.lineGross.toFixed(2)}
+                          </div>
+                        ) : null}
+                      </div>
+                      <span className="font-medium">${pricing.lineTotal.toFixed(2)}</span>
+                    </div>
+                  );
+                })}
                 <div className="border-t pt-2 mt-2 flex justify-between font-semibold">
                   <span>Total</span>
                   <span>${total.toFixed(2)}</span>
@@ -165,6 +177,13 @@ export default function PosHome({
         onSaved={(updated) => {
           setProducts((prev) =>
             prev ? prev.map((p) => (p.id === updated.id ? updated : p)) : prev,
+          );
+          setCart((prev) =>
+            prev.map((line) =>
+              line.product.id === updated.id
+                ? { ...line, product: updated }
+                : line,
+            ),
           );
         }}
       />

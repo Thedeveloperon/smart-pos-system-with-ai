@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Wrench } from "lucide-react";
+import { Loader2, Plus, Power, Wrench } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { deleteService, fetchServices, type Service } from "@/lib/api";
+import { deleteService, fetchServices, type Service, updateService } from "@/lib/api";
 import ServiceManagementDialog from "@/components/manager/ServiceManagementDialog";
 
 const currencyFormatter = new Intl.NumberFormat("en-LK", {
@@ -21,12 +21,12 @@ export default function ServicesTab() {
   const [services, setServices] = useState<Service[]>([]);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
 
   const loadServices = useCallback(async () => {
     setLoading(true);
     try {
-      const rows = await fetchServices();
+      const rows = await fetchServices(true);
       setServices(rows);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load services.");
@@ -54,16 +54,28 @@ export default function ServicesTab() {
     );
   }, [query, services]);
 
-  const handleSoftDelete = async (service: Service) => {
-    setDeletingId(service.id);
+  const handleStatusChange = async (service: Service) => {
+    setStatusUpdatingId(service.id);
     try {
-      await deleteService(service.id);
-      toast.success("Service deactivated.");
-      setServices((prev) => prev.filter((row) => row.id !== service.id));
+      if (service.is_active) {
+        await deleteService(service.id);
+        setServices((prev) =>
+          prev.map((row) => (row.id === service.id ? { ...row, is_active: false } : row)),
+        );
+        toast.success("Service deactivated.");
+        return;
+      }
+
+      const updated = await updateService(service.id, { is_active: true });
+      toast.success("Service activated.");
+      setServices((prev) => prev.map((row) => (row.id === service.id ? updated : row)));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to deactivate service.");
+      const fallbackMessage = service.is_active
+        ? "Failed to deactivate service."
+        : "Failed to activate service.";
+      toast.error(error instanceof Error ? error.message : fallbackMessage);
     } finally {
-      setDeletingId(null);
+      setStatusUpdatingId(null);
     }
   };
 
@@ -166,12 +178,18 @@ export default function ServicesTab() {
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={deletingId === service.id}
+                        className={service.is_active ? "text-destructive hover:text-destructive" : ""}
+                        disabled={statusUpdatingId === service.id}
                         onClick={() => {
-                          void handleSoftDelete(service);
+                          void handleStatusChange(service);
                         }}
                       >
-                        Deactivate
+                        {statusUpdatingId === service.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Power className="h-4 w-4" />
+                        )}
+                        {service.is_active ? "Deactivate" : "Activate"}
                       </Button>
                     </div>
                   </TableCell>

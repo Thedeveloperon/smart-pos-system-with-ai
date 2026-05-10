@@ -18,6 +18,16 @@ interface CartPanelProps {
 const CartPanel = ({ items, onUpdateQty, onRemove, onUpdateDiscount, cartDiscount, expertMode = false }: CartPanelProps) => {
   const itemCount = items.reduce((acc, i) => acc + i.quantity, 0);
   const totals = computeCartTotals(items, cartDiscount, 0);
+  const lineMathById = new Map(totals.lines.map((line) => [line.lineId, line]));
+  const resolveLineId = (item: CartItem) =>
+    item.lineId
+    ?? (item.selectedSerial?.id
+      ? `serial:${item.selectedSerial.id}`
+      : item.sellMode === "service"
+        ? `service:${item.product.serviceId || item.product.id.replace(/^service:/, "")}`
+        : item.sellMode === "bundle"
+          ? `bundle:${item.bundleId || item.product.bundleId || item.product.id.replace(/^bundle:/, "")}`
+          : `product:${item.product.id.replace(/^bundle:/, "")}:${item.sellMode ?? "unit"}`);
 
   return (
     <div className="flex flex-col h-full">
@@ -62,8 +72,9 @@ const CartPanel = ({ items, onUpdateQty, onRemove, onUpdateDiscount, cartDiscoun
         ) : (
           items.map((item) => (
             <CartItemRow
-              key={item.lineId ?? `${item.sellMode ?? "unit"}:${item.selectedSerial?.id ?? item.bundleId ?? item.product.id}`}
+              key={resolveLineId(item)}
               item={item}
+              lineMath={lineMathById.get(resolveLineId(item))}
               onUpdateQty={onUpdateQty}
               onRemove={onRemove}
               onUpdateDiscount={onUpdateDiscount}

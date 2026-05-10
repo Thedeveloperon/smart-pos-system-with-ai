@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { toast } from "sonner";
 import { AlertTriangle, Loader2, Plus, Printer, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -100,9 +100,33 @@ const emptyFormState = (): ProductFormState => ({
   isActive: true,
 });
 
-const toNumber = (value: string) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
+const DECIMAL_INPUT_PATTERN = /^(?:\d+\.?\d*|\.\d+)$/;
+
+const parseDecimalInput = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed || !DECIMAL_INPUT_PATTERN.test(trimmed)) {
+    return null;
+  }
+
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const parseDecimalInputOrZero = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return 0;
+  }
+
+  return parseDecimalInput(trimmed);
+};
+
+const toNumber = (value: string) => parseDecimalInput(value) ?? 0;
+
+const preventInvalidNumberKeys = (event: KeyboardEvent<HTMLInputElement>) => {
+  if (event.key === "e" || event.key === "E" || event.key === "+" || event.key === "-") {
+    event.preventDefault();
+  }
 };
 
 const toFormState = (product: Product): ProductFormState => ({
@@ -352,7 +376,7 @@ export default function ProductManagementDialog({
   const [deleteMode, setDeleteMode] = useState<"soft" | "hard" | null>(null);
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [adjustQuantity, setAdjustQuantity] = useState("0");
-  const [adjustReason, setAdjustReason] = useState("manual_adjustment");
+  const [adjustReason, setAdjustReason] = useState("");
   const [adjustBatchId, setAdjustBatchId] = useState("");
 
   const isEditing = Boolean(product);
@@ -369,12 +393,16 @@ export default function ProductManagementDialog({
     setBarcodeTone("neutral");
     setDeleteMode(null);
     setAdjustQuantity("0");
-    setAdjustReason("manual_adjustment");
+    setAdjustReason("");
     setAdjustBatchId("");
 
     let alive = true;
     setLoadingLookups(true);
-    void Promise.all([fetchCategories(true), fetchBrands(true), fetchSuppliers(true)])
+    void Promise.all([
+      fetchCategories(Boolean(product?.category_id)),
+      fetchBrands(true),
+      fetchSuppliers(true),
+    ])
       .then(([categoryItems, brandItems, supplierItems]) => {
         if (!alive) {
           return;
@@ -383,6 +411,24 @@ export default function ProductManagementDialog({
         setCategories(categoryItems);
         setBrands(brandItems);
         setSuppliers(supplierItems);
+        if (!product) {
+          setForm((prev) => {
+            if (!prev.categoryId) {
+              return prev;
+            }
+
+            const selectedCategory = categoryItems.find((item) => item.category_id === prev.categoryId);
+            if (!selectedCategory) {
+              return { ...prev, categoryId: "" };
+            }
+
+            if (selectedCategory.is_active ?? true) {
+              return prev;
+            }
+
+            return { ...prev, categoryId: "" };
+          });
+        }
       })
       .catch(() => {
         if (!alive) {
@@ -456,6 +502,13 @@ export default function ProductManagementDialog({
     updateField("permanentDiscountFixed", "");
   };
 
+  const openAdjustDialog = () => {
+    setAdjustQuantity("0");
+    setAdjustReason("");
+    setAdjustBatchId("");
+    setAdjustOpen(true);
+  };
+
   const validateBarcode = async (value: string) => {
     const trimmed = value.trim();
     if (!trimmed) {
@@ -511,12 +564,80 @@ export default function ProductManagementDialog({
       return;
     }
 
-    const permanentDiscountPercent = form.permanentDiscountPercent === "" ? null : toNumber(form.permanentDiscountPercent);
-    const permanentDiscountFixed = form.permanentDiscountFixed === "" ? null : toNumber(form.permanentDiscountFixed);
+    const unitPrice = parseDecimalInput(form.unitPrice);
+    if (unitPrice == null || unitPrice <= 0) {
+      toast.error("Unit price is required and must be greater than 0.");
+      return;
+    }
+
+    const costPrice = form.costPrice.trim() === "" ? 0 : parseDecimalInput(form.costPrice);
+    if (costPrice == null || costPrice < 0) {
+      toast.error("Cost price must be a valid non-negative number.");
+      return;
+    }
+
+    if (costPrice > unitPrice) {
+      toast.error("Cost price cannot be greater than unit price.");
+      return;
+    }
+
+    const initialStockQuantity = parseDecimalInputOrZero(form.initialStockQuantity);
+    if (!isEditing && (initialStockQuantity == null || initialStockQuantity < 0)) {
+      toast.error("Initial stock must be a valid non-negative number.");
+      return;
+    }
+    const initialStockQuantityForCreate = initialStockQuantity ?? 0;
+
+    const reorderLevel = parseDecimalInputOrZero(form.reorderLevel);
+    if (reorderLevel == null || reorderLevel < 0) {
+      toast.error("Reorder level must be a valid non-negative number.");
+      return;
+    }
+
+    const safetyStock = parseDecimalInputOrZero(form.safetyStock);
+    if (safetyStock == null || safetyStock < 0) {
+      toast.error("Safety stock must be a valid non-negative number.");
+      return;
+    }
+
+    const targetStockLevel = parseDecimalInputOrZero(form.targetStockLevel);
+    if (targetStockLevel == null || targetStockLevel < 0) {
+      toast.error("Target stock level must be a valid non-negative number.");
+      return;
+    }
+
+    const permanentDiscountPercent =
+      form.permanentDiscountPercent === "" ? null : parseDecimalInput(form.permanentDiscountPercent);
+    if (form.permanentDiscountPercent !== "" && permanentDiscountPercent == null) {
+      toast.error("Permanent discount percent must be a valid non-negative number.");
+      return;
+    }
+
+    const permanentDiscountFixed =
+      form.permanentDiscountFixed === "" ? null : parseDecimalInput(form.permanentDiscountFixed);
+    if (form.permanentDiscountFixed !== "" && permanentDiscountFixed == null) {
+      toast.error("Permanent discount amount must be a valid non-negative number.");
+      return;
+    }
+
     if (permanentDiscountPercent != null && permanentDiscountFixed != null) {
       toast.error("Use either permanent discount percent or fixed amount.");
       return;
     }
+
+    const warrantyMonths = form.serialTracked ? parseDecimalInputOrZero(form.warrantyMonths) : 0;
+    if (form.serialTracked && (warrantyMonths == null || warrantyMonths < 0)) {
+      toast.error("Warranty months must be a valid non-negative number.");
+      return;
+    }
+    const normalizedWarrantyMonths = warrantyMonths ?? 0;
+
+    const expiryAlertDays = form.batchTracked ? parseDecimalInputOrZero(form.expiryAlertDays) : 30;
+    if (form.batchTracked && (expiryAlertDays == null || expiryAlertDays < 0)) {
+      toast.error("Expiry alert days must be a valid non-negative number.");
+      return;
+    }
+    const normalizedExpiryAlertDays = expiryAlertDays ?? 30;
 
     setSaving(true);
     try {
@@ -527,19 +648,19 @@ export default function ProductManagementDialog({
         image_url: form.imageUrl.trim() || undefined,
         category_id: form.categoryId || undefined,
         brand_id: form.brandId || undefined,
-        unit_price: toNumber(form.unitPrice),
-        cost_price: toNumber(form.costPrice),
+        unit_price: unitPrice,
+        cost_price: costPrice,
         permanent_discount_percent: permanentDiscountPercent,
         permanent_discount_fixed: permanentDiscountFixed,
-        initial_stock_quantity: isEditing ? undefined : toNumber(form.initialStockQuantity),
-        reorder_level: toNumber(form.reorderLevel),
-        safety_stock: toNumber(form.safetyStock),
-        target_stock_level: toNumber(form.targetStockLevel),
+        initial_stock_quantity: isEditing ? undefined : initialStockQuantityForCreate,
+        reorder_level: reorderLevel,
+        safety_stock: safetyStock,
+        target_stock_level: targetStockLevel,
         allow_negative_stock: form.allowNegativeStock,
         is_serial_tracked: form.serialTracked,
-        warranty_months: form.serialTracked ? toNumber(form.warrantyMonths) : 0,
+        warranty_months: normalizedWarrantyMonths,
         is_batch_tracked: form.batchTracked,
-        expiry_alert_days: form.batchTracked ? toNumber(form.expiryAlertDays) : 30,
+        expiry_alert_days: normalizedExpiryAlertDays,
         is_active: form.isActive,
         product_suppliers: form.preferredSupplierId
           ? [{ supplier_id: form.preferredSupplierId, is_preferred: true }]
@@ -588,6 +709,12 @@ export default function ProductManagementDialog({
       return;
     }
 
+    const trimmedReason = adjustReason.trim();
+    if (!trimmedReason) {
+      toast.error("Enter a reason for the stock adjustment.");
+      return;
+    }
+
     const delta = toNumber(adjustQuantity);
     if (delta === 0) {
       toast.error("Enter a non-zero quantity adjustment.");
@@ -601,12 +728,7 @@ export default function ProductManagementDialog({
 
     setSaving(true);
     try {
-      await adjustStock(
-        product.id,
-        delta,
-        adjustReason.trim() || "manual_adjustment",
-        adjustBatchId || null,
-      );
+      await adjustStock(product.id, delta, trimmedReason, adjustBatchId || null);
       const nextStock = currentStock + delta;
       setCurrentStock(nextStock);
       onSaved?.(snapshotProduct(product, form, nextStock));
@@ -620,7 +742,25 @@ export default function ProductManagementDialog({
   };
 
   const statusLabel = form.isActive ? "Active" : "Inactive";
-  const selectedCategory = categories.find((item) => item.category_id === form.categoryId);
+  const categoryOptions = useMemo(() => {
+    const activeCategories = categories.filter((item) => item.is_active ?? true);
+    if (!isEditing || !form.categoryId) {
+      return activeCategories;
+    }
+
+    const inactiveSelectedCategory = categories.find(
+      (item) => item.category_id === form.categoryId && !(item.is_active ?? true),
+    );
+    if (!inactiveSelectedCategory) {
+      return activeCategories;
+    }
+
+    return [
+      inactiveSelectedCategory,
+      ...activeCategories.filter((item) => item.category_id !== inactiveSelectedCategory.category_id),
+    ];
+  }, [categories, form.categoryId, isEditing]);
+  const selectedCategory = categoryOptions.find((item) => item.category_id === form.categoryId);
   const selectedBrand = brands.find((item) => item.brand_id === form.brandId);
   const selectedSupplier = suppliers.find((item) => item.supplier_id === form.preferredSupplierId);
   const printableProduct = product ? snapshotProduct(product, form, currentStock) : null;
@@ -756,7 +896,7 @@ export default function ProductManagementDialog({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">No category</SelectItem>
-                    {categories.map((item) => (
+                    {categoryOptions.map((item) => (
                       <SelectItem key={item.category_id} value={item.category_id}>
                         {item.name}
                       </SelectItem>
@@ -833,7 +973,9 @@ export default function ProductManagementDialog({
                   type="number"
                   min={0}
                   step="0.01"
+                  inputMode="decimal"
                   value={form.unitPrice}
+                  onKeyDown={preventInvalidNumberKeys}
                   onChange={(event) => updateField("unitPrice", event.target.value)}
                 />
               </div>
@@ -845,7 +987,9 @@ export default function ProductManagementDialog({
                   type="number"
                   min={0}
                   step="0.01"
+                  inputMode="decimal"
                   value={form.costPrice}
+                  onKeyDown={preventInvalidNumberKeys}
                   onChange={(event) => updateField("costPrice", event.target.value)}
                 />
               </div>
@@ -900,7 +1044,7 @@ export default function ProductManagementDialog({
                       type="button"
                       size="sm"
                       variant="outline"
-                      onClick={() => setAdjustOpen(true)}
+                      onClick={openAdjustDialog}
                     >
                       <Plus className="h-4 w-4" />
                       Adjust
@@ -916,6 +1060,7 @@ export default function ProductManagementDialog({
                     min={0}
                     step="1"
                     value={form.initialStockQuantity}
+                    onKeyDown={preventInvalidNumberKeys}
                     onChange={(event) => updateField("initialStockQuantity", event.target.value)}
                   />
                 </div>
@@ -931,6 +1076,7 @@ export default function ProductManagementDialog({
                   min={0}
                   step="1"
                   value={form.reorderLevel}
+                  onKeyDown={preventInvalidNumberKeys}
                   onChange={(event) => updateField("reorderLevel", event.target.value)}
                 />
               </div>
@@ -943,6 +1089,7 @@ export default function ProductManagementDialog({
                   min={0}
                   step="1"
                   value={form.safetyStock}
+                  onKeyDown={preventInvalidNumberKeys}
                   onChange={(event) => updateField("safetyStock", event.target.value)}
                 />
               </div>
@@ -955,6 +1102,7 @@ export default function ProductManagementDialog({
                   min={0}
                   step="1"
                   value={form.targetStockLevel}
+                  onKeyDown={preventInvalidNumberKeys}
                   onChange={(event) => updateField("targetStockLevel", event.target.value)}
                 />
               </div>
@@ -1015,6 +1163,7 @@ export default function ProductManagementDialog({
                       min={0}
                       step="1"
                       value={form.warrantyMonths}
+                      onKeyDown={preventInvalidNumberKeys}
                       onChange={(event) => updateField("warrantyMonths", event.target.value)}
                     />
                   </div>
@@ -1043,6 +1192,7 @@ export default function ProductManagementDialog({
                       min={0}
                       step="1"
                       value={form.expiryAlertDays}
+                      onKeyDown={preventInvalidNumberKeys}
                       onChange={(event) => updateField("expiryAlertDays", event.target.value)}
                     />
                   </div>
@@ -1063,7 +1213,7 @@ export default function ProductManagementDialog({
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => setAdjustOpen(true)}
+                    onClick={openAdjustDialog}
                     disabled={loadingBatches}
                   >
                     {loadingBatches ? (
@@ -1205,6 +1355,7 @@ export default function ProductManagementDialog({
                 id="adjust-reason"
                 value={adjustReason}
                 onChange={(event) => setAdjustReason(event.target.value)}
+                placeholder="Enter adjustment reason"
                 rows={3}
               />
             </div>
@@ -1238,7 +1389,11 @@ export default function ProductManagementDialog({
             <Button type="button" variant="ghost" onClick={() => setAdjustOpen(false)}>
               Cancel
             </Button>
-            <Button type="button" onClick={() => void handleAdjustStock()} disabled={saving}>
+            <Button
+              type="button"
+              onClick={() => void handleAdjustStock()}
+              disabled={saving || !adjustReason.trim()}
+            >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               Apply adjustment
             </Button>

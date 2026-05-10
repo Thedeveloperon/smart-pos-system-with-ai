@@ -43,8 +43,8 @@ vi.mock("@/lib/api", async () => {
 });
 
 const categories = [
-  { category_id: "cat-1", name: "Cat A", description: "Category A" },
-  { category_id: "cat-2", name: "Cat B", description: "Category B" },
+  { category_id: "cat-1", name: "Cat A", description: "Category A", is_active: true },
+  { category_id: "cat-2", name: "Cat B", description: "Category B", is_active: true },
 ];
 
 const brands = [
@@ -126,6 +126,115 @@ describe("ProductManagementDialog", () => {
     expect(createProduct).not.toHaveBeenCalled();
   });
 
+  it("blocks save when unit price is not a plain decimal value", async () => {
+    renderDialog();
+
+    fireEvent.change(await screen.findByLabelText("Product name"), {
+      target: { value: "Test Product" },
+    });
+    fireEvent.change(screen.getByLabelText(/Unit price/i), {
+      target: { value: "1e2" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Create product" }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("Unit price is required and must be greater than 0.");
+    });
+    expect(createProduct).not.toHaveBeenCalled();
+  });
+
+  it("blocks save when cost price is not a plain decimal value", async () => {
+    renderDialog();
+
+    fireEvent.change(await screen.findByLabelText("Product name"), {
+      target: { value: "Test Product" },
+    });
+    fireEvent.change(screen.getByLabelText(/Unit price/i), {
+      target: { value: "25" },
+    });
+    fireEvent.change(screen.getByLabelText(/Cost price/i), {
+      target: { value: "1e2" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Create product" }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("Cost price must be a valid non-negative number.");
+    });
+    expect(createProduct).not.toHaveBeenCalled();
+  });
+
+  it("blocks save when cost price is greater than unit price", async () => {
+    renderDialog();
+
+    fireEvent.change(await screen.findByLabelText("Product name"), {
+      target: { value: "Test Product" },
+    });
+    fireEvent.change(screen.getByLabelText(/Unit price/i), {
+      target: { value: "10" },
+    });
+    fireEvent.change(screen.getByLabelText(/Cost price/i), {
+      target: { value: "20" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Create product" }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("Cost price cannot be greater than unit price.");
+    });
+    expect(createProduct).not.toHaveBeenCalled();
+  });
+
+  it("blocks saving an edited product when reorder level is not a plain decimal value", async () => {
+    const existingProduct = {
+      id: "prod-101",
+      name: "Existing Product",
+      sku: "EX-101",
+      barcode: "1234567890123",
+      image_url: null,
+      category_id: "cat-1",
+      brand_id: "brand-1",
+      unit_price: 150,
+      cost_price: 120,
+      price: 150,
+      permanent_discount_percent: null,
+      permanent_discount_fixed: null,
+      stock_quantity: 5,
+      stock: 5,
+      initial_stock_quantity: 5,
+      reorder_level: 2,
+      safety_stock: 1,
+      target_stock_level: 4,
+      allow_negative_stock: false,
+      has_pack_option: false,
+      pack_size: 0,
+      pack_price: null,
+      pack_label: null,
+      is_serial_tracked: false,
+      warranty_months: 0,
+      is_batch_tracked: false,
+      expiry_alert_days: 30,
+      is_active: true,
+      product_suppliers: [],
+      created_at: "2026-05-03T00:00:00Z",
+      updated_at: "2026-05-03T00:00:00Z",
+    };
+
+    renderDialog({ product: existingProduct as never });
+
+    fireEvent.change(await screen.findByLabelText("Reorder level"), {
+      target: { value: "1e2" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("Reorder level must be a valid non-negative number.");
+    });
+    expect(updateProduct).not.toHaveBeenCalled();
+  });
+
   it("persists defaults after creating a product", async () => {
     vi.mocked(createProduct).mockResolvedValue({
       id: "prod-1",
@@ -191,6 +300,71 @@ describe("ProductManagementDialog", () => {
 
     expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(onNavigate).toHaveBeenCalledWith("catalogue");
+  });
+
+  it("hides inactive categories when creating a product", async () => {
+    vi.mocked(fetchCategories).mockResolvedValue([
+      { category_id: "cat-1", name: "Active Cat", description: "Shown", is_active: true },
+      { category_id: "cat-2", name: "Inactive Cat", description: "Hidden", is_active: false },
+    ] as never);
+
+    renderDialog();
+
+    await openSelect(0);
+
+    expect(await screen.findByRole("option", { name: "Active Cat" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Inactive Cat" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the assigned inactive category visible when editing a product", async () => {
+    vi.mocked(fetchCategories).mockResolvedValue([
+      { category_id: "cat-1", name: "Active Cat", description: "Shown", is_active: true },
+      { category_id: "cat-2", name: "Inactive Cat", description: "Still selectable for edits", is_active: false },
+    ] as never);
+
+    renderDialog({
+      product: {
+        id: "prod-101",
+        name: "Existing Product",
+        sku: "EX-101",
+        barcode: "1234567890123",
+        image_url: null,
+        category_id: "cat-2",
+        brand_id: "brand-1",
+        unit_price: 150,
+        cost_price: 120,
+        price: 150,
+        permanent_discount_percent: null,
+        permanent_discount_fixed: null,
+        stock_quantity: 5,
+        stock: 5,
+        initial_stock_quantity: 5,
+        reorder_level: 2,
+        safety_stock: 1,
+        target_stock_level: 4,
+        allow_negative_stock: false,
+        has_pack_option: false,
+        pack_size: 0,
+        pack_price: null,
+        pack_label: null,
+        is_serial_tracked: false,
+        warranty_months: 0,
+        is_batch_tracked: false,
+        expiry_alert_days: 30,
+        is_active: true,
+        product_suppliers: [],
+        created_at: "2026-05-03T00:00:00Z",
+        updated_at: "2026-05-03T00:00:00Z",
+      } as never,
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("combobox")[0]).toHaveTextContent("Inactive Cat");
+    });
+
+    await openSelect(0);
+
+    expect(await screen.findByRole("option", { name: "Inactive Cat" })).toBeInTheDocument();
   });
 
   it("clears permanent discounts and saves null values", async () => {

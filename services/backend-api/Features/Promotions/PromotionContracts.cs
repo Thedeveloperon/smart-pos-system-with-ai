@@ -12,7 +12,7 @@ public sealed class UpsertPromotionRequest
     public string? Description { get; set; }
 
     [JsonPropertyName("scope")]
-    public string Scope { get; set; } = "all";
+    public string Scope { get; set; } = string.Empty;
 
     [JsonPropertyName("category_id")]
     public Guid? CategoryId { get; set; }

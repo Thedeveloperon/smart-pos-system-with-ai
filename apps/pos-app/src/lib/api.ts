@@ -879,6 +879,7 @@ type BackendSupplierItem = {
   supplier_id: string;
   name: string;
   phone?: string | null;
+  email?: string | null;
   company_name?: string | null;
   company_phone?: string | null;
   address?: string | null;
@@ -905,6 +906,7 @@ export type SupplierRecord = {
   supplier_id: string;
   name: string;
   phone: string;
+  email: string;
   companyName: string;
   company_name: string;
   companyPhone: string;
@@ -933,10 +935,12 @@ export type Supplier = SupplierRecord;
 export type CreateSupplierRequest = {
   name: string;
   phone?: string | null;
+  email?: string | null;
   company_name?: string | null;
   company_phone?: string | null;
   address?: string | null;
   isActive?: boolean;
+  is_active?: boolean;
   brand_ids?: string[];
 };
 
@@ -1102,6 +1106,7 @@ export type Product = CatalogProduct & {
 };
 
 export type PromotionScope = "all" | "category" | "product";
+export type UpsertPromotionScope = Exclude<PromotionScope, "all">;
 export type PromotionValueType = "percent" | "fixed";
 
 export type Promotion = {
@@ -1123,7 +1128,7 @@ export type Promotion = {
 export type UpsertPromotionRequest = {
   name: string;
   description?: string | null;
-  scope: PromotionScope;
+  scope: UpsertPromotionScope;
   category_id?: string | null;
   product_id?: string | null;
   value_type: PromotionValueType;
@@ -3427,8 +3432,10 @@ export async function searchBundles(query?: string, take = 30) {
   }));
 }
 
-export async function fetchServices(): Promise<Service[]> {
-  const response = await request<BackendServiceListResponse>("/api/services");
+export async function fetchServices(includeInactive = false): Promise<Service[]> {
+  const response = await request<BackendServiceListResponse>(
+    `/api/services${buildQuery({ include_inactive: includeInactive })}`,
+  );
   return response.items.map(mapService);
 }
 
@@ -3485,6 +3492,7 @@ export type UpdateServiceRequest = {
   description?: string | null;
   category_id?: string | null;
   duration_minutes?: number | null;
+  is_active?: boolean | null;
 };
 
 export async function createService(requestBody: CreateServiceRequest): Promise<Service> {
@@ -3513,6 +3521,7 @@ export async function updateService(serviceId: string, requestBody: UpdateServic
       description: normalizeOptionalString(requestBody.description),
       category_id: requestBody.category_id ?? null,
       duration_minutes: requestBody.duration_minutes ?? null,
+      is_active: requestBody.is_active ?? null,
     }),
   });
 
@@ -4036,6 +4045,7 @@ function mapSupplier(item: BackendSupplierItem): SupplierRecord {
     supplier_id: item.supplier_id,
     name: item.name,
     phone: item.phone ?? "",
+    email: item.email ?? "",
     companyName: item.company_name ?? "",
     company_name: item.company_name ?? "",
     companyPhone: item.company_phone ?? "",
@@ -4064,16 +4074,21 @@ export async function fetchSuppliers(includeInactive = false) {
   return response.items.map(mapSupplier);
 }
 
+function resolveSupplierIsActive(requestBody: CreateSupplierRequest) {
+  return requestBody.isActive ?? requestBody.is_active ?? true;
+}
+
 export async function createSupplier(requestBody: CreateSupplierRequest) {
   const response = await request<BackendSupplierItem>("/api/suppliers", {
     method: "POST",
     body: JSON.stringify({
       name: requestBody.name,
       phone: normalizeOptionalString(requestBody.phone),
+      email: normalizeOptionalString(requestBody.email),
       company_name: normalizeOptionalString(requestBody.company_name),
       company_phone: normalizeOptionalString(requestBody.company_phone),
       address: normalizeOptionalString(requestBody.address),
-      is_active: requestBody.isActive ?? true,
+      is_active: resolveSupplierIsActive(requestBody),
       brand_ids: requestBody.brand_ids ?? [],
     }),
   });
@@ -4121,10 +4136,11 @@ export async function updateSupplier(supplierId: string, requestBody: CreateSupp
     body: JSON.stringify({
       name: requestBody.name,
       phone: normalizeOptionalString(requestBody.phone),
+      email: normalizeOptionalString(requestBody.email),
       company_name: normalizeOptionalString(requestBody.company_name),
       company_phone: normalizeOptionalString(requestBody.company_phone),
       address: normalizeOptionalString(requestBody.address),
-      is_active: requestBody.isActive ?? true,
+      is_active: resolveSupplierIsActive(requestBody),
       brand_ids: requestBody.brand_ids ?? [],
     }),
   });

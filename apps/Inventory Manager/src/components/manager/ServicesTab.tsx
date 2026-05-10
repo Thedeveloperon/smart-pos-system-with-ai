@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, PencilLine, Plus, Search, Trash2, Wrench } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Loader2, PencilLine, Plus, Power, Search, Wrench } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,7 +21,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import {
   createService,
@@ -32,6 +39,7 @@ import {
   type Service,
   updateService,
 } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 const currencyFormatter = new Intl.NumberFormat("en-LK", {
   style: "currency",
@@ -57,22 +65,87 @@ const emptyForm = (): FormState => ({
   durationMinutes: "",
 });
 
+const DECIMAL_INPUT_PATTERN = /^(?:\d+\.?\d*|\.\d+)$/;
+
+const validateServicePrice = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed || !DECIMAL_INPUT_PATTERN.test(trimmed)) {
+    return {
+      parsedPrice: null,
+      error: "Enter a valid service price.",
+    };
+  }
+
+  const parsedPrice = Number(trimmed);
+  if (!Number.isFinite(parsedPrice)) {
+    return {
+      parsedPrice: null,
+      error: "Enter a valid service price.",
+    };
+  }
+
+  if (parsedPrice <= 0) {
+    return {
+      parsedPrice,
+      error: "Service price must be greater than 0.",
+    };
+  }
+
+  return {
+    parsedPrice,
+    error: null,
+  };
+};
+
+const validateServiceDuration = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return {
+      parsedDuration: null,
+      error: null,
+    };
+  }
+
+  const parsedDuration = Number(trimmed);
+  if (
+    !Number.isFinite(parsedDuration) ||
+    !Number.isInteger(parsedDuration) ||
+    parsedDuration <= 0
+  ) {
+    return {
+      parsedDuration: null,
+      error: "Service duration must be a whole number greater than 0.",
+    };
+  }
+
+  return {
+    parsedDuration,
+    error: null,
+  };
+};
+
 export default function ServicesTab() {
   const [services, setServices] = useState<Service[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingService, setEditingService] = useState<Service | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm());
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [priceError, setPriceError] = useState<string | null>(null);
+  const [durationError, setDurationError] = useState<string | null>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const priceInputRef = useRef<HTMLInputElement>(null);
+  const durationInputRef = useRef<HTMLInputElement>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const [serviceItems, categoryItems] = await Promise.all([
-        fetchServices(),
+        fetchServices(true),
         fetchCategories(true),
       ]);
       setServices(serviceItems);
@@ -111,6 +184,9 @@ export default function ServicesTab() {
   const openCreateDialog = () => {
     setEditingService(null);
     setForm(emptyForm());
+    setNameError(null);
+    setPriceError(null);
+    setDurationError(null);
     setDialogOpen(true);
   };
 
@@ -124,27 +200,42 @@ export default function ServicesTab() {
       categoryId: service.category_id ?? "none",
       durationMinutes: service.duration_minutes ? String(service.duration_minutes) : "",
     });
+    setNameError(null);
+    setPriceError(null);
+    setDurationError(null);
     setDialogOpen(true);
   };
 
   const handleSave = async () => {
     const trimmedName = form.name.trim();
     if (!trimmedName) {
-      toast.error("Service name is required.");
+      const message = "Service name is required.";
+      setNameError(message);
+      toast.error(message);
+      nameInputRef.current?.focus();
       return;
     }
+    setNameError(null);
 
-    const parsedPrice = Number(form.price);
-    if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) {
-      toast.error("Service price must be a positive number.");
+    const { parsedPrice, error: priceValidationMessage } = validateServicePrice(form.price);
+    if (priceValidationMessage) {
+      setPriceError(priceValidationMessage);
+      toast.error(priceValidationMessage);
+      priceInputRef.current?.focus();
       return;
     }
+    setPriceError(null);
 
-    const parsedDuration = form.durationMinutes.trim() ? Number(form.durationMinutes) : null;
-    if (parsedDuration != null && (!Number.isInteger(parsedDuration) || parsedDuration <= 0)) {
-      toast.error("Duration must be a positive whole number.");
+    const { parsedDuration, error: durationValidationMessage } = validateServiceDuration(
+      form.durationMinutes,
+    );
+    if (durationValidationMessage) {
+      setDurationError(durationValidationMessage);
+      toast.error(durationValidationMessage);
+      durationInputRef.current?.focus();
       return;
     }
+    setDurationError(null);
 
     setSaving(true);
     try {
@@ -179,16 +270,41 @@ export default function ServicesTab() {
     }
   };
 
-  const handleDelete = async (service: Service) => {
-    setDeletingId(service.id);
+  const handleDialogOpenChange = (open: boolean) => {
+    setDialogOpen(open);
+    if (!open) {
+      setNameError(null);
+      setPriceError(null);
+      setDurationError(null);
+    }
+  };
+
+  const handleStatusChange = async (service: Service) => {
+    setStatusUpdatingId(service.id);
     try {
-      await deleteService(service.id);
-      setServices((prev) => prev.filter((item) => item.id !== service.id));
-      toast.success("Service deactivated.");
+      if (service.is_active) {
+        await deleteService(service.id);
+        setServices((prev) =>
+          prev.map((item) =>
+            item.id === service.id ? { ...item, is_active: false } : item,
+          ),
+        );
+        toast.success("Service deactivated.");
+        return;
+      }
+
+      const updated = await updateService(service.id, { is_active: true });
+      setServices((prev) =>
+        prev.map((item) => (item.id === service.id ? updated : item)),
+      );
+      toast.success("Service activated.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to deactivate service.");
+      const fallbackMessage = service.is_active
+        ? "Failed to deactivate service."
+        : "Failed to activate service.";
+      toast.error(error instanceof Error ? error.message : fallbackMessage);
     } finally {
-      setDeletingId(null);
+      setStatusUpdatingId(null);
     }
   };
 
@@ -256,14 +372,18 @@ export default function ServicesTab() {
                           <div className="min-w-0">
                             <div className="truncate font-medium">{service.name}</div>
                             {service.description ? (
-                              <div className="truncate text-xs text-muted-foreground">{service.description}</div>
+                              <div className="truncate text-xs text-muted-foreground">
+                                {service.description}
+                              </div>
                             ) : null}
                           </div>
                         </div>
                       </TableCell>
                       <TableCell>{service.sku || "-"}</TableCell>
                       <TableCell>{service.category_name || "-"}</TableCell>
-                      <TableCell className="text-right font-medium">{currencyFormatter.format(service.price)}</TableCell>
+                      <TableCell className="text-right font-medium">
+                        {currencyFormatter.format(service.price)}
+                      </TableCell>
                       <TableCell className="text-right">
                         {service.duration_minutes && service.duration_minutes > 0
                           ? `${service.duration_minutes} min`
@@ -276,7 +396,12 @@ export default function ServicesTab() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
-                          <Button type="button" size="sm" variant="ghost" onClick={() => openEditDialog(service)}>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => openEditDialog(service)}
+                          >
                             <PencilLine className="h-4 w-4" />
                             Edit
                           </Button>
@@ -284,14 +409,22 @@ export default function ServicesTab() {
                             type="button"
                             size="sm"
                             variant="ghost"
-                            className="text-destructive hover:text-destructive"
-                            disabled={deletingId === service.id}
+                            className={
+                              service.is_active
+                                ? "text-destructive hover:text-destructive"
+                                : ""
+                            }
+                            disabled={statusUpdatingId === service.id}
                             onClick={() => {
-                              void handleDelete(service);
+                              void handleStatusChange(service);
                             }}
                           >
-                            {deletingId === service.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                            Deactivate
+                            {statusUpdatingId === service.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Power className="h-4 w-4" />
+                            )}
+                            {service.is_active ? "Deactivate" : "Activate"}
                           </Button>
                         </div>
                       </TableCell>
@@ -304,7 +437,7 @@ export default function ServicesTab() {
         </CardContent>
       </Card>
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog open={dialogOpen} onOpenChange={handleDialogOpenChange}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>{editingService ? "Edit service" : "Add service"}</DialogTitle>
@@ -315,12 +448,29 @@ export default function ServicesTab() {
 
           <div className="grid gap-4 py-1">
             <div className="grid gap-1.5">
-              <Label htmlFor="service-name">Name</Label>
+              <Label htmlFor="service-name" className={cn(nameError && "text-destructive")}>
+                Name
+              </Label>
               <Input
                 id="service-name"
+                ref={nameInputRef}
                 value={form.name}
-                onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
+                onChange={(event) => {
+                  const nextName = event.target.value;
+                  setForm((prev) => ({ ...prev, name: nextName }));
+                  if (nameError) {
+                    setNameError(nextName.trim() ? null : "Service name is required.");
+                  }
+                }}
+                aria-invalid={Boolean(nameError)}
+                aria-describedby={nameError ? "service-name-error" : undefined}
+                className={cn(nameError && "border-destructive focus-visible:ring-destructive")}
               />
+              {nameError ? (
+                <p id="service-name-error" className="text-sm text-destructive">
+                  {nameError}
+                </p>
+              ) : null}
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
@@ -333,13 +483,30 @@ export default function ServicesTab() {
                 />
               </div>
               <div className="grid gap-1.5">
-                <Label htmlFor="service-price">Price</Label>
+                <Label htmlFor="service-price" className={cn(priceError && "text-destructive")}>
+                  Price
+                </Label>
                 <Input
                   id="service-price"
+                  ref={priceInputRef}
                   inputMode="decimal"
                   value={form.price}
-                  onChange={(event) => setForm((prev) => ({ ...prev, price: event.target.value }))}
+                  onChange={(event) => {
+                    const nextPrice = event.target.value;
+                    setForm((prev) => ({ ...prev, price: nextPrice }));
+                    if (priceError) {
+                      setPriceError(validateServicePrice(nextPrice).error);
+                    }
+                  }}
+                  aria-invalid={Boolean(priceError)}
+                  aria-describedby={priceError ? "service-price-error" : undefined}
+                  className={cn(priceError && "border-destructive focus-visible:ring-destructive")}
                 />
+                {priceError ? (
+                  <p id="service-price-error" className="text-sm text-destructive">
+                    {priceError}
+                  </p>
+                ) : null}
               </div>
             </div>
 
@@ -364,13 +531,35 @@ export default function ServicesTab() {
                 </Select>
               </div>
               <div className="grid gap-1.5">
-                <Label htmlFor="service-duration">Duration (minutes)</Label>
+                <Label
+                  htmlFor="service-duration"
+                  className={cn(durationError && "text-destructive")}
+                >
+                  Duration (minutes)
+                </Label>
                 <Input
                   id="service-duration"
+                  ref={durationInputRef}
                   inputMode="numeric"
                   value={form.durationMinutes}
-                  onChange={(event) => setForm((prev) => ({ ...prev, durationMinutes: event.target.value }))}
+                  onChange={(event) => {
+                    const nextDuration = event.target.value;
+                    setForm((prev) => ({ ...prev, durationMinutes: nextDuration }));
+                    if (durationError) {
+                      setDurationError(validateServiceDuration(nextDuration).error);
+                    }
+                  }}
+                  aria-invalid={Boolean(durationError)}
+                  aria-describedby={durationError ? "service-duration-error" : undefined}
+                  className={cn(
+                    durationError && "border-destructive focus-visible:ring-destructive",
+                  )}
                 />
+                {durationError ? (
+                  <p id="service-duration-error" className="text-sm text-destructive">
+                    {durationError}
+                  </p>
+                ) : null}
               </div>
             </div>
 
@@ -380,7 +569,9 @@ export default function ServicesTab() {
                 id="service-description"
                 rows={4}
                 value={form.description}
-                onChange={(event) => setForm((prev) => ({ ...prev, description: event.target.value }))}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, description: event.target.value }))
+                }
               />
             </div>
           </div>

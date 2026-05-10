@@ -14,6 +14,7 @@ import {
   PencilLine,
   Plus,
   Power,
+  Search,
   Trash2,
   X,
 } from "lucide-react";
@@ -65,6 +66,7 @@ type EditorState = {
 type SupplierFormState = {
   name: string;
   phone: string;
+  email: string;
   companyName: string;
   companyPhone: string;
   address: string;
@@ -81,9 +83,23 @@ type SupplierActionState = {
 
 type SupplierMode = "simple" | "extended";
 
+const OPTIONAL_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const getOptionalEmailError = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  return OPTIONAL_EMAIL_PATTERN.test(trimmed)
+    ? null
+    : "Enter a valid email address or leave it empty.";
+};
+
 const emptySupplierForm = (): SupplierFormState => ({
   name: "",
   phone: "",
+  email: "",
   companyName: "",
   companyPhone: "",
   address: "",
@@ -97,6 +113,7 @@ const toSupplierUpdatePayload = (
 ) => ({
   name: supplier.name,
   phone: supplier.phone ?? "",
+  email: supplier.email ?? "",
   company_name: supplier.company_name ?? "",
   company_phone: supplier.company_phone ?? "",
   address: supplier.address ?? "",
@@ -104,9 +121,24 @@ const toSupplierUpdatePayload = (
   brand_ids: supplier.brands.map((brand) => brand.brand_id),
 });
 
+const sortSuppliers = (items: Supplier[]) =>
+  [...items].sort((left, right) =>
+    left.name.localeCompare(right.name, undefined, { sensitivity: "base" }),
+  );
+
+const mergeSupplier = (items: Supplier[], supplier: Supplier) =>
+  sortSuppliers(
+    items.some((item) => item.supplier_id === supplier.supplier_id)
+      ? items.map((item) =>
+          item.supplier_id === supplier.supplier_id ? supplier : item,
+        )
+      : [...items, supplier],
+  );
+
 export default function SuppliersTab() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
   const [editor, setEditor] = useState<EditorState>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorMode, setEditorMode] = useState<SupplierMode>("simple");
@@ -165,6 +197,7 @@ export default function SuppliersTab() {
         ? {
             name: item.name,
             phone: item.phone || "",
+            email: item.email || "",
             companyName: item.company_name || "",
             companyPhone: item.company_phone || "",
             address: item.address || "",
@@ -189,29 +222,36 @@ export default function SuppliersTab() {
       return;
     }
 
+    const emailError =
+      editorMode === "extended" ? getOptionalEmailError(supplierForm.email) : null;
+    if (emailError) {
+      toast.error(emailError);
+      return;
+    }
+
     setSaving(true);
     try {
       const payload = {
         name: supplierForm.name.trim(),
         phone: supplierForm.phone.trim(),
-        company_name:
-          editorMode === "extended" ? supplierForm.companyName.trim() : "",
-        company_phone:
-          editorMode === "extended" ? supplierForm.companyPhone.trim() : "",
-        address: editorMode === "extended" ? supplierForm.address.trim() : "",
+        email: supplierForm.email.trim(),
+        company_name: supplierForm.companyName.trim(),
+        company_phone: supplierForm.companyPhone.trim(),
+        address: supplierForm.address.trim(),
         is_active: supplierForm.isActive,
         brand_ids: supplierForm.brandIds,
       };
 
       if (editor?.id) {
-        await updateSupplier(editor.id, payload);
+        const updatedSupplier = await updateSupplier(editor.id, payload);
+        setSuppliers((prev) => mergeSupplier(prev, updatedSupplier));
       } else {
-        await createSupplier(payload);
+        const createdSupplier = await createSupplier(payload);
+        setSuppliers((prev) => mergeSupplier(prev, createdSupplier));
       }
 
       toast.success("Sales rep saved.");
       closeEditor();
-      await loadData();
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Failed to save sales rep.",
@@ -229,24 +269,30 @@ export default function SuppliersTab() {
     setActionPending(true);
     try {
       if (actionState.mode === "activate") {
-        await updateSupplier(
+        const updatedSupplier = await updateSupplier(
           actionState.supplier.supplier_id,
           toSupplierUpdatePayload(actionState.supplier, true),
         );
+        setSuppliers((prev) => mergeSupplier(prev, updatedSupplier));
         toast.success("Sales rep activated.");
       } else if (actionState.mode === "deactivate") {
-        await updateSupplier(
+        const updatedSupplier = await updateSupplier(
           actionState.supplier.supplier_id,
           toSupplierUpdatePayload(actionState.supplier, false),
         );
+        setSuppliers((prev) => mergeSupplier(prev, updatedSupplier));
         toast.success("Sales rep deactivated.");
       } else {
         await hardDeleteSupplier(actionState.supplier.supplier_id);
+        setSuppliers((prev) =>
+          prev.filter(
+            (item) => item.supplier_id !== actionState.supplier.supplier_id,
+          ),
+        );
         toast.success("Sales rep deleted.");
       }
 
       setActionState(null);
-      await loadData();
     } catch (error) {
       toast.error(
         error instanceof Error
@@ -268,6 +314,28 @@ export default function SuppliersTab() {
       .map((brandId) => lookup.get(brandId))
       .filter((name): name is string => Boolean(name));
   }, [brandOptions, supplierForm.brandIds]);
+  const filteredSuppliers = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    if (!normalizedQuery) {
+      return suppliers;
+    }
+
+    return suppliers.filter((supplier) =>
+      [
+        supplier.name,
+        supplier.phone ?? "",
+        supplier.email ?? "",
+        supplier.company_name ?? "",
+        supplier.company_phone ?? "",
+        supplier.address ?? "",
+        ...supplier.brands.flatMap((brand) => [brand.name, brand.code ?? ""]),
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(normalizedQuery),
+    );
+  }, [searchQuery, suppliers]);
+  const supplierEmailError = getOptionalEmailError(supplierForm.email);
 
   return (
     <>
@@ -283,15 +351,27 @@ export default function SuppliersTab() {
         </CardHeader>
 
         <CardContent className="space-y-4">
-          <div className="flex items-center justify-between rounded-xl border bg-muted/20 p-4">
-            <div>
-              <p className="font-medium">Sales rep directory</p>
-              <p className="text-sm text-muted-foreground">
-                Use the active switch to hide sales reps without deleting
-                historical links.
-              </p>
+          <div className="flex flex-col gap-4 rounded-xl border bg-muted/20 p-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="space-y-3">
+              <div>
+                <p className="font-medium">Sales rep directory</p>
+                <p className="text-sm text-muted-foreground">
+                  Use the active switch to hide sales reps without deleting
+                  historical links.
+                </p>
+              </div>
+              <div className="relative max-w-md">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Search sales reps, companies, phones, or brands..."
+                  aria-label="Search sales reps"
+                  className="pl-9"
+                />
+              </div>
             </div>
-            <Button type="button" onClick={() => openEditor()}>
+            <Button type="button" onClick={() => openEditor()} className="shrink-0">
               <Plus className="h-4 w-4" />
               Add Sales Rep
             </Button>
@@ -299,8 +379,12 @@ export default function SuppliersTab() {
 
           <Table
             loading={loading}
-            emptyText="No sales reps found."
-            rows={suppliers.map((item) => ({
+            emptyText={
+              searchQuery.trim()
+                ? "No sales reps match your search."
+                : "No sales reps found."
+            }
+            rows={filteredSuppliers.map((item) => ({
               key: item.supplier_id,
               cells: [
                 <div key="name" className="space-y-1">
@@ -332,48 +416,55 @@ export default function SuppliersTab() {
                 >
                   {item.is_active ? "Active" : "Inactive"}
                 </Badge>,
-                <div key="action" className="flex flex-wrap justify-end gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => openEditor(item.supplier_id)}
-                  >
-                    <PencilLine className="h-4 w-4" />
-                    Edit
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      setActionState({
-                        supplier: item,
-                        mode: item.is_active ? "deactivate" : "activate",
-                      })
-                    }
-                  >
-                    <Power className="h-4 w-4" />
-                    {item.is_active ? "Deactivate" : "Activate"}
-                  </Button>
-                  <span title={item.delete_block_reason ?? undefined}>
+                <div key="action" className="space-y-1">
+                  <div className="flex flex-wrap justify-end gap-2">
                     <Button
                       type="button"
                       size="sm"
                       variant="ghost"
-                      className="text-destructive hover:text-destructive"
-                      disabled={!item.can_delete}
+                      onClick={() => openEditor(item.supplier_id)}
+                    >
+                      <PencilLine className="h-4 w-4" />
+                      Edit
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
                       onClick={() =>
                         setActionState({
                           supplier: item,
-                          mode: "delete",
+                          mode: item.is_active ? "deactivate" : "activate",
                         })
                       }
                     >
-                      <Trash2 className="h-4 w-4" />
-                      Delete
+                      <Power className="h-4 w-4" />
+                      {item.is_active ? "Deactivate" : "Activate"}
                     </Button>
-                  </span>
+                    <span title={item.delete_block_reason ?? undefined}>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="text-destructive hover:text-destructive"
+                        disabled={!item.can_delete}
+                        onClick={() =>
+                          setActionState({
+                            supplier: item,
+                            mode: "delete",
+                          })
+                        }
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Delete
+                      </Button>
+                    </span>
+                  </div>
+                  {!item.can_delete && item.delete_block_reason ? (
+                    <p className="text-right text-xs text-muted-foreground">
+                      {item.delete_block_reason}
+                    </p>
+                  ) : null}
                 </div>,
               ],
             }))}
@@ -391,6 +482,7 @@ export default function SuppliersTab() {
         loadingBrands={loadingBrands}
         saving={saving}
         selectedBrandNames={selectedBrandNames}
+        emailError={supplierEmailError}
         onOpenChange={(nextOpen) => {
           if (!nextOpen) {
             closeEditor();
@@ -529,6 +621,7 @@ function SupplierEditorDialog({
   loadingBrands,
   saving,
   selectedBrandNames,
+  emailError,
   onOpenChange,
   onSave,
 }: {
@@ -541,12 +634,13 @@ function SupplierEditorDialog({
   loadingBrands: boolean;
   saving: boolean;
   selectedBrandNames: string[];
+  emailError: string | null;
   onOpenChange: (open: boolean) => void;
   onSave: () => void;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             {supplierForm.name ? "Edit sales rep" : "Add sales rep"}
@@ -633,6 +727,35 @@ function SupplierEditorDialog({
                   />
                 </div>
                 <div className="grid gap-1.5">
+                  <Label htmlFor="supplier-email">Email address</Label>
+                  <Input
+                    id="supplier-email"
+                    type="email"
+                    value={supplierForm.email}
+                    onChange={(event) =>
+                      setSupplierForm((prev) => ({
+                        ...prev,
+                        email: event.target.value,
+                      }))
+                    }
+                    aria-invalid={Boolean(emailError)}
+                    aria-describedby={
+                      emailError ? "supplier-email-error" : undefined
+                    }
+                    className={emailError ? "border-destructive" : undefined}
+                  />
+                  {emailError ? (
+                    <p
+                      id="supplier-email-error"
+                      className="text-sm text-destructive"
+                    >
+                      {emailError}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-1.5">
                   <Label>Company Name</Label>
                   <Input
                     value={supplierForm.companyName}
@@ -644,8 +767,6 @@ function SupplierEditorDialog({
                     }
                   />
                 </div>
-              </div>
-              <div className="grid gap-4 md:grid-cols-2">
                 <div className="grid gap-1.5">
                   <Label>Company Phone</Label>
                   <Input
@@ -658,18 +779,18 @@ function SupplierEditorDialog({
                     }
                   />
                 </div>
-                <div className="grid gap-1.5">
-                  <Label>Brands</Label>
-                  <BrandMultiSelect
-                    brands={brands}
-                    loading={loadingBrands}
-                    selectedBrandIds={supplierForm.brandIds}
-                    selectedBrandNames={selectedBrandNames}
-                    onChange={(brandIds) =>
-                      setSupplierForm((prev) => ({ ...prev, brandIds }))
-                    }
-                  />
-                </div>
+              </div>
+              <div className="grid gap-1.5">
+                <Label>Brands</Label>
+                <BrandMultiSelect
+                  brands={brands}
+                  loading={loadingBrands}
+                  selectedBrandIds={supplierForm.brandIds}
+                  selectedBrandNames={selectedBrandNames}
+                  onChange={(brandIds) =>
+                    setSupplierForm((prev) => ({ ...prev, brandIds }))
+                  }
+                />
               </div>
               <div className="grid gap-1.5">
                 <Label>Company Address</Label>

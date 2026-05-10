@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { PauseCircle, Play, Trash2, ShoppingCart } from "lucide-react";
 import { useState } from "react";
 import type { HeldBill } from "./types";
+import { computeCartTotals } from "@/lib/cartMath";
 
 interface HeldBillsDrawerProps {
   open: boolean;
@@ -51,10 +52,7 @@ const HeldBillsDrawer = ({
             </div>
           ) : (
             heldBills.map((bill) => {
-              const total = bill.items.reduce(
-                (acc, i) => acc + i.product.price * i.quantity,
-                0
-              );
+              const total = computeCartTotals(bill.items, {}).grandTotal;
               const itemCount = bill.items.reduce(
                 (acc, i) => acc + i.quantity,
                 0

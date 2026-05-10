@@ -1,6 +1,9 @@
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
 using System.Net;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using SmartPos.Backend.Infrastructure;
 
 namespace SmartPos.Backend.IntegrationTests;
 
@@ -186,6 +189,93 @@ public sealed class ProductInventoryTests(CustomWebApplicationFactory factory)
         var catalogItem = FindObjectInArray(productCatalog, "items", "product_id", productId.ToString());
         Assert.Equal(7m, TestJson.GetDecimal(catalogItem, "initial_stock_quantity"));
         Assert.Equal(5m, TestJson.GetDecimal(catalogItem, "stock_quantity"));
+    }
+
+    [Fact]
+    public async Task StockAdjustment_ShouldIncludeAuthenticatedOwnerInMovementHistory()
+    {
+        await TestAuth.SignInAsOwnerAsync(client);
+
+        Guid ownerId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<SmartPosDbContext>();
+            ownerId = await dbContext.Users
+                .AsNoTracking()
+                .Where(x => x.Username == "owner")
+                .Select(x => x.Id)
+                .SingleAsync();
+        }
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+        var adjustmentReason = $"owner_manual_adjustment_{runId}";
+        var createProduct = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"Owner Adjustment Product {runId}",
+                sku = $"OWNER-ADJ-{runId}",
+                unit_price = 150m,
+                cost_price = 100m,
+                initial_stock_quantity = 0m,
+                reorder_level = 2m,
+                allow_negative_stock = true,
+                is_active = true
+            }));
+
+        var productId = Guid.Parse(TestJson.GetString(createProduct, "product_id"));
+
+        var stockAdjust = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync($"/api/products/{productId}/stock-adjustments", new
+            {
+                delta_quantity = 5m,
+                reason = adjustmentReason
+            }));
+        Assert.Equal(0m, TestJson.GetDecimal(stockAdjust, "previous_quantity"));
+        Assert.Equal(5m, TestJson.GetDecimal(stockAdjust, "new_quantity"));
+
+        var movementHistory = await TestJson.ReadObjectAsync(
+            await client.GetAsync($"/api/inventory/movements?product_id={productId}&movement_type=Adjustment&page=1&take=20"));
+        var movement = FindObjectInArray(movementHistory, "items", "reason", adjustmentReason);
+
+        Assert.Equal(
+            ownerId.ToString(),
+            TestJson.GetString(movement, "created_by_user_id"),
+            ignoreCase: true,
+            ignoreLineEndingDifferences: false,
+            ignoreWhiteSpaceDifferences: false);
+    }
+
+    [Fact]
+    public async Task StockAdjustment_WithoutReason_ShouldReturnBadRequest()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+        var createProduct = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"Stock Reason Product {runId}",
+                sku = $"STOCK-REASON-{runId}",
+                unit_price = 150m,
+                cost_price = 100m,
+                initial_stock_quantity = 5m,
+                reorder_level = 2m,
+                allow_negative_stock = false,
+                is_active = true
+            }));
+
+        var productId = Guid.Parse(TestJson.GetString(createProduct, "product_id"));
+
+        var response = await client.PostAsJsonAsync($"/api/products/{productId}/stock-adjustments", new
+        {
+            delta_quantity = 1m
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        var error = JsonNode.Parse(await response.Content.ReadAsStringAsync())?.AsObject()
+                    ?? throw new InvalidOperationException("Missing stock adjustment validation error.");
+        Assert.Equal("Stock adjustment reason is required.", TestJson.GetString(error, "message"));
     }
 
     [Fact]

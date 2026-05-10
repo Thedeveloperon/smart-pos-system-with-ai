@@ -210,7 +210,19 @@ public sealed class PromotionService(
             throw new InvalidOperationException("Promotion end date must be after start date.");
         }
 
-        var scope = ParseScope(request.Scope);
+        if (request.StartsAtUtc.ToUniversalTime() < GetCurrentUtcMinute())
+        {
+            throw new InvalidOperationException("Promotion start date must be current UTC time or later.");
+        }
+
+        var scopeInput = request.Scope?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(scopeInput) ||
+            string.Equals(scopeInput, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Promotion scope is required. Choose category or product.");
+        }
+
+        var scope = ParseScope(scopeInput);
         var valueType = ParseValueType(request.ValueType);
         var value = decimal.Round(request.Value, 2, MidpointRounding.AwayFromZero);
 
@@ -283,10 +295,9 @@ public sealed class PromotionService(
 
     private static PromotionScope ParseScope(string value) => value.Trim().ToLowerInvariant() switch
     {
-        "all" => PromotionScope.All,
         "category" => PromotionScope.Category,
         "product" => PromotionScope.Product,
-        _ => throw new InvalidOperationException("scope must be one of: all, category, product.")
+        _ => throw new InvalidOperationException("scope must be one of: category, product.")
     };
 
     private static PromotionValueType ParseValueType(string value) => value.Trim().ToLowerInvariant() switch
@@ -295,6 +306,12 @@ public sealed class PromotionService(
         "fixed" => PromotionValueType.Fixed,
         _ => throw new InvalidOperationException("value_type must be one of: percent, fixed.")
     };
+
+    private static DateTimeOffset GetCurrentUtcMinute()
+    {
+        var now = DateTimeOffset.UtcNow;
+        return new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, now.Minute, 0, TimeSpan.Zero);
+    }
 
     private static PromotionResponse MapResponse(Promotion entity)
     {

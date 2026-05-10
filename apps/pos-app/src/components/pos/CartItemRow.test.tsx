@@ -17,7 +17,7 @@ describe("CartItemRow", () => {
     };
 
     render(
-      <CartItemRow item={item} onUpdateQty={vi.fn()} onRemove={vi.fn()} />,
+      <CartItemRow item={item} onUpdateQty={vi.fn()} onRemove={vi.fn()} onUpdateDiscount={vi.fn()} />,
     );
 
     expect(screen.getByRole("status")).toHaveTextContent("Stock warning");
@@ -42,7 +42,7 @@ describe("CartItemRow", () => {
     };
 
     render(
-      <CartItemRow item={item} onUpdateQty={vi.fn()} onRemove={vi.fn()} />,
+      <CartItemRow item={item} onUpdateQty={vi.fn()} onRemove={vi.fn()} onUpdateDiscount={vi.fn()} />,
     );
 
     expect(screen.getByText("Serial SN-0001")).toBeInTheDocument();

@@ -10,10 +10,11 @@ public static class ServiceEndpoints
             .WithTags("Services");
 
         group.MapGet("", async (
+            bool? include_inactive,
             ServiceService service,
             CancellationToken cancellationToken) =>
         {
-            var result = await service.GetAllAsync(cancellationToken);
+            var result = await service.GetAllAsync(include_inactive ?? false, cancellationToken);
             return Results.Ok(result);
         })
         .RequireAuthorization()

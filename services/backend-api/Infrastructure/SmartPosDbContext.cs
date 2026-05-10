@@ -359,6 +359,7 @@ public sealed class SmartPosDbContext(DbContextOptions<SmartPosDbContext> option
             entity.ToTable("suppliers");
             entity.Property(x => x.Name).HasMaxLength(160);
             entity.Property(x => x.Phone).HasMaxLength(32);
+            entity.Property(x => x.Email).HasMaxLength(120);
             entity.Property(x => x.CompanyName).HasMaxLength(160);
             entity.Property(x => x.CompanyPhone).HasMaxLength(32);
             entity.Property(x => x.Address).HasMaxLength(500);

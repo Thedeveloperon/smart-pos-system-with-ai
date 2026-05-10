@@ -2,9 +2,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AlertTriangle, Minus, Plus, Trash2 } from "lucide-react";
 import type { CartItem } from "./types";
+import type { CartLineMath } from "@/lib/cartMath";
 
 interface CartItemRowProps {
   item: CartItem;
+  lineMath?: CartLineMath;
   onUpdateQty: (lineId: string, qty: number) => void;
   onRemove: (lineId: string) => void;
   onUpdateDiscount: (
@@ -13,7 +15,7 @@ interface CartItemRowProps {
   ) => void;
 }
 
-const CartItemRow = ({ item, onUpdateQty, onRemove, onUpdateDiscount }: CartItemRowProps) => {
+const CartItemRow = ({ item, lineMath, onUpdateQty, onRemove, onUpdateDiscount }: CartItemRowProps) => {
   const sellMode = item.sellMode
     ?? (item.product.isService || item.product.serviceId ? "service" : item.bundleId || item.product.isBundle ? "bundle" : "unit");
   const lineId = item.lineId
@@ -21,12 +23,14 @@ const CartItemRow = ({ item, onUpdateQty, onRemove, onUpdateDiscount }: CartItem
       ? `serial:${item.selectedSerial.id}`
       : sellMode === "service"
         ? `service:${item.product.serviceId || item.product.id.replace(/^service:/, "")}`
-        : sellMode === "bundle"
-          ? `bundle:${item.bundleId || item.product.bundleId || item.product.id.replace(/^bundle:/, "")}`
-          : `product:${item.product.id.replace(/^bundle:/, "")}:${sellMode}`);
+          : sellMode === "bundle"
+            ? `bundle:${item.bundleId || item.product.bundleId || item.product.id.replace(/^bundle:/, "")}`
+            : `product:${item.product.id.replace(/^bundle:/, "")}:${sellMode}`);
   const hasSelectedSerial = Boolean(item.selectedSerial?.id);
-  const lineTotal = item.lineTotal ?? (item.product.price * item.quantity);
-  const lineGross = item.product.price * item.quantity;
+  const lineTotal = lineMath?.lineTotal ?? item.lineTotal ?? (item.product.price * item.quantity);
+  const lineGross = lineMath?.lineGross ?? (item.product.price * item.quantity);
+  const discountAmount = lineMath?.discountAmount ?? item.discountAmount ?? 0;
+  const catalogDiscountAmount = lineMath?.catalogDiscountAmount ?? item.catalogDiscountAmount ?? 0;
   const tracksStock = item.product.tracksStock ?? sellMode !== "service";
   const stock = item.product.stock ?? 0;
   const availableQuantity = tracksStock
@@ -130,8 +134,8 @@ const CartItemRow = ({ item, onUpdateQty, onRemove, onUpdateDiscount }: CartItem
           <p className="text-xs text-muted-foreground">
             Rs. {item.product.price.toLocaleString()} x {item.quantity} {quantityLabel}
           </p>
-          {(item.discountAmount ?? 0) > 0 && (
-            <p className="text-[11px] text-primary">Discount: Rs. {(item.discountAmount ?? 0).toLocaleString()}</p>
+          {discountAmount > 0 && (
+            <p className="text-[11px] text-primary">Discount: Rs. {discountAmount.toLocaleString()}</p>
           )}
           {sellMode === "pack" && (item.packSize ?? 0) > 0 && (
             <p className="text-[11px] text-muted-foreground">
@@ -188,9 +192,9 @@ const CartItemRow = ({ item, onUpdateQty, onRemove, onUpdateDiscount }: CartItem
         </div>
       </div>
 
-      {(item.catalogDiscountAmount ?? 0) > 0 && (
+      {catalogDiscountAmount > 0 && (
         <div className="mt-1 text-[11px] text-muted-foreground">
-          Catalog discount: Rs. {(item.catalogDiscountAmount ?? 0).toLocaleString()} on gross Rs. {lineGross.toLocaleString()}
+          Catalog discount: Rs. {catalogDiscountAmount.toLocaleString()} on gross Rs. {lineGross.toLocaleString()}
         </div>
       )}
     </div>

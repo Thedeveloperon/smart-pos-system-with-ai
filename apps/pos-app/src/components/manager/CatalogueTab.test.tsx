@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import CatalogueTab from "./CatalogueTab";
 import {
+  createCategory,
   fetchBrands,
   fetchCategories,
   fetchProductCatalogItems,
@@ -147,5 +148,26 @@ describe("CatalogueTab", () => {
         }),
       );
     });
+  });
+
+  it("highlights the category name field when save is attempted without a name", async () => {
+    render(<CatalogueTab />);
+
+    await waitFor(() => {
+      expect(fetchCategories).toHaveBeenCalledWith(true);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Category" }));
+
+    const nameInput = await screen.findByRole("textbox", { name: "Name" });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(createCategory).not.toHaveBeenCalled();
+      expect(nameInput).toHaveAttribute("aria-invalid", "true");
+    });
+
+    expect(nameInput).toHaveClass("border-destructive");
+    expect(screen.getByText("Category name is required.")).toBeInTheDocument();
   });
 });

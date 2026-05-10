@@ -31,14 +31,16 @@ import {
   type Category,
   type Product,
   type Promotion,
-  type PromotionScope,
+  type UpsertPromotionScope,
   type PromotionValueType,
 } from "@/lib/api";
+
+type FormScope = "" | UpsertPromotionScope;
 
 type FormState = {
   name: string;
   description: string;
-  scope: PromotionScope;
+  scope: FormScope;
   categoryId: string;
   productId: string;
   valueType: PromotionValueType;
@@ -51,19 +53,61 @@ type FormState = {
 type PromotionStatusFilter = "all" | "active" | "expired";
 type PromotionScopeFilter = "all-scopes" | "all" | "category" | "product";
 
-const nowLocal = () => new Date().toISOString().slice(0, 16);
-const afterOneWeekLocal = () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16);
+const unselectedScopeValue = "__unselected_scope__";
+const padDateTimePart = (value: number) => String(value).padStart(2, "0");
+
+function formatUtcInputValue(date: Date): string {
+  return `${date.getUTCFullYear()}-${padDateTimePart(date.getUTCMonth() + 1)}-${padDateTimePart(date.getUTCDate())}T${padDateTimePart(date.getUTCHours())}:${padDateTimePart(date.getUTCMinutes())}`;
+}
+
+function getCurrentUtcMinuteDate(): Date {
+  const now = new Date();
+  now.setUTCSeconds(0, 0);
+  return now;
+}
+
+function getCurrentUtcInputValue(): string {
+  return formatUtcInputValue(getCurrentUtcMinuteDate());
+}
+
+function getOneWeekFromNowUtcInputValue(): string {
+  const nextWeek = getCurrentUtcMinuteDate();
+  nextWeek.setUTCDate(nextWeek.getUTCDate() + 7);
+  return formatUtcInputValue(nextWeek);
+}
+
+function parseUtcInputValue(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
+  if (!match) {
+    return null;
+  }
+
+  const [, year, month, day, hours, minutes] = match;
+  const parsed = new Date(Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hours),
+    Number(minutes),
+  ));
+
+  if (Number.isNaN(parsed.getTime()) || formatUtcInputValue(parsed) !== value) {
+    return null;
+  }
+
+  return parsed;
+}
 
 const emptyForm = (): FormState => ({
   name: "",
   description: "",
-  scope: "all",
+  scope: "",
   categoryId: "",
   productId: "",
   valueType: "percent",
   value: "0",
-  startsAt: nowLocal(),
-  endsAt: afterOneWeekLocal(),
+  startsAt: getCurrentUtcInputValue(),
+  endsAt: getOneWeekFromNowUtcInputValue(),
   isActive: true,
 });
 
@@ -71,13 +115,13 @@ function toForm(item: Promotion): FormState {
   return {
     name: item.name,
     description: item.description ?? "",
-    scope: item.scope,
+    scope: item.scope === "all" ? "" : item.scope,
     categoryId: item.category_id ?? "",
     productId: item.product_id ?? "",
     valueType: item.value_type,
     value: String(item.value ?? 0),
-    startsAt: new Date(item.starts_at_utc).toISOString().slice(0, 16),
-    endsAt: new Date(item.ends_at_utc).toISOString().slice(0, 16),
+    startsAt: formatUtcInputValue(new Date(item.starts_at_utc)),
+    endsAt: formatUtcInputValue(new Date(item.ends_at_utc)),
     isActive: item.is_active,
   };
 }
@@ -154,6 +198,8 @@ export default function PromotionsTab() {
       return !item.is_active || new Date(item.ends_at_utc).getTime() < now.getTime();
     });
   }, [items, scopeFilter, statusFilter]);
+  const minimumStartAt = getCurrentUtcInputValue();
+  const minimumEndAt = form.startsAt > minimumStartAt ? form.startsAt : minimumStartAt;
 
   const openCreate = () => {
     setEditing(null);
@@ -167,7 +213,7 @@ export default function PromotionsTab() {
     setOpen(true);
   };
 
-  const handleScopeChange = (value: PromotionScope) => {
+  const handleScopeChange = (value: FormScope) => {
     setForm((prev) => ({
       ...prev,
       scope: value,
@@ -182,18 +228,56 @@ export default function PromotionsTab() {
       return;
     }
 
+    if (!form.scope) {
+      toast.error("Promotion scope is required.");
+      return;
+    }
+
+    if (form.scope === "category" && !form.categoryId) {
+      toast.error("Category is required for category scope.");
+      return;
+    }
+
+    if (form.scope === "product" && !form.productId) {
+      toast.error("Product is required for product scope.");
+      return;
+    }
+
+    const scope = form.scope;
+    const startsAt = parseUtcInputValue(form.startsAt);
+    if (!startsAt) {
+      toast.error("Promotion start date is invalid.");
+      return;
+    }
+
+    const endsAt = parseUtcInputValue(form.endsAt);
+    if (!endsAt) {
+      toast.error("Promotion end date is invalid.");
+      return;
+    }
+
+    if (startsAt.getTime() < getCurrentUtcMinuteDate().getTime()) {
+      toast.error("Promotion start date must be current UTC time or later.");
+      return;
+    }
+
+    if (endsAt.getTime() <= startsAt.getTime()) {
+      toast.error("Promotion end date must be after start date.");
+      return;
+    }
+
     setSaving(true);
     try {
       const payload = {
         name: form.name.trim(),
         description: form.description.trim() || null,
-        scope: form.scope,
-        category_id: form.scope === "category" ? form.categoryId || null : null,
-        product_id: form.scope === "product" ? form.productId || null : null,
+        scope,
+        category_id: scope === "category" ? form.categoryId || null : null,
+        product_id: scope === "product" ? form.productId || null : null,
         value_type: form.valueType,
         value: Number(form.value) || 0,
-        starts_at_utc: new Date(form.startsAt).toISOString(),
-        ends_at_utc: new Date(form.endsAt).toISOString(),
+        starts_at_utc: startsAt.toISOString(),
+        ends_at_utc: endsAt.toISOString(),
         is_active: form.isActive,
       } as const;
 
@@ -373,10 +457,17 @@ export default function PromotionsTab() {
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-1.5">
                 <Label>Scope</Label>
-                <Select value={form.scope} onValueChange={(value) => handleScopeChange(value as PromotionScope)}>
+                <Select
+                  value={form.scope || unselectedScopeValue}
+                  onValueChange={(value) =>
+                    handleScopeChange(value === unselectedScopeValue ? "" : (value as UpsertPromotionScope))
+                  }
+                >
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All</SelectItem>
+                    <SelectItem value={unselectedScopeValue} className="hidden" disabled>
+                      Select Scope
+                    </SelectItem>
                     <SelectItem value="category">Category</SelectItem>
                     <SelectItem value="product">Product</SelectItem>
                   </SelectContent>
@@ -438,11 +529,21 @@ export default function PromotionsTab() {
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-1.5">
                 <Label>Starts at (UTC)</Label>
-                <Input type="datetime-local" value={form.startsAt} onChange={(event) => setForm((prev) => ({ ...prev, startsAt: event.target.value }))} />
+                <Input
+                  type="datetime-local"
+                  min={minimumStartAt}
+                  value={form.startsAt}
+                  onChange={(event) => setForm((prev) => ({ ...prev, startsAt: event.target.value }))}
+                />
               </div>
               <div className="grid gap-1.5">
                 <Label>Ends at (UTC)</Label>
-                <Input type="datetime-local" value={form.endsAt} onChange={(event) => setForm((prev) => ({ ...prev, endsAt: event.target.value }))} />
+                <Input
+                  type="datetime-local"
+                  min={minimumEndAt}
+                  value={form.endsAt}
+                  onChange={(event) => setForm((prev) => ({ ...prev, endsAt: event.target.value }))}
+                />
               </div>
             </div>
           </div>

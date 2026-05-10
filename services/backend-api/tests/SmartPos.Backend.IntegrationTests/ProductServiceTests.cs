@@ -12,6 +12,43 @@ namespace SmartPos.Backend.IntegrationTests;
 public sealed class ProductServiceTests
 {
     [Fact]
+    public async Task CreateProductAsync_ShouldRejectCostPriceHigherThanUnitPrice()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var dbOptions = new DbContextOptionsBuilder<SmartPosDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using var dbContext = new SmartPosDbContext(dbOptions);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var httpContextAccessor = new HttpContextAccessor();
+        var auditLogService = new AuditLogService(dbContext, httpContextAccessor);
+        var stockMovementHelper = new StockMovementHelper(dbContext);
+        var productService = new ProductService(dbContext, auditLogService, stockMovementHelper, httpContextAccessor);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => productService.CreateProductAsync(
+            new CreateProductRequest
+            {
+                Name = "Invalid Margin Product",
+                Sku = "INV-001",
+                UnitPrice = 10m,
+                CostPrice = 20m,
+                InitialStockQuantity = 0m,
+                ReorderLevel = 0m,
+                SafetyStock = 0m,
+                TargetStockLevel = 0m,
+                AllowNegativeStock = false,
+                IsActive = true
+            },
+            CancellationToken.None));
+
+        Assert.Equal("Cost price cannot be greater than unit price.", exception.Message);
+    }
+
+    [Fact]
     public async Task UpdateProductAsync_ShouldAllowReactivatingLegacyProductWithUnchangedInvalidBarcode()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -81,5 +118,72 @@ public sealed class ProductServiceTests
         var persisted = await dbContext.Products.AsNoTracking().SingleAsync(x => x.Id == product.Id);
         Assert.True(persisted.IsActive);
         Assert.Equal("20000016", persisted.Barcode);
+    }
+
+    [Fact]
+    public async Task UpdateProductAsync_ShouldRejectCostPriceHigherThanUnitPrice()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var dbOptions = new DbContextOptionsBuilder<SmartPosDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using var dbContext = new SmartPosDbContext(dbOptions);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var now = DateTimeOffset.UtcNow;
+        var product = new Product
+        {
+            Name = "Margin Guard Product",
+            Sku = "MRG-001",
+            Barcode = "12345670",
+            UnitPrice = 25m,
+            CostPrice = 15m,
+            IsActive = true,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+        var inventory = new InventoryRecord
+        {
+            Product = product,
+            InitialStockQuantity = 5m,
+            QuantityOnHand = 5m,
+            ReorderLevel = 1m,
+            SafetyStock = 0m,
+            TargetStockLevel = 5m,
+            AllowNegativeStock = false,
+            UpdatedAtUtc = now
+        };
+        product.Inventory = inventory;
+
+        dbContext.Products.Add(product);
+        await dbContext.SaveChangesAsync();
+
+        var httpContextAccessor = new HttpContextAccessor();
+        var auditLogService = new AuditLogService(dbContext, httpContextAccessor);
+        var stockMovementHelper = new StockMovementHelper(dbContext);
+        var productService = new ProductService(dbContext, auditLogService, stockMovementHelper, httpContextAccessor);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => productService.UpdateProductAsync(
+            product.Id,
+            new UpdateProductRequest
+            {
+                Name = "Margin Guard Product",
+                Sku = "MRG-001",
+                Barcode = "12345670",
+                UnitPrice = 10m,
+                CostPrice = 20m,
+                InitialStockQuantity = 5m,
+                ReorderLevel = 1m,
+                SafetyStock = 0m,
+                TargetStockLevel = 5m,
+                AllowNegativeStock = false,
+                IsActive = true
+            },
+            CancellationToken.None));
+
+        Assert.Equal("Cost price cannot be greater than unit price.", exception.Message);
     }
 }

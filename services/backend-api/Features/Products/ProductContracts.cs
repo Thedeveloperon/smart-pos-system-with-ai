@@ -118,6 +118,9 @@ public sealed class SupplierItemResponse
     [JsonPropertyName("phone")]
     public string? Phone { get; set; }
 
+    [JsonPropertyName("email")]
+    public string? Email { get; set; }
+
     [JsonPropertyName("company_name")]
     public string? CompanyName { get; set; }
 
@@ -165,6 +168,9 @@ public sealed class UpsertSupplierRequest
 
     [JsonPropertyName("phone")]
     public string? Phone { get; set; }
+
+    [JsonPropertyName("email")]
+    public string? Email { get; set; }
 
     [JsonPropertyName("company_name")]
     public string? CompanyName { get; set; }
@@ -693,7 +699,7 @@ public sealed class StockAdjustmentRequest
     public decimal DeltaQuantity { get; set; }
 
     [JsonPropertyName("reason")]
-    public string Reason { get; set; } = "manual_adjustment";
+    public string Reason { get; set; } = string.Empty;
 
     [JsonPropertyName("batch_id")]
     public Guid? BatchId { get; set; }
