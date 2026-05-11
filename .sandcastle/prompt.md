@@ -28,7 +28,7 @@ Pick the highest-priority open issue that is not blocked by another open issue.
 1. **Explore** — read the issue carefully. Pull in the parent PRD if referenced. Read the relevant source files and tests before writing any code.
 2. **Plan** — decide what to change and why. Keep the change as small as possible.
 3. **Execute** — use RGR (Red → Green → Repeat → Refactor): write a failing test first, then write the implementation to pass it.
-4. **Verify** — run `cd apps/pos-app && npm run lint` and `cd apps/pos-app && npm run test` before committing when working on POS frontend code. If the bug affects backend code, run the relevant backend .NET build/test commands instead.. Fix any failures before proceeding.
+4. **Verify** — run `cd apps/pos-app && npm run lint` and `cd apps/pos-app && npm run test` before committing when working on POS frontend code. If the bug affects backend code, run the relevant backend .NET build/test commands instead. Fix any failures before proceeding.
 5. **Commit** — make a single git commit. The message MUST:
    - Start with `RALPH:` prefix
    - Include the task completed and any PRD reference
