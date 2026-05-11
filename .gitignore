@@ -42,3 +42,5 @@ tmp-*
 # IDE and tooling
 .idea/
 .vscode/
+
+node_modules/
