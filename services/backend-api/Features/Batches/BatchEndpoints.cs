@@ -94,7 +94,7 @@ public static class BatchEndpoints
             var existing = await dbContext.ProductBatches.AnyAsync(
                 x => x.ProductId == productId &&
                      x.StoreId == product.StoreId &&
-                     x.BatchNumber == batchNumber,
+                     x.BatchNumber!.ToLower() == batchNumber.ToLower(),
                 cancellationToken);
             if (existing)
             {
@@ -183,12 +183,13 @@ public static class BatchEndpoints
                 return Results.NotFound(new { message = "Batch not found." });
             }
 
-            if (batch.BatchNumber != Normalize(request.BatchNumber) && !string.IsNullOrWhiteSpace(Normalize(request.BatchNumber)))
+            var normalizedNewBatchNumber = Normalize(request.BatchNumber);
+            if (!string.Equals(batch.BatchNumber, normalizedNewBatchNumber, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(normalizedNewBatchNumber))
             {
                 var duplicate = await dbContext.ProductBatches.AnyAsync(
                     x => x.ProductId == productId &&
                          x.StoreId == batch.StoreId &&
-                         x.BatchNumber == Normalize(request.BatchNumber) &&
+                         x.BatchNumber!.ToLower() == normalizedNewBatchNumber.ToLower() &&
                          x.Id != batchId,
                     cancellationToken);
                 if (duplicate)
@@ -206,7 +207,7 @@ public static class BatchEndpoints
 
             batch.SupplierId = request.SupplierId;
             batch.PurchaseBillId = request.PurchaseBillId;
-            batch.BatchNumber = Normalize(request.BatchNumber) ?? batch.BatchNumber;
+            batch.BatchNumber = normalizedNewBatchNumber ?? batch.BatchNumber;
             batch.ManufactureDate = request.ManufactureDate;
             batch.ExpiryDate = request.ExpiryDate;
             batch.CostPrice = request.CostPrice;

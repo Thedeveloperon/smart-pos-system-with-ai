@@ -150,6 +150,17 @@ export default function BatchesTab() {
   };
 
   const save = async () => {
+    const trimmed = form.batch_number.trim();
+    const isDuplicate = batches.some(
+      (b) =>
+        b.batch_number.toLowerCase() === trimmed.toLowerCase() &&
+        b.id !== editingId,
+    );
+    if (isDuplicate) {
+      toast.error("Batch number already exists for this product.");
+      return;
+    }
+
     setSaving(true);
     try {
       const payload = {
