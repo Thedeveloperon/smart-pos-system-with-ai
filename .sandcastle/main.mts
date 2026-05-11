@@ -41,7 +41,7 @@ await run({
       // synced in, before the agent starts. Use it to install dependencies or run
       // any other setup steps your project needs.
       onSandboxReady: [
-  { command: "npm install --prefix apps/pos-app", timeoutMs: 300000 },
+  { command: "npm ci --prefix apps/pos-app --no-audit --no-fund", timeoutMs: 900000 },
 ],
     },
   },
