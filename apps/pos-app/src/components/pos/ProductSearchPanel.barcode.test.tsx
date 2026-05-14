@@ -1,0 +1,154 @@
+import { createRef } from "react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "@/lib/api";
+import { BrowserMultiFormatReader } from "@zxing/browser";
+import ProductSearchPanel, { type ProductSearchPanelHandle } from "./ProductSearchPanel";
+import type { Product } from "./types";
+
+const lookupSerialMock = vi.fn();
+const searchBundlesMock = vi.fn();
+const searchServicesMock = vi.fn();
+
+vi.mock("@/lib/api", () => ({
+  ApiError: class ApiError extends Error {
+    status: number;
+
+    constructor(message: string, status: number) {
+      super(message);
+      this.status = status;
+    }
+  },
+  lookupSerial: (...args: unknown[]) => lookupSerialMock(...args),
+  searchBundles: (...args: unknown[]) => searchBundlesMock(...args),
+  searchServices: (...args: unknown[]) => searchServicesMock(...args),
+}));
+
+const sampleProducts: Product[] = [
+  {
+    id: "prod-1",
+    name: "Milk 1L",
+    sku: "MILK-1L",
+    barcode: "1234567890128",
+    price: 450,
+    stock: 20,
+  },
+];
+
+describe("ProductSearchPanel barcode mode", () => {
+  beforeEach(() => {
+    lookupSerialMock.mockReset();
+    lookupSerialMock.mockRejectedValue(new ApiError("Serial number not found.", 404));
+    searchBundlesMock.mockReset();
+    searchBundlesMock.mockResolvedValue([]);
+    searchServicesMock.mockReset();
+    searchServicesMock.mockResolvedValue([]);
+  });
+
+  it("adds exact barcode match to cart when Enter is pressed in barcode mode", () => {
+    const onAddToCart = vi.fn();
+
+    render(<ProductSearchPanel products={sampleProducts} onAddToCart={onAddToCart} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Switch to barcode mode" }));
+    const input = screen.getByPlaceholderText("Scan or enter barcode...");
+
+    fireEvent.change(input, { target: { value: "1234567890128" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    expect(onAddToCart).toHaveBeenCalledWith(sampleProducts[0], 1, undefined, { sellMode: "unit" });
+    expect(input).toHaveValue("");
+  });
+
+  it("shows clear no-match feedback for scanner-like bursts", () => {
+    const onAddToCart = vi.fn();
+
+    render(<ProductSearchPanel products={sampleProducts} onAddToCart={onAddToCart} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Switch to barcode mode" }));
+    const input = screen.getByPlaceholderText("Scan or enter barcode...");
+
+    for (const key of "9999999999999") {
+      fireEvent.keyDown(input, { key });
+    }
+    fireEvent.change(input, { target: { value: "9999999999999" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    expect(onAddToCart).not.toHaveBeenCalled();
+    expect(screen.getByText('No product matched scanned barcode "9999999999999".')).toBeInTheDocument();
+  });
+
+  it("does not auto-add product on Enter in manual mode", () => {
+    const onAddToCart = vi.fn();
+
+    render(<ProductSearchPanel products={sampleProducts} onAddToCart={onAddToCart} />);
+
+    const input = screen.getByPlaceholderText("Search products by name, SKU, serial...");
+    fireEvent.change(input, { target: { value: "Milk" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    expect(onAddToCart).not.toHaveBeenCalled();
+  });
+
+  it("supports focusSearch imperative handle for shortcut focus behavior", () => {
+    const onAddToCart = vi.fn();
+    const panelRef = createRef<ProductSearchPanelHandle>();
+
+    render(<ProductSearchPanel ref={panelRef} products={sampleProducts} onAddToCart={onAddToCart} />);
+
+    const input = screen.getByPlaceholderText("Search products by name, SKU, serial...");
+    input.blur();
+
+    act(() => {
+      panelRef.current?.focusSearch();
+    });
+
+    expect(input).toHaveFocus();
+  });
+
+  it("enables camera scan when mediaDevices is available even without BarcodeDetector", async () => {
+    const onAddToCart = vi.fn();
+    const originalMediaDevices = navigator.mediaDevices;
+    const decodeSpy = vi.spyOn(BrowserMultiFormatReader.prototype, "decodeFromConstraints").mockResolvedValue({
+      stop: vi.fn(),
+    });
+
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn(),
+      },
+    });
+
+    try {
+      render(<ProductSearchPanel products={sampleProducts} onAddToCart={onAddToCart} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Switch to barcode mode" }));
+      fireEvent.click(screen.getByRole("button", { name: "Start camera barcode scan" }));
+
+      await waitFor(() => expect(decodeSpy).toHaveBeenCalledOnce());
+      expect(
+        screen.queryByText("Camera barcode scan is unavailable in this browser. Use scanner input and Enter."),
+      ).not.toBeInTheDocument();
+    } finally {
+      decodeSpy.mockRestore();
+      Object.defineProperty(navigator, "mediaDevices", {
+        configurable: true,
+        value: originalMediaDevices,
+      });
+    }
+  });
+
+  it("shows clear fallback when camera scan is unavailable", () => {
+    const onAddToCart = vi.fn();
+
+    render(<ProductSearchPanel products={sampleProducts} onAddToCart={onAddToCart} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Switch to barcode mode" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start camera barcode scan" }));
+
+    expect(
+      screen.getByText("Camera barcode scan is unavailable in this browser. Use scanner input and Enter."),
+    ).toBeInTheDocument();
+  });
+});

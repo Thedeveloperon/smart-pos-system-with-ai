@@ -1,0 +1,177 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 40% 98%;
+    --foreground: 222 47% 16%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 16%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 16%;
+
+    --primary: 160 70% 38%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 28% 94%;
+    --secondary-foreground: 222 45% 20%;
+
+    --muted: 210 25% 92%;
+    --muted-foreground: 215 16% 38%;
+
+    --accent: 184 70% 42%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 214 24% 86%;
+    --input: 214 24% 86%;
+    --ring: 160 70% 38%;
+
+    --radius: 0.75rem;
+
+    --hero-bg: 210 40% 98%;
+    --hero-foreground: 222 47% 18%;
+    --hero-muted: 215 18% 42%;
+
+    --feature-icon-bg: 160 70% 38%;
+    --feature-icon-fg: 0 0% 100%;
+
+    --glass: 0 0% 100%;
+    --glass-border: 214 28% 84%;
+    --glow-primary: 160 70% 38%;
+
+    --sidebar-background: 210 40% 98%;
+    --sidebar-foreground: 222 47% 16%;
+    --sidebar-primary: 160 70% 38%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 210 28% 94%;
+    --sidebar-accent-foreground: 222 45% 20%;
+    --sidebar-border: 214 24% 86%;
+    --sidebar-ring: 160 70% 38%;
+    --surface: 0 0% 100%;
+    --surface-muted: 210 28% 97%;
+    --surface-elevated: 0 0% 100%;
+    --layout-gradient-start: 210 45% 99%;
+    --layout-gradient-end: 158 35% 96%;
+    --success: 152 62% 38%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 48%;
+    --warning-foreground: 38 92% 16%;
+    --info: 204 82% 48%;
+    --info-foreground: 0 0% 100%;
+
+    font-family: var(--font-site), system-ui, sans-serif;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-site), system-ui, sans-serif;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font-family: inherit;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-site), system-ui, sans-serif;
+  }
+}
+
+@layer utilities {
+  .glass-card {
+    @apply bg-glass/85 backdrop-blur-xl border border-glass-border rounded-2xl;
+  }
+
+  .app-shell {
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at top left, hsl(var(--layout-gradient-start) / 0.9), transparent 44%),
+      radial-gradient(circle at top right, hsl(var(--layout-gradient-end) / 0.82), transparent 36%),
+      linear-gradient(180deg, hsl(var(--layout-gradient-start)) 0%, hsl(var(--layout-gradient-end)) 100%);
+  }
+
+  .portal-hero {
+    @apply rounded-2xl border border-border/70 bg-surface px-6 py-6 md:px-8 md:py-7 shadow-sm;
+  }
+
+  .portal-surface {
+    @apply rounded-2xl border border-border/75 bg-surface px-6 py-6 md:px-8 md:py-8 shadow-sm;
+  }
+
+  .portal-kicker {
+    @apply text-[11px] uppercase tracking-[0.16em] text-muted-foreground font-semibold;
+  }
+
+  .field-shell {
+    @apply w-full rounded-lg border border-input bg-surface px-3 py-2.5 text-sm transition-colors outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/20;
+  }
+
+  .status-badge {
+    @apply inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold;
+  }
+
+  .status-badge-neutral {
+    @apply bg-muted text-muted-foreground;
+  }
+
+  .status-badge-success {
+    @apply bg-success/15 text-success;
+  }
+
+  .status-badge-warning {
+    @apply bg-warning/20 text-warning-foreground;
+  }
+
+  .status-badge-info {
+    @apply bg-info/15 text-info;
+  }
+
+  .hero-dark-theme {
+    --background: 222 47% 6%;
+    --foreground: 210 40% 92%;
+    --border: 222 25% 16%;
+    --input: 222 25% 16%;
+    --ring: 160 84% 39%;
+    --card: 222 40% 10%;
+    --card-foreground: 210 40% 92%;
+    --secondary: 222 30% 14%;
+    --secondary-foreground: 210 40% 92%;
+    --muted-foreground: 215 20% 60%;
+    --hero-bg: 222 50% 5%;
+    --hero-foreground: 210 40% 96%;
+    --hero-muted: 215 20% 62%;
+    --glass: 222 40% 12%;
+    --glass-border: 215 25% 20%;
+  }
+
+  .glow-primary {
+    box-shadow: 0 0 40px -10px hsl(var(--glow-primary) / 0.3);
+  }
+
+  .glow-primary-sm {
+    box-shadow: 0 0 20px -5px hsl(var(--glow-primary) / 0.2);
+  }
+
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-primary to-accent;
+  }
+}

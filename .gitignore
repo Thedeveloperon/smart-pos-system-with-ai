@@ -1,0 +1,46 @@
+# macOS
+.DS_Store
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Frontend apps
+apps/cloud-portal/node_modules/
+apps/cloud-portal/.next/
+apps/cloud-portal/out/
+apps/pos-app/node_modules/
+apps/pos-app/dist/
+apps/pos-app/.vite/
+
+# Backend service
+services/backend-api/bin/
+services/backend-api/obj/
+**/bin/
+**/obj/
+
+# Test artifacts
+TestResults/
+test-results/
+
+# Local DB/runtime files
+services/backend-api/*.db
+services/backend-api/*.db-shm
+services/backend-api/*.db-wal
+
+# Logs
+*.log
+
+# Deployment artifacts
+release/
+artifacts/
+tmp/
+tmp-*
+.logs/
+
+# IDE and tooling
+.idea/
+.vscode/
+
+node_modules/

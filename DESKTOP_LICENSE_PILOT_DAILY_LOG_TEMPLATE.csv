@@ -1,0 +1,2 @@
+date_utc,cohort,shop_code,checkout_completed_at_utc,first_activation_at_utc,ttfa_minutes,installer_download_clicked,installer_checksum_confirmed,activation_success,activation_failure_reason,support_ticket_opened,support_ticket_category,severity,webhook_dead_letter_count,notes
+2026-04-09,Cohort A,SHOP-001,,,,,,,,,,,,

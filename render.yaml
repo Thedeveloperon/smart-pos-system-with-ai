@@ -1,0 +1,76 @@
+databases:
+  - name: smartpos-postgres
+    plan: free
+    databaseName: smartpos
+    user: smartpos
+
+services:
+  - type: web
+    name: smartpos-backend
+    runtime: docker
+    dockerContext: ./services/backend-api
+    dockerfilePath: ./services/backend-api/Dockerfile
+    autoDeployTrigger: commit
+    healthCheckPath: /health
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: Database__Provider
+        value: Postgres
+      # Render injects the database's internal Postgres URL here.
+      # The backend service and database must be in the same region for this to resolve.
+      - key: ConnectionStrings__Postgres
+        fromDatabase:
+          name: smartpos-postgres
+          property: connectionString
+      - key: JwtAuth__SecureCookie
+        value: "true"
+      - key: Licensing__TokenCookieSecure
+        value: "true"
+      - key: SMARTPOS_JWT_SECRET
+        sync: false
+      - key: SMARTPOS_LICENSE_SIGNING_PRIVATE_KEY_PEM
+        sync: false
+      - key: SMARTPOS_LICENSE_DATA_ENCRYPTION_KEY
+        sync: false
+      - key: Licensing__VerificationPublicKeyPem
+        sync: false
+      - key: Licensing__AccessSuccessPageBaseUrl
+        sync: false
+      - key: Licensing__MarketingManualBillingFallbackEnabled
+        value: "true"
+      - key: Licensing__CloudLicensingEndpointsEnabled
+        value: "true"
+      - key: AiInsights__CloudAiRelayEndpointsEnabled
+        value: "true"
+      - key: OPENAI_API_KEY
+        sync: false
+
+  - type: web
+    name: smartpos-pos-frontend
+    runtime: docker
+    dockerContext: ./apps/pos-app
+    dockerfilePath: ./apps/pos-app/Dockerfile.render
+    autoDeployTrigger: commit
+    healthCheckPath: /health
+    envVars:
+      - key: BACKEND_UPSTREAM
+        fromService:
+          type: web
+          name: smartpos-backend
+          envVarKey: RENDER_EXTERNAL_URL
+
+  - type: web
+    name: smartpos-marketing-website
+    runtime: node
+    rootDir: apps/cloud-portal
+    autoDeployTrigger: commit
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NEXT_PUBLIC_SITE_URL
+        sync: false
+      - key: SMARTPOS_BACKEND_API_URL
+        sync: false
+      - key: NEXT_PUBLIC_MARKETING_MANUAL_BILLING_FALLBACK_ENABLED
+        value: "true"

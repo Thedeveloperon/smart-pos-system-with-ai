@@ -1,0 +1,184 @@
+import { useEffect, useState } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Banknote, Coins, Save } from "lucide-react";
+import DenominationCounter from "./DenominationCounter";
+import type { CashSession, DenominationCount } from "./types";
+
+interface ManageDrawerDialogProps {
+  open: boolean;
+  session: CashSession | null;
+  onClose: () => void;
+  onSave: (counts: DenominationCount[], total: number, reason: string) => Promise<void>;
+}
+
+const ManageDrawerDialog = ({ open, session, onClose, onSave }: ManageDrawerDialogProps) => {
+  const [counts, setCounts] = useState<DenominationCount[]>([]);
+  const [total, setTotal] = useState(0);
+  const [reason, setReason] = useState("");
+  const [resetKey, setResetKey] = useState(0);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const currentCounts = session?.drawer.counts ?? session?.opening.counts ?? [];
+    const currentTotal = session?.drawer.total ?? session?.opening.total ?? 0;
+    setCounts(currentCounts);
+    setTotal(currentTotal);
+    setReason("");
+    setResetKey((value) => value + 1);
+  }, [open, session]);
+
+  const handleSave = async () => {
+    try {
+      setIsSaving(true);
+      await onSave(counts, total, reason.trim());
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const openingCounts = session?.opening.counts ?? [];
+  const expectedCash = (session?.opening.total ?? 0) + (session?.cashSalesTotal ?? 0);
+  const cashBalance = total - expectedCash;
+  const noteCount = counts
+    .filter((count) => count.denomination > 10)
+    .reduce((sum, count) => sum + count.quantity, 0);
+  const coinCount = counts
+    .filter((count) => count.denomination <= 10)
+    .reduce((sum, count) => sum + count.quantity, 0);
+  const latestDrawerEntry = [...(session?.auditLog ?? [])]
+    .filter((entry) =>
+      entry.action === "cash_drawer_updated" ||
+      entry.action === "cash_session_sale_recorded" ||
+      entry.action === "cash_session_opened"
+    )
+    .sort((a, b) => b.performedAt.getTime() - a.performedAt.getTime())[0];
+  const lastUpdatedAtLabel = session?.drawer.updatedAt ? session.drawer.updatedAt.toLocaleString() : "Not updated yet";
+  const lastUpdatedBy = latestDrawerEntry?.performedBy || session?.opening.submittedBy || session?.cashierName || "Unknown";
+
+  return (
+    <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
+      <DialogContent className="flex max-h-[92vh] w-[min(96vw,56rem)] flex-col overflow-hidden rounded-2xl border border-slate-300 bg-[#f7f8fa] p-0 shadow-xl sm:max-w-4xl">
+        <DialogHeader className="border-b border-slate-300 bg-transparent px-6 py-4 pr-14">
+          <DialogTitle className="flex items-center gap-3 text-[1.6rem] font-semibold tracking-tight text-slate-800">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Banknote className="h-5 w-5" />
+            </span>
+            Check Drawer
+          </DialogTitle>
+          <DialogDescription className="text-sm text-slate-600">
+            Notes: {noteCount} items - Coins: {coinCount} items - Variance vs expected: Rs.{" "}
+            {cashBalance.toLocaleString()}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-6 py-3 pr-4">
+          <div className="grid gap-2.5 md:grid-cols-2">
+            <div className="rounded-2xl border border-slate-300 bg-white px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                Cash balance
+              </p>
+              <p className="mt-0.5 text-[1.55rem] font-bold tabular-nums leading-none text-primary">
+                Rs. {total.toLocaleString()}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-300 bg-white px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                Expected cash
+              </p>
+              <p className="mt-0.5 text-[1.55rem] font-bold tabular-nums leading-none text-slate-800">
+                Rs. {expectedCash.toLocaleString()}
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-300 bg-white px-3 py-2">
+            <p className="truncate text-xs font-medium text-slate-700 sm:text-sm">
+              Last updated <span className="font-semibold">{lastUpdatedAtLabel}</span> by{" "}
+              <span className="font-semibold">{lastUpdatedBy}</span>{" "}
+              <span className={`${cashBalance >= 0 ? "text-emerald-600" : "text-destructive"}`}>
+                Variance vs expected: Rs. {cashBalance.toLocaleString()}
+              </span>
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-300 bg-white px-3 py-3">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <label
+                htmlFor="drawer-adjustment-reason"
+                className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground"
+              >
+                Adjustment reason
+              </label>
+              <span className="text-xs text-muted-foreground">Required for audit trail</span>
+            </div>
+            <Input
+              id="drawer-adjustment-reason"
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              placeholder="E.g. change float, cash count correction, end-of-day adjustment"
+              className="h-10 rounded-xl border-slate-300 bg-white"
+              maxLength={250}
+            />
+          </div>
+
+          <div className="flex min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-300 bg-white p-3">
+            <DenominationCounter
+              key={resetKey}
+              initialCounts={counts.length > 0 ? counts : openingCounts}
+              compact
+              onChange={(nextCounts, nextTotal) => {
+                setCounts(nextCounts);
+                setTotal(nextTotal);
+              }}
+            />
+          </div>
+        </div>
+
+        <DialogFooter className="shrink-0 border-t border-slate-300 bg-slate-100 px-6 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
+          <div className="flex w-full flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Coins className="h-4 w-4" />
+              <span className="tabular-nums">Rs. {total.toLocaleString()}</span>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={onClose}
+                className="h-10 rounded-xl border-slate-300 bg-white px-4 text-[0.95rem] font-semibold"
+                disabled={isSaving}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="pos-primary"
+                onClick={() => {
+                  void handleSave();
+                }}
+                className="h-10 rounded-xl border border-primary bg-primary px-4 text-[0.95rem] font-bold text-white"
+                disabled={isSaving || !reason.trim()}
+              >
+                <Save className="h-4 w-4" />
+                {isSaving ? "Saving..." : "Save drawer"}
+              </Button>
+            </div>
+          </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+export default ManageDrawerDialog;

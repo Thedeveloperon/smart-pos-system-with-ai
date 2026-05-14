@@ -1,0 +1,249 @@
+using System.Text.Json.Serialization;
+
+namespace SmartPos.Backend.Features.AiChat;
+
+public sealed class AiChatCreateSessionRequest
+{
+    [JsonPropertyName("title")]
+    public string? Title { get; set; }
+
+    [JsonPropertyName("usage_type")]
+    public string? UsageType { get; set; }
+}
+
+public sealed class AiChatMessageCreateRequest
+{
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = string.Empty;
+
+    [JsonPropertyName("usage_type")]
+    public string? UsageType { get; set; }
+
+    [JsonPropertyName("idempotency_key")]
+    public string? IdempotencyKey { get; set; }
+}
+
+public sealed class AiChatHistoryResponse
+{
+    [JsonPropertyName("items")]
+    public List<AiChatSessionSummaryResponse> Items { get; set; } = [];
+}
+
+public sealed class AiChatSessionDetailResponse
+{
+    [JsonPropertyName("session")]
+    public AiChatSessionSummaryResponse Session { get; set; } = new();
+
+    [JsonPropertyName("messages")]
+    public List<AiChatMessageResponse> Messages { get; set; } = [];
+}
+
+public sealed class AiChatPostMessageResponse
+{
+    [JsonPropertyName("session")]
+    public AiChatSessionSummaryResponse Session { get; set; } = new();
+
+    [JsonPropertyName("user_message")]
+    public AiChatMessageResponse UserMessage { get; set; } = new();
+
+    [JsonPropertyName("assistant_message")]
+    public AiChatMessageResponse AssistantMessage { get; set; } = new();
+
+    [JsonPropertyName("remaining_credits")]
+    public decimal RemainingCredits { get; set; }
+}
+
+public sealed class AiChatStreamEventResponse
+{
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = string.Empty;
+
+    [JsonPropertyName("message_id")]
+    public Guid? MessageId { get; set; }
+
+    [JsonPropertyName("delta")]
+    public string? Delta { get; set; }
+
+    [JsonPropertyName("session")]
+    public AiChatSessionSummaryResponse? Session { get; set; }
+
+    [JsonPropertyName("user_message")]
+    public AiChatMessageResponse? UserMessage { get; set; }
+
+    [JsonPropertyName("assistant_message")]
+    public AiChatMessageResponse? AssistantMessage { get; set; }
+
+    [JsonPropertyName("remaining_credits")]
+    public decimal? RemainingCredits { get; set; }
+
+    [JsonPropertyName("error_message")]
+    public string? ErrorMessage { get; set; }
+}
+
+public sealed class AiChatSessionSummaryResponse
+{
+    [JsonPropertyName("session_id")]
+    public Guid SessionId { get; set; }
+
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = string.Empty;
+
+    [JsonPropertyName("default_usage_type")]
+    public string DefaultUsageType { get; set; } = "quick_insights";
+
+    [JsonPropertyName("message_count")]
+    public int MessageCount { get; set; }
+
+    [JsonPropertyName("created_at")]
+    public DateTimeOffset CreatedAt { get; set; }
+
+    [JsonPropertyName("updated_at")]
+    public DateTimeOffset UpdatedAt { get; set; }
+
+    [JsonPropertyName("last_message_at")]
+    public DateTimeOffset? LastMessageAt { get; set; }
+}
+
+public sealed class AiChatMessageResponse
+{
+    [JsonPropertyName("message_id")]
+    public Guid MessageId { get; set; }
+
+    [JsonPropertyName("role")]
+    public string Role { get; set; } = "assistant";
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "succeeded";
+
+    [JsonPropertyName("usage_type")]
+    public string UsageType { get; set; } = "quick_insights";
+
+    [JsonPropertyName("content")]
+    public string Content { get; set; } = string.Empty;
+
+    [JsonPropertyName("confidence")]
+    public string? Confidence { get; set; }
+
+    [JsonPropertyName("citations")]
+    public List<AiChatCitationResponse> Citations { get; set; } = [];
+
+    [JsonPropertyName("blocks")]
+    public List<AiChatMessageBlockResponse> Blocks { get; set; } = [];
+
+    [JsonPropertyName("input_tokens")]
+    public int InputTokens { get; set; }
+
+    [JsonPropertyName("output_tokens")]
+    public int OutputTokens { get; set; }
+
+    [JsonPropertyName("reserved_credits")]
+    public decimal ReservedCredits { get; set; }
+
+    [JsonPropertyName("charged_credits")]
+    public decimal ChargedCredits { get; set; }
+
+    [JsonPropertyName("refunded_credits")]
+    public decimal RefundedCredits { get; set; }
+
+    [JsonPropertyName("created_at")]
+    public DateTimeOffset CreatedAt { get; set; }
+
+    [JsonPropertyName("completed_at")]
+    public DateTimeOffset? CompletedAt { get; set; }
+
+    [JsonPropertyName("error_message")]
+    public string? ErrorMessage { get; set; }
+}
+
+public sealed class AiChatCitationResponse
+{
+    [JsonPropertyName("bucket_key")]
+    public string BucketKey { get; set; } = string.Empty;
+
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = string.Empty;
+
+    [JsonPropertyName("summary")]
+    public string Summary { get; set; } = string.Empty;
+}
+
+public sealed class AiChatMessageBlockResponse
+{
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = string.Empty;
+
+    [JsonPropertyName("stock_table")]
+    public AiChatStockTableBlockResponse? StockTable { get; set; }
+
+    [JsonPropertyName("sales_kpi")]
+    public AiChatSalesKpiBlockResponse? SalesKpi { get; set; }
+
+    [JsonPropertyName("summary_list")]
+    public AiChatSummaryListBlockResponse? SummaryList { get; set; }
+}
+
+public sealed class AiChatStockTableBlockResponse
+{
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = "Stock & Inventory Update";
+
+    [JsonPropertyName("rows")]
+    public List<AiChatStockTableRowResponse> Rows { get; set; } = [];
+
+    [JsonPropertyName("footer_note")]
+    public string? FooterNote { get; set; }
+}
+
+public sealed class AiChatStockTableRowResponse
+{
+    [JsonPropertyName("item")]
+    public string Item { get; set; } = string.Empty;
+
+    [JsonPropertyName("current_stock")]
+    public decimal CurrentStock { get; set; }
+
+    [JsonPropertyName("reorder_level")]
+    public decimal ReorderLevel { get; set; }
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "ok";
+}
+
+public sealed class AiChatSalesKpiBlockResponse
+{
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = "Sales Summary";
+
+    [JsonPropertyName("from_date")]
+    public DateOnly FromDate { get; set; }
+
+    [JsonPropertyName("to_date")]
+    public DateOnly ToDate { get; set; }
+
+    [JsonPropertyName("revenue")]
+    public decimal Revenue { get; set; }
+
+    [JsonPropertyName("transactions")]
+    public int Transactions { get; set; }
+
+    [JsonPropertyName("average_basket")]
+    public decimal AverageBasket { get; set; }
+
+    [JsonPropertyName("top_seller")]
+    public string? TopSeller { get; set; }
+
+    [JsonPropertyName("trend_percent")]
+    public decimal TrendPercent { get; set; }
+
+    [JsonPropertyName("trend_label")]
+    public string TrendLabel { get; set; } = "flat";
+}
+
+public sealed class AiChatSummaryListBlockResponse
+{
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = "Business Summary";
+
+    [JsonPropertyName("items")]
+    public List<string> Items { get; set; } = [];
+}

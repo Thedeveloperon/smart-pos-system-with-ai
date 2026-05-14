@@ -1,0 +1,408 @@
+using System.Security.Claims;
+using System.Text.Json.Serialization;
+using Microsoft.EntityFrameworkCore;
+using SmartPos.Backend.Domain;
+using SmartPos.Backend.Features.Inventory;
+using SmartPos.Backend.Infrastructure;
+using SmartPos.Backend.Infrastructure.Json;
+using SmartPos.Backend.Security;
+
+namespace SmartPos.Backend.Features.Batches;
+
+public static class BatchEndpoints
+{
+    public static IEndpointRouteBuilder MapBatchEndpoints(this IEndpointRouteBuilder app)
+    {
+        var productGroup = app.MapGroup("/api/products/{productId:guid}/batches")
+            .WithTags("Batches")
+            .RequireAuthorization(SmartPosPolicies.ManagerOrOwner);
+
+        productGroup.MapGet("/", async (
+            Guid productId,
+            ClaimsPrincipal user,
+            SmartPosDbContext dbContext,
+            CancellationToken cancellationToken) =>
+        {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
+            var product = await dbContext.Products.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == productId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
+            if (product is null)
+            {
+                return Results.NotFound(new { message = "Product not found." });
+            }
+
+            var batchQuery = dbContext.ProductBatches
+                .AsNoTracking()
+                .Where(x => x.ProductId == productId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value))
+                .Select(x => new
+                {
+                    id = x.Id,
+                    product_id = x.ProductId,
+                    supplier_id = x.SupplierId,
+                    purchase_bill_id = x.PurchaseBillId,
+                    batch_number = x.BatchNumber,
+                    manufacture_date = x.ManufactureDate,
+                    expiry_date = x.ExpiryDate,
+                    initial_quantity = x.InitialQuantity,
+                    remaining_quantity = x.RemainingQuantity,
+                    cost_price = x.CostPrice,
+                    received_at = x.ReceivedAtUtc,
+                    created_at = x.CreatedAtUtc,
+                    updated_at = x.UpdatedAtUtc
+                });
+
+            var batches = dbContext.Database.IsSqlite()
+                ? (await batchQuery.ToListAsync(cancellationToken))
+                    .OrderByDescending(x => x.created_at)
+                    .ToList()
+                : await batchQuery
+                    .OrderByDescending(x => x.created_at)
+                    .ToListAsync(cancellationToken);
+
+            return Results.Ok(new { product_id = productId, items = batches });
+        })
+        .WithName("ListProductBatches")
+        .WithOpenApi();
+
+        productGroup.MapPost("/", async (
+            Guid productId,
+            CreateBatchRequest request,
+            ClaimsPrincipal user,
+            SmartPosDbContext dbContext,
+            StockMovementHelper stockMovementHelper,
+            CancellationToken cancellationToken) =>
+        {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
+            var product = await dbContext.Products
+                .FirstOrDefaultAsync(x => x.Id == productId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
+            if (product is null)
+            {
+                return Results.NotFound(new { message = "Product not found." });
+            }
+
+            if (!product.IsBatchTracked)
+            {
+                return Results.BadRequest(new { message = "Product is not batch tracked." });
+            }
+
+            var batchNumber = Normalize(request.BatchNumber);
+            if (string.IsNullOrWhiteSpace(batchNumber))
+            {
+                return Results.BadRequest(new { message = "batch_number is required." });
+            }
+
+            var existing = await dbContext.ProductBatches.AnyAsync(
+                x => x.ProductId == productId &&
+                     x.StoreId == product.StoreId &&
+                     x.BatchNumber!.ToLower() == batchNumber.ToLower(),
+                cancellationToken);
+            if (existing)
+            {
+                return Results.BadRequest(new { message = "Batch number already exists for this product." });
+            }
+
+            if (request.InitialQuantity <= 0m)
+            {
+                return Results.BadRequest(new { message = "initial_quantity must be greater than zero." });
+            }
+
+            var remainingQuantity = request.RemainingQuantity ?? request.InitialQuantity;
+            if (remainingQuantity <= 0m)
+            {
+                return Results.BadRequest(new { message = "remaining_quantity must be greater than zero." });
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var batch = new ProductBatch
+            {
+                StoreId = product.StoreId,
+                ProductId = product.Id,
+                SupplierId = request.SupplierId,
+                PurchaseBillId = request.PurchaseBillId,
+                BatchNumber = batchNumber,
+                ManufactureDate = request.ManufactureDate,
+                ExpiryDate = request.ExpiryDate,
+                InitialQuantity = request.InitialQuantity,
+                RemainingQuantity = remainingQuantity,
+                CostPrice = request.CostPrice,
+                ReceivedAtUtc = request.ReceivedAtUtc ?? now,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now,
+                Product = product
+            };
+
+            dbContext.ProductBatches.Add(batch);
+            try
+            {
+                await stockMovementHelper.RecordMovementAsync(
+                    storeId: product.StoreId,
+                    productId: product.Id,
+                    type: StockMovementType.Adjustment,
+                    quantityChange: batch.RemainingQuantity,
+                    refType: StockMovementRef.Adjustment,
+                    refId: batch.Id,
+                    batchId: batch.Id,
+                    serialNumber: null,
+                    reason: "batch_manual_create",
+                    userId: ParseUserId(user),
+                    cancellationToken: cancellationToken);
+            }
+            catch (InvalidOperationException error)
+            {
+                return Results.BadRequest(new { message = error.Message });
+            }
+
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                return Results.Conflict(new { message = "Failed to save batch changes. Refresh and try again." });
+            }
+
+            return Results.Ok(ToBatchResponse(batch));
+        })
+        .WithName("CreateProductBatch")
+        .WithOpenApi();
+
+        productGroup.MapPut("/{batchId:guid}", async (
+            Guid productId,
+            Guid batchId,
+            UpdateBatchRequest request,
+            ClaimsPrincipal user,
+            SmartPosDbContext dbContext,
+            StockMovementHelper stockMovementHelper,
+            CancellationToken cancellationToken) =>
+        {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
+            var batch = await dbContext.ProductBatches
+                .FirstOrDefaultAsync(x => x.Id == batchId && x.ProductId == productId && (!currentStoreId.HasValue || x.StoreId == currentStoreId.Value), cancellationToken);
+            if (batch is null)
+            {
+                return Results.NotFound(new { message = "Batch not found." });
+            }
+
+            var normalizedNewBatchNumber = Normalize(request.BatchNumber);
+            if (!string.Equals(batch.BatchNumber, normalizedNewBatchNumber, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(normalizedNewBatchNumber))
+            {
+                var duplicate = await dbContext.ProductBatches.AnyAsync(
+                    x => x.ProductId == productId &&
+                         x.StoreId == batch.StoreId &&
+                         x.BatchNumber!.ToLower() == normalizedNewBatchNumber.ToLower() &&
+                         x.Id != batchId,
+                    cancellationToken);
+                if (duplicate)
+                {
+                    return Results.BadRequest(new { message = "Batch number already exists for this product." });
+                }
+            }
+
+            if (request.RemainingQuantity < 0m)
+            {
+                return Results.BadRequest(new { message = "remaining_quantity cannot be negative." });
+            }
+
+            var previousRemainingQuantity = batch.RemainingQuantity;
+
+            batch.SupplierId = request.SupplierId;
+            batch.PurchaseBillId = request.PurchaseBillId;
+            batch.BatchNumber = normalizedNewBatchNumber ?? batch.BatchNumber;
+            batch.ManufactureDate = request.ManufactureDate;
+            batch.ExpiryDate = request.ExpiryDate;
+            batch.CostPrice = request.CostPrice;
+            batch.RemainingQuantity = request.RemainingQuantity;
+            batch.UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+            var quantityDelta = decimal.Round(
+                batch.RemainingQuantity - previousRemainingQuantity,
+                3,
+                MidpointRounding.AwayFromZero);
+            if (quantityDelta != 0m)
+            {
+                try
+                {
+                    await stockMovementHelper.RecordMovementAsync(
+                        storeId: batch.StoreId,
+                        productId: batch.ProductId,
+                        type: StockMovementType.Adjustment,
+                        quantityChange: quantityDelta,
+                        refType: StockMovementRef.Adjustment,
+                        refId: batch.Id,
+                        batchId: batch.Id,
+                        serialNumber: null,
+                        reason: "batch_manual_adjustment",
+                        userId: ParseUserId(user),
+                        cancellationToken: cancellationToken);
+                }
+                catch (InvalidOperationException error)
+                {
+                    return Results.BadRequest(new { message = error.Message });
+                }
+            }
+
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                return Results.Conflict(new { message = "Failed to save batch changes. Refresh and try again." });
+            }
+
+            return Results.Ok(ToBatchResponse(batch));
+        })
+        .WithName("UpdateProductBatch")
+        .WithOpenApi();
+
+        app.MapGet("/api/batches/expiring", async (
+            int? days,
+            ClaimsPrincipal user,
+            SmartPosDbContext dbContext,
+            CancellationToken cancellationToken) =>
+        {
+            var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
+            var thresholdDays = Math.Clamp(days ?? 30, 1, 3650);
+            var limitDate = DateTimeOffset.UtcNow.AddDays(thresholdDays);
+
+            var batchesQuery = dbContext.ProductBatches
+                .AsNoTracking()
+                .Include(x => x.Product)
+                .Where(x => !currentStoreId.HasValue || x.StoreId == currentStoreId.Value)
+                .Where(x => x.ExpiryDate.HasValue);
+
+            var batches = dbContext.Database.IsSqlite()
+                ? (await batchesQuery.ToListAsync(cancellationToken))
+                    .Where(x => x.ExpiryDate <= limitDate)
+                    .OrderBy(x => x.ExpiryDate)
+                    .ToList()
+                : await batchesQuery
+                    .Where(x => x.ExpiryDate <= limitDate)
+                    .OrderBy(x => x.ExpiryDate)
+                    .ToListAsync(cancellationToken);
+
+            var now = DateTimeOffset.UtcNow.Date;
+            var items = batches
+                .Select(x => new
+                {
+                    batch_id = x.Id,
+                    product_id = x.ProductId,
+                    product_name = x.Product?.Name ?? string.Empty,
+                    batch_number = x.BatchNumber,
+                    expiry_date = x.ExpiryDate,
+                    remaining_quantity = x.RemainingQuantity,
+                    days_until_expiry = x.ExpiryDate.HasValue
+                        ? (int)Math.Floor((x.ExpiryDate.Value.UtcDateTime.Date - now).TotalDays)
+                        : (int?)null
+                })
+                .ToList();
+
+            return Results.Ok(new
+            {
+                days = thresholdDays,
+                items
+            });
+        })
+        .RequireAuthorization(SmartPosPolicies.ManagerOrOwner)
+        .WithTags("Batches")
+        .WithName("ListExpiringBatches")
+        .WithOpenApi();
+
+        return app;
+    }
+
+    private static string? Normalize(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return value.Trim();
+    }
+
+    private static object ToBatchResponse(ProductBatch batch)
+    {
+        return new
+        {
+            id = batch.Id,
+            product_id = batch.ProductId,
+            supplier_id = batch.SupplierId,
+            purchase_bill_id = batch.PurchaseBillId,
+            batch_number = batch.BatchNumber,
+            manufacture_date = batch.ManufactureDate,
+            expiry_date = batch.ExpiryDate,
+            initial_quantity = batch.InitialQuantity,
+            remaining_quantity = batch.RemainingQuantity,
+            cost_price = batch.CostPrice,
+            received_at = batch.ReceivedAtUtc,
+            created_at = batch.CreatedAtUtc,
+            updated_at = batch.UpdatedAtUtc
+        };
+    }
+
+    private static Guid? ParseUserId(ClaimsPrincipal user)
+    {
+        var value = user.FindFirstValue(ClaimTypes.NameIdentifier) ?? user.FindFirstValue("sub");
+        return Guid.TryParse(value, out var parsed) ? parsed : null;
+    }
+}
+
+public sealed class CreateBatchRequest
+{
+    [JsonPropertyName("supplier_id")]
+    public Guid? SupplierId { get; set; }
+
+    [JsonPropertyName("purchase_bill_id")]
+    public Guid? PurchaseBillId { get; set; }
+
+    [JsonPropertyName("batch_number")]
+    public string BatchNumber { get; set; } = string.Empty;
+
+    [JsonPropertyName("manufacture_date")]
+    [JsonConverter(typeof(FlexibleNullableDateTimeOffsetJsonConverter))]
+    public DateTimeOffset? ManufactureDate { get; set; }
+
+    [JsonPropertyName("expiry_date")]
+    [JsonConverter(typeof(FlexibleNullableDateTimeOffsetJsonConverter))]
+    public DateTimeOffset? ExpiryDate { get; set; }
+
+    [JsonPropertyName("initial_quantity")]
+    public decimal InitialQuantity { get; set; }
+
+    [JsonPropertyName("remaining_quantity")]
+    public decimal? RemainingQuantity { get; set; }
+
+    [JsonPropertyName("cost_price")]
+    public decimal CostPrice { get; set; }
+
+    [JsonPropertyName("received_at")]
+    [JsonConverter(typeof(FlexibleNullableDateTimeOffsetJsonConverter))]
+    public DateTimeOffset? ReceivedAtUtc { get; set; }
+}
+
+public sealed class UpdateBatchRequest
+{
+    [JsonPropertyName("supplier_id")]
+    public Guid? SupplierId { get; set; }
+
+    [JsonPropertyName("purchase_bill_id")]
+    public Guid? PurchaseBillId { get; set; }
+
+    [JsonPropertyName("batch_number")]
+    public string? BatchNumber { get; set; }
+
+    [JsonPropertyName("manufacture_date")]
+    [JsonConverter(typeof(FlexibleNullableDateTimeOffsetJsonConverter))]
+    public DateTimeOffset? ManufactureDate { get; set; }
+
+    [JsonPropertyName("expiry_date")]
+    [JsonConverter(typeof(FlexibleNullableDateTimeOffsetJsonConverter))]
+    public DateTimeOffset? ExpiryDate { get; set; }
+
+    [JsonPropertyName("remaining_quantity")]
+    public decimal RemainingQuantity { get; set; }
+
+    [JsonPropertyName("cost_price")]
+    public decimal CostPrice { get; set; }
+}
