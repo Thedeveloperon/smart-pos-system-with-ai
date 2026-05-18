@@ -20,11 +20,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  deleteService,
   fetchCategories,
   fetchServices,
   type Category,
   type Service,
+  updateService,
 } from "@/lib/api";
 import ServiceManagementDialog from "@/components/manager/ServiceManagementDialog";
 
@@ -52,7 +52,7 @@ export default function ServicesTab() {
     setLoading(true);
     try {
       const [rows, categoryRows] = await Promise.all([
-        fetchServices(),
+        fetchServices(true),
         fetchCategories(true),
       ]);
       setServices(rows);
@@ -100,17 +100,25 @@ export default function ServicesTab() {
     [categories],
   );
 
-  const handleSoftDelete = async (service: Service) => {
+  const handleToggleActive = async (service: Service) => {
     setDeletingId(service.id);
     try {
-      await deleteService(service.id);
-      toast.success("Service deactivated.");
-      setServices((prev) => prev.filter((row) => row.id !== service.id));
+      const updated = await updateService(service.id, {
+        is_active: !service.is_active,
+      });
+      toast.success(
+        updated.is_active ? "Service activated." : "Service deactivated.",
+      );
+      setServices((prev) =>
+        prev.map((row) => (row.id === updated.id ? updated : row)),
+      );
     } catch (error) {
       toast.error(
         error instanceof Error
           ? error.message
-          : "Failed to deactivate service.",
+          : service.is_active
+            ? "Failed to deactivate service."
+            : "Failed to activate service.",
       );
     } finally {
       setDeletingId(null);
@@ -267,10 +275,10 @@ export default function ServicesTab() {
                         variant="outline"
                         disabled={deletingId === service.id}
                         onClick={() => {
-                          void handleSoftDelete(service);
+                          void handleToggleActive(service);
                         }}
                       >
-                        Deactivate
+                        {service.is_active ? "Deactivate" : "Activate"}
                       </Button>
                     </div>
                   </TableCell>

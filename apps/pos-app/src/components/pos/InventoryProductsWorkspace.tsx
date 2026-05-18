@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ShoppingCart } from "lucide-react";
 import { toast } from "sonner";
 import { fetchProducts } from "@/lib/api";
+import { INVENTORY_REFRESH_EVENT } from "@/lib/inventoryRefresh";
 import ProductCard from "./ProductCard";
 import type { Product } from "./types";
 
@@ -24,6 +25,17 @@ const InventoryProductsWorkspace = () => {
 
   useEffect(() => {
     void loadProducts();
+  }, [loadProducts]);
+
+  useEffect(() => {
+    const handleInventoryRefresh = () => {
+      void loadProducts();
+    };
+
+    window.addEventListener(INVENTORY_REFRESH_EVENT, handleInventoryRefresh);
+    return () => {
+      window.removeEventListener(INVENTORY_REFRESH_EVENT, handleInventoryRefresh);
+    };
   }, [loadProducts]);
 
   return (

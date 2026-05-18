@@ -73,6 +73,8 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
   const [products, setProducts] = useState<Product[]>([]);
   const [serialDialogLineIndex, setSerialDialogLineIndex] = useState<number | null>(null);
   const [pendingSubmitAfterSerials, setPendingSubmitAfterSerials] = useState(false);
+  const [batchDialogLineIndex, setBatchDialogLineIndex] = useState<number | null>(null);
+  const [pendingSubmitAfterBatches, setPendingSubmitAfterBatches] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -87,6 +89,8 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
     setUpdateCostPrice(true);
     setSerialDialogLineIndex(null);
     setPendingSubmitAfterSerials(false);
+    setBatchDialogLineIndex(null);
+    setPendingSubmitAfterBatches(false);
     setLines(
       po.lines
         .filter((l) => l.quantity_pending > 0)
@@ -124,6 +128,8 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
 
   const serialDialogLine =
     serialDialogLineIndex === null ? null : (lines[serialDialogLineIndex] ?? null);
+  const batchDialogLine =
+    batchDialogLineIndex === null ? null : (lines[batchDialogLineIndex] ?? null);
 
   const openSerialDialog = (lineIndex: number, continueSubmission = false) => {
     setSerialDialogLineIndex(lineIndex);
@@ -133,6 +139,16 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
   const closeSerialDialog = () => {
     setSerialDialogLineIndex(null);
     setPendingSubmitAfterSerials(false);
+  };
+
+  const openBatchDialog = (lineIndex: number, continueSubmission = false) => {
+    setBatchDialogLineIndex(lineIndex);
+    setPendingSubmitAfterBatches(continueSubmission);
+  };
+
+  const closeBatchDialog = () => {
+    setBatchDialogLineIndex(null);
+    setPendingSubmitAfterBatches(false);
   };
 
   const validateBeforeSubmit = () => {
@@ -157,6 +173,22 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
     }
 
     return true;
+  };
+
+  const hasCompleteBatchDetails = (line: ReceiveLine) =>
+    line.is_batch_tracked && line.batch_number.trim().length > 0;
+
+  const continueAfterTrackedDetails = async () => {
+    const nextMissingSerialLineIndex = lines.findIndex(
+      (line) => line.is_serial_tracked && !hasCompleteSerials(line),
+    );
+
+    if (nextMissingSerialLineIndex >= 0) {
+      openSerialDialog(nextMissingSerialLineIndex, true);
+      return;
+    }
+
+    await submitReceipt();
   };
 
   const submitReceipt = async () => {
@@ -189,6 +221,14 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
 
   const handleConfirm = async () => {
     if (!validateBeforeSubmit()) {
+      return;
+    }
+
+    const missingBatchLineIndex = lines.findIndex(
+      (line) => line.is_batch_tracked && !hasCompleteBatchDetails(line),
+    );
+    if (missingBatchLineIndex >= 0) {
+      openBatchDialog(missingBatchLineIndex, true);
       return;
     }
 
@@ -234,6 +274,35 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
 
     closeSerialDialog();
     await submitReceipt();
+  };
+
+  const handleBatchDialogSave = async () => {
+    if (!batchDialogLine) {
+      return;
+    }
+
+    if (!batchDialogLine.batch_number.trim()) {
+      toast.error(`'${batchDialogLine.product_name}' requires a batch number for this receipt.`);
+      return;
+    }
+
+    if (!pendingSubmitAfterBatches) {
+      closeBatchDialog();
+      return;
+    }
+
+    const nextMissingBatchLineIndex = lines.findIndex(
+      (line, index) =>
+        index !== batchDialogLineIndex && line.is_batch_tracked && !hasCompleteBatchDetails(line),
+    );
+
+    if (nextMissingBatchLineIndex >= 0) {
+      setBatchDialogLineIndex(nextMissingBatchLineIndex);
+      return;
+    }
+
+    closeBatchDialog();
+    await continueAfterTrackedDetails();
   };
 
   return (
@@ -380,33 +449,34 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
                                 </div>
                               )}
                               {l.is_batch_tracked && (
-                                <div className="grid grid-cols-3 gap-2">
-                                  <div>
-                                    <Label className="text-xs">Batch #</Label>
-                                    <Input
-                                      value={l.batch_number}
-                                      onChange={(e) =>
-                                        update(idx, { batch_number: e.target.value })
-                                      }
-                                    />
+                                <div className="flex flex-col gap-3 rounded-lg border bg-background/80 p-3 sm:flex-row sm:items-center sm:justify-between">
+                                  <div className="space-y-1">
+                                    <div className="text-sm font-medium">Batch details</div>
+                                    <div className="text-xs text-muted-foreground">
+                                      Enter the batch number before confirming this receipt.
+                                    </div>
+                                    {l.batch_number.trim() ? (
+                                      <div className="text-xs font-medium">
+                                        Batch # {l.batch_number}
+                                        {l.manufacture_date ? ` · MFG ${l.manufacture_date}` : ""}
+                                        {l.expiry_date ? ` · EXP ${l.expiry_date}` : ""}
+                                      </div>
+                                    ) : null}
                                   </div>
-                                  <div>
-                                    <Label className="text-xs">Manufacture Date</Label>
-                                    <Input
-                                      type="date"
-                                      value={l.manufacture_date}
-                                      onChange={(e) =>
-                                        update(idx, { manufacture_date: e.target.value })
-                                      }
-                                    />
-                                  </div>
-                                  <div>
-                                    <Label className="text-xs">Expiry Date</Label>
-                                    <Input
-                                      type="date"
-                                      value={l.expiry_date}
-                                      onChange={(e) => update(idx, { expiry_date: e.target.value })}
-                                    />
+                                  <div className="flex items-center gap-2">
+                                    <Badge
+                                      variant={hasCompleteBatchDetails(l) ? "default" : "secondary"}
+                                    >
+                                      {l.batch_number.trim() ? "Ready" : "Required"}
+                                    </Badge>
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => openBatchDialog(idx)}
+                                    >
+                                      {l.batch_number.trim() ? "Edit batch" : "Add batch details"}
+                                    </Button>
                                   </div>
                                 </div>
                               )}
@@ -477,6 +547,73 @@ export default function ReceiveGoodsSheet({ open, po, onClose, onReceived }: Pro
               }
             >
               Save serials
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={batchDialogLine !== null}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) {
+            closeBatchDialog();
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Add batch details</DialogTitle>
+            <DialogDescription>
+              {batchDialogLine
+                ? `Enter a batch number for ${batchDialogLine.product_name} before confirming this receipt.`
+                : "Enter batch details for this receipt."}
+            </DialogDescription>
+          </DialogHeader>
+          {batchDialogLine && (
+            <div className="grid gap-4">
+              <div className="grid gap-1.5">
+                <Label htmlFor="batch-number-input">Batch number</Label>
+                <Input
+                  id="batch-number-input"
+                  value={batchDialogLine.batch_number}
+                  onChange={(e) =>
+                    update(batchDialogLineIndex, { batch_number: e.target.value })
+                  }
+                  placeholder="Batch-..."
+                />
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="batch-manufacture-input">Manufacture date</Label>
+                  <Input
+                    id="batch-manufacture-input"
+                    type="date"
+                    value={batchDialogLine.manufacture_date}
+                    onChange={(e) =>
+                      update(batchDialogLineIndex, { manufacture_date: e.target.value })
+                    }
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="batch-expiry-input">Expiry date</Label>
+                  <Input
+                    id="batch-expiry-input"
+                    type="date"
+                    value={batchDialogLine.expiry_date}
+                    onChange={(e) =>
+                      update(batchDialogLineIndex, { expiry_date: e.target.value })
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="ghost" onClick={closeBatchDialog}>
+              Cancel
+            </Button>
+            <Button onClick={handleBatchDialogSave} disabled={!batchDialogLine}>
+              Save batch details
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -48,6 +48,7 @@ import {
   type ShopProfile,
   voidSale,
 } from "@/lib/api";
+import { INVENTORY_REFRESH_EVENT } from "@/lib/inventoryRefresh";
 import { openShiftReportPrintWindow } from "@/lib/shiftReport";
 import { isSuperAdminBackendRole } from "@/lib/auth";
 import { flushOfflineSyncQueue, getOfflineSyncQueueSummary } from "@/lib/offlineSyncQueue";
@@ -348,6 +349,17 @@ const IndexInner = () => {
   useEffect(() => {
     void Promise.all([loadProducts(), loadHeldBills()]);
   }, [loadHeldBills, loadProducts]);
+
+  useEffect(() => {
+    const handleInventoryRefresh = () => {
+      void loadProducts();
+    };
+
+    window.addEventListener(INVENTORY_REFRESH_EVENT, handleInventoryRefresh);
+    return () => {
+      window.removeEventListener(INVENTORY_REFRESH_EVENT, handleInventoryRefresh);
+    };
+  }, [loadProducts]);
 
   useEffect(() => {
     void loadAiWallet();

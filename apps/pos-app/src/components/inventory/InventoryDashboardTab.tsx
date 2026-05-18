@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AlertTriangle, ClipboardList, PackageX, ShieldAlert } from "lucide-react";
 import { fetchInventoryDashboard, type InventoryDashboard } from "@/lib/api";
+import { INVENTORY_REFRESH_EVENT } from "@/lib/inventoryRefresh";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -38,41 +39,50 @@ export default function InventoryDashboardTab() {
   const [data, setData] = useState<InventoryDashboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isMountedRef = useRef(true);
+
+  const loadDashboard = useCallback(async () => {
+    setLoading(true);
+    try {
+      const dashboard = await fetchInventoryDashboard();
+      if (!isMountedRef.current) {
+        return;
+      }
+      setData(dashboard);
+      setError(null);
+    } catch (fetchError) {
+      if (!isMountedRef.current) {
+        return;
+      }
+      const message =
+        fetchError instanceof Error ? fetchError.message : "Failed to load inventory dashboard.";
+      setData(null);
+      setError(message);
+      toast.error(message);
+    } finally {
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
+    }
+  }, []);
 
   useEffect(() => {
-    let alive = true;
-
-    const load = async () => {
-      setLoading(true);
-      try {
-        const dashboard = await fetchInventoryDashboard();
-        if (!alive) {
-          return;
-        }
-        setData(dashboard);
-        setError(null);
-      } catch (fetchError) {
-        if (!alive) {
-          return;
-        }
-        const message =
-          fetchError instanceof Error ? fetchError.message : "Failed to load inventory dashboard.";
-        setData(null);
-        setError(message);
-        toast.error(message);
-      } finally {
-        if (alive) {
-          setLoading(false);
-        }
-      }
-    };
-
-    void load();
-
+    void loadDashboard();
     return () => {
-      alive = false;
+      isMountedRef.current = false;
     };
-  }, []);
+  }, [loadDashboard]);
+
+  useEffect(() => {
+    const handleInventoryRefresh = () => {
+      void loadDashboard();
+    };
+
+    window.addEventListener(INVENTORY_REFRESH_EVENT, handleInventoryRefresh);
+    return () => {
+      window.removeEventListener(INVENTORY_REFRESH_EVENT, handleInventoryRefresh);
+    };
+  }, [loadDashboard]);
 
   if (loading) {
     return (

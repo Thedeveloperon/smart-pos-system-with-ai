@@ -173,7 +173,7 @@ export default function StockMovementsTab() {
                       </TableCell>
                       <TableCell className="text-xs">{movement.reason ?? "-"}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">
-                        {movement.created_by_user_id ?? "-"}
+                        {movement.created_by_username ?? movement.created_by_user_id ?? "-"}
                       </TableCell>
                     </TableRow>
                   ))}

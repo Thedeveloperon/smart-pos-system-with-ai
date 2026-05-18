@@ -140,7 +140,7 @@ describe("BulkImportDialog", () => {
     expect(screen.getAllByRole("button", { name: "Close" })).toHaveLength(1);
   });
 
-  it("uses an inner scroll viewport for the preview table so the horizontal scrollbar stays pinned", async () => {
+  it("uses a pinned scroll area for the preview table so the horizontal scrollbar stays visible", async () => {
     parseFileMock.mockResolvedValue({
       rows: Array.from({ length: 20 }, (_, index) => ({
         name: `Product ${index + 1}`,
@@ -176,10 +176,10 @@ describe("BulkImportDialog", () => {
 
     await screen.findByRole("button", { name: "Import 20 row(s)" });
 
-    expect(screen.getByTestId("bulk-import-body").className).toContain("overflow-hidden");
-
     const previewScroller = screen.getByTestId("bulk-import-preview-table-scroll");
+    expect(screen.getByTestId("bulk-import-body").className).toContain("overflow-hidden");
     expect(previewScroller.className).toContain("flex-1");
-    expect(previewScroller.className).toContain("overflow-auto");
+    expect(previewScroller.className).toContain("overflow-hidden");
+    expect(screen.getByTestId("bulk-import-preview-table-viewport").className).toContain("min-w-max");
   });
 });

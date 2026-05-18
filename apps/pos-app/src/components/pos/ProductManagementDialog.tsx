@@ -262,7 +262,7 @@ export default function ProductManagementDialog({
   const [deleteMode, setDeleteMode] = useState<"soft" | "hard" | null>(null);
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [adjustQuantity, setAdjustQuantity] = useState("0");
-  const [adjustReason, setAdjustReason] = useState("manual_adjustment");
+  const [adjustReason, setAdjustReason] = useState("");
   const [adjustBatchId, setAdjustBatchId] = useState("");
 
   const isEditing = Boolean(product);
@@ -280,7 +280,7 @@ export default function ProductManagementDialog({
     setBarcodePrintOpen(false);
     setDeleteMode(null);
     setAdjustQuantity("0");
-    setAdjustReason("manual_adjustment");
+    setAdjustReason("");
     setAdjustBatchId("");
 
     let alive = true;
@@ -539,7 +539,7 @@ export default function ProductManagementDialog({
       await adjustStock(
         product.id,
         delta,
-        adjustReason.trim() || "manual_adjustment",
+        adjustReason.trim(),
         adjustBatchId || null,
       );
       const nextStock = currentStock + delta;
@@ -558,6 +558,19 @@ export default function ProductManagementDialog({
   const selectedCategory = categories.find((item) => item.category_id === form.categoryId);
   const selectedBrand = brands.find((item) => item.brand_id === form.brandId);
   const selectedSupplier = suppliers.find((item) => item.supplier_id === form.preferredSupplierId);
+  const categoryOptions = useMemo(() => {
+    const activeCategories = categories.filter((item) => item.is_active);
+    if (!product?.category_id) {
+      return activeCategories;
+    }
+
+    if (activeCategories.some((item) => item.category_id === product.category_id)) {
+      return activeCategories;
+    }
+
+    const selected = categories.find((item) => item.category_id === product.category_id);
+    return selected ? [...activeCategories, selected] : activeCategories;
+  }, [categories, product?.category_id]);
   const barcodePrintProducts = useMemo(
     () => (product ? [snapshotProduct(product, form, currentStock)] : []),
     [product, form, currentStock],
@@ -686,9 +699,9 @@ export default function ProductManagementDialog({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">No category</SelectItem>
-                    {categories.map((item) => (
+                    {categoryOptions.map((item) => (
                       <SelectItem key={item.category_id} value={item.category_id}>
-                        {item.name}
+                        {item.is_active ? item.name : `${item.name} (inactive)`}
                       </SelectItem>
                     ))}
                     {onNavigate ? (
@@ -1245,6 +1258,7 @@ export default function ProductManagementDialog({
                 value={adjustReason}
                 onChange={(event) => setAdjustReason(event.target.value)}
                 rows={3}
+                placeholder="Enter a reason"
               />
             </div>
 
@@ -1277,7 +1291,11 @@ export default function ProductManagementDialog({
             <Button type="button" variant="ghost" onClick={() => setAdjustOpen(false)}>
               Cancel
             </Button>
-            <Button type="button" onClick={() => void handleAdjustStock()} disabled={saving}>
+            <Button
+              type="button"
+              onClick={() => void handleAdjustStock()}
+              disabled={saving || !adjustReason.trim()}
+            >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               Apply adjustment
             </Button>
