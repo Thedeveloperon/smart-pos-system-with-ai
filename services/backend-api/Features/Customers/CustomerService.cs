@@ -241,8 +241,12 @@ public sealed class CustomerService(
         var normalizedTags = NormalizeTags(request.Tags);
         var fixedDiscountPercent = NormalizeOptionalDecimal(request.FixedDiscountPercent);
         var creditLimit = NormalizeMoney(request.CreditLimit);
+        var normalizedPhone = NormalizeOptional(request.Phone);
+        var normalizedEmail = NormalizeOptional(request.Email);
 
         await EnsureCustomerCodeUniqueAsync(normalizedCode, null, currentStoreId, cancellationToken);
+        await EnsureCustomerPhoneUniqueAsync(normalizedPhone, null, currentStoreId, cancellationToken);
+        await EnsureCustomerEmailUniqueAsync(normalizedEmail, null, currentStoreId, cancellationToken);
         await EnsurePriceTierExistsAsync(request.PriceTierId, currentStoreId, cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
@@ -253,8 +257,8 @@ public sealed class CustomerService(
             Name = normalizedName,
             Code = normalizedCode,
             IdNumber = NormalizeOptional(request.IdNumber),
-            Phone = NormalizeOptional(request.Phone),
-            Email = NormalizeOptional(request.Email),
+            Phone = normalizedPhone,
+            Email = normalizedEmail,
             Address = NormalizeOptional(request.Address),
             DateOfBirth = request.DateOfBirth,
             FixedDiscountPercent = fixedDiscountPercent,
@@ -314,8 +318,12 @@ public sealed class CustomerService(
         var normalizedTags = NormalizeTags(request.Tags);
         var fixedDiscountPercent = NormalizeOptionalDecimal(request.FixedDiscountPercent);
         var creditLimit = NormalizeMoney(request.CreditLimit);
+        var normalizedPhone = NormalizeOptional(request.Phone);
+        var normalizedEmail = NormalizeOptional(request.Email);
 
         await EnsureCustomerCodeUniqueAsync(normalizedCode, customer.Id, currentStoreId, cancellationToken);
+        await EnsureCustomerPhoneUniqueAsync(normalizedPhone, customer.Id, currentStoreId, cancellationToken);
+        await EnsureCustomerEmailUniqueAsync(normalizedEmail, customer.Id, currentStoreId, cancellationToken);
         await EnsurePriceTierExistsAsync(request.PriceTierId, currentStoreId, cancellationToken);
 
         var before = new
@@ -331,8 +339,8 @@ public sealed class CustomerService(
         customer.Name = normalizedName;
         customer.Code = normalizedCode;
         customer.IdNumber = NormalizeOptional(request.IdNumber);
-        customer.Phone = NormalizeOptional(request.Phone);
-        customer.Email = NormalizeOptional(request.Email);
+        customer.Phone = normalizedPhone;
+        customer.Email = normalizedEmail;
         customer.Address = NormalizeOptional(request.Address);
         customer.DateOfBirth = request.DateOfBirth;
         customer.PriceTierId = request.PriceTierId;
@@ -785,6 +793,54 @@ public sealed class CustomerService(
         if (exists)
         {
             throw new InvalidOperationException("Customer code already exists.");
+        }
+    }
+
+    private async Task EnsureCustomerPhoneUniqueAsync(
+        string? phone,
+        Guid? customerId,
+        Guid? storeId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(phone))
+        {
+            return;
+        }
+
+        var exists = await dbContext.Customers
+            .AsNoTracking()
+            .AnyAsync(x =>
+                x.Phone == phone &&
+                x.Id != customerId &&
+                (!storeId.HasValue || x.StoreId == storeId.Value), cancellationToken);
+
+        if (exists)
+        {
+            throw new InvalidOperationException("A customer with this phone number already exists.");
+        }
+    }
+
+    private async Task EnsureCustomerEmailUniqueAsync(
+        string? email,
+        Guid? customerId,
+        Guid? storeId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            return;
+        }
+
+        var exists = await dbContext.Customers
+            .AsNoTracking()
+            .AnyAsync(x =>
+                x.Email == email &&
+                x.Id != customerId &&
+                (!storeId.HasValue || x.StoreId == storeId.Value), cancellationToken);
+
+        if (exists)
+        {
+            throw new InvalidOperationException("A customer with this email address already exists.");
         }
     }
 

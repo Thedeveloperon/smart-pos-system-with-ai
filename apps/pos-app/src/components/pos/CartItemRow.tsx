@@ -100,6 +100,11 @@ const CartItemRow = ({ item, onUpdateQty, onRemove, onUpdateDiscount }: CartItem
         {hasSelectedSerial ? (
           <div className="rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 text-[11px] font-medium text-primary">
             Serial-selected item
+            {item.selectedSerial?.warrantyExpiryDate && (
+              <span className="ml-2 text-muted-foreground">
+                · Warranty until {new Date(item.selectedSerial.warrantyExpiryDate).toLocaleDateString()}
+              </span>
+            )}
           </div>
         ) : (
           <div className="flex items-center gap-2">

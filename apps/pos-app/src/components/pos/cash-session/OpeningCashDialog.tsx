@@ -271,11 +271,16 @@ const OpeningCashDialog = ({
               size="lg"
               className="w-full rounded-xl sm:w-[17rem]"
               onClick={handleProceed}
-            disabled={isConfirming}
+              disabled={isConfirming || total === 0}
           >
             <CheckCircle2 className="h-5 w-5" />
             Proceed - Rs. {total.toLocaleString()}
           </Button>
+          {total === 0 && (
+            <p className="mt-1 text-xs text-destructive">
+              Enter at least one denomination before proceeding.
+            </p>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

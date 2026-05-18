@@ -38,6 +38,7 @@ describe("CartItemRow", () => {
       selectedSerial: {
         id: "serial-1",
         value: "SN-0001",
+        warrantyExpiryDate: "2027-05-20",
       },
     };
 
@@ -47,6 +48,7 @@ describe("CartItemRow", () => {
 
     expect(screen.getByText("Serial SN-0001")).toBeInTheDocument();
     expect(screen.getByText("Serial-selected item")).toBeInTheDocument();
+    expect(screen.getByText(/Warranty until/i)).toBeInTheDocument();
     expect(screen.getAllByRole("button")).toHaveLength(1);
   });
 });
