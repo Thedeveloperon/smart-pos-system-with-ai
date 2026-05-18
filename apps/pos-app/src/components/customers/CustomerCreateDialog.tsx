@@ -55,6 +55,13 @@ export default function CustomerCreateDialog({ open, onOpenChange, onCreate, tie
   const [tagInput, setTagInput] = useState(initialState.tagInput);
   const [isActive, setIsActive] = useState(initialState.isActive);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<{
+    name?: string;
+    email?: string;
+    phone?: string;
+    dob?: string;
+  }>({});
+  const [apiError, setApiError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -76,7 +83,15 @@ export default function CustomerCreateDialog({ open, onOpenChange, onCreate, tie
     setTagInput("");
     setIsActive(true);
     setIsSubmitting(false);
+    setFieldErrors({});
+    setApiError(null);
   }, [open]);
+
+  const clearApiError = () => {
+    if (apiError) {
+      setApiError(null);
+    }
+  };
 
   const addTag = () => {
     const normalizedTag = tagInput.trim();
@@ -84,24 +99,58 @@ export default function CustomerCreateDialog({ open, onOpenChange, onCreate, tie
       return;
     }
 
+    clearApiError();
     setTags((previous) => [...previous, normalizedTag]);
     setTagInput("");
   };
 
   const submit = async () => {
     const trimmedName = name.trim();
-    if (!trimmedName || isSubmitting) {
+    if (isSubmitting) {
       return;
     }
 
+    const trimmedEmail = email.trim();
+    const trimmedPhone = phone.trim();
+    const errors: {
+      name?: string;
+      email?: string;
+      phone?: string;
+      dob?: string;
+    } = {};
+
+    if (!trimmedName) {
+      errors.name = "Full name is required.";
+    }
+    if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      errors.email = "Enter a valid email address.";
+    }
+    if (trimmedPhone && !/^[+\d\s\-().]+$/.test(trimmedPhone)) {
+      errors.phone = "Phone number may only contain digits, spaces, +, -, (, ).";
+    }
+    if (dob) {
+      const selectedDate = new Date(dob);
+      if (!Number.isNaN(selectedDate.getTime()) && selectedDate > new Date()) {
+        errors.dob = "Date of birth cannot be in the future.";
+      }
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
+      clearApiError();
+      return;
+    }
+
+    setFieldErrors({});
+    clearApiError();
     setIsSubmitting(true);
     try {
       await onCreate({
         name: trimmedName,
         code: code.trim() || null,
         idNumber: idNumber.trim() || null,
-        phone: phone.trim() || null,
-        email: email.trim() || null,
+        phone: trimmedPhone || null,
+        email: trimmedEmail || null,
         address: address.trim() || null,
         dateOfBirth: dob || null,
         priceTierId: tierId === "none" ? null : tierId,
@@ -112,6 +161,8 @@ export default function CustomerCreateDialog({ open, onOpenChange, onCreate, tie
         isActive,
       });
       onOpenChange(false);
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : "Failed to create customer.");
     } finally {
       setIsSubmitting(false);
     }
@@ -126,30 +177,94 @@ export default function CustomerCreateDialog({ open, onOpenChange, onCreate, tie
         </DialogHeader>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Full name *">
-            <Input value={name} onChange={(event) => setName(event.target.value)} />
+            <>
+              <Input
+                value={name}
+                onChange={(event) => {
+                  clearApiError();
+                  setFieldErrors((previous) => ({ ...previous, name: undefined }));
+                  setName(event.target.value);
+                }}
+              />
+              {fieldErrors.name && <p className="text-xs text-destructive">{fieldErrors.name}</p>}
+            </>
           </Field>
           <Field label="Code (auto if blank)">
-            <Input value={code} onChange={(event) => setCode(event.target.value)} placeholder="C-0005" />
+            <Input
+              value={code}
+              onChange={(event) => {
+                clearApiError();
+                setCode(event.target.value);
+              }}
+              placeholder="C-0005"
+            />
           </Field>
           <Field label="ID number" className="sm:col-span-2">
-            <Input value={idNumber} onChange={(event) => setIdNumber(event.target.value)} />
+            <Input
+              value={idNumber}
+              onChange={(event) => {
+                clearApiError();
+                setIdNumber(event.target.value);
+              }}
+            />
           </Field>
           <Field label="Phone">
-            <Input value={phone} onChange={(event) => setPhone(event.target.value)} />
+            <>
+              <Input
+                value={phone}
+                onChange={(event) => {
+                  clearApiError();
+                  setFieldErrors((previous) => ({ ...previous, phone: undefined }));
+                  setPhone(event.target.value);
+                }}
+              />
+              {fieldErrors.phone && <p className="text-xs text-destructive">{fieldErrors.phone}</p>}
+            </>
           </Field>
           <Field label="Email">
-            <Input type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+            <>
+              <Input
+                type="email"
+                value={email}
+                onChange={(event) => {
+                  clearApiError();
+                  setFieldErrors((previous) => ({ ...previous, email: undefined }));
+                  setEmail(event.target.value);
+                }}
+              />
+              {fieldErrors.email && <p className="text-xs text-destructive">{fieldErrors.email}</p>}
+            </>
           </Field>
           <Field label="Address" className="sm:col-span-2">
-            <Input value={address} onChange={(event) => setAddress(event.target.value)} />
+            <Input
+              value={address}
+              onChange={(event) => {
+                clearApiError();
+                setAddress(event.target.value);
+              }}
+            />
           </Field>
           <Field label="Date of birth">
-            <Input type="date" value={dob} onChange={(event) => setDob(event.target.value)} />
+            <>
+              <Input
+                type="date"
+                value={dob}
+                onChange={(event) => {
+                  clearApiError();
+                  setFieldErrors((previous) => ({ ...previous, dob: undefined }));
+                  setDob(event.target.value);
+                }}
+              />
+              {fieldErrors.dob && <p className="text-xs text-destructive">{fieldErrors.dob}</p>}
+            </>
           </Field>
           <Field label="Price tier">
             <select
               value={tierId}
-              onChange={(event) => setTierId(event.target.value)}
+              onChange={(event) => {
+                clearApiError();
+                setTierId(event.target.value);
+              }}
               className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
             >
               <option value="none">- None -</option>
@@ -167,26 +282,46 @@ export default function CustomerCreateDialog({ open, onOpenChange, onCreate, tie
               max={100}
               step="0.01"
               value={fixedDiscount}
-              onChange={(event) => setFixedDiscount(event.target.value)}
+              onChange={(event) => {
+                clearApiError();
+                setFixedDiscount(event.target.value);
+              }}
               placeholder="-"
             />
           </Field>
           <Field label="Credit limit (LKR)">
-            <Input type="number" min={0} value={creditLimit} onChange={(event) => setCreditLimit(event.target.value)} />
+            <Input
+              type="number"
+              min={0}
+              value={creditLimit}
+              onChange={(event) => {
+                clearApiError();
+                setCreditLimit(event.target.value);
+              }}
+            />
           </Field>
           <Field label="Tags" className="sm:col-span-2">
             <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-input p-2">
               {tags.map((tag) => (
                 <Badge key={tag} variant="secondary" className="gap-1">
                   {tag}
-                  <button type="button" onClick={() => setTags((previous) => previous.filter((value) => value !== tag))}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      clearApiError();
+                      setTags((previous) => previous.filter((value) => value !== tag));
+                    }}
+                  >
                     <X className="h-3 w-3" />
                   </button>
                 </Badge>
               ))}
               <input
                 value={tagInput}
-                onChange={(event) => setTagInput(event.target.value)}
+                onChange={(event) => {
+                  clearApiError();
+                  setTagInput(event.target.value);
+                }}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
                     event.preventDefault();
@@ -199,14 +334,30 @@ export default function CustomerCreateDialog({ open, onOpenChange, onCreate, tie
             </div>
           </Field>
           <Field label="Notes" className="sm:col-span-2">
-            <Textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} />
+            <Textarea
+              rows={3}
+              value={notes}
+              onChange={(event) => {
+                clearApiError();
+                setNotes(event.target.value);
+              }}
+            />
           </Field>
           <label className="flex items-center gap-2 text-sm sm:col-span-2">
-            <input type="checkbox" checked={isActive} onChange={(event) => setIsActive(event.target.checked)} className="h-4 w-4" />
+            <input
+              type="checkbox"
+              checked={isActive}
+              onChange={(event) => {
+                clearApiError();
+                setIsActive(event.target.checked);
+              }}
+              className="h-4 w-4"
+            />
             Active
           </label>
         </div>
         <DialogFooter>
+          {apiError && <p className="w-full text-sm text-destructive">{apiError}</p>}
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
             Cancel
           </Button>
