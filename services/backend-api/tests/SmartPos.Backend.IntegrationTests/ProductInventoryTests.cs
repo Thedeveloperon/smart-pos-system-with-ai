@@ -193,6 +193,39 @@ public sealed class ProductInventoryTests(CustomWebApplicationFactory factory)
     }
 
     [Fact]
+    public async Task StockAdjustment_ShouldRejectBlankReasons()
+    {
+        await TestAuth.SignInAsManagerAsync(client);
+
+        var runId = Guid.NewGuid().ToString("N")[..8];
+        var createProduct = await TestJson.ReadObjectAsync(
+            await client.PostAsJsonAsync("/api/products", new
+            {
+                name = $"Reason Check Product {runId}",
+                sku = $"RSN-{runId}",
+                unit_price = 150m,
+                cost_price = 100m,
+                initial_stock_quantity = 5m,
+                reorder_level = 2m,
+                safety_stock = 1m,
+                target_stock_level = 8m,
+                allow_negative_stock = false,
+                is_active = true
+            }));
+
+        var productId = Guid.Parse(TestJson.GetString(createProduct, "product_id"));
+
+        var response = await client.PostAsJsonAsync($"/api/products/{productId}/stock-adjustments", new
+        {
+            delta_quantity = 1m
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await TestJson.ReadObjectAsync(response);
+        Assert.Contains("reason", TestJson.GetString(body, "message"), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task CategoryEndpoints_ShouldAcceptLegacyCategoryNameField()
     {
         await TestAuth.SignInAsManagerAsync(client);

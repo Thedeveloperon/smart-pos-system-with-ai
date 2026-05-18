@@ -11,6 +11,7 @@ import {
   type ProductBatch,
   type SupplierRecord,
 } from "@/lib/api";
+import { notifyInventoryRefresh } from "@/lib/inventoryRefresh";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -178,6 +179,7 @@ export default function BatchesTab() {
         await createProductBatch(productId, payload);
       }
       setBatches(await fetchProductBatches(productId));
+      notifyInventoryRefresh();
       setOpen(false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save product batch.");

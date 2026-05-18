@@ -3,6 +3,7 @@ import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ProductManagementDialog from "./ProductManagementDialog";
 import {
+  adjustStock,
   createProduct,
   fetchBrands,
   fetchCategories,
@@ -43,8 +44,9 @@ vi.mock("@/lib/api", async () => {
 });
 
 const categories = [
-  { category_id: "cat-1", name: "Cat A", description: "Category A" },
-  { category_id: "cat-2", name: "Cat B", description: "Category B" },
+  { category_id: "cat-1", name: "Cat A", description: "Category A", is_active: true },
+  { category_id: "cat-2", name: "Cat B", description: "Category B", is_active: true },
+  { category_id: "cat-3", name: "Cat C", description: "Category C", is_active: false },
 ];
 
 const brands = [
@@ -109,6 +111,16 @@ describe("ProductManagementDialog", () => {
       expect(screen.getAllByRole("combobox")[1]).toHaveTextContent("Brand A");
       expect(screen.getAllByRole("combobox")[2]).toHaveTextContent("Supplier B");
     });
+  });
+
+  it("hides inactive categories from the new product category dropdown", async () => {
+    renderDialog();
+
+    await openSelect(0);
+
+    expect(await screen.findByText("Cat A")).toBeInTheDocument();
+    expect(await screen.findByText("Cat B")).toBeInTheDocument();
+    expect(screen.queryByText("Cat C (inactive)")).not.toBeInTheDocument();
   });
 
   it("blocks save when unit price is zero", async () => {
@@ -244,6 +256,62 @@ describe("ProductManagementDialog", () => {
     expect(vi.mocked(updateProduct).mock.calls[0]?.[1]).toMatchObject({
       permanent_discount_percent: null,
       permanent_discount_fixed: null,
+    });
+  });
+
+  it("requires an adjustment reason before saving stock changes", async () => {
+    const existingProduct = {
+      id: "prod-200",
+      name: "Adjustable Item",
+      sku: "ADJ-200",
+      barcode: "1234567890123",
+      image_url: null,
+      category_id: "cat-1",
+      brand_id: "brand-1",
+      unit_price: 100,
+      cost_price: 75,
+      price: 100,
+      stock_quantity: 10,
+      stock: 10,
+      initial_stock_quantity: 10,
+      reorder_level: 0,
+      safety_stock: 0,
+      target_stock_level: 0,
+      allow_negative_stock: false,
+      has_pack_option: false,
+      pack_size: 0,
+      pack_price: null,
+      pack_label: null,
+      is_serial_tracked: false,
+      warranty_months: 0,
+      is_batch_tracked: false,
+      expiry_alert_days: 30,
+      is_active: true,
+      product_suppliers: [],
+      created_at: "2026-05-03T00:00:00Z",
+      updated_at: "2026-05-03T00:00:00Z",
+    };
+
+    renderDialog({ product: existingProduct as never });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Adjust" }));
+
+    const reasonField = await screen.findByPlaceholderText("Enter a reason");
+    expect(reasonField).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Apply adjustment" })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("Quantity change"), {
+      target: { value: "5" },
+    });
+    fireEvent.change(reasonField, {
+      target: { value: "Cycle count correction" },
+    });
+
+    expect(screen.getByRole("button", { name: "Apply adjustment" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Apply adjustment" }));
+
+    await waitFor(() => {
+      expect(adjustStock).toHaveBeenCalledWith("prod-200", 5, "Cycle count correction", null);
     });
   });
 });

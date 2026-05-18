@@ -709,7 +709,7 @@ public sealed class StockAdjustmentRequest
     public decimal DeltaQuantity { get; set; }
 
     [JsonPropertyName("reason")]
-    public string Reason { get; set; } = "manual_adjustment";
+    public string Reason { get; set; } = string.Empty;
 
     [JsonPropertyName("batch_id")]
     public Guid? BatchId { get; set; }

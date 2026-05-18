@@ -74,11 +74,17 @@ type EditorState = {
 type SupplierFormState = {
   name: string;
   phone: string;
+  email: string;
   companyName: string;
   companyPhone: string;
   address: string;
   isActive: boolean;
   brandIds: string[];
+};
+
+type SupplierFormErrors = {
+  name?: string;
+  email?: string;
 };
 
 type SupplierActionMode = "activate" | "deactivate" | "delete";
@@ -93,6 +99,7 @@ type SupplierMode = "simple" | "extended";
 const emptySupplierForm = (): SupplierFormState => ({
   name: "",
   phone: "",
+  email: "",
   companyName: "",
   companyPhone: "",
   address: "",
@@ -160,6 +167,7 @@ export default function SuppliersTab() {
   const [saving, setSaving] = useState(false);
   const [supplierForm, setSupplierForm] =
     useState<SupplierFormState>(emptySupplierForm());
+  const [formErrors, setFormErrors] = useState<SupplierFormErrors>({});
   const [brandOptions, setBrandOptions] = useState<Brand[]>([]);
   const [loadingBrands, setLoadingBrands] = useState(false);
   const [actionState, setActionState] = useState<SupplierActionState>(null);
@@ -235,14 +243,16 @@ export default function SuppliersTab() {
         ? {
             name: item.name,
             phone: item.phone || "",
+            email: item.email || "",
             companyName: item.company_name || "",
             companyPhone: item.company_phone || "",
             address: item.address || "",
             isActive: item.is_active,
             brandIds: item.brands.map((brand) => brand.brand_id),
-          }
+        }
         : emptySupplierForm(),
     );
+    setFormErrors({});
     setEditorMode("simple");
     setEditorOpen(true);
   };
@@ -251,19 +261,33 @@ export default function SuppliersTab() {
     setEditorOpen(false);
     setEditor(null);
     setEditorMode("simple");
+    setFormErrors({});
   };
 
   const handleSave = async () => {
+    const errors: SupplierFormErrors = {};
     if (!supplierForm.name.trim()) {
-      toast.error("Sales rep name is required.");
+      errors.name = "Sales rep name is required.";
+    }
+
+    const normalizedEmail = supplierForm.email.trim();
+    if (normalizedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      errors.email = "Email format is invalid.";
+    }
+
+    if (errors.name || errors.email) {
+      setFormErrors(errors);
+      toast.error("Fix the highlighted supplier fields.");
       return;
     }
 
+    setFormErrors({});
     setSaving(true);
     try {
       const payload = {
         name: supplierForm.name.trim(),
         phone: supplierForm.phone.trim(),
+        email: supplierForm.email.trim(),
         company_name:
           editorMode === "extended" ? supplierForm.companyName.trim() : "",
         company_phone:
@@ -491,6 +515,8 @@ export default function SuppliersTab() {
         brands={brandOptions}
         loadingBrands={loadingBrands}
         saving={saving}
+        formErrors={formErrors}
+        setFormErrors={setFormErrors}
         selectedBrandNames={selectedBrandNames}
         onOpenChange={(nextOpen) => {
           if (!nextOpen) {
@@ -629,6 +655,8 @@ function SupplierEditorDialog({
   brands,
   loadingBrands,
   saving,
+  formErrors,
+  setFormErrors,
   selectedBrandNames,
   onOpenChange,
   onSave,
@@ -641,13 +669,28 @@ function SupplierEditorDialog({
   brands: Brand[];
   loadingBrands: boolean;
   saving: boolean;
+  formErrors: SupplierFormErrors;
+  setFormErrors: Dispatch<SetStateAction<SupplierFormErrors>>;
   selectedBrandNames: string[];
   onOpenChange: (open: boolean) => void;
   onSave: () => void;
 }) {
+  const updateField = <TKey extends keyof SupplierFormState>(
+    key: TKey,
+    value: SupplierFormState[TKey],
+  ) => {
+    setSupplierForm((prev) => ({ ...prev, [key]: value }));
+    if (key === "name" && formErrors.name) {
+      setFormErrors((prev) => ({ ...prev, name: undefined }));
+    }
+    if (key === "email" && formErrors.email) {
+      setFormErrors((prev) => ({ ...prev, email: undefined }));
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="max-h-[90vh] w-[min(92vw,48rem)] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             {supplierForm.name ? "Edit sales rep" : "Add sales rep"}
@@ -679,31 +722,43 @@ function SupplierEditorDialog({
 
         <div className="grid gap-4">
           <div className="grid gap-1.5">
-            <Label>Sales Rep Name</Label>
+            <Label htmlFor="supplier-name">Sales Rep Name</Label>
             <Input
+              id="supplier-name"
               value={supplierForm.name}
-              onChange={(event) =>
-                setSupplierForm((prev) => ({
-                  ...prev,
-                  name: event.target.value,
-                }))
+              onChange={(event) => updateField("name", event.target.value)}
+              className={
+                formErrors.name ? "border-destructive focus-visible:ring-destructive" : undefined
               }
             />
+            {formErrors.name ? <p className="text-xs text-destructive">{formErrors.name}</p> : null}
           </div>
 
           {mode === "simple" ? (
             <>
               <div className="grid gap-1.5">
-                <Label>Phone Number</Label>
+                <Label htmlFor="supplier-phone-simple">Phone Number</Label>
                 <Input
+                  id="supplier-phone-simple"
                   value={supplierForm.phone}
-                  onChange={(event) =>
-                    setSupplierForm((prev) => ({
-                      ...prev,
-                      phone: event.target.value,
-                    }))
+                  onChange={(event) => updateField("phone", event.target.value)}
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="supplier-email-simple">Email</Label>
+                <Input
+                  id="supplier-email-simple"
+                  value={supplierForm.email}
+                  onChange={(event) => updateField("email", event.target.value)}
+                  className={
+                    formErrors.email
+                      ? "border-destructive focus-visible:ring-destructive"
+                      : undefined
                   }
                 />
+                {formErrors.email ? (
+                  <p className="text-xs text-destructive">{formErrors.email}</p>
+                ) : null}
               </div>
               <div className="grid gap-1.5">
                 <Label>Brands</Label>
@@ -722,43 +777,49 @@ function SupplierEditorDialog({
             <>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="grid gap-1.5">
-                  <Label>Sales Rep Phone</Label>
+                  <Label htmlFor="supplier-phone-extended">Sales Rep Phone</Label>
                   <Input
+                    id="supplier-phone-extended"
                     value={supplierForm.phone}
-                    onChange={(event) =>
-                      setSupplierForm((prev) => ({
-                        ...prev,
-                        phone: event.target.value,
-                      }))
-                    }
+                    onChange={(event) => updateField("phone", event.target.value)}
                   />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label>Company Name</Label>
+                  <Label htmlFor="supplier-company-name">Company Name</Label>
                   <Input
+                    id="supplier-company-name"
                     value={supplierForm.companyName}
-                    onChange={(event) =>
-                      setSupplierForm((prev) => ({
-                        ...prev,
-                        companyName: event.target.value,
-                      }))
-                    }
+                    onChange={(event) => updateField("companyName", event.target.value)}
                   />
                 </div>
               </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="grid gap-1.5">
-                  <Label>Company Phone</Label>
+                  <Label htmlFor="supplier-company-phone">Company Phone</Label>
                   <Input
+                    id="supplier-company-phone"
                     value={supplierForm.companyPhone}
-                    onChange={(event) =>
-                      setSupplierForm((prev) => ({
-                        ...prev,
-                        companyPhone: event.target.value,
-                      }))
-                    }
+                    onChange={(event) => updateField("companyPhone", event.target.value)}
                   />
                 </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="supplier-email-extended">Email</Label>
+                  <Input
+                    id="supplier-email-extended"
+                    value={supplierForm.email}
+                    onChange={(event) => updateField("email", event.target.value)}
+                    className={
+                      formErrors.email
+                        ? "border-destructive focus-visible:ring-destructive"
+                        : undefined
+                    }
+                  />
+                  {formErrors.email ? (
+                    <p className="text-xs text-destructive">{formErrors.email}</p>
+                  ) : null}
+                </div>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
                 <div className="grid gap-1.5">
                   <Label>Brands</Label>
                   <BrandMultiSelect
@@ -773,15 +834,11 @@ function SupplierEditorDialog({
                 </div>
               </div>
               <div className="grid gap-1.5">
-                <Label>Company Address</Label>
+                <Label htmlFor="supplier-company-address">Company Address</Label>
                 <Textarea
+                  id="supplier-company-address"
                   value={supplierForm.address}
-                  onChange={(event) =>
-                    setSupplierForm((prev) => ({
-                      ...prev,
-                      address: event.target.value,
-                    }))
-                  }
+                  onChange={(event) => updateField("address", event.target.value)}
                   rows={4}
                 />
               </div>

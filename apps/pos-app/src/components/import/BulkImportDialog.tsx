@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Separator } from "@/components/ui/separator";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import {
@@ -307,40 +308,43 @@ export default function BulkImportDialog({ open, onOpenChange, entityType, onImp
                 <Badge variant="secondary">{config.label}</Badge>
               </div>
 
-              <div
+              <ScrollArea
                 data-testid="bulk-import-preview-table-scroll"
-                className="min-h-0 flex-1 overflow-auto rounded-md border"
+                type="always"
+                className="min-h-0 flex-1 rounded-md border"
               >
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-12 text-xs uppercase tracking-wider">#</TableHead>
-                      {config.columns.map((column) => (
-                        <TableHead key={column} className="whitespace-nowrap text-xs uppercase tracking-wider">
-                          {column}
-                          {config.requiredColumns.includes(column) ? <span className="ml-1 text-destructive">*</span> : null}
-                        </TableHead>
-                      ))}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {parsedRows.slice(0, 200).map((row, rowIndex) => (
-                      <TableRow key={rowIndex}>
-                        <TableCell className="text-xs text-muted-foreground">{rowIndex + 1}</TableCell>
-                        {config.columns.map((column) => {
-                          const value = row[column];
-                          const requiredMissing = config.requiredColumns.includes(column) && !value;
-                          return (
-                            <TableCell key={column} className={cn("max-w-[220px] truncate text-sm", requiredMissing && "bg-muted/60")}>
-                              {value || (requiredMissing ? <span className="text-xs italic text-destructive">required</span> : <span className="text-muted-foreground/40">—</span>)}
-                            </TableCell>
-                          );
-                        })}
+                <div data-testid="bulk-import-preview-table-viewport" className="min-w-max">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-12 text-xs uppercase tracking-wider">#</TableHead>
+                        {config.columns.map((column) => (
+                          <TableHead key={column} className="whitespace-nowrap text-xs uppercase tracking-wider">
+                            {column}
+                            {config.requiredColumns.includes(column) ? <span className="ml-1 text-destructive">*</span> : null}
+                          </TableHead>
+                        ))}
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+                    </TableHeader>
+                    <TableBody>
+                      {parsedRows.slice(0, 200).map((row, rowIndex) => (
+                        <TableRow key={rowIndex}>
+                          <TableCell className="text-xs text-muted-foreground">{rowIndex + 1}</TableCell>
+                          {config.columns.map((column) => {
+                            const value = row[column];
+                            const requiredMissing = config.requiredColumns.includes(column) && !value;
+                            return (
+                              <TableCell key={column} className={cn("max-w-[220px] truncate text-sm", requiredMissing && "bg-muted/60")}>
+                                {value || (requiredMissing ? <span className="text-xs italic text-destructive">required</span> : <span className="text-muted-foreground/40">—</span>)}
+                              </TableCell>
+                            );
+                          })}
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </ScrollArea>
             </div>
           )}
 

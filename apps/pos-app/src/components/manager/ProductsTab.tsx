@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   AlertCircle,
@@ -44,6 +44,7 @@ import {
   type Category,
   type Product,
 } from "@/lib/api";
+import { INVENTORY_REFRESH_EVENT } from "@/lib/inventoryRefresh";
 
 type Props = {
   onNavigate?: (tab: "catalogue" | "suppliers") => void;
@@ -72,7 +73,7 @@ export default function ProductsTab({ onNavigate }: Props) {
   const [barcodeBatchRunning, setBarcodeBatchRunning] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
 
-  const loadProducts = async () => {
+  const loadProducts = useCallback(async () => {
     setLoading(true);
     try {
       const [productItems, categoryItems, brandItems] = await Promise.all([
@@ -88,11 +89,22 @@ export default function ProductsTab({ onNavigate }: Props) {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void loadProducts();
-  }, []);
+  }, [loadProducts]);
+
+  useEffect(() => {
+    const handleInventoryRefresh = () => {
+      void loadProducts();
+    };
+
+    window.addEventListener(INVENTORY_REFRESH_EVENT, handleInventoryRefresh);
+    return () => {
+      window.removeEventListener(INVENTORY_REFRESH_EVENT, handleInventoryRefresh);
+    };
+  }, [loadProducts]);
 
   const filteredProducts = useMemo(() => {
     const query = search.trim().toLowerCase();

@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -59,6 +60,7 @@ import {
   updateBrand,
   updateCategory,
 } from "@/lib/api";
+import { INVENTORY_REFRESH_EVENT } from "@/lib/inventoryRefresh";
 
 type EditorState = {
   kind: "category" | "brand";
@@ -181,7 +183,7 @@ export default function CatalogueTab() {
   const [importEntityType, setImportEntityType] =
     useState<ImportEntityType>("brand");
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const [categoryItems, brandItems, productItems] = await Promise.all([
@@ -201,11 +203,22 @@ export default function CatalogueTab() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void loadData();
-  }, []);
+  }, [loadData]);
+
+  useEffect(() => {
+    const handleInventoryRefresh = () => {
+      void loadData();
+    };
+
+    window.addEventListener(INVENTORY_REFRESH_EVENT, handleInventoryRefresh);
+    return () => {
+      window.removeEventListener(INVENTORY_REFRESH_EVENT, handleInventoryRefresh);
+    };
+  }, [loadData]);
 
   const openEditor = (kind: "category" | "brand", id?: string) => {
     setEditor({ kind, id });

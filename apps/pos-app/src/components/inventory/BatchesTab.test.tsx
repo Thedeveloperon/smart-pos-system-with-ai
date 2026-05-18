@@ -9,6 +9,7 @@ import {
   type CatalogProduct,
   type ProductBatch,
 } from "@/lib/api";
+import { INVENTORY_REFRESH_EVENT } from "@/lib/inventoryRefresh";
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -129,6 +130,8 @@ describe("BatchesTab", () => {
         },
       ]);
 
+    const refreshHandler = vi.fn();
+    window.addEventListener(INVENTORY_REFRESH_EVENT, refreshHandler);
     render(<BatchesTab />);
 
     await waitFor(() => {
@@ -157,5 +160,8 @@ describe("BatchesTab", () => {
     await waitFor(() => {
       expect(createProductBatch).toHaveBeenCalled();
     });
+    expect(refreshHandler).toHaveBeenCalledTimes(1);
+
+    window.removeEventListener(INVENTORY_REFRESH_EVENT, refreshHandler);
   });
 });

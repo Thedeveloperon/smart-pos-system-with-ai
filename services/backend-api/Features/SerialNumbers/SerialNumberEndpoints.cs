@@ -445,7 +445,13 @@ public static class SerialNumberEndpoints
                 var sale = await dbContext.Sales
                     .AsNoTracking()
                     .Where(x => x.Id == serial.SaleId.Value)
-                    .Select(x => new { x.SaleNumber, x.CompletedAtUtc, x.CreatedAtUtc })
+                    .Select(x => new
+                    {
+                        x.SaleNumber,
+                        x.CompletedAtUtc,
+                        x.CreatedAtUtc,
+                        CustomerName = x.Customer != null ? x.Customer.Name : null
+                    })
                     .FirstOrDefaultAsync(cancellationToken);
                 if (sale is not null)
                 {
@@ -453,7 +459,10 @@ public static class SerialNumberEndpoints
                         EventType: "sale",
                         AtUtc: sale.CompletedAtUtc ?? sale.CreatedAtUtc,
                         Title: "Sold",
-                        Description: $"Sold via sale {sale.SaleNumber}."));
+                        CustomerName: sale.CustomerName,
+                        Description: sale.CustomerName is null
+                            ? $"Sold via sale {sale.SaleNumber}."
+                            : $"Sold via sale {sale.SaleNumber} to {sale.CustomerName}."));
                 }
             }
 
@@ -557,13 +566,14 @@ public static class SerialNumberEndpoints
                 .OrderBy(x => x.AtUtc)
                 .Select(x => new
                 {
-                    event_type = x.EventType,
-                    at = x.AtUtc,
-                    title = x.Title,
-                    description = x.Description,
-                    claim_id = x.ClaimId,
-                    claim_status = x.ClaimStatus
-                })
+                event_type = x.EventType,
+                at = x.AtUtc,
+                title = x.Title,
+                description = x.Description,
+                claim_id = x.ClaimId,
+                claim_status = x.ClaimStatus,
+                customer_name = x.CustomerName
+            })
                 .ToList();
 
             return Results.Ok(new
@@ -659,6 +669,7 @@ public static class SerialNumberEndpoints
         string EventType,
         DateTimeOffset AtUtc,
         string Title,
+        string? CustomerName = null,
         string? Description = null,
         Guid? ClaimId = null,
         string? ClaimStatus = null);

@@ -696,6 +696,7 @@ export type StockMovement = {
   serial_number?: string;
   reason?: string;
   created_by_user_id?: string;
+  created_by_username?: string;
   created_at: string;
 };
 
@@ -744,6 +745,22 @@ export type SerialLookupResult = {
   sale_date?: string;
   warranty_expiry_date?: string;
   product: Product;
+};
+
+export type SerialHistoryItem = {
+  event_type: string;
+  at: string;
+  title: string;
+  description?: string | null;
+  claim_id?: string | null;
+  claim_status?: string | null;
+  customer_name?: string | null;
+};
+
+export type SerialHistoryResponse = {
+  serial_id: string;
+  serial_value: string;
+  items: SerialHistoryItem[];
 };
 
 export type ProductBatch = {
@@ -882,6 +899,7 @@ type BackendSupplierItem = {
   supplier_id: string;
   name: string;
   phone?: string | null;
+  email?: string | null;
   company_name?: string | null;
   company_phone?: string | null;
   address?: string | null;
@@ -908,6 +926,7 @@ export type SupplierRecord = {
   supplier_id: string;
   name: string;
   phone: string;
+  email: string;
   companyName: string;
   company_name: string;
   companyPhone: string;
@@ -936,6 +955,7 @@ export type Supplier = SupplierRecord;
 export type CreateSupplierRequest = {
   name: string;
   phone?: string | null;
+  email?: string | null;
   company_name?: string | null;
   company_phone?: string | null;
   address?: string | null;
@@ -3442,8 +3462,9 @@ export async function searchBundles(query?: string, take = 30) {
   }));
 }
 
-export async function fetchServices(): Promise<Service[]> {
-  const response = await request<BackendServiceListResponse>("/api/services");
+export async function fetchServices(includeInactive = false): Promise<Service[]> {
+  const query = `?include_inactive=${includeInactive ? "true" : "false"}`;
+  const response = await request<BackendServiceListResponse>(`/api/services${query}`);
   return response.items.map(mapService);
 }
 
@@ -4051,6 +4072,7 @@ function mapSupplier(item: BackendSupplierItem): SupplierRecord {
     supplier_id: item.supplier_id,
     name: item.name,
     phone: item.phone ?? "",
+    email: item.email ?? "",
     companyName: item.company_name ?? "",
     company_name: item.company_name ?? "",
     companyPhone: item.company_phone ?? "",
@@ -4085,6 +4107,7 @@ export async function createSupplier(requestBody: CreateSupplierRequest) {
     body: JSON.stringify({
       name: requestBody.name,
       phone: normalizeOptionalString(requestBody.phone),
+      email: normalizeOptionalString(requestBody.email),
       company_name: normalizeOptionalString(requestBody.company_name),
       company_phone: normalizeOptionalString(requestBody.company_phone),
       address: normalizeOptionalString(requestBody.address),
@@ -4136,6 +4159,7 @@ export async function updateSupplier(supplierId: string, requestBody: CreateSupp
     body: JSON.stringify({
       name: requestBody.name,
       phone: normalizeOptionalString(requestBody.phone),
+      email: normalizeOptionalString(requestBody.email),
       company_name: normalizeOptionalString(requestBody.company_name),
       company_phone: normalizeOptionalString(requestBody.company_phone),
       address: normalizeOptionalString(requestBody.address),
@@ -4458,6 +4482,7 @@ function mapStockMovement(item: BackendStockMovementPage["items"][number]): Stoc
     serial_number: item.serial_number ?? undefined,
     reason: item.reason ?? undefined,
     created_by_user_id: item.created_by_user_id ?? undefined,
+    created_by_username: item.created_by_username ?? undefined,
     created_at: item.created_at,
   };
 }
@@ -4636,6 +4661,10 @@ export async function lookupSerial(serialValue: string): Promise<SerialLookupRes
     warranty_expiry_date: response.serial.warranty_expiry_date ?? undefined,
     product,
   };
+}
+
+export async function fetchSerialHistory(serialId: string): Promise<SerialHistoryResponse> {
+  return request<SerialHistoryResponse>(`/api/serials/${serialId}/history`);
 }
 
 export async function fetchProductBatches(productId: string): Promise<ProductBatch[]> {
@@ -5450,7 +5479,7 @@ export async function hardDeleteProduct(productId: string) {
 export async function adjustStock(
   productId: string,
   deltaQuantity: number,
-  reason = "manual_adjustment",
+  reason: string,
   batchId?: string | null,
 ): Promise<StockAdjustmentResponse> {
   return request<StockAdjustmentResponse>(`/api/products/${productId}/stock-adjustments`, {

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -31,6 +32,15 @@ type FormState = {
   durationMinutes: string;
 };
 
+type FormErrors = {
+  name?: string;
+  price?: string;
+  durationMinutes?: string;
+};
+
+const PRICE_INPUT_PATTERN = /^(?:\d+\.?\d*|\.\d+)?$/;
+const DURATION_INPUT_PATTERN = /^\d*$/;
+
 const emptyForm = (): FormState => ({
   name: "",
   sku: "",
@@ -42,8 +52,10 @@ const emptyForm = (): FormState => ({
 
 export default function ServiceManagementDialog({ open, service, onOpenChange, onSaved }: Props) {
   const [form, setForm] = useState<FormState>(emptyForm());
+  const [errors, setErrors] = useState<FormErrors>({});
   const [categories, setCategories] = useState<Category[]>([]);
   const [saving, setSaving] = useState(false);
+  const [durationInputRejected, setDurationInputRejected] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -62,6 +74,8 @@ export default function ServiceManagementDialog({ open, service, onOpenChange, o
 
     if (!service) {
       setForm(emptyForm());
+      setErrors({});
+      setDurationInputRejected(false);
       return;
     }
 
@@ -73,6 +87,8 @@ export default function ServiceManagementDialog({ open, service, onOpenChange, o
       categoryId: service.category_id ?? "none",
       durationMinutes: service.duration_minutes ? String(service.duration_minutes) : "",
     });
+    setErrors({});
+    setDurationInputRejected(false);
   }, [open, service]);
 
   const categoryOptions = useMemo(
@@ -80,25 +96,84 @@ export default function ServiceManagementDialog({ open, service, onOpenChange, o
     [categories],
   );
 
+  const handlePriceChange = (value: string) => {
+    if (value === "" || PRICE_INPUT_PATTERN.test(value)) {
+      setForm((prev) => ({ ...prev, price: value }));
+      if (errors.price) {
+        setErrors((prev) => ({ ...prev, price: undefined }));
+      }
+      return;
+    }
+
+    setErrors((prev) => ({
+      ...prev,
+      price: "Service price must be a valid number greater than zero.",
+    }));
+    toast.error("Service price must be a valid number greater than zero.");
+  };
+
+  const handleDurationChange = (value: string) => {
+    if (value === "" || DURATION_INPUT_PATTERN.test(value)) {
+      setForm((prev) => ({ ...prev, durationMinutes: value }));
+      setDurationInputRejected(false);
+      if (errors.durationMinutes) {
+        setErrors((prev) => ({ ...prev, durationMinutes: undefined }));
+      }
+      return;
+    }
+
+    setDurationInputRejected(true);
+    setErrors((prev) => ({
+      ...prev,
+      durationMinutes: "Duration must be a positive whole number.",
+    }));
+    toast.error("Duration must be a positive whole number.");
+  };
+
   const handleSave = async () => {
+    const nextErrors: FormErrors = {};
     const trimmedName = form.name.trim();
     if (!trimmedName) {
+      nextErrors.name = "Service name is required.";
+    }
+
+    const normalizedPrice = form.price.trim();
+    const parsedPrice = Number(normalizedPrice);
+    if (
+      !normalizedPrice ||
+      !PRICE_INPUT_PATTERN.test(normalizedPrice) ||
+      !Number.isFinite(parsedPrice) ||
+      parsedPrice <= 0
+    ) {
+      nextErrors.price = "Service price must be a valid number greater than zero.";
+    }
+
+    const normalizedDuration = form.durationMinutes.trim();
+    const parsedDuration = normalizedDuration ? Number(normalizedDuration) : null;
+
+    if (
+      durationInputRejected ||
+      parsedDuration != null &&
+      (!DURATION_INPUT_PATTERN.test(normalizedDuration) ||
+        !Number.isInteger(parsedDuration) ||
+        parsedDuration <= 0)
+    ) {
+      nextErrors.durationMinutes = "Duration must be a positive whole number.";
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      setErrors(nextErrors);
+      toast.error(
+        nextErrors.price ??
+          nextErrors.durationMinutes ??
+          nextErrors.name ??
+          "Fix the highlighted service fields.",
+      );
       return;
     }
 
-    const parsedPrice = Number(form.price);
-    if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) {
-      return;
-    }
-
-    const parsedDuration = form.durationMinutes.trim()
-      ? Number(form.durationMinutes)
-      : null;
-
-    if (parsedDuration != null && (!Number.isInteger(parsedDuration) || parsedDuration <= 0)) {
-      return;
-    }
-
+    setErrors({});
+    setDurationInputRejected(false);
     setSaving(true);
     try {
       const payload = {
@@ -136,8 +211,15 @@ export default function ServiceManagementDialog({ open, service, onOpenChange, o
             <Input
               id="service-name"
               value={form.name}
-              onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
+              onChange={(event) => {
+                setForm((prev) => ({ ...prev, name: event.target.value }));
+                if (errors.name) {
+                  setErrors((prev) => ({ ...prev, name: undefined }));
+                }
+              }}
+              className={errors.name ? "border-destructive focus-visible:ring-destructive" : undefined}
             />
+            {errors.name ? <p className="text-xs text-destructive">{errors.name}</p> : null}
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -155,8 +237,10 @@ export default function ServiceManagementDialog({ open, service, onOpenChange, o
                 id="service-price"
                 inputMode="decimal"
                 value={form.price}
-                onChange={(event) => setForm((prev) => ({ ...prev, price: event.target.value }))}
+                onChange={(event) => handlePriceChange(event.target.value)}
+                className={errors.price ? "border-destructive focus-visible:ring-destructive" : undefined}
               />
+              {errors.price ? <p className="text-xs text-destructive">{errors.price}</p> : null}
             </div>
           </div>
 
@@ -187,8 +271,14 @@ export default function ServiceManagementDialog({ open, service, onOpenChange, o
                 id="service-duration"
                 inputMode="numeric"
                 value={form.durationMinutes}
-                onChange={(event) => setForm((prev) => ({ ...prev, durationMinutes: event.target.value }))}
+                onChange={(event) => handleDurationChange(event.target.value)}
+                className={
+                  errors.durationMinutes ? "border-destructive focus-visible:ring-destructive" : undefined
+                }
               />
+              {errors.durationMinutes ? (
+                <p className="text-xs text-destructive">{errors.durationMinutes}</p>
+              ) : null}
             </div>
           </div>
 

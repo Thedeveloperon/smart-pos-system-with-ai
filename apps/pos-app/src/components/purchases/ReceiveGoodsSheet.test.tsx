@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import ReceiveGoodsSheet from "./ReceiveGoodsSheet";
 import { fetchProducts } from "@/lib/api";
 import { receivePurchaseOrder } from "@/lib/purchases";
+import { toast } from "sonner";
 
 vi.mock("sonner", () => ({
   toast: {
@@ -24,6 +25,10 @@ vi.mock("@/lib/purchases", async () => {
 });
 
 describe("ReceiveGoodsSheet", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("opens serial entry before submitting serial-tracked receipts and sends serials in the payload", async () => {
     vi.mocked(fetchProducts).mockResolvedValue([
       {
@@ -134,6 +139,133 @@ describe("ReceiveGoodsSheet", () => {
             product_id: "product-1",
             quantity_received: 2,
             serials: ["SN0001", "SN0002"],
+          }),
+        ],
+      }),
+    );
+    expect(onReceived).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("requires batch details before submitting batch-tracked receipts", async () => {
+    vi.mocked(fetchProducts).mockResolvedValue([
+      {
+        id: "product-2",
+        product_id: "product-2",
+        name: "Batch Paint",
+        sku: "PAINT-01",
+        unitPrice: 0,
+        costPrice: 0,
+        stockQuantity: 0,
+        reorderLevel: 0,
+        alertLevel: 0,
+        allowNegativeStock: false,
+        isBatchTracked: true,
+        is_batch_tracked: true,
+        isActive: true,
+        isLowStock: false,
+        createdAt: "2026-05-03T00:00:00.000Z",
+        created_at: "2026-05-03T00:00:00.000Z",
+        unit_price: 0,
+        cost_price: 0,
+        stock_quantity: 0,
+        reorder_level: 0,
+        alert_level: 0,
+        allow_negative_stock: false,
+        is_active: true,
+        is_low_stock: false,
+      },
+    ] as never);
+    vi.mocked(receivePurchaseOrder).mockResolvedValue({
+      id: "po-2",
+      supplier_id: "supplier-1",
+      supplier_name: "Orange Pvt Ltd",
+      po_number: "PO-527718",
+      po_date: "2026-05-03",
+      expected_delivery_date: null,
+      status: "Received",
+      currency: "LKR",
+      subtotal_estimate: 1800,
+      notes: null,
+      created_at: "2026-05-03T00:00:00.000Z",
+      updated_at: "2026-05-03T00:00:00.000Z",
+      bills: [],
+      lines: [],
+    });
+
+    const onClose = vi.fn();
+    const onReceived = vi.fn();
+
+    render(
+      <ReceiveGoodsSheet
+        open
+        po={{
+          id: "po-2",
+          supplier_id: "supplier-1",
+          supplier_name: "Orange Pvt Ltd",
+          po_number: "PO-527718",
+          po_date: "2026-05-03",
+          expected_delivery_date: null,
+          status: "Sent",
+          currency: "LKR",
+          subtotal_estimate: 1800,
+          notes: null,
+          created_at: "2026-05-03T00:00:00.000Z",
+          updated_at: null,
+          bills: [],
+          lines: [
+            {
+              id: "line-2",
+              product_id: "product-2",
+              product_name: "Batch Paint",
+              quantity_ordered: 10,
+              quantity_received: 0,
+              quantity_pending: 3,
+              unit_cost_estimate: 90,
+            },
+          ],
+        }}
+        onClose={onClose}
+        onReceived={onReceived}
+      />,
+    );
+
+    await screen.findByRole("button", { name: "Add batch details" });
+    fireEvent.change(screen.getByPlaceholderText("INV-..."), { target: { value: "INV-2001" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Receipt & Update Stock" }));
+
+    const batchDialog = await screen.findByRole("dialog", {
+      name: /add batch details/i,
+    });
+
+    fireEvent.click(within(batchDialog).getByRole("button", { name: "Save batch details" }));
+    expect(vi.mocked(toast.error)).toHaveBeenCalledWith(
+      "'Batch Paint' requires a batch number for this receipt.",
+    );
+    expect(receivePurchaseOrder).not.toHaveBeenCalled();
+
+    fireEvent.change(within(batchDialog).getByLabelText("Batch number"), {
+      target: { value: "BATCH-0001" },
+    });
+    fireEvent.change(within(batchDialog).getByLabelText("Expiry date"), {
+      target: { value: "2026-12-31" },
+    });
+    fireEvent.click(within(batchDialog).getByRole("button", { name: "Save batch details" }));
+
+    await waitFor(() => {
+      expect(receivePurchaseOrder).toHaveBeenCalledTimes(1);
+    });
+
+    expect(receivePurchaseOrder).toHaveBeenCalledWith(
+      "po-2",
+      expect.objectContaining({
+        invoice_number: "INV-2001",
+        lines: [
+          expect.objectContaining({
+            product_id: "product-2",
+            quantity_received: 3,
+            batch_number: "BATCH-0001",
+            expiry_date: "2026-12-31",
           }),
         ],
       }),
