@@ -457,6 +457,7 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
           ? {
               id: product.matchedSerialId,
               value: product.matchedSerialValue,
+              warrantyExpiryDate: product.matchedWarrantyExpiryDate ?? null,
             }
           : undefined,
       [],
@@ -518,6 +519,7 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
         addProductToCart(result.product, 1, {
           id: result.serial_id,
           value: result.serial_value,
+          warrantyExpiryDate: result.warranty_expiry_date ?? null,
         });
         setSearchQuery("");
         setSerialLookupProduct(null);
@@ -893,6 +895,7 @@ const ProductSearchPanel = forwardRef<ProductSearchPanelHandle, ProductSearchPan
               matchedSerialId: result.serial_id,
               matchedSerialValue: result.serial_value,
               matchedSerialStatus: result.status,
+              matchedWarrantyExpiryDate: result.warranty_expiry_date ?? null,
             });
             setSerialLookupFeedback(`Serial match: ${result.serial_value}`);
           })

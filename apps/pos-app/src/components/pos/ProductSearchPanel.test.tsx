@@ -190,6 +190,7 @@ describe("ProductSearchPanel", () => {
       product_id: "serial-product",
       product_name: "Serial Camera",
       status: "Available",
+      warranty_expiry_date: "2027-05-20",
       product: {
         id: "serial-product",
         name: "Serial Camera",
@@ -210,7 +211,11 @@ describe("ProductSearchPanel", () => {
       expect(onAddToCart).toHaveBeenCalledWith(
         expect.objectContaining({ id: "serial-product", name: "Serial Camera" }),
         1,
-        { id: "serial-1", value: "SERIAL-0001" },
+        expect.objectContaining({
+          id: "serial-1",
+          value: "SERIAL-0001",
+          warrantyExpiryDate: "2027-05-20",
+        }),
         { sellMode: "unit" },
       );
     });
@@ -225,6 +230,7 @@ describe("ProductSearchPanel", () => {
       product_id: "serial-product",
       product_name: "Serial Camera",
       status: "Available",
+      warranty_expiry_date: "2027-05-21",
       product: {
         id: "serial-product",
         name: "Serial Camera",
@@ -270,7 +276,11 @@ describe("ProductSearchPanel", () => {
       expect(onAddToCart).toHaveBeenCalledWith(
         expect.objectContaining({ id: "serial-product", name: "Serial Camera" }),
         1,
-        { id: "serial-2", value: "CAM-SN-002" },
+        expect.objectContaining({
+          id: "serial-2",
+          value: "CAM-SN-002",
+          warrantyExpiryDate: "2027-05-21",
+        }),
         { sellMode: "unit" },
       );
     });
