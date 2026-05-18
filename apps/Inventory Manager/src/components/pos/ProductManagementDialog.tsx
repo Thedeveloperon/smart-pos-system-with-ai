@@ -932,7 +932,7 @@ export default function ProductManagementDialog({
 
             <Separator />
 
-            <div className="grid gap-3 md:grid-cols-5">
+            <div className="grid gap-3 md:grid-cols-4">
               <div className="grid gap-1.5">
                 <Label htmlFor="unit-price">Unit price</Label>
                 <Input
@@ -1007,8 +1007,10 @@ export default function ProductManagementDialog({
                   <p className="text-xs text-destructive">{formErrors.permanentDiscountFixed}</p>
                 ) : null}
               </div>
+            </div>
 
-              <div className="md:col-span-2 flex items-end">
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="flex items-end">
                 <Button type="button" variant="outline" onClick={clearPermanentDiscounts}>
                   Remove discount
                 </Button>
