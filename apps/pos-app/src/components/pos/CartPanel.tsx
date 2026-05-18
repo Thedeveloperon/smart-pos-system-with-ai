@@ -1,4 +1,4 @@
-import { ShoppingCart } from "lucide-react";
+import { ShoppingCart, Trash2 } from "lucide-react";
 import CartItemRow from "./CartItemRow";
 import type { CartDiscount, CartItem } from "./types";
 import { computeCartTotals } from "@/lib/cartMath";
@@ -13,9 +13,18 @@ interface CartPanelProps {
   ) => void;
   cartDiscount: CartDiscount;
   expertMode?: boolean;
+  onClear?: () => void;
 }
 
-const CartPanel = ({ items, onUpdateQty, onRemove, onUpdateDiscount, cartDiscount, expertMode = false }: CartPanelProps) => {
+const CartPanel = ({
+  items,
+  onUpdateQty,
+  onRemove,
+  onUpdateDiscount,
+  cartDiscount,
+  expertMode = false,
+  onClear,
+}: CartPanelProps) => {
   const itemCount = items.reduce((acc, i) => acc + i.quantity, 0);
   const totals = computeCartTotals(items, cartDiscount, 0);
 
@@ -31,7 +40,18 @@ const CartPanel = ({ items, onUpdateQty, onRemove, onUpdateDiscount, cartDiscoun
             </span>
           )}
         </div>
-        <div className="text-right">
+        <div className="flex items-center gap-3">
+          {items.length > 0 && onClear && (
+            <button
+              type="button"
+              onClick={onClear}
+              className="inline-flex h-7 items-center rounded-lg px-2 text-xs text-destructive transition-colors hover:bg-destructive/10"
+            >
+              <Trash2 className="mr-1 h-3.5 w-3.5" />
+              Clear
+            </button>
+          )}
+          <div className="text-right">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             Grand Total
           </p>
@@ -41,6 +61,7 @@ const CartPanel = ({ items, onUpdateQty, onRemove, onUpdateDiscount, cartDiscoun
           {totals.discountTotal > 0 && (
             <p className="text-[11px] text-muted-foreground">Discount: Rs. {totals.discountTotal.toLocaleString()}</p>
           )}
+          </div>
         </div>
       </div>
 

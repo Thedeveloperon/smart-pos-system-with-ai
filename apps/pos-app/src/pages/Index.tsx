@@ -1340,6 +1340,7 @@ const IndexInner = () => {
                     onRemove={handleRemove}
                     onUpdateDiscount={handleUpdateLineDiscount}
                     cartDiscount={cartDiscount}
+                    onClear={handleCancelSale}
                   />
                 </div>
                 <div className="min-h-0 overflow-hidden">
@@ -1380,6 +1381,7 @@ const IndexInner = () => {
                   onRemove={handleRemove}
                   onUpdateDiscount={handleUpdateLineDiscount}
                   cartDiscount={cartDiscount}
+                  onClear={handleCancelSale}
                 />
               </div>
             )}
