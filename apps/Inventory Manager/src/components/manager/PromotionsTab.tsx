@@ -51,10 +51,43 @@ type FormState = {
 type PromotionStatusFilter = "all" | "active" | "expired";
 type PromotionScopeFilter = "all-scopes" | "all" | "category" | "product";
 
-const nowLocal = () => new Date().toISOString().slice(0, 16);
+function pad2(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+export function formatDateTimeLocal(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return [
+    date.getFullYear(),
+    pad2(date.getMonth() + 1),
+    pad2(date.getDate()),
+  ].join("-")
+    + `T${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+export function parseDateTimeLocal(value: string) {
+  const [datePart, timePart] = value.split("T");
+  if (!datePart || !timePart) {
+    return "";
+  }
+
+  const [year, month, day] = datePart.split("-").map(Number);
+  const [hours, minutes] = timePart.split(":").map(Number);
+  const date = new Date(year, month - 1, day, hours, minutes, 0, 0);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+}
+
+const nowLocal = () => formatDateTimeLocal(new Date().toISOString());
 const afterOneWeekLocal = () =>
-  new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16);
-const todayLocal = () => new Date().toISOString().slice(0, 10);
+  formatDateTimeLocal(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString());
+const todayLocal = () => {
+  const now = new Date();
+  return [now.getFullYear(), pad2(now.getMonth() + 1), pad2(now.getDate())].join("-");
+};
 
 const emptyForm = (): FormState => ({
   name: "",
@@ -79,8 +112,8 @@ function toForm(item: Promotion): FormState {
     productId: item.product_id ?? "",
     valueType: item.value_type,
     value: String(item.value ?? 0),
-    startsAt: new Date(item.starts_at_utc).toISOString().slice(0, 16),
-    endsAt: new Date(item.ends_at_utc).toISOString().slice(0, 16),
+    startsAt: formatDateTimeLocal(item.starts_at_utc),
+    endsAt: formatDateTimeLocal(item.ends_at_utc),
     isActive: item.is_active,
   };
 }
@@ -196,11 +229,13 @@ export default function PromotionsTab() {
       return;
     }
 
-    const startsAt = new Date(form.startsAt);
-    const endsAt = new Date(form.endsAt);
+    const startsAtUtc = parseDateTimeLocal(form.startsAt);
+    const endsAtUtc = parseDateTimeLocal(form.endsAt);
+    const startsAt = startsAtUtc ? new Date(startsAtUtc) : new Date("");
+    const endsAt = endsAtUtc ? new Date(endsAtUtc) : new Date("");
     const now = new Date();
-    const startOfTodayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-    if (!Number.isFinite(startsAt.getTime()) || startsAt.getTime() < startOfTodayUtc) {
+    const startOfTodayLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    if (!Number.isFinite(startsAt.getTime()) || startsAt.getTime() < startOfTodayLocal) {
       toast.error("Start date must be today or later.");
       return;
     }
@@ -230,8 +265,8 @@ export default function PromotionsTab() {
         product_id: form.scope === "product" ? form.productId || null : null,
         value_type: form.valueType,
         value: Number(form.value) || 0,
-        starts_at_utc: startsAt.toISOString(),
-        ends_at_utc: endsAt.toISOString(),
+        starts_at_utc: startsAtUtc,
+        ends_at_utc: endsAtUtc,
         is_active: form.isActive,
       } as const;
 
@@ -549,7 +584,7 @@ export default function PromotionsTab() {
 
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-1.5">
-                <Label>Starts at (UTC)</Label>
+                <Label>Starts at</Label>
                 <Input
                   type="datetime-local"
                   min={startsAtMin}
@@ -560,7 +595,7 @@ export default function PromotionsTab() {
                 />
               </div>
               <div className="grid gap-1.5">
-                <Label>Ends at (UTC)</Label>
+                <Label>Ends at</Label>
                 <Input
                   type="datetime-local"
                   value={form.endsAt}
