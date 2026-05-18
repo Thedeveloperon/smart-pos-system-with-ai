@@ -72,12 +72,40 @@ import { X } from "lucide-react";
 const SHORTCUTS_ONBOARDING_STORAGE_KEY_PREFIX = "smartpos.shortcuts.onboarding.v1";
 const REMINDER_BANNER_DISMISSAL_STORAGE_KEY_PREFIX = "smartpos.reminders.banner.dismissed.v1";
 const OFFLINE_BANNER_DISMISSAL_STORAGE_KEY_PREFIX = "smartpos.license.offline.banner.dismissed.v1";
+const CART_ITEMS_STORAGE_KEY = "pos:cartItems";
+const CART_DISCOUNT_STORAGE_KEY = "pos:cartDiscount";
 const AI_LOW_CREDIT_THRESHOLD = 10;
 const CLOUD_PORTAL_URL = (import.meta.env.VITE_CLOUD_PORTAL_URL || "").trim().replace(/\/$/, "");
 const INVENTORY_MANAGER_URL = (import.meta.env.VITE_INVENTORY_MANAGER_URL || "/inventory-manager")
   .trim()
   .replace(/\/$/, "");
 const isPosShortcutsFeatureEnabled = import.meta.env.VITE_POS_SHORTCUTS_ENABLED !== "false";
+
+export function readCartItemsFromSessionStorage(): CartItem[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const saved = window.sessionStorage.getItem(CART_ITEMS_STORAGE_KEY);
+    return saved ? (JSON.parse(saved) as CartItem[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function readCartDiscountFromSessionStorage(): CartDiscount {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  try {
+    const saved = window.sessionStorage.getItem(CART_DISCOUNT_STORAGE_KEY);
+    return saved ? (JSON.parse(saved) as CartDiscount) : {};
+  } catch {
+    return {};
+  }
+}
 
 const IndexInner = () => {
   const { user, logout } = useAuth();
@@ -95,8 +123,8 @@ const IndexInner = () => {
   const isOwner = backendRole === "owner";
 
   const [products, setProducts] = useState<Product[]>([]);
-  const [cartItems, setCartItems] = useState<CartItem[]>([]);
-  const [cartDiscount, setCartDiscount] = useState<CartDiscount>({});
+  const [cartItems, setCartItems] = useState<CartItem[]>(() => readCartItemsFromSessionStorage());
+  const [cartDiscount, setCartDiscount] = useState<CartDiscount>(() => readCartDiscountFromSessionStorage());
   const [heldBills, setHeldBills] = useState<HeldBill[]>([]);
   const [activeHeldSaleId, setActiveHeldSaleId] = useState<string | null>(null);
   const [showHeldBills, setShowHeldBills] = useState(false);
@@ -137,6 +165,22 @@ const IndexInner = () => {
   const mobileCheckoutRef = useRef<CheckoutPanelHandle | null>(null);
   const seenReminderIdsRef = useRef<Set<string>>(new Set());
   const isMobile = useIsMobile();
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.sessionStorage.setItem(CART_ITEMS_STORAGE_KEY, JSON.stringify(cartItems));
+  }, [cartItems]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.sessionStorage.setItem(CART_DISCOUNT_STORAGE_KEY, JSON.stringify(cartDiscount));
+  }, [cartDiscount]);
 
   const shortcutsOnboardingStorageKey = useMemo(
     () =>
@@ -1352,6 +1396,7 @@ const IndexInner = () => {
                     onRemove={handleRemove}
                     onUpdateDiscount={handleUpdateLineDiscount}
                     cartDiscount={cartDiscount}
+                    onClear={handleCancelSale}
                   />
                 </div>
                 <div className="min-h-0 overflow-hidden">
@@ -1392,6 +1437,7 @@ const IndexInner = () => {
                   onRemove={handleRemove}
                   onUpdateDiscount={handleUpdateLineDiscount}
                   cartDiscount={cartDiscount}
+                  onClear={handleCancelSale}
                 />
               </div>
             )}

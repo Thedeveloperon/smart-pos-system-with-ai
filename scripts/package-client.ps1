@@ -39,12 +39,15 @@ function Invoke-External {
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$frontendDir = Join-Path $repoRoot "apps/pos-app"
+$posFrontendDir = Join-Path $repoRoot "apps/pos-app"
+$inventoryFrontendDir = Join-Path $repoRoot "apps/Inventory Manager"
 $backendProject = Join-Path $repoRoot "services/backend-api/backend.csproj"
-$frontendDistDir = Join-Path $frontendDir "dist"
+$posFrontendDistDir = Join-Path $posFrontendDir "dist"
+$inventoryFrontendDistDir = Join-Path $inventoryFrontendDir "dist"
 $outputRoot = Join-Path $repoRoot $OutputDir
 $appDir = Join-Path $outputRoot "app"
 $wwwrootDir = Join-Path $appDir "wwwroot"
+$inventoryManagerOutputDir = Join-Path $wwwrootDir "inventory-manager"
 $clientTemplatesDir = Join-Path $repoRoot "scripts/client"
 
 if (Test-Path $outputRoot) {
@@ -55,10 +58,12 @@ if (Test-Path $outputRoot) {
 New-Item -ItemType Directory -Path $outputRoot | Out-Null
 
 if (-not $SkipNpmCi) {
-    Invoke-External -Label "Installing frontend dependencies" -Command "npm" -Arguments @("ci") -WorkingDirectory $frontendDir
+    Invoke-External -Label "Installing POS frontend dependencies" -Command "npm" -Arguments @("ci") -WorkingDirectory $posFrontendDir
+    Invoke-External -Label "Installing Inventory Manager dependencies" -Command "npm" -Arguments @("ci") -WorkingDirectory $inventoryFrontendDir
 }
 
-Invoke-External -Label "Building frontend" -Command "npm" -Arguments @("run", "build") -WorkingDirectory $frontendDir
+Invoke-External -Label "Building POS frontend" -Command "npm" -Arguments @("run", "build") -WorkingDirectory $posFrontendDir
+Invoke-External -Label "Building Inventory Manager frontend" -Command "npm" -Arguments @("run", "build") -WorkingDirectory $inventoryFrontendDir
 
 $publishArgs = @(
     "publish",
@@ -80,7 +85,9 @@ else {
 Invoke-External -Label "Publishing backend" -Command "dotnet" -Arguments $publishArgs -WorkingDirectory $repoRoot
 
 New-Item -ItemType Directory -Path $wwwrootDir -Force | Out-Null
-Copy-Item -Path (Join-Path $frontendDistDir "*") -Destination $wwwrootDir -Recurse -Force
+Copy-Item -Path (Join-Path $posFrontendDistDir "*") -Destination $wwwrootDir -Recurse -Force
+New-Item -ItemType Directory -Path $inventoryManagerOutputDir -Force | Out-Null
+Copy-Item -Path (Join-Path $inventoryFrontendDistDir "*") -Destination $inventoryManagerOutputDir -Recurse -Force
 
 $publishedPaymentProofsDir = Join-Path $wwwrootDir "payment-proofs"
 if (Test-Path -LiteralPath $publishedPaymentProofsDir) {
@@ -90,8 +97,8 @@ if (Test-Path -LiteralPath $publishedPaymentProofsDir) {
 }
 
 $shortcutIconOutput = Join-Path $outputRoot "lanka-pos.ico"
-$shortcutIconPngSource = Join-Path $frontendDir "public/favicon.png"
-$shortcutIconIcoFallback = Join-Path $frontendDir "public/favicon.ico"
+$shortcutIconPngSource = Join-Path $posFrontendDir "public/favicon.png"
+$shortcutIconIcoFallback = Join-Path $posFrontendDir "public/favicon.ico"
 $shortcutIconWritten = $false
 
 $pythonCommand = Get-Command python3 -ErrorAction SilentlyContinue

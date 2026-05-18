@@ -4,6 +4,21 @@ import OpeningCashDialog from "./OpeningCashDialog";
 import type { CashSession } from "./types";
 
 describe("OpeningCashDialog", () => {
+  it("disables proceed when total is zero and shows helper text", () => {
+    render(
+      <OpeningCashDialog
+        open
+        cashierName="Cashier B"
+        initialCounts={[]}
+        onConfirm={vi.fn()}
+      />,
+    );
+
+    const proceedButton = screen.getByRole("button", { name: "Proceed - Rs. 0" });
+    expect(proceedButton).toBeDisabled();
+    expect(screen.getByText("Enter at least one denomination before proceeding.")).toBeInTheDocument();
+  });
+
   it("keeps non-essential informational text out of the confirm popup", async () => {
     const previousSession: CashSession = {
       id: "session-1",
@@ -60,4 +75,3 @@ describe("OpeningCashDialog", () => {
     ).not.toBeInTheDocument();
   });
 });
-

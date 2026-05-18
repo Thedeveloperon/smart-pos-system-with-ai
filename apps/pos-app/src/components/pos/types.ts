@@ -16,6 +16,7 @@ export interface Product {
   matchedSerialId?: string;
   matchedSerialValue?: string;
   matchedSerialStatus?: string;
+  matchedWarrantyExpiryDate?: string | null;
   hasPackOption?: boolean;
   packSize?: number | null;
   packPrice?: number | null;
@@ -39,6 +40,7 @@ export interface Product {
 export interface SelectedSerial {
   id: string;
   value: string;
+  warrantyExpiryDate?: string | null;
 }
 
 export interface CartItem {
