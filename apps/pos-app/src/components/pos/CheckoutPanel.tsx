@@ -20,6 +20,17 @@ import {
 import CustomerCreateDialog from "@/components/customers/CustomerCreateDialog";
 import CustomerSearchInput from "@/components/customers/CustomerSearchInput";
 
+function normalizeCustomerContactKey(value?: string | null) {
+  return value
+    ?.trim()
+    .replace(/[+\s\-().]/g, "")
+    .toLowerCase() ?? "";
+}
+
+function normalizeCustomerEmailKey(value?: string | null) {
+  return value?.trim().toLowerCase() ?? "";
+}
+
 interface CheckoutPanelProps {
   items: CartItem[];
   role?: "owner" | "manager" | "cashier";
@@ -135,6 +146,30 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
         [item.name, item.code, item.phone ?? "", item.email ?? ""].some((field) => field.toLowerCase().includes(query))
       );
     }, [customerDirectory, customerQuery]);
+
+    const findDuplicateCustomerError = useCallback((request: CreateCustomerRequest) => {
+      const phoneKey = normalizeCustomerContactKey(request.phone);
+      if (phoneKey) {
+        const duplicatePhone = customerDirectory.find(
+          (item) => normalizeCustomerContactKey(item.phone) === phoneKey,
+        );
+        if (duplicatePhone) {
+          return "A customer with this phone number already exists.";
+        }
+      }
+
+      const emailKey = normalizeCustomerEmailKey(request.email);
+      if (emailKey) {
+        const duplicateEmail = customerDirectory.find(
+          (item) => normalizeCustomerEmailKey(item.email) === emailKey,
+        );
+        if (duplicateEmail) {
+          return "A customer with this email address already exists.";
+        }
+      }
+
+      return null;
+    }, [customerDirectory]);
     const completeBlockReason =
       items.length === 0
         ? "add items to the cart"
@@ -238,12 +273,17 @@ const CheckoutPanel = forwardRef<CheckoutPanelHandle, CheckoutPanelProps>(
     }, [completeBlockReason, paymentMethod, runCompleteSale]);
 
     const handleCreateCustomer = useCallback(async (request: CreateCustomerRequest) => {
+      const duplicateError = findDuplicateCustomerError(request);
+      if (duplicateError) {
+        throw new Error(duplicateError);
+      }
+
       const created = await createCustomer(request);
       setCustomerDirectory((current) => [created, ...current.filter((item) => item.id !== created.id)]);
       setSelectedCustomer(created);
       setCustomerQuery(created.name);
       setCustomerDropdownOpen(false);
-    }, []);
+    }, [findDuplicateCustomerError]);
 
     useImperativeHandle(ref, () => ({
       openCashWorkflow: () => {

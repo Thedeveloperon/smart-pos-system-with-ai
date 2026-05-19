@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import CheckoutPanel, { type CheckoutPanelHandle } from "./CheckoutPanel";
 import type { CartItem } from "./types";
 import type { CashDrawerState } from "./cash-session/types";
-import { fetchCustomerDirectoryLookup, fetchCustomerPriceTiers } from "@/lib/api";
+import { createCustomer, fetchCustomerDirectoryLookup, fetchCustomerPriceTiers } from "@/lib/api";
 
 vi.mock("@/lib/sound", () => ({
   primeConfirmationSound: vi.fn().mockResolvedValue(undefined),
@@ -53,6 +53,7 @@ const sampleCashDrawer: CashDrawerState = {
 
 const mockFetchCustomerDirectoryLookup = vi.mocked(fetchCustomerDirectoryLookup);
 const mockFetchCustomerPriceTiers = vi.mocked(fetchCustomerPriceTiers);
+const mockCreateCustomer = vi.mocked(createCustomer);
 const emptyCashierDiscount = {
   cashierTransactionDiscountPercent: 0,
   cashierTransactionDiscountFixed: null,
@@ -73,6 +74,7 @@ beforeEach(() => {
       name: "Jagath Bandara",
       code: "C-0007",
       phone: "0712424204",
+      email: "jagath@example.com",
       creditLimit: 500,
       outstandingBalance: 100,
     },
@@ -86,6 +88,17 @@ beforeEach(() => {
     },
   ]);
   mockFetchCustomerPriceTiers.mockResolvedValue([]);
+  mockCreateCustomer.mockResolvedValue({
+    id: "customer-created",
+    name: "New Customer",
+    code: "C-0010",
+    phone: null,
+    email: null,
+    creditLimit: 0,
+    outstandingBalance: 0,
+    priceTierDiscountPercent: null,
+    fixedDiscountPercent: null,
+  });
 });
 
 async function waitForDefaultCustomer() {
@@ -95,6 +108,15 @@ async function waitForDefaultCustomer() {
 async function selectCustomer(query: string, name: RegExp) {
   fireEvent.change(screen.getByPlaceholderText("Search name, code, phone, email..."), { target: { value: query } });
   fireEvent.click(await screen.findByRole("button", { name }));
+}
+
+function getDialogInput(labelText: string) {
+  const input = screen.getByText(labelText).parentElement?.querySelector("input");
+  if (!(input instanceof HTMLInputElement)) {
+    throw new Error(`Input for label "${labelText}" was not rendered.`);
+  }
+
+  return input;
 }
 
 describe("CheckoutPanel shortcut integration", () => {
@@ -459,6 +481,31 @@ describe("CheckoutPanel shortcut integration", () => {
       false,
       0,
     );
+  });
+
+  it("blocks quick-add customer creation when the email already exists", async () => {
+    render(
+      <CheckoutPanel
+        items={sampleItems}
+        cashDrawer={sampleCashDrawer}
+        onCompleteSale={vi.fn()}
+        onHoldBill={vi.fn()}
+        onCancelSale={vi.fn()}
+        cartDiscount={{}}
+        onCartDiscountChange={vi.fn()}
+        showShortcutHints
+      />,
+    );
+
+    await waitForDefaultCustomer();
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    fireEvent.change(getDialogInput("Full name *"), { target: { value: "Quick Add Customer" } });
+    fireEvent.change(getDialogInput("Email"), { target: { value: "JAGATH@EXAMPLE.COM" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create customer" }));
+
+    expect(await screen.findByText("A customer with this email address already exists.")).toBeInTheDocument();
+    expect(mockCreateCustomer).not.toHaveBeenCalled();
   });
 });
 

@@ -807,10 +807,18 @@ public sealed class CustomerService(
             return;
         }
 
+        var normalizedPhone = NormalizePhoneForComparison(phone);
         var exists = await dbContext.Customers
             .AsNoTracking()
             .AnyAsync(x =>
-                x.Phone == phone &&
+                x.Phone != null &&
+                x.Phone
+                    .Replace(" ", string.Empty)
+                    .Replace("-", string.Empty)
+                    .Replace("(", string.Empty)
+                    .Replace(")", string.Empty)
+                    .Replace(".", string.Empty)
+                    .Replace("+", string.Empty) == normalizedPhone &&
                 x.Id != customerId &&
                 (!storeId.HasValue || x.StoreId == storeId.Value), cancellationToken);
 
@@ -831,10 +839,12 @@ public sealed class CustomerService(
             return;
         }
 
+        var normalizedEmail = NormalizeEmailForComparison(email);
         var exists = await dbContext.Customers
             .AsNoTracking()
             .AnyAsync(x =>
-                x.Email == email &&
+                x.Email != null &&
+                x.Email.ToLower() == normalizedEmail &&
                 x.Id != customerId &&
                 (!storeId.HasValue || x.StoreId == storeId.Value), cancellationToken);
 
@@ -968,6 +978,28 @@ public sealed class CustomerService(
     {
         var normalized = value?.Trim();
         return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
+    private static string NormalizePhoneForComparison(string? phone)
+    {
+        if (string.IsNullOrWhiteSpace(phone))
+        {
+            return string.Empty;
+        }
+
+        return phone
+            .Trim()
+            .Replace(" ", string.Empty, StringComparison.Ordinal)
+            .Replace("-", string.Empty, StringComparison.Ordinal)
+            .Replace("(", string.Empty, StringComparison.Ordinal)
+            .Replace(")", string.Empty, StringComparison.Ordinal)
+            .Replace(".", string.Empty, StringComparison.Ordinal)
+            .Replace("+", string.Empty, StringComparison.Ordinal);
+    }
+
+    private static string NormalizeEmailForComparison(string? email)
+    {
+        return email?.Trim().ToLower() ?? string.Empty;
     }
 
     private static decimal NormalizeDiscountPercent(decimal value)
