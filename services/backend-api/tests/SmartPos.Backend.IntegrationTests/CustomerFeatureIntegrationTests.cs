@@ -88,6 +88,83 @@ public sealed class CustomerFeatureIntegrationTests
     }
 
     [Fact]
+    public async Task CreateCustomer_ShouldRejectDuplicatePhoneAndEmailRegardlessOfFormatting()
+    {
+        using var appFactory = new CustomWebApplicationFactory();
+        using var client = appFactory.CreateClient();
+        await TestAuth.SignInAsManagerAsync(client);
+
+        const string canonicalPhone = "94771234567";
+        const string canonicalEmail = "customer.quick.add@example.com";
+
+        var firstResponse = await client.PostAsJsonAsync("/api/customers", new
+        {
+            name = "Customer One",
+            code = (string?)null,
+            id_number = "NIC-QA-101",
+            phone = "+94 77 123 4567",
+            email = canonicalEmail,
+            address = "Colombo",
+            date_of_birth = (DateOnly?)null,
+            price_tier_id = (Guid?)null,
+            fixed_discount_percent = (decimal?)null,
+            credit_limit = 1000m,
+            notes = "first customer",
+            tags = Array.Empty<string>(),
+            is_active = true
+        });
+        firstResponse.EnsureSuccessStatusCode();
+
+        var duplicatePhoneResponse = await client.PostAsJsonAsync("/api/customers", new
+        {
+            name = "Customer Two",
+            code = (string?)null,
+            id_number = "NIC-QA-102",
+            phone = canonicalPhone,
+            email = "phone-format@example.com",
+            address = "Kandy",
+            date_of_birth = (DateOnly?)null,
+            price_tier_id = (Guid?)null,
+            fixed_discount_percent = (decimal?)null,
+            credit_limit = 1000m,
+            notes = "duplicate phone",
+            tags = Array.Empty<string>(),
+            is_active = true
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, duplicatePhoneResponse.StatusCode);
+        var duplicatePhoneError = await duplicatePhoneResponse.Content.ReadFromJsonAsync<JsonObject>()
+            ?? throw new InvalidOperationException("Expected duplicate phone formatting error payload.");
+        Assert.Equal(
+            "A customer with this phone number already exists.",
+            TestJson.GetString(duplicatePhoneError, "message"));
+
+        var duplicateEmailResponse = await client.PostAsJsonAsync("/api/customers", new
+        {
+            name = "Customer Three",
+            code = (string?)null,
+            id_number = "NIC-QA-103",
+            phone = "+94 77 765 4321",
+            email = "CUSTOMER.QUICK.ADD@EXAMPLE.COM",
+            address = "Galle",
+            date_of_birth = (DateOnly?)null,
+            price_tier_id = (Guid?)null,
+            fixed_discount_percent = (decimal?)null,
+            credit_limit = 1000m,
+            notes = "duplicate email",
+            tags = Array.Empty<string>(),
+            is_active = true
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, duplicateEmailResponse.StatusCode);
+        var duplicateEmailError = await duplicateEmailResponse.Content.ReadFromJsonAsync<JsonObject>()
+            ?? throw new InvalidOperationException("Expected duplicate email formatting error payload.");
+        Assert.Equal(
+            "A customer with this email address already exists.",
+            TestJson.GetString(duplicateEmailError, "message"));
+    }
+
+    [Fact]
     public async Task UpdateCustomer_ShouldRejectDuplicatePhoneAndEmail()
     {
         using var appFactory = new CustomWebApplicationFactory();
