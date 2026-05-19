@@ -1,10 +1,12 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import CatalogueTab from "./CatalogueTab";
 import {
   fetchBrands,
   fetchCategories,
   fetchProductCatalogItems,
+  hardDeleteBrand,
+  updateBrand,
   updateProduct,
   type Brand,
   type Product,
@@ -22,6 +24,10 @@ vi.mock("@/components/ui/tabs", () => ({
   TabsList: ({ children }: { children: unknown }) => <div>{children}</div>,
   TabsTrigger: ({ children }: { children: unknown }) => <button type="button">{children}</button>,
   TabsContent: ({ children }: { children: unknown }) => <div>{children}</div>,
+}));
+
+vi.mock("@/components/import/BulkImportDialog", () => ({
+  default: () => null,
 }));
 
 vi.mock("@/lib/api", async () => {
@@ -58,6 +64,20 @@ const brand = {
   created_at: "2026-05-03T00:00:00.000Z",
   updatedAt: null,
   updated_at: null,
+} as Brand;
+
+const unusedBrand = {
+  ...brand,
+  id: "brand-2",
+  brand_id: "brand-2",
+  name: "Unused Brand",
+  code: "UB",
+  productCount: 0,
+  product_count: 0,
+  can_delete: true,
+  delete_block_reason: null,
+  isActive: true,
+  is_active: true,
 } as Brand;
 
 const product = {
@@ -119,7 +139,7 @@ describe("CatalogueTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(fetchCategories).mockResolvedValue([]);
-    vi.mocked(fetchBrands).mockResolvedValue([brand]);
+    vi.mocked(fetchBrands).mockResolvedValue([brand, unusedBrand]);
     vi.mocked(fetchProductCatalogItems).mockResolvedValue([product]);
     vi.mocked(updateProduct).mockResolvedValue({ ...product, isActive: false, is_active: false });
   });
@@ -146,6 +166,52 @@ describe("CatalogueTab", () => {
           is_active: false,
         }),
       );
+    });
+  });
+
+  it("deactivates an unused brand and allows deleting it afterwards", async () => {
+    vi.mocked(fetchBrands)
+      .mockResolvedValueOnce([brand, unusedBrand])
+      .mockResolvedValueOnce([
+        brand,
+        { ...unusedBrand, isActive: false, is_active: false },
+      ])
+      .mockResolvedValueOnce([brand]);
+    vi.mocked(updateBrand).mockResolvedValue({ ...unusedBrand, isActive: false, is_active: false });
+    vi.mocked(hardDeleteBrand).mockResolvedValue(undefined);
+
+    render(<CatalogueTab />);
+
+    expect(await screen.findByText("Unused Brand")).toBeInTheDocument();
+
+    const brandRow = screen.getByText("Unused Brand").closest("tr");
+    expect(brandRow).not.toBeNull();
+
+    fireEvent.click(within(brandRow!).getByRole("button", { name: "Deactivate" }));
+
+    const confirmDialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(confirmDialog).getByRole("button", { name: "Deactivate" }));
+
+    await waitFor(() => {
+      expect(updateBrand).toHaveBeenCalledWith(
+        "brand-2",
+        expect.objectContaining({
+          is_active: false,
+        }),
+      );
+    });
+
+    const inactiveBrandRow = screen.getByText("Unused Brand").closest("tr");
+    expect(inactiveBrandRow).not.toBeNull();
+    expect(within(inactiveBrandRow!).getByText("Inactive")).toBeInTheDocument();
+
+    fireEvent.click(within(inactiveBrandRow!).getByRole("button", { name: "Delete" }));
+
+    const deleteDialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(deleteDialog).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(hardDeleteBrand).toHaveBeenCalledWith("brand-2");
     });
   });
 });

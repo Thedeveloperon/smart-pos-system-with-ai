@@ -708,6 +708,19 @@ public sealed class InventoryManagerOverviewEndpointTests(CustomWebApplicationFa
         Assert.Equal(string.Empty, TestJson.GetString(orphanedMovement, "product_name"));
     }
 
+    [Fact]
+    public async Task InventoryMovements_ShouldRejectAnInvalidDateRange()
+    {
+        await TestAuth.SignInAsOwnerAsync(client);
+
+        var response = await client.GetAsync("/api/inventory/movements?from_date=2026-05-10&to_date=2026-05-01");
+
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<JsonObject>()
+            ?? throw new InvalidOperationException("Expected invalid range payload.");
+        Assert.Contains("from_date must be on or before to_date", TestJson.GetString(payload, "message"), StringComparison.OrdinalIgnoreCase);
+    }
+
     private async Task EnsureNoInProgressStocktakeSessionsAsync()
     {
         using var scope = factory.Services.CreateScope();

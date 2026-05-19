@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { Boxes } from "lucide-react";
 import {
   createProductBatch,
+  fetchExpiringBatches,
   fetchProductBatches,
   fetchProductCatalogItems,
   fetchSuppliers,
@@ -47,13 +48,18 @@ const empty: FormState = {
   supplier_id: "",
 };
 
+const EXPIRY_WINDOW_DAYS = 30;
+
 export default function BatchesTab() {
   const [products, setProducts] = useState<CatalogProduct[]>([]);
   const [productId, setProductId] = useState("");
   const [batches, setBatches] = useState<ProductBatch[]>([]);
+  const [expiringBatchIds, setExpiringBatchIds] = useState<Set<string>>(new Set());
   const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingExpiring, setLoadingExpiring] = useState(false);
   const [loadingSuppliers, setLoadingSuppliers] = useState(false);
+  const [view, setView] = useState<"all" | "expiring">("all");
 
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -107,6 +113,41 @@ export default function BatchesTab() {
   }, [productId]);
 
   useEffect(() => {
+    if (!productId || view !== "expiring") {
+      setExpiringBatchIds(new Set());
+      setLoadingExpiring(false);
+      return;
+    }
+
+    let alive = true;
+    setLoadingExpiring(true);
+    fetchExpiringBatches(EXPIRY_WINDOW_DAYS)
+      .then((items) => {
+        if (!alive) {
+          return;
+        }
+
+        setExpiringBatchIds(
+          new Set(items.filter((item) => item.product_id === productId).map((item) => item.batch_id)),
+        );
+      })
+      .catch((error) => {
+        if (alive) {
+          toast.error(error instanceof Error ? error.message : "Failed to load expiring batches.");
+        }
+      })
+      .finally(() => {
+        if (alive) {
+          setLoadingExpiring(false);
+        }
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [productId, view]);
+
+  useEffect(() => {
     if (!open) return;
     let alive = true;
     setLoadingSuppliers(true);
@@ -150,6 +191,11 @@ export default function BatchesTab() {
     setOpen(true);
   };
 
+  const visibleBatches =
+    view === "expiring"
+      ? batches.filter((batch) => expiringBatchIds.has(batch.id))
+      : batches;
+
   const save = async () => {
     const trimmed = form.batch_number.trim();
     const isDuplicate = batches.some(
@@ -179,6 +225,7 @@ export default function BatchesTab() {
         await createProductBatch(productId, payload);
       }
       setBatches(await fetchProductBatches(productId));
+      setExpiringBatchIds(new Set());
       notifyInventoryRefresh();
       setOpen(false);
     } catch (error) {
@@ -193,8 +240,21 @@ export default function BatchesTab() {
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle className="text-base">Product batches</CardTitle>
         <div className="flex items-center gap-2">
+          <Select
+            value={view}
+            onValueChange={(value) => setView(value as "all" | "expiring")}
+          >
+            <SelectTrigger className="w-[180px]" aria-label="Batch view">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All batches</SelectItem>
+              <SelectItem value="expiring">Expiring soon</SelectItem>
+            </SelectContent>
+          </Select>
+
           <Select value={productId} onValueChange={setProductId}>
-            <SelectTrigger className="w-[240px]">
+            <SelectTrigger className="w-[240px]" aria-label="Product selector">
               <SelectValue placeholder="Select product" />
             </SelectTrigger>
             <SelectContent>
@@ -300,10 +360,18 @@ export default function BatchesTab() {
               <Skeleton key={i} className="h-10" />
             ))}
           </div>
-        ) : batches.length === 0 ? (
+        ) : loadingExpiring ? (
+          <div className="space-y-2">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Skeleton key={i} className="h-10" />
+            ))}
+          </div>
+        ) : visibleBatches.length === 0 ? (
           <div className="py-12 text-center text-muted-foreground">
             <Boxes className="mx-auto mb-2 h-8 w-8 opacity-50" />
-            No batches for this product.
+            {view === "expiring"
+              ? "No expiring batches for this product."
+              : "No batches for this product."}
           </div>
         ) : (
           <Table>
@@ -319,7 +387,7 @@ export default function BatchesTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {batches.map((batch) => (
+              {visibleBatches.map((batch) => (
                 <TableRow key={batch.id}>
                   <TableCell className="font-mono text-xs">{batch.batch_number}</TableCell>
                   <TableCell>{batch.manufacture_date ? new Date(batch.manufacture_date).toLocaleDateString() : "-"}</TableCell>

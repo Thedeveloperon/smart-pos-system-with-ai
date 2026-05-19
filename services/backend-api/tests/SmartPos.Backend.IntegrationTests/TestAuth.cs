@@ -139,14 +139,15 @@ internal static class TestAuth
     {
         var statusResponse = await client.GetAsync(
             $"/api/license/status?device_code={Uri.EscapeDataString(DeviceCode)}");
-        statusResponse.EnsureSuccessStatusCode();
-
-        var statusPayload = await statusResponse.Content.ReadFromJsonAsync<JsonObject>();
-        var state = statusPayload?["state"]?.GetValue<string>();
-        if (string.Equals(state, "active", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(state, "grace", StringComparison.OrdinalIgnoreCase))
+        if (statusResponse.IsSuccessStatusCode)
         {
-            return;
+            var statusPayload = await statusResponse.Content.ReadFromJsonAsync<JsonObject>();
+            var state = statusPayload?["state"]?.GetValue<string>();
+            if (string.Equals(state, "active", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(state, "grace", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
         }
 
         var clientContext = ResolveClientContext(client);

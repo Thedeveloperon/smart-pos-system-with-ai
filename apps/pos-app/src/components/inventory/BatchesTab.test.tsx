@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import BatchesTab from "./BatchesTab";
 import {
   createProductBatch,
+  fetchExpiringBatches,
   fetchProductBatches,
   fetchProductCatalogItems,
   fetchSuppliers,
@@ -18,6 +19,7 @@ vi.mock("@/lib/api", async () => {
     ...actual,
     fetchProductCatalogItems: vi.fn(),
     fetchProductBatches: vi.fn(),
+    fetchExpiringBatches: vi.fn(),
     fetchSuppliers: vi.fn(),
     createProductBatch: vi.fn(),
     updateProductBatch: vi.fn(),
@@ -75,6 +77,17 @@ describe("BatchesTab", () => {
     vi.clearAllMocks();
     vi.mocked(fetchProductCatalogItems).mockResolvedValue(mockProducts);
     vi.mocked(fetchProductBatches).mockResolvedValue(existingBatches);
+    vi.mocked(fetchExpiringBatches).mockResolvedValue([
+      {
+        batch_id: "batch-1",
+        product_id: "product-1",
+        product_name: "Test Product",
+        batch_number: "Batch0123",
+        expiry_date: "2026-02-01T00:00:00.000Z",
+        remaining_quantity: 50,
+        days_until_expiry: 10,
+      },
+    ]);
     vi.mocked(fetchSuppliers).mockResolvedValue([]);
   });
 
@@ -163,5 +176,40 @@ describe("BatchesTab", () => {
     expect(refreshHandler).toHaveBeenCalledTimes(1);
 
     window.removeEventListener(INVENTORY_REFRESH_EVENT, refreshHandler);
+  });
+
+  it("shows only expiring batches when the expiring soon filter is selected", async () => {
+    vi.mocked(fetchProductBatches).mockResolvedValue([
+      existingBatches[0],
+      {
+        id: "batch-2",
+        product_id: "product-1",
+        batch_number: "FreshBatch",
+        initial_quantity: 25,
+        remaining_quantity: 25,
+        cost_price: 6,
+        received_at: "2026-01-01T00:00:00.000Z",
+        expiry_date: "2027-01-01T00:00:00.000Z",
+      },
+    ]);
+
+    render(<BatchesTab />);
+
+    await waitFor(() => {
+      expect(fetchProductBatches).toHaveBeenCalledWith("product-1");
+    });
+
+    expect(await screen.findByText("Batch0123")).toBeInTheDocument();
+    expect(screen.getByText("FreshBatch")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Batch view" }));
+    fireEvent.click(await screen.findByText("Expiring soon"));
+
+    await waitFor(() => {
+      expect(fetchExpiringBatches).toHaveBeenCalledWith(30);
+    });
+
+    expect(screen.getByText("Batch0123")).toBeInTheDocument();
+    expect(screen.queryByText("FreshBatch")).not.toBeInTheDocument();
   });
 });
