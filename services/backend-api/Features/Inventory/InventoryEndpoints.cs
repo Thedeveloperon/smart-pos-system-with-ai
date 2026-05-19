@@ -123,6 +123,11 @@ public static class InventoryEndpoints
             SmartPosDbContext dbContext,
             CancellationToken cancellationToken) =>
         {
+            if (from_date.HasValue && to_date.HasValue && from_date.Value > to_date.Value)
+            {
+                return Results.BadRequest(new { message = "from_date must be on or before to_date." });
+            }
+
             var currentStoreId = await user.GetRequiredStoreIdAsync(dbContext, cancellationToken);
             var normalizedPage = Math.Max(1, page ?? 1);
             var normalizedTake = Math.Clamp(take ?? 20, 1, 100);

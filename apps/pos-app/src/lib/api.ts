@@ -562,7 +562,7 @@ export type CreateBrandRequest = {
   name: string;
   code?: string | null;
   description?: string | null;
-  isActive?: boolean;
+  is_active?: boolean;
 };
 
 type BackendShopStockSettings = {
@@ -3521,6 +3521,7 @@ export type UpdateServiceRequest = {
   description?: string | null;
   category_id?: string | null;
   duration_minutes?: number | null;
+  is_active?: boolean | null;
 };
 
 export async function createService(requestBody: CreateServiceRequest): Promise<Service> {
@@ -3549,6 +3550,7 @@ export async function updateService(serviceId: string, requestBody: UpdateServic
       description: normalizeOptionalString(requestBody.description),
       category_id: requestBody.category_id ?? null,
       duration_minutes: requestBody.duration_minutes ?? null,
+      is_active: requestBody.is_active ?? null,
     }),
   });
 
@@ -3971,7 +3973,7 @@ export async function createBrand(requestBody: CreateBrandRequest) {
       name: requestBody.name,
       code: normalizeOptionalString(requestBody.code),
       description: normalizeOptionalString(requestBody.description),
-      is_active: requestBody.isActive ?? true,
+      is_active: requestBody.is_active ?? true,
     }),
   });
 
@@ -3985,7 +3987,7 @@ export async function updateBrand(brandId: string, requestBody: CreateBrandReque
       name: requestBody.name,
       code: normalizeOptionalString(requestBody.code),
       description: normalizeOptionalString(requestBody.description),
-      is_active: requestBody.isActive ?? true,
+      is_active: requestBody.is_active ?? true,
     }),
   });
 

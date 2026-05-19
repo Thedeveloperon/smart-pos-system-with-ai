@@ -247,6 +247,9 @@ describe("ReceiveGoodsSheet", () => {
     fireEvent.change(within(batchDialog).getByLabelText("Batch number"), {
       target: { value: "BATCH-0001" },
     });
+    fireEvent.change(within(batchDialog).getByLabelText("Manufacture date"), {
+      target: { value: "2026-01-15" },
+    });
     fireEvent.change(within(batchDialog).getByLabelText("Expiry date"), {
       target: { value: "2026-12-31" },
     });
@@ -265,6 +268,7 @@ describe("ReceiveGoodsSheet", () => {
             product_id: "product-2",
             quantity_received: 3,
             batch_number: "BATCH-0001",
+            manufacture_date: "2026-01-15",
             expiry_date: "2026-12-31",
           }),
         ],

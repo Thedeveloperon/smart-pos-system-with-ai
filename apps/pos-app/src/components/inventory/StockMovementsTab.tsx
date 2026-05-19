@@ -1,7 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { History } from "lucide-react";
-import { fetchStockMovements, type StockMovement } from "@/lib/api";
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsUpDown,
+  Download,
+  History,
+} from "lucide-react";
+import {
+  fetchProductCatalogItems,
+  fetchStockMovements,
+  type CatalogProduct,
+  type StockMovement,
+} from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,6 +21,8 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import StockMovementTypeBadge from "./StockMovementTypeBadge";
 
 const TYPES = [
@@ -22,8 +36,50 @@ const TYPES = [
   "Transfer",
 ];
 
+const PAGE_SIZE = 20;
+
+function formatCsvValue(value: string | number | null | undefined) {
+  const text = value == null ? "" : String(value);
+  if (/[",\n]/.test(text)) {
+    return `"${text.replaceAll('"', '""')}"`;
+  }
+
+  return text;
+}
+
+function toCsv(items: StockMovement[]) {
+  const rows = [
+    [
+      "created_at",
+      "product_name",
+      "movement_type",
+      "quantity_before",
+      "quantity_change",
+      "quantity_after",
+      "reference",
+      "reason",
+      "created_by",
+    ],
+    ...items.map((movement) => [
+      new Date(movement.created_at).toISOString(),
+      movement.product_name,
+      movement.movement_type,
+      movement.quantity_before,
+      movement.quantity_change,
+      movement.quantity_after,
+      movement.reference_id ?? movement.reference_type,
+      movement.reason ?? "",
+      movement.created_by_username ?? movement.created_by_user_id ?? "",
+    ]),
+  ];
+
+  return rows.map((row) => row.map(formatCsvValue).join(",")).join("\n");
+}
+
 export default function StockMovementsTab() {
-  const [productQuery, setProductQuery] = useState("");
+  const [products, setProducts] = useState<CatalogProduct[]>([]);
+  const [productFilterOpen, setProductFilterOpen] = useState(false);
+  const [selectedProductId, setSelectedProductId] = useState("");
   const [type, setType] = useState("all");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -31,24 +87,45 @@ export default function StockMovementsTab() {
   const [items, setItems] = useState<StockMovement[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-
-  const [debouncedQuery, setDebouncedQuery] = useState("");
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedQuery(productQuery), 300);
-    return () => clearTimeout(timer);
-  }, [productQuery]);
+  const [loadingProducts, setLoadingProducts] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const params = useMemo(
     () => ({
-      product_id: debouncedQuery || undefined,
+      product_id: selectedProductId || undefined,
       movement_type: type,
       from_date: from || undefined,
       to_date: to || undefined,
       page,
-      take: 20,
+      take: PAGE_SIZE,
     }),
-    [debouncedQuery, type, from, to, page],
+    [selectedProductId, type, from, to, page],
   );
+
+  useEffect(() => {
+    let alive = true;
+    setLoadingProducts(true);
+    fetchProductCatalogItems(200, true)
+      .then((rows) => {
+        if (alive) {
+          setProducts(rows);
+        }
+      })
+      .catch((error) => {
+        if (alive) {
+          toast.error(error instanceof Error ? error.message : "Failed to load products.");
+        }
+      })
+      .finally(() => {
+        if (alive) {
+          setLoadingProducts(false);
+        }
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -59,7 +136,7 @@ export default function StockMovementsTab() {
           return;
         }
         setTotal(res.total);
-        setItems((prev) => (page === 1 ? res.items : [...prev, ...res.items]));
+        setItems(res.items);
       })
       .catch((error) => {
         if (alive) {
@@ -75,27 +152,141 @@ export default function StockMovementsTab() {
     return () => {
       alive = false;
     };
-  }, [params, page]);
+  }, [params]);
 
-  useEffect(() => {
+  const selectedProduct = useMemo(
+    () => products.find((product) => product.id === selectedProductId) ?? null,
+    [products, selectedProductId],
+  );
+
+  const setFromDate = (value: string) => {
+    if (value && to && new Date(value).getTime() > new Date(to).getTime()) {
+      toast.error("From date cannot be after To date.");
+      return;
+    }
+
+    setFrom(value);
     setPage(1);
-  }, [debouncedQuery, type, from, to]);
+  };
+
+  const setToDate = (value: string) => {
+    if (value && from && new Date(value).getTime() < new Date(from).getTime()) {
+      toast.error("To date cannot be before From date.");
+      return;
+    }
+
+    setTo(value);
+    setPage(1);
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const exported: StockMovement[] = [];
+      let currentPage = 1;
+      let totalPages = 1;
+
+      do {
+        const response = await fetchStockMovements({
+          product_id: selectedProductId || undefined,
+          movement_type: type,
+          from_date: from || undefined,
+          to_date: to || undefined,
+          page: currentPage,
+          take: 100,
+        });
+
+        exported.push(...response.items);
+        totalPages = Math.max(1, Math.ceil(response.total / response.take));
+        currentPage += 1;
+      } while (currentPage <= totalPages);
+
+      const blob = new Blob([toCsv(exported)], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "stock-movements.csv";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to export stock movements.");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const hasPreviousPage = page > 1;
+  const hasNextPage = page * PAGE_SIZE < total;
 
   return (
     <div className="space-y-4">
       <Card>
-        <CardContent className="grid gap-4 pt-6 md:grid-cols-4">
+        <CardContent className="grid gap-4 pt-6 md:grid-cols-5">
           <div className="space-y-1">
             <Label>Product</Label>
-            <Input
-              placeholder="Search by name..."
-              value={productQuery}
-              onChange={(e) => setProductQuery(e.target.value)}
-            />
+            <Popover open={productFilterOpen} onOpenChange={setProductFilterOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full justify-between font-normal"
+                  disabled={loadingProducts}
+                >
+                  <span className="truncate">
+                    {loadingProducts ? "Loading products..." : selectedProduct?.name ?? "All products"}
+                  </span>
+                  <ChevronsUpDown className="h-4 w-4 opacity-60" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-[min(92vw,26rem)] p-0">
+                <Command>
+                  <CommandInput placeholder="Search product..." />
+                  <CommandList>
+                    <CommandEmpty>No product found.</CommandEmpty>
+                    <CommandGroup>
+                      <CommandItem
+                        value="all products"
+                        onSelect={() => {
+                          setSelectedProductId("");
+                          setProductFilterOpen(false);
+                          setPage(1);
+                        }}
+                      >
+                        <Check className={`mr-2 h-4 w-4 ${selectedProductId === "" ? "opacity-100" : "opacity-0"}`} />
+                        All products
+                      </CommandItem>
+                      {products.map((product) => (
+                        <CommandItem
+                          key={product.id}
+                          value={`${product.name} ${product.sku}`}
+                          onSelect={() => {
+                            setSelectedProductId(product.id);
+                            setProductFilterOpen(false);
+                            setPage(1);
+                          }}
+                        >
+                          <Check className={`mr-2 h-4 w-4 ${selectedProductId === product.id ? "opacity-100" : "opacity-0"}`} />
+                          <span className="truncate">{product.name}</span>
+                          <span className="ml-2 text-xs text-muted-foreground">{product.sku}</span>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
           </div>
           <div className="space-y-1">
             <Label>Type</Label>
-            <Select value={type} onValueChange={setType}>
+            <Select
+              value={type}
+              onValueChange={(value) => {
+                setType(value);
+                setPage(1);
+              }}
+            >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -109,12 +300,34 @@ export default function StockMovementsTab() {
             </Select>
           </div>
           <div className="space-y-1">
-            <Label>From</Label>
-            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+            <Label htmlFor="stock-movements-from-date">From</Label>
+            <Input
+              id="stock-movements-from-date"
+              type="date"
+              value={from}
+              onChange={(e) => setFromDate(e.target.value)}
+            />
           </div>
           <div className="space-y-1">
-            <Label>To</Label>
-            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+            <Label htmlFor="stock-movements-to-date">To</Label>
+            <Input
+              id="stock-movements-to-date"
+              type="date"
+              value={to}
+              onChange={(e) => setToDate(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label>Actions</Label>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleExport}
+              disabled={exporting || loading || items.length === 0}
+            >
+              <Download className="mr-2 h-4 w-4" />
+              {exporting ? "Exporting..." : "Export CSV"}
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -179,13 +392,27 @@ export default function StockMovementsTab() {
                   ))}
                 </TableBody>
               </Table>
-              {items.length < total && (
-                <div className="mt-4 flex justify-center">
-                  <Button variant="outline" onClick={() => setPage((current) => current + 1)} disabled={loading}>
-                    {loading ? "Loading..." : "Load more"}
-                  </Button>
-                </div>
-              )}
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                  disabled={loading || !hasPreviousPage}
+                >
+                  <ChevronLeft className="mr-2 h-4 w-4" />
+                  Previous page
+                </Button>
+                <span className="text-sm text-muted-foreground">Page {page}</span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setPage((current) => current + 1)}
+                  disabled={loading || !hasNextPage}
+                >
+                  Next page
+                  <ChevronRight className="ml-2 h-4 w-4" />
+                </Button>
+              </div>
             </>
           )}
         </CardContent>
