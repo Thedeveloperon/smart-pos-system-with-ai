@@ -1,7 +1,17 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\User\\\\Desktop\\\\smart-pos-system-with-ai-main\" -Directory)",
+      "Bash(Select-Object Name)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\User\\\\Desktop\\\\smart-pos-system-with-ai-main\" -Directory -Force)",
+      "Bash(xargs grep -l -i \"license\")",
+      "Bash(grep -E \"\\\\.\\(env|json\\)$\")",
+      "Bash(xargs grep -l \"license/account\")",
+      "Bash(xargs grep -l \"LicenseErrorCodes\\\\|LicenseState\\\\|ProvisionedDeviceStatus\")",
+      "Bash(npx tsc *)",
+      "Bash(node_modules\\\\.bin\\\\tsc --noEmit)",
+      "Bash(./node_modules/.bin/tsc --noEmit)"
     ]
   }
 }

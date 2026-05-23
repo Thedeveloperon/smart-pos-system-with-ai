@@ -24,6 +24,14 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { Button } from "@/components/ui/button";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { PageShell, SectionCard, StatusChip } from "@/components/portal/layout-primitives";
 import { useI18n } from "@/i18n/I18nProvider";
 import { trackMarketingEvent } from "@/lib/marketingAnalytics";
@@ -86,24 +94,36 @@ type AiCreditLedgerResponse = {
 };
 
 type OwnerLicensePortalDeviceRow = {
+  provisioned_device_id: string;
   device_code: string;
   terminal_id?: string | null;
   device_name: string;
+  branch_code?: string;
   device_status: string;
   license_state: string;
   assigned_at: string;
   last_heartbeat_at?: string | null;
-  is_current_device?: boolean;
+  valid_until?: string | null;
+  grace_until?: string | null;
 };
 
 type OwnerLicensePortalResponse = {
+  shop_id: string;
   shop_code: string;
+  shop_name: string;
+  plan: string;
+  subscription_status: string;
+  seat_limit: number;
+  active_seats: number;
+  self_service_deactivation_limit_per_day: number;
+  self_service_deactivations_used_today: number;
+  self_service_deactivations_remaining_today: number;
+  can_deactivate_more_devices_today: boolean;
   latest_activation_entitlement?: {
     activation_entitlement_key: string;
     issued_at: string;
     expires_at: string;
   } | null;
-  can_deactivate_more_devices_today?: boolean;
   devices: OwnerLicensePortalDeviceRow[];
 };
 
@@ -463,6 +483,52 @@ const ownerPurchaseFallbackRows: CloudPurchaseRow[] = [
   },
 ];
 
+// TODO: Remove MOCK_LICENSE_PORTAL once backend confirmed live
+const MOCK_LICENSE_PORTAL: OwnerLicensePortalResponse = {
+  shop_id: "shop-001",
+  shop_code: "SHOP-DOWNTOWN",
+  shop_name: "Downtown Café",
+  plan: "starter",
+  subscription_status: "active",
+  seat_limit: 5,
+  active_seats: 2,
+  self_service_deactivation_limit_per_day: 2,
+  self_service_deactivations_used_today: 0,
+  self_service_deactivations_remaining_today: 2,
+  can_deactivate_more_devices_today: true,
+  latest_activation_entitlement: {
+    activation_entitlement_key: "SPK-DEMO-ABCD-1234-EFGH",
+    issued_at: new Date(Date.now() - 7 * 24 * 3600000).toISOString(),
+    expires_at: new Date(Date.now() + 83 * 24 * 3600000).toISOString(),
+  },
+  devices: [
+    {
+      provisioned_device_id: "dev-001",
+      device_code: "DEV-A1B2",
+      terminal_id: "TRM-001",
+      device_name: "Counter 1",
+      device_status: "active",
+      license_state: "active",
+      assigned_at: new Date(Date.now() - 30 * 24 * 3600000).toISOString(),
+      last_heartbeat_at: new Date(Date.now() - 2 * 60000).toISOString(),
+      valid_until: new Date(Date.now() + 18 * 3600000).toISOString(),
+      grace_until: new Date(Date.now() + (18 + 7 * 24) * 3600000).toISOString(),
+    },
+    {
+      provisioned_device_id: "dev-002",
+      device_code: "DEV-C3D4",
+      terminal_id: "TRM-002",
+      device_name: "Counter 2",
+      device_status: "active",
+      license_state: "grace",
+      assigned_at: new Date(Date.now() - 60 * 24 * 3600000).toISOString(),
+      last_heartbeat_at: new Date(Date.now() - 30 * 60000).toISOString(),
+      valid_until: new Date(Date.now() - 3 * 3600000).toISOString(),
+      grace_until: new Date(Date.now() + 5 * 24 * 3600000).toISOString(),
+    },
+  ],
+};
+
 export default function AccountPage() {
   const { locale } = useI18n();
 
@@ -495,6 +561,9 @@ export default function AccountPage() {
   const [orderingProductCode, setOrderingProductCode] = useState<string | null>(null);
   const [pendingOrderProduct, setPendingOrderProduct] = useState<CloudProductRow | null>(null);
   const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
+  const [deactivatingDeviceCode, setDeactivatingDeviceCode] = useState<string | null>(null);
+  const [deactivateReason, setDeactivateReason] = useState("");
+  const [isDeactivating, setIsDeactivating] = useState(false);
 
   const canPurchase = canManageCommerce(authSession?.role);
   const ownerDisplayName = authSession?.full_name || "Shop Owner";
@@ -1098,78 +1167,283 @@ export default function AccountPage() {
   );
 
   const ownerProvisioningSection = (
-    <div className="space-y-6 max-w-[720px]">
-      <div className="space-y-2">
-        <h1 className="text-4xl font-semibold tracking-tight">POS Provisioning</h1>
-        <p className="text-sm text-muted-foreground">Manage your POS terminal activation and diagnostics.</p>
+    <div className="space-y-6 max-w-[800px]">
+      <div className="flex items-start justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="text-3xl font-semibold tracking-tight">POS Provisioning</h1>
+          <p className="text-sm text-muted-foreground">Manage your POS terminal licenses and connected devices.</p>
+        </div>
+        <Button type="button" variant="outline" size="sm" onClick={() => void handleRefresh()} disabled={isLoadingCommerce}>
+          <RefreshCw className={["h-4 w-4", isLoadingCommerce ? "animate-spin" : ""].join(" ")} />
+          Sync Portal
+        </Button>
       </div>
 
+      {/* Card 1 — Subscription Summary */}
       <SectionCard className="rounded-[16px] p-6 shadow-sm">
         <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <KeyRound className="h-4 w-4" />
-            <h2 className="text-lg font-semibold">Activation Key</h2>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-lg font-semibold">{licensePortal?.shop_name ?? "—"}</p>
+              <p className="text-sm text-muted-foreground font-mono">{licensePortal?.shop_code ?? "—"}</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Plan badge */}
+              <span
+                className={[
+                  "inline-flex rounded-full border px-3 py-0.5 text-xs font-semibold capitalize",
+                  licensePortal?.plan === "pro"
+                    ? "border-indigo-200 bg-indigo-50 text-indigo-700"
+                    : licensePortal?.plan === "growth"
+                      ? "border-purple-200 bg-purple-50 text-purple-700"
+                      : licensePortal?.plan === "starter"
+                        ? "border-blue-200 bg-blue-50 text-blue-700"
+                        : "border-slate-200 bg-slate-50 text-slate-600",
+                ].join(" ")}
+              >
+                {licensePortal?.plan ?? "Trial"}
+              </span>
+              {/* Subscription status badge */}
+              <span
+                className={[
+                  "inline-flex rounded-full border px-3 py-0.5 text-xs font-semibold capitalize",
+                  licensePortal?.subscription_status === "active"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : licensePortal?.subscription_status === "trialing"
+                      ? "border-blue-200 bg-blue-50 text-blue-700"
+                      : licensePortal?.subscription_status === "suspended"
+                        ? "border-orange-200 bg-orange-50 text-orange-700"
+                        : "border-red-200 bg-red-50 text-red-700",
+                ].join(" ")}
+              >
+                {licensePortal?.subscription_status ?? "Unknown"}
+              </span>
+            </div>
           </div>
 
-          <div className="rounded-xl bg-slate-50 px-4 py-5">
-            <p className="text-sm text-muted-foreground">Current Activation Key</p>
-            <p className="mt-1 font-mono text-lg font-semibold tracking-[0.12em]">
-              {licensePortal?.latest_activation_entitlement?.activation_entitlement_key
-                ? `XXXX-XXXX-XXXX-${licensePortal.latest_activation_entitlement.activation_entitlement_key.slice(-4)}`
-                : "XXXX-XXXX-XXXX-7A3F"}
-            </p>
+          {/* Seat usage */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Seats used</span>
+              <span className="font-medium">
+                {licensePortal?.active_seats ?? 0} / {licensePortal?.seat_limit ?? 0}
+              </span>
+            </div>
+            <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+              <div
+                className={[
+                  "h-full rounded-full transition-all",
+                  (licensePortal?.active_seats ?? 0) >= (licensePortal?.seat_limit ?? 1)
+                    ? "bg-red-400"
+                    : (licensePortal?.active_seats ?? 0) / (licensePortal?.seat_limit ?? 1) >= 0.8
+                      ? "bg-amber-400"
+                      : "bg-emerald-400",
+                ].join(" ")}
+                style={{
+                  width: `${Math.min(100, ((licensePortal?.active_seats ?? 0) / Math.max(1, licensePortal?.seat_limit ?? 1)) * 100)}%`,
+                }}
+              />
+            </div>
           </div>
-
-          <Button type="button" variant="outline" onClick={() => void handleRefresh()} disabled={isLoadingCommerce}>
-            <RefreshCw className="h-4 w-4" />
-            Sync Portal
-          </Button>
         </div>
       </SectionCard>
 
+      {/* Card 2 — Activation Key */}
       <SectionCard className="rounded-[16px] p-6 shadow-sm">
         <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <Monitor className="h-4 w-4" />
-            <h2 className="text-lg font-semibold">Connected Devices</h2>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <KeyRound className="h-4 w-4 text-muted-foreground" />
+              <h2 className="text-base font-semibold">Activation Key</h2>
+            </div>
+            {licensePortal?.latest_activation_entitlement?.expires_at && (
+              <span className="text-xs text-muted-foreground">
+                Expires{" "}
+                {new Date(licensePortal.latest_activation_entitlement.expires_at).toLocaleDateString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                })}
+              </span>
+            )}
+          </div>
+
+          {licensePortal?.latest_activation_entitlement?.activation_entitlement_key ? (
+            <div className="flex items-center gap-3 rounded-xl bg-slate-50 border border-slate-200 px-4 py-4">
+              <p className="flex-1 font-mono text-sm font-semibold tracking-wider break-all">
+                {showActivationKey
+                  ? licensePortal.latest_activation_entitlement.activation_entitlement_key
+                  : licensePortal.latest_activation_entitlement.activation_entitlement_key.replace(/[^-]/g, "X")}
+              </p>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowActivationKey((v) => !v)}
+                  className="flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50 transition"
+                >
+                  {showActivationKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  {showActivationKey ? "Hide" : "Show"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void copyActivationKey()}
+                  className="flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50 transition"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  Copy
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No activation key available — contact support.</p>
+          )}
+        </div>
+      </SectionCard>
+
+      {/* Card 3 — Connected Devices */}
+      <SectionCard className="rounded-[16px] p-6 shadow-sm">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Monitor className="h-4 w-4 text-muted-foreground" />
+              <h2 className="text-base font-semibold">Connected Devices</h2>
+            </div>
+            {licensePortal && (
+              <span className="text-xs text-muted-foreground">
+                {licensePortal.self_service_deactivations_remaining_today} deactivation
+                {licensePortal.self_service_deactivations_remaining_today !== 1 ? "s" : ""} remaining today
+              </span>
+            )}
           </div>
 
           <div className="overflow-hidden rounded-xl border border-border/70">
             {(licensePortal?.devices || []).length === 0 ? (
-              <div className="px-4 py-6 text-sm text-muted-foreground">No connected devices found.</div>
+              <div className="px-4 py-8 text-center text-sm text-muted-foreground">No connected devices found.</div>
             ) : (
-              <div className="divide-y divide-border/70">
-                {licensePortal.devices.map((device, index) => {
-                  const isOnline = device.device_status.toLowerCase() === "active";
-                  return (
-                    <div key={`${device.device_code}-${index}`} className="flex items-center justify-between gap-4 px-4 py-4">
-                      <div className="min-w-0">
-                        <p className="font-medium">{device.device_name}</p>
-                        <p className="font-mono text-xs text-muted-foreground">
-                          Terminal ID: {device.terminal_id || device.device_code}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          Last seen: {formatRelativeTime(device.last_heartbeat_at || device.assigned_at)}
-                        </p>
-                      </div>
-                      <span
-                        className={[
-                          "inline-flex rounded-md border px-3 py-1 text-xs font-medium",
-                          isOnline
-                            ? "border-emerald-200 bg-emerald-100 text-emerald-700"
-                            : "border-slate-200 bg-slate-100 text-slate-500",
-                        ].join(" ")}
-                      >
-                        {isOnline ? "Online" : "Offline"}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border/70 bg-slate-50">
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Device</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Terminal ID</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">License</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Last Heartbeat</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-medium text-muted-foreground">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/70">
+                  {licensePortal!.devices.map((device) => {
+                    const state = device.license_state.toLowerCase();
+                    const canDeactivate =
+                      licensePortal!.can_deactivate_more_devices_today &&
+                      device.device_status.toLowerCase() === "active";
+                    return (
+                      <tr key={device.device_code}>
+                        <td className="px-4 py-3">
+                          <p className="font-medium">{device.device_name}</p>
+                          <p className="font-mono text-xs text-muted-foreground">{device.device_code}</p>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="font-mono text-xs">{device.terminal_id ?? device.device_code}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={[
+                              "inline-flex rounded-md border px-2 py-0.5 text-xs font-medium capitalize",
+                              state === "active"
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : state === "grace"
+                                  ? "border-amber-200 bg-amber-50 text-amber-700"
+                                  : state === "suspended"
+                                    ? "border-orange-200 bg-orange-50 text-orange-700"
+                                    : state === "revoked"
+                                      ? "border-red-200 bg-red-50 text-red-700"
+                                      : "border-slate-200 bg-slate-50 text-slate-500",
+                            ].join(" ")}
+                          >
+                            {state === "grace" ? "⚠ Grace" : device.license_state}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-muted-foreground">
+                          {formatRelativeTime(device.last_heartbeat_at ?? device.assigned_at)}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={!canDeactivate}
+                            onClick={() => {
+                              setDeactivatingDeviceCode(device.device_code);
+                              setDeactivateReason("");
+                            }}
+                          >
+                            Deactivate
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             )}
           </div>
         </div>
       </SectionCard>
+
+      {/* Deactivation dialog */}
+      <Dialog
+        open={Boolean(deactivatingDeviceCode)}
+        onOpenChange={(open) => {
+          if (!open && !isDeactivating) {
+            setDeactivatingDeviceCode(null);
+            setDeactivateReason("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Deactivate Device</DialogTitle>
+            <DialogDescription>
+              {(() => {
+                const device = licensePortal?.devices.find((d) => d.device_code === deactivatingDeviceCode);
+                return device
+                  ? `This will revoke the license for ${device.device_name} (${device.terminal_id ?? device.device_code}). The device will need to re-activate with a new key.`
+                  : "This will revoke the license for this device.";
+              })()}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <label className="block text-sm font-medium">Reason (optional)</label>
+            <textarea
+              className="min-h-[64px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+              placeholder="e.g. Hardware replaced, Terminal retired…"
+              value={deactivateReason}
+              onChange={(e) => setDeactivateReason(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={isDeactivating}
+              onClick={() => {
+                setDeactivatingDeviceCode(null);
+                setDeactivateReason("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={isDeactivating}
+              onClick={() => void handleDeactivateDevice()}
+            >
+              {isDeactivating ? "Deactivating…" : "Deactivate"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 
@@ -1404,6 +1678,9 @@ export default function AccountPage() {
 
     if (licensePortalResult.status === "fulfilled") {
       setLicensePortal(licensePortalResult.value);
+    } else {
+      // TODO: Remove mock fallback once backend confirmed live
+      setLicensePortal(MOCK_LICENSE_PORTAL);
     }
 
     setIsLoadingCommerce(false);
@@ -1537,6 +1814,34 @@ export default function AccountPage() {
       setCommerceMessage("Activation key revealed. Copy it manually.");
     }
   }, [licensePortal?.latest_activation_entitlement?.activation_entitlement_key]);
+
+  const handleDeactivateDevice = async () => {
+    if (!deactivatingDeviceCode || isDeactivating) return;
+    setIsDeactivating(true);
+    setCommerceError(null);
+    // TODO: replace with real API call:
+    // POST /api/account/license-portal/devices/{deviceCode}/deactivate
+    await new Promise((r) => setTimeout(r, 600));
+    setLicensePortal((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        active_seats: Math.max(0, prev.active_seats - 1),
+        self_service_deactivations_used_today: prev.self_service_deactivations_used_today + 1,
+        self_service_deactivations_remaining_today: Math.max(0, prev.self_service_deactivations_remaining_today - 1),
+        can_deactivate_more_devices_today: prev.self_service_deactivations_remaining_today > 1,
+        devices: prev.devices.map((d) =>
+          d.device_code === deactivatingDeviceCode
+            ? { ...d, device_status: "revoked", license_state: "revoked" }
+            : d,
+        ),
+      };
+    });
+    setDeactivatingDeviceCode(null);
+    setDeactivateReason("");
+    setIsDeactivating(false);
+    setCommerceMessage("Device deactivated successfully.");
+  };
 
   const closeOrderDialog = useCallback(() => {
     if (isSubmittingPurchase) {
