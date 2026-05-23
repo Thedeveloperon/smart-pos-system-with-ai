@@ -2428,6 +2428,7 @@ async function request<T>(path: string, init: RequestInit = {}, options: Request
   const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
   const terminalId = getAuthTerminalId();
   const licenseToken = getStoredLicenseToken();
+  const shouldAttachLicenseToken = Boolean(licenseToken) && !path.startsWith("/api/provision/activate");
   const method = (init.method || "GET").toUpperCase();
   const isMutation = method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE";
   const isSensitiveMutation = isSensitiveMutationPath(path, method);
@@ -2486,7 +2487,7 @@ async function request<T>(path: string, init: RequestInit = {}, options: Request
         [DEVICE_ID_HEADER]: terminalId,
         [DEVICE_CODE_HEADER]: terminalId,
         [POS_VERSION_HEADER]: POS_CLIENT_VERSION,
-        ...(licenseToken ? { "X-License-Token": licenseToken } : {}),
+        ...(shouldAttachLicenseToken ? { "X-License-Token": licenseToken } : {}),
         ...Object.fromEntries(existingHeaders.entries()),
       },
     });
@@ -3276,10 +3277,38 @@ export async function fetchLicenseStatus() {
     if (error instanceof ApiError && isLicenseTokenRecoveryErrorCode(error.code)) {
       setStoredLicenseToken(null);
 
-      const retryResponse = await request<BackendLicenseStatus>("/api/license/status");
-      const retryStatus = mapLicenseStatus(retryResponse);
-      setStoredLicenseToken(retryStatus.licenseToken);
-      return retryStatus;
+      try {
+        const retryResponse = await request<BackendLicenseStatus>("/api/license/status");
+        const retryStatus = mapLicenseStatus(retryResponse);
+        setStoredLicenseToken(retryStatus.licenseToken);
+        return retryStatus;
+      } catch (retryError) {
+        if (!(retryError instanceof ApiError) || !isLicenseTokenRecoveryErrorCode(retryError.code)) {
+          throw retryError;
+        }
+
+        try {
+          await activateLicense({
+            terminalId: getAuthTerminalId(),
+            actor: "pos-web-ui",
+            reason: "token_replay_recovery",
+          });
+          const recoveredResponse = await request<BackendLicenseStatus>("/api/license/status");
+          const recoveredStatus = mapLicenseStatus(recoveredResponse);
+          setStoredLicenseToken(recoveredStatus.licenseToken);
+          return recoveredStatus;
+        } catch (recoveryError) {
+          if (recoveryError instanceof ApiError && isLicenseTokenRecoveryErrorCode(recoveryError.code)) {
+            throw new ApiError(
+              "License token session could not be recovered automatically. Ask billing admin to reactivate this terminal from Admin > Licenses.",
+              recoveryError.status,
+              recoveryError.code,
+            );
+          }
+
+          throw recoveryError;
+        }
+      }
     }
 
     throw error;

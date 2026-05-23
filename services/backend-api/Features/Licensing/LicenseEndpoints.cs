@@ -1722,7 +1722,7 @@ public static class LicenseEndpoints
         .WithName("AdminDeactivateDevice")
         .WithOpenApi();
 
-        admin.MapPost("/devices/{device_code}/reactivate", [Authorize(Policy = SmartPosPolicies.SuperAdmin)] async (
+        admin.MapPost("/devices/{device_code}/reactivate", [Authorize(Policy = SmartPosPolicies.SupportOrBilling)] async (
             string device_code,
             AdminDeviceActionRequest request,
             HttpContext httpContext,
@@ -1743,7 +1743,7 @@ public static class LicenseEndpoints
         .WithName("AdminReactivateDevice")
         .WithOpenApi();
 
-        admin.MapPost("/devices/{device_code}/activate", [Authorize(Policy = SmartPosPolicies.SuperAdmin)] async (
+        admin.MapPost("/devices/{device_code}/activate", [Authorize(Policy = SmartPosPolicies.SupportOrBilling)] async (
             string device_code,
             AdminDeviceActionRequest request,
             HttpContext httpContext,

@@ -121,4 +121,104 @@ describe("license token replay recovery", () => {
     expect(status.state).toBe("active");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it("runs activation recovery when replay persists after status retry", async () => {
+    window.localStorage.setItem("smartpos-device-code", "device-a");
+    window.localStorage.setItem("smartpos-license-token", "stale-token");
+
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const headers = new Headers(init?.headers ?? {});
+        expect(headers.get("X-License-Token")).toBe("stale-token");
+        return jsonResponse(
+          {
+            error: {
+              code: "TOKEN_REPLAY_DETECTED",
+              message: "license_token jti was rotated or revoked.",
+            },
+          },
+          403
+        );
+      })
+      .mockImplementationOnce(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const headers = new Headers(init?.headers ?? {});
+        expect(headers.get("X-License-Token")).toBeNull();
+        return jsonResponse(
+          {
+            error: {
+              code: "TOKEN_REPLAY_DETECTED",
+              message: "license_token jti was rotated or revoked.",
+            },
+          },
+          403
+        );
+      })
+      .mockImplementationOnce(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const headers = new Headers(init?.headers ?? {});
+        expect(headers.get("X-License-Token")).toBeNull();
+        return jsonResponse(
+          {
+            error: {
+              code: "NOT_FOUND",
+              message: "challenge endpoint not available",
+            },
+          },
+          404
+        );
+      })
+      .mockImplementationOnce(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const headers = new Headers(init?.headers ?? {});
+        expect(headers.get("X-License-Token")).toBeNull();
+        return jsonResponse(activeLicenseStatusPayload);
+      })
+      .mockImplementationOnce(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const headers = new Headers(init?.headers ?? {});
+        expect(headers.get("X-License-Token")).toBe("fresh-token");
+        return jsonResponse(activeLicenseStatusPayload);
+      });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { fetchLicenseStatus } = await import("@/lib/api");
+    const status = await fetchLicenseStatus();
+    expect(status.state).toBe("active");
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+  });
+
+  it("does not forward X-License-Token when activating license", async () => {
+    window.localStorage.setItem("smartpos-device-code", "device-a");
+    window.localStorage.setItem("smartpos-license-token", "stale-token");
+
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const headers = new Headers(init?.headers ?? {});
+        expect(headers.get("X-License-Token")).toBe("stale-token");
+        return jsonResponse(
+          {
+            error: {
+              code: "NOT_FOUND",
+              message: "challenge endpoint not available",
+            },
+          },
+          404
+        );
+      })
+      .mockImplementationOnce(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const headers = new Headers(init?.headers ?? {});
+        expect(headers.get("X-License-Token")).toBeNull();
+        return jsonResponse(activeLicenseStatusPayload);
+      });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { activateLicense } = await import("@/lib/api");
+    const status = await activateLicense({
+      terminalId: "device-a",
+      activationEntitlementKey: "SPK-TEST-1234",
+    });
+    expect(status.state).toBe("active");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });

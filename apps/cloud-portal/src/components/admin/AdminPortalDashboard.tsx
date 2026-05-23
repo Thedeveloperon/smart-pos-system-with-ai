@@ -22,6 +22,7 @@ import CloudProductCatalogPanel from "./CloudProductCatalogPanel";
 import CloudPurchaseQueuePanel from "./CloudPurchaseQueuePanel";
 import AdminShopsPanel from "./AdminShopsPanel";
 import AdminUsersPanel from "./AdminUsersPanel";
+import AdminLicensesPanel from "./AdminLicensesPanel";
 import {
   fetchAdminCloudPurchases,
   fetchAdminCloudProducts,
@@ -40,13 +41,14 @@ type AdminPortalDashboardProps = {
   onSignOut: () => Promise<void>;
 };
 
-type SectionId = "overview" | "catalog" | "purchases" | "shops" | "users";
+type SectionId = "overview" | "catalog" | "purchases" | "shops" | "licenses" | "users";
 
 const navItems: Array<{ id: SectionId; label: string; icon: ElementType }> = [
   { id: "overview", label: "Dashboard", icon: LayoutGrid },
   { id: "catalog", label: "Product Catalog", icon: Package },
   { id: "purchases", label: "Purchase Queue", icon: ShoppingCart },
   { id: "shops", label: "Shops", icon: Store },
+  { id: "licenses", label: "Licenses", icon: Shield },
   { id: "users", label: "Users", icon: Users },
 ];
 
@@ -296,8 +298,30 @@ export default function AdminPortalDashboard({ user, onSignOut }: AdminPortalDas
       case "shops":
         return (
           <div className="space-y-6">
-            <AdminSectionHeader title="Shops Management" subtitle="Manage shop accounts and registrations." />
+            <AdminSectionHeader
+              title="Shops Management"
+              subtitle="Manage shop accounts and registrations."
+              action={
+                <Button variant="outline" onClick={() => setActiveSection("licenses")}>
+                  Open Licenses
+                </Button>
+              }
+            />
             <AdminShopsPanel shops={shops} onShopsChanged={loadDashboard} />
+          </div>
+        );
+      case "licenses":
+        return (
+          <div className="space-y-6">
+            <AdminSectionHeader
+              title="License Operations"
+              subtitle="Review expired/problem device licenses and run recovery actions."
+            />
+            <AdminLicensesPanel
+              shops={shops}
+              canManage={canAccessBillingApprover}
+              onRefresh={loadDashboard}
+            />
           </div>
         );
       case "users":
