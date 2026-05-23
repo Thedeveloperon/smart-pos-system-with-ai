@@ -26,6 +26,9 @@ import {
   adminGenerateOfflineActivationEntitlementBatch,
   fetchAdminLicenseAuditLogs,
   exportAdminLicenseAuditLogs,
+  adminExtendDeviceGrace,
+  runAdminEmergencyAction,
+  adminFraudLockDevice,
 } from "@/lib/adminApi";
 
 // ---------------------------------------------------------------------------
@@ -104,6 +107,15 @@ type GeneratedKey = {
   copied: boolean;
 };
 
+type AdvancedMode = "extend_grace" | "fraud_lock" | "emergency";
+
+type AdvancedDialogState = {
+  open: boolean;
+  deviceCode: string;
+  deviceName: string;
+  shopName: string;
+};
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -138,6 +150,14 @@ export default function AdminLicensesPanel({ shops, canManage, onRefresh }: Admi
   const [isGeneratingKeys, setIsGeneratingKeys] = useState(false);
   const [generatedKeys, setGeneratedKeys] = useState<GeneratedKey[]>([]);
   const [generatedForShop, setGeneratedForShop] = useState("");
+
+  // Advanced Actions dialog state
+  const [advDialog, setAdvDialog] = useState<AdvancedDialogState>({ open: false, deviceCode: "", deviceName: "", shopName: "" });
+  const [advMode, setAdvMode] = useState<AdvancedMode>("extend_grace");
+  const [extendDays, setExtendDays] = useState(3);
+  const [emergencyCommand, setEmergencyCommand] = useState<"lock_device" | "revoke_token" | "force_reauth">("force_reauth");
+  const [advActorNote, setAdvActorNote] = useState("");
+  const [isAdvSubmitting, setIsAdvSubmitting] = useState(false);
 
   // Audit Logs tab state
   const [activeTab, setActiveTab] = useState("devices");
@@ -245,6 +265,46 @@ export default function AdminLicensesPanel({ shops, canManage, onRefresh }: Admi
     setActorNote("");
     setDialogReason("");
     setDialog({ open: true, action, shopId: row.shopId, shopName: row.shopName, deviceCode: row.deviceCode, deviceName: row.deviceName });
+  };
+
+  const openAdvancedDialog = (row: DeviceRow) => {
+    setAdvMode("extend_grace");
+    setExtendDays(3);
+    setEmergencyCommand("force_reauth");
+    setAdvActorNote("");
+    setAdvDialog({ open: true, deviceCode: row.deviceCode, deviceName: row.deviceName, shopName: row.shopName });
+  };
+
+  const closeAdvancedDialog = () => {
+    if (isAdvSubmitting) return;
+    setAdvDialog((prev) => ({ ...prev, open: false }));
+  };
+
+  const handleAdvancedSubmit = async () => {
+    if (!advActorNote.trim()) {
+      toast.error("Actor note is required.");
+      return;
+    }
+    if (isAdvSubmitting) return;
+    setIsAdvSubmitting(true);
+    try {
+      if (advMode === "extend_grace") {
+        await adminExtendDeviceGrace(advDialog.deviceCode, extendDays, advActorNote, "billing-ui");
+        toast.success(`Grace period extended by ${extendDays} day(s) for ${advDialog.deviceCode}.`);
+      } else if (advMode === "fraud_lock") {
+        await adminFraudLockDevice(advDialog.deviceCode, advActorNote, "billing-ui");
+        toast.success(`Fraud lock applied to ${advDialog.deviceCode}.`);
+      } else if (advMode === "emergency") {
+        await runAdminEmergencyAction(advDialog.deviceCode, emergencyCommand, advActorNote, "billing-ui");
+        toast.success(`Emergency command '${emergencyCommand}' executed on ${advDialog.deviceCode}.`);
+      }
+      setAdvDialog((prev) => ({ ...prev, open: false }));
+      await onRefresh();
+    } catch (err) {
+      toast.error(`Action failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setIsAdvSubmitting(false);
+    }
   };
 
   const closeDialog = () => {
@@ -384,6 +444,14 @@ export default function AdminLicensesPanel({ shops, canManage, onRefresh }: Admi
             </Button>
           </>
         )}
+        <Button
+          variant="ghost"
+          size="sm"
+          title="Advanced actions (extend grace, fraud lock, emergency)"
+          onClick={() => openAdvancedDialog(row)}
+        >
+          ···
+        </Button>
       </div>
     );
   }
@@ -905,6 +973,120 @@ export default function AdminLicensesPanel({ shops, canManage, onRefresh }: Admi
               onClick={() => void handleDialogSubmit()}
             >
               {isSubmitting ? "Processing…" : `Confirm ${dialog.action ?? ""}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Advanced Actions Dialog                                             */}
+      {/* ------------------------------------------------------------------ */}
+      <Dialog open={advDialog.open} onOpenChange={(open) => { if (!open) closeAdvancedDialog(); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Advanced Actions</DialogTitle>
+            <DialogDescription>
+              Perform privileged resolution actions on this device.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* Device info */}
+            <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2.5 text-sm space-y-0.5">
+              <p>
+                <span className="text-muted-foreground">Shop: </span>
+                <span className="font-medium">{advDialog.shopName}</span>
+              </p>
+              <p>
+                <span className="text-muted-foreground">Device: </span>
+                <span className="font-medium">{advDialog.deviceName}</span>
+                <span className="ml-1.5 font-mono text-xs text-muted-foreground">({advDialog.deviceCode})</span>
+              </p>
+            </div>
+
+            {/* Action selector */}
+            <div className="space-y-1.5">
+              <Label htmlFor="adv-mode">Action</Label>
+              <select
+                id="adv-mode"
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                value={advMode}
+                onChange={(e) => setAdvMode(e.target.value as AdvancedMode)}
+              >
+                <option value="extend_grace">Extend Grace Period</option>
+                <option value="fraud_lock">Fraud Lock</option>
+                <option value="emergency">Emergency Command</option>
+              </select>
+            </div>
+
+            {/* Mode-specific fields */}
+            {advMode === "extend_grace" && (
+              <div className="space-y-1.5">
+                <Label htmlFor="adv-days">Days to Extend</Label>
+                <Input
+                  id="adv-days"
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={extendDays}
+                  onChange={(e) => setExtendDays(Math.max(1, Math.min(30, parseInt(e.target.value) || 3)))}
+                />
+                <p className="text-xs text-muted-foreground">Max 30 days. Values above 7 require StepUp approval on the backend.</p>
+              </div>
+            )}
+
+            {advMode === "fraud_lock" && (
+              <div className="rounded-lg bg-orange-50 border border-orange-200 px-3 py-2.5 text-sm text-orange-800">
+                This will lock the device against fraudulent use. The device will need manual reactivation to resume.
+              </div>
+            )}
+
+            {advMode === "emergency" && (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="adv-cmd">Command</Label>
+                  <select
+                    id="adv-cmd"
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    value={emergencyCommand}
+                    onChange={(e) => setEmergencyCommand(e.target.value as "lock_device" | "revoke_token" | "force_reauth")}
+                  >
+                    <option value="force_reauth">Force Re-auth (mildest)</option>
+                    <option value="revoke_token">Revoke Token</option>
+                    <option value="lock_device">Lock Device (strongest)</option>
+                  </select>
+                </div>
+                <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2.5 text-sm text-red-800">
+                  Emergency commands take effect immediately on the device.
+                </div>
+              </div>
+            )}
+
+            {/* Actor note */}
+            <div className="space-y-1.5">
+              <Label htmlFor="adv-actor-note">
+                Actor Note <span className="text-red-500">*</span>
+              </Label>
+              <textarea
+                id="adv-actor-note"
+                className="min-h-[72px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+                placeholder="Describe why this action is being taken…"
+                value={advActorNote}
+                onChange={(e) => setAdvActorNote(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="ghost" onClick={closeAdvancedDialog} disabled={isAdvSubmitting}>
+              Cancel
+            </Button>
+            <Button
+              variant={advMode === "fraud_lock" || advMode === "emergency" ? "destructive" : "default"}
+              disabled={isAdvSubmitting || !advActorNote.trim()}
+              onClick={() => void handleAdvancedSubmit()}
+            >
+              {isAdvSubmitting ? "Processing…" : "Confirm Action"}
             </Button>
           </DialogFooter>
         </DialogContent>

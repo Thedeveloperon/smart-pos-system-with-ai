@@ -786,6 +786,12 @@ const IndexInner = () => {
       const paidAmount = paymentMethod === "cash" ? cashReceived || total : total;
       const receiptWindow = window.open("", "_blank", "width=420,height=760");
 
+      if (licenseStatus?.blockedActions?.includes("checkout")) {
+        receiptWindow?.close();
+        toast.error("Checkout is currently blocked — your license requires renewal. Contact your admin.");
+        return;
+      }
+
       try {
         const result = await completeSale(
           cartItems,
@@ -923,6 +929,10 @@ const IndexInner = () => {
   };
 
   const handleRefundRequested = (saleId: string) => {
+    if (licenseStatus?.blockedActions?.includes("refund")) {
+      toast.error("Refunds are currently blocked — your license requires renewal. Contact your admin.");
+      return;
+    }
     setRefundSaleId(saleId);
   };
 

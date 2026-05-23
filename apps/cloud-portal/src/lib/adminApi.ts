@@ -1713,6 +1713,27 @@ export async function runAdminEmergencyAction(
   return executeAdminEmergencyCommand(deviceCode, envelope.envelope_token);
 }
 
+export async function adminFraudLockDevice(
+  deviceCode: string,
+  actorNote: string,
+  actor = "support-ui",
+  reasonCode = "manual_fraud_lock",
+) {
+  return request<AdminDeviceActionResponse>(
+    `/api/admin/licensing/devices/${encodeURIComponent(deviceCode)}/fraud-lock`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        actor,
+        reason_code: reasonCode,
+        actor_note: actorNote,
+        reason: actorNote,
+      }),
+    },
+  );
+}
+
 export async function exportAdminLicenseAuditLogs({
   search,
   action,

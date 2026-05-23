@@ -27,6 +27,12 @@ const LicensingContext = createContext<LicensingContextValue | null>(null);
 const isLicensedState = (status: LicenseStatus | null) => status?.state === "active" || status?.state === "grace";
 const isBlockedState = (status: LicenseStatus | null) => status?.state === "suspended" || status?.state === "revoked";
 
+// Cloud relay outage (503) is transient — treat it like a network error so the cache fallback activates.
+function isTransientLicenseError(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return true;
+  return error.code === "CLOUD_LICENSE_UNREACHABLE";
+}
+
 function toErrorMessage(error: unknown) {
   if (error instanceof ApiError) {
     if (error.code === "CLOUD_LICENSE_UNREACHABLE") {
@@ -90,7 +96,7 @@ export const LicensingProvider = ({ children }: { children: ReactNode }) => {
       applyOnlineStatus(next);
       return next;
     } catch (refreshError) {
-      if (!(refreshError instanceof ApiError)) {
+      if (isTransientLicenseError(refreshError)) {
         const cached = await tryLoadCachedStatus();
         if (cached) {
           return cached;
@@ -128,7 +134,7 @@ export const LicensingProvider = ({ children }: { children: ReactNode }) => {
         return refresh();
       }
 
-      if (!(heartbeatError instanceof ApiError)) {
+      if (isTransientLicenseError(heartbeatError)) {
         return tryLoadCachedStatus();
       }
 
@@ -155,7 +161,7 @@ export const LicensingProvider = ({ children }: { children: ReactNode }) => {
           return;
         }
 
-        if (!(hydrateError instanceof ApiError)) {
+        if (isTransientLicenseError(hydrateError)) {
           const cached = await tryLoadCachedStatus();
           if (cached) {
             return;
