@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Check, Copy, Download, Eye, EyeOff, RefreshCw, Shield, ShieldAlert, ShieldOff, ShieldX } from "lucide-react";
+import { Check, Copy, Download, RefreshCw, Shield, ShieldAlert, ShieldX } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,172 +15,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { AdminShopsLicensingSnapshotResponse } from "@/lib/adminApi";
-
-// ---------------------------------------------------------------------------
-// Mock data — replace with real API calls in the next phase
-// ---------------------------------------------------------------------------
-
-type MockDevice = {
-  device_code: string;
-  device_name: string;
-  device_status: string;
-  license_state: string;
-  valid_until: string | null;
-  grace_until: string | null;
-  last_heartbeat_at: string | null;
-};
-
-type MockShop = {
-  shop_id: string;
-  shop_code: string;
-  shop_name: string;
-  is_active: boolean;
-  devices: MockDevice[];
-};
-
-const INITIAL_MOCK_SHOPS: MockShop[] = [
-  {
-    shop_id: "shop-001",
-    shop_code: "SHOP-DOWNTOWN",
-    shop_name: "Downtown Café",
-    is_active: true,
-    devices: [
-      {
-        device_code: "DEV-A1B2",
-        device_name: "Counter 1",
-        device_status: "active",
-        license_state: "active",
-        valid_until: new Date(Date.now() + 18 * 3600000).toISOString(),
-        grace_until: new Date(Date.now() + (18 + 7 * 24) * 3600000).toISOString(),
-        last_heartbeat_at: new Date(Date.now() - 2 * 60000).toISOString(),
-      },
-      {
-        device_code: "DEV-C3D4",
-        device_name: "Counter 2",
-        device_status: "active",
-        license_state: "grace",
-        valid_until: new Date(Date.now() - 3 * 3600000).toISOString(),
-        grace_until: new Date(Date.now() + 5 * 24 * 3600000).toISOString(),
-        last_heartbeat_at: new Date(Date.now() - 30 * 60000).toISOString(),
-      },
-    ],
-  },
-  {
-    shop_id: "shop-002",
-    shop_code: "SHOP-UPTOWN",
-    shop_name: "Uptown Grill",
-    is_active: true,
-    devices: [
-      {
-        device_code: "DEV-E5F6",
-        device_name: "POS Terminal 1",
-        device_status: "revoked",
-        license_state: "revoked",
-        valid_until: null,
-        grace_until: null,
-        last_heartbeat_at: new Date(Date.now() - 2 * 24 * 3600000).toISOString(),
-      },
-      {
-        device_code: "DEV-G7H8",
-        device_name: "POS Terminal 2",
-        device_status: "active",
-        license_state: "suspended",
-        valid_until: new Date(Date.now() - 13 * 24 * 3600000).toISOString(),
-        grace_until: null,
-        last_heartbeat_at: new Date(Date.now() - 5 * 3600000).toISOString(),
-      },
-    ],
-  },
-  {
-    shop_id: "shop-003",
-    shop_code: "SHOP-EASTSIDE",
-    shop_name: "Eastside Market",
-    is_active: true,
-    devices: [
-      {
-        device_code: "DEV-I9J0",
-        device_name: "Cashier Desk",
-        device_status: "active",
-        license_state: "unprovisioned",
-        valid_until: null,
-        grace_until: null,
-        last_heartbeat_at: null,
-      },
-    ],
-  },
-  {
-    shop_id: "shop-004",
-    shop_code: "SHOP-WESTEND",
-    shop_name: "West End Bakery",
-    is_active: false,
-    devices: [
-      {
-        device_code: "DEV-K1L2",
-        device_name: "Front Counter",
-        device_status: "revoked",
-        license_state: "revoked",
-        valid_until: null,
-        grace_until: null,
-        last_heartbeat_at: new Date(Date.now() - 30 * 24 * 3600000).toISOString(),
-      },
-    ],
-  },
-];
-
-type MockAuditLog = {
-  id: string;
-  created_at: string;
-  shop_code: string;
-  device_code: string;
-  action: string;
-  actor: string;
-  reason: string | null;
-  is_manual_override: boolean;
-};
-
-const MOCK_AUDIT_LOGS: MockAuditLog[] = [
-  {
-    id: "log-1",
-    created_at: new Date(Date.now() - 3600000).toISOString(),
-    shop_code: "SHOP-DOWNTOWN",
-    device_code: "DEV-A1B2",
-    action: "provision_activate",
-    actor: "billing-ui",
-    reason: "Initial setup",
-    is_manual_override: false,
-  },
-  {
-    id: "log-2",
-    created_at: new Date(Date.now() - 7200000).toISOString(),
-    shop_code: "SHOP-UPTOWN",
-    device_code: "DEV-E5F6",
-    action: "provision_deactivate",
-    actor: "support-admin",
-    reason: "Customer request",
-    is_manual_override: true,
-  },
-  {
-    id: "log-3",
-    created_at: new Date(Date.now() - 86400000).toISOString(),
-    shop_code: "SHOP-UPTOWN",
-    device_code: "DEV-G7H8",
-    action: "license_revoke",
-    actor: "system",
-    reason: "Subscription suspended",
-    is_manual_override: false,
-  },
-  {
-    id: "log-4",
-    created_at: new Date(Date.now() - 172800000).toISOString(),
-    shop_code: "SHOP-EASTSIDE",
-    device_code: "DEV-I9J0",
-    action: "provision_activate",
-    actor: "billing-ui",
-    reason: "New device registration",
-    is_manual_override: false,
-  },
-];
+import {
+  type AdminShopsLicensingSnapshotResponse,
+  type AdminAuditLogsResponse,
+  adminActivateDevice,
+  adminReactivateDevice,
+  adminDeactivateDevice,
+  adminRevokeDevice,
+  adminForceLicenseResync,
+  adminGenerateOfflineActivationEntitlementBatch,
+  fetchAdminLicenseAuditLogs,
+  exportAdminLicenseAuditLogs,
+} from "@/lib/adminApi";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -228,12 +74,13 @@ function getActionLabel(action: string) {
   return action.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function delay(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function truncateId(id?: string | null) {
+  if (!id) return "—";
+  return id.length > 8 ? `${id.slice(0, 8)}…` : id;
 }
 
 // ---------------------------------------------------------------------------
-// Props — kept identical to original so AdminPortalDashboard.tsx is unchanged
+// Props — identical signature to original so AdminPortalDashboard.tsx is unchanged
 // ---------------------------------------------------------------------------
 
 type AdminLicensesPanelProps = {
@@ -261,9 +108,8 @@ type GeneratedKey = {
 // Component
 // ---------------------------------------------------------------------------
 
-export default function AdminLicensesPanel({ canManage }: AdminLicensesPanelProps) {
+export default function AdminLicensesPanel({ shops, canManage, onRefresh }: AdminLicensesPanelProps) {
   // Devices tab state
-  const [shops, setShops] = useState<MockShop[]>(INITIAL_MOCK_SHOPS);
   const [search, setSearch] = useState("");
   const [stateFilter, setStateFilter] = useState<LicenseStateFilter>("all");
   const [includeInactive, setIncludeInactive] = useState(false);
@@ -294,10 +140,31 @@ export default function AdminLicensesPanel({ canManage }: AdminLicensesPanelProp
   const [generatedForShop, setGeneratedForShop] = useState("");
 
   // Audit Logs tab state
-  const [auditLogs] = useState<MockAuditLog[]>(MOCK_AUDIT_LOGS);
+  const [activeTab, setActiveTab] = useState("devices");
+  const [auditLogs, setAuditLogs] = useState<AdminAuditLogsResponse["items"]>([]);
+  const [isLoadingAuditLogs, setIsLoadingAuditLogs] = useState(false);
   const [auditSearch, setAuditSearch] = useState("");
-  const [auditActionFilter, setAuditActionFilter] = useState("all");
-  const [auditTake] = useState(50);
+  const [auditActionFilter, setAuditActionFilter] = useState("");
+  const [auditTake, setAuditTake] = useState(50);
+
+  // ---------------------------------------------------------------------------
+  // Load audit logs from API when tab is active or filters change
+  // ---------------------------------------------------------------------------
+
+  useEffect(() => {
+    if (activeTab !== "audit") return;
+    let cancelled = false;
+    setIsLoadingAuditLogs(true);
+    fetchAdminLicenseAuditLogs({
+      search: auditSearch.trim() || undefined,
+      action: auditActionFilter || undefined,
+      take: auditTake,
+    })
+      .then((res) => { if (!cancelled) setAuditLogs(res.items); })
+      .catch((err: Error) => { if (!cancelled) toast.error(`Failed to load audit logs: ${err.message}`); })
+      .finally(() => { if (!cancelled) setIsLoadingAuditLogs(false); });
+    return () => { cancelled = true; };
+  }, [activeTab, auditSearch, auditActionFilter, auditTake]);
 
   // ---------------------------------------------------------------------------
   // Derived data
@@ -312,9 +179,9 @@ export default function AdminLicensesPanel({ canManage }: AdminLicensesPanelProp
     deviceName: string;
     deviceStatus: string;
     licenseState: string;
-    validUntil: string | null;
-    graceUntil: string | null;
-    lastHeartbeatAt: string | null;
+    validUntil: string | null | undefined;
+    graceUntil: string | null | undefined;
+    lastHeartbeatAt: string | null | undefined;
   };
 
   const allRows = useMemo<DeviceRow[]>(() =>
@@ -356,18 +223,6 @@ export default function AdminLicensesPanel({ canManage }: AdminLicensesPanelProp
   const statsGrace = allRows.filter((r) => (includeInactive || r.shopIsActive) && normalize(r.licenseState) === "grace").length;
   const statsExpired = allRows.filter((r) => (includeInactive || r.shopIsActive) && (normalize(r.licenseState) === "suspended" || normalize(r.licenseState) === "revoked")).length;
 
-  const filteredAuditLogs = useMemo(() => {
-    const query = normalize(auditSearch);
-    return auditLogs
-      .filter((log) => auditActionFilter === "all" || normalize(log.action) === auditActionFilter)
-      .filter((log) => {
-        if (!query) return true;
-        const haystack = [log.shop_code, log.device_code, log.actor, log.action, log.reason ?? ""].map(normalize).join(" ");
-        return haystack.includes(query);
-      })
-      .slice(0, auditTake);
-  }, [auditLogs, auditSearch, auditActionFilter, auditTake]);
-
   // ---------------------------------------------------------------------------
   // Handlers
   // ---------------------------------------------------------------------------
@@ -375,10 +230,15 @@ export default function AdminLicensesPanel({ canManage }: AdminLicensesPanelProp
   const handleForceResync = async () => {
     if (isSyncing) return;
     setIsSyncing(true);
-    // TODO: replace with adminForceLicenseResync()
-    await delay(800);
-    setIsSyncing(false);
-    toast.success("License resync completed.");
+    try {
+      await adminForceLicenseResync("", "Manual resync triggered from admin UI", "billing-ui");
+      toast.success("License resync completed.");
+      await onRefresh();
+    } catch (err) {
+      toast.error(`Resync failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   const openActionDialog = (row: DeviceRow, action: DeviceAction) => {
@@ -399,40 +259,25 @@ export default function AdminLicensesPanel({ canManage }: AdminLicensesPanelProp
     }
     if (isSubmitting) return;
     setIsSubmitting(true);
-
-    // TODO: replace with real API calls:
-    //   activate   → adminActivateDevice(deviceCode, actorNote, "billing-ui")
-    //   reactivate → adminReactivateDevice(deviceCode, actorNote, "billing-ui")
-    //   deactivate → adminDeactivateDevice(deviceCode, actorNote, "billing-ui", dialogReason)
-    //   revoke     → adminRevokeDevice(deviceCode, actorNote, "billing-ui", dialogReason)
-    await delay(600);
-
-    const { action, shopId, deviceCode } = dialog;
-
-    const nextStateMap: Record<DeviceAction, { device_status: string; license_state: string }> = {
-      activate: { device_status: "active", license_state: "active" },
-      reactivate: { device_status: "active", license_state: "active" },
-      deactivate: { device_status: "revoked", license_state: "revoked" },
-      revoke: { device_status: "revoked", license_state: "revoked" },
-    };
-
-    if (action) {
-      setShops((prev) =>
-        prev.map((shop) => {
-          if (shop.shop_id !== shopId) return shop;
-          return {
-            ...shop,
-            devices: shop.devices.map((d) =>
-              d.device_code === deviceCode ? { ...d, ...nextStateMap[action], last_heartbeat_at: action === "activate" || action === "reactivate" ? new Date().toISOString() : d.last_heartbeat_at } : d,
-            ),
-          };
-        }),
-      );
+    try {
+      const { action, deviceCode } = dialog;
+      if (action === "activate") {
+        await adminActivateDevice(deviceCode, actorNote, "billing-ui");
+      } else if (action === "reactivate") {
+        await adminReactivateDevice(deviceCode, actorNote, "billing-ui");
+      } else if (action === "deactivate") {
+        await adminDeactivateDevice(deviceCode, actorNote, "billing-ui", dialogReason || undefined);
+      } else if (action === "revoke") {
+        await adminRevokeDevice(deviceCode, actorNote, "billing-ui", dialogReason || undefined);
+      }
       toast.success(`Device ${deviceCode} ${action}d successfully.`);
+      setDialog((prev) => ({ ...prev, open: false }));
+      await onRefresh();
+    } catch (err) {
+      toast.error(`Action failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setIsSubmitting(false);
-    setDialog((prev) => ({ ...prev, open: false }));
   };
 
   const handleGenerateKeys = async () => {
@@ -442,22 +287,29 @@ export default function AdminLicensesPanel({ canManage }: AdminLicensesPanelProp
     }
     if (isGeneratingKeys) return;
     setIsGeneratingKeys(true);
-
-    // TODO: replace with adminGenerateOfflineActivationEntitlementBatch({ shop_code: keyShopCode, count: keyCount, ttl_days: keyTtlDays, max_activations: keyMaxActivations, allow_if_existing_batch: keyAllowExisting, actor_note: keyActorNote })
-    await delay(700);
-
-    const shopLabel = keyShopCode.trim() || "DEFAULT";
-    const expiry = new Date(Date.now() + keyTtlDays * 24 * 3600000).toISOString();
-    const keys: GeneratedKey[] = Array.from({ length: keyCount }, (_, i) => ({
-      key: `SPK-${shopLabel.slice(0, 4).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}-${String(i + 1).padStart(4, "0")}`,
-      expires_at: expiry,
-      copied: false,
-    }));
-
-    setGeneratedKeys(keys);
-    setGeneratedForShop(shopLabel);
-    setIsGeneratingKeys(false);
-    toast.success(`${keyCount} key(s) generated.`);
+    try {
+      const result = await adminGenerateOfflineActivationEntitlementBatch({
+        shop_code: keyShopCode.trim() || undefined,
+        count: keyCount,
+        ttl_days: keyTtlDays,
+        max_activations: keyMaxActivations,
+        allow_if_existing_batch: keyAllowExisting,
+        actor_note: keyActorNote,
+        actor: "billing-ui",
+      });
+      const keys: GeneratedKey[] = result.entitlements.map((e) => ({
+        key: e.activation_entitlement_key,
+        expires_at: e.expires_at,
+        copied: false,
+      }));
+      setGeneratedKeys(keys);
+      setGeneratedForShop(result.shop_code || "DEFAULT");
+      toast.success(`${result.generated_count} key(s) generated.`);
+    } catch (err) {
+      toast.error(`Key generation failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setIsGeneratingKeys(false);
+    }
   };
 
   const handleCopyKey = async (index: number) => {
@@ -473,9 +325,25 @@ export default function AdminLicensesPanel({ canManage }: AdminLicensesPanelProp
     setTimeout(() => setGeneratedKeys((prev) => prev.map((k, i) => (i === index ? { ...k, copied: false } : k))), 2000);
   };
 
-  const handleExportAuditLogs = (format: "csv" | "json") => {
-    // TODO: replace with exportAdminLicenseAuditLogs({ format })
-    toast.info(`Export as ${format.toUpperCase()} started (mock — no file downloaded).`);
+  const handleExportAuditLogs = async (format: "csv" | "json") => {
+    try {
+      const result = await exportAdminLicenseAuditLogs({
+        search: auditSearch.trim() || undefined,
+        action: auditActionFilter || undefined,
+        take: auditTake,
+        format,
+      });
+      const blob = new Blob([result.content], { type: result.mimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = result.filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Export started: ${result.filename}`);
+    } catch (err) {
+      toast.error(`Export failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    }
   };
 
   // ---------------------------------------------------------------------------
@@ -526,7 +394,7 @@ export default function AdminLicensesPanel({ canManage }: AdminLicensesPanelProp
 
   return (
     <div className="space-y-4">
-      <Tabs defaultValue="devices">
+      <Tabs defaultValue="devices" onValueChange={setActiveTab}>
         <div className="flex items-center justify-between gap-3">
           <TabsList>
             <TabsTrigger value="devices">Devices</TabsTrigger>
@@ -836,14 +704,14 @@ export default function AdminLicensesPanel({ canManage }: AdminLicensesPanelProp
           <div className="rounded-2xl border border-border bg-card shadow-sm">
             {/* Filters + Export */}
             <div className="flex flex-col gap-3 border-b border-border px-4 py-3 md:flex-row md:items-end md:justify-between">
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid gap-3 md:grid-cols-3">
                 <div className="space-y-1">
                   <Label htmlFor="audit-search">Search</Label>
                   <Input
                     id="audit-search"
                     value={auditSearch}
                     onChange={(e) => setAuditSearch(e.target.value)}
-                    placeholder="shop, device, actor…"
+                    placeholder="actor, action…"
                   />
                 </div>
                 <div className="space-y-1">
@@ -854,12 +722,25 @@ export default function AdminLicensesPanel({ canManage }: AdminLicensesPanelProp
                     value={auditActionFilter}
                     onChange={(e) => setAuditActionFilter(e.target.value)}
                   >
-                    <option value="all">All Actions</option>
+                    <option value="">All Actions</option>
                     <option value="provision_activate">Provision Activate</option>
                     <option value="provision_deactivate">Provision Deactivate</option>
                     <option value="license_revoke">License Revoke</option>
                     <option value="license_reactivate">License Reactivate</option>
                     <option value="subscription_change">Subscription Change</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="audit-take">Limit</Label>
+                  <select
+                    id="audit-take"
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    value={auditTake}
+                    onChange={(e) => setAuditTake(Number(e.target.value))}
+                  >
+                    <option value={50}>50 rows</option>
+                    <option value={100}>100 rows</option>
+                    <option value={200}>200 rows</option>
                   </select>
                 </div>
               </div>
@@ -868,7 +749,7 @@ export default function AdminLicensesPanel({ canManage }: AdminLicensesPanelProp
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => handleExportAuditLogs("csv")}
+                  onClick={() => void handleExportAuditLogs("csv")}
                 >
                   <Download className="h-3.5 w-3.5" />
                   CSV
@@ -876,7 +757,7 @@ export default function AdminLicensesPanel({ canManage }: AdminLicensesPanelProp
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => handleExportAuditLogs("json")}
+                  onClick={() => void handleExportAuditLogs("json")}
                 >
                   <Download className="h-3.5 w-3.5" />
                   JSON
@@ -889,8 +770,8 @@ export default function AdminLicensesPanel({ canManage }: AdminLicensesPanelProp
                 <TableHeader>
                   <TableRow>
                     <TableHead>Timestamp</TableHead>
-                    <TableHead>Shop</TableHead>
-                    <TableHead>Device</TableHead>
+                    <TableHead>Shop ID</TableHead>
+                    <TableHead>Device ID</TableHead>
                     <TableHead>Action</TableHead>
                     <TableHead>Actor</TableHead>
                     <TableHead>Reason</TableHead>
@@ -898,19 +779,27 @@ export default function AdminLicensesPanel({ canManage }: AdminLicensesPanelProp
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredAuditLogs.length === 0 ? (
+                  {isLoadingAuditLogs ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
+                        Loading audit logs…
+                      </TableCell>
+                    </TableRow>
+                  ) : auditLogs.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
                         No audit log entries found.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredAuditLogs.map((log) => (
+                    auditLogs.map((log) => (
                       <TableRow key={log.id}>
-                        <TableCell className="text-sm whitespace-nowrap">{formatDateTime(log.created_at)}</TableCell>
-                        <TableCell className="text-sm">{log.shop_code}</TableCell>
-                        <TableCell>
-                          <span className="font-mono text-xs">{log.device_code}</span>
+                        <TableCell className="text-sm whitespace-nowrap">{formatDateTime(log.timestamp)}</TableCell>
+                        <TableCell className="font-mono text-xs text-muted-foreground" title={log.shop_id ?? undefined}>
+                          {truncateId(log.shop_id)}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs text-muted-foreground" title={log.device_id ?? undefined}>
+                          {truncateId(log.device_id)}
                         </TableCell>
                         <TableCell>
                           <span

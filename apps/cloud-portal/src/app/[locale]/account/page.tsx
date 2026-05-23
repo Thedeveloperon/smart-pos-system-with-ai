@@ -483,52 +483,6 @@ const ownerPurchaseFallbackRows: CloudPurchaseRow[] = [
   },
 ];
 
-// TODO: Remove MOCK_LICENSE_PORTAL once backend confirmed live
-const MOCK_LICENSE_PORTAL: OwnerLicensePortalResponse = {
-  shop_id: "shop-001",
-  shop_code: "SHOP-DOWNTOWN",
-  shop_name: "Downtown Café",
-  plan: "starter",
-  subscription_status: "active",
-  seat_limit: 5,
-  active_seats: 2,
-  self_service_deactivation_limit_per_day: 2,
-  self_service_deactivations_used_today: 0,
-  self_service_deactivations_remaining_today: 2,
-  can_deactivate_more_devices_today: true,
-  latest_activation_entitlement: {
-    activation_entitlement_key: "SPK-DEMO-ABCD-1234-EFGH",
-    issued_at: new Date(Date.now() - 7 * 24 * 3600000).toISOString(),
-    expires_at: new Date(Date.now() + 83 * 24 * 3600000).toISOString(),
-  },
-  devices: [
-    {
-      provisioned_device_id: "dev-001",
-      device_code: "DEV-A1B2",
-      terminal_id: "TRM-001",
-      device_name: "Counter 1",
-      device_status: "active",
-      license_state: "active",
-      assigned_at: new Date(Date.now() - 30 * 24 * 3600000).toISOString(),
-      last_heartbeat_at: new Date(Date.now() - 2 * 60000).toISOString(),
-      valid_until: new Date(Date.now() + 18 * 3600000).toISOString(),
-      grace_until: new Date(Date.now() + (18 + 7 * 24) * 3600000).toISOString(),
-    },
-    {
-      provisioned_device_id: "dev-002",
-      device_code: "DEV-C3D4",
-      terminal_id: "TRM-002",
-      device_name: "Counter 2",
-      device_status: "active",
-      license_state: "grace",
-      assigned_at: new Date(Date.now() - 60 * 24 * 3600000).toISOString(),
-      last_heartbeat_at: new Date(Date.now() - 30 * 60000).toISOString(),
-      valid_until: new Date(Date.now() - 3 * 3600000).toISOString(),
-      grace_until: new Date(Date.now() + 5 * 24 * 3600000).toISOString(),
-    },
-  ],
-};
-
 export default function AccountPage() {
   const { locale } = useI18n();
 
@@ -1679,8 +1633,7 @@ export default function AccountPage() {
     if (licensePortalResult.status === "fulfilled") {
       setLicensePortal(licensePortalResult.value);
     } else {
-      // TODO: Remove mock fallback once backend confirmed live
-      setLicensePortal(MOCK_LICENSE_PORTAL);
+      setLicensePortal(null);
     }
 
     setIsLoadingCommerce(false);
@@ -1819,28 +1772,29 @@ export default function AccountPage() {
     if (!deactivatingDeviceCode || isDeactivating) return;
     setIsDeactivating(true);
     setCommerceError(null);
-    // TODO: replace with real API call:
-    // POST /api/account/license-portal/devices/{deviceCode}/deactivate
-    await new Promise((r) => setTimeout(r, 600));
-    setLicensePortal((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        active_seats: Math.max(0, prev.active_seats - 1),
-        self_service_deactivations_used_today: prev.self_service_deactivations_used_today + 1,
-        self_service_deactivations_remaining_today: Math.max(0, prev.self_service_deactivations_remaining_today - 1),
-        can_deactivate_more_devices_today: prev.self_service_deactivations_remaining_today > 1,
-        devices: prev.devices.map((d) =>
-          d.device_code === deactivatingDeviceCode
-            ? { ...d, device_status: "revoked", license_state: "revoked" }
-            : d,
-        ),
-      };
-    });
-    setDeactivatingDeviceCode(null);
-    setDeactivateReason("");
-    setIsDeactivating(false);
-    setCommerceMessage("Device deactivated successfully.");
+    try {
+      const response = await fetch(
+        `/api/account/license-portal/devices/${encodeURIComponent(deactivatingDeviceCode)}/deactivate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason: deactivateReason.trim() || undefined }),
+          cache: "no-store",
+        },
+      );
+      if (!response.ok) {
+        const payload = await parseApiPayload(response);
+        throw new Error(parseErrorMessage(payload));
+      }
+      setDeactivatingDeviceCode(null);
+      setDeactivateReason("");
+      setCommerceMessage("Device deactivated successfully.");
+      await loadCommerceData();
+    } catch (err) {
+      setCommerceError(err instanceof Error ? err.message : "Deactivation failed. Please try again.");
+    } finally {
+      setIsDeactivating(false);
+    }
   };
 
   const closeOrderDialog = useCallback(() => {

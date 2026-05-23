@@ -11,7 +11,8 @@
       "Bash(xargs grep -l \"LicenseErrorCodes\\\\|LicenseState\\\\|ProvisionedDeviceStatus\")",
       "Bash(npx tsc *)",
       "Bash(node_modules\\\\.bin\\\\tsc --noEmit)",
-      "Bash(./node_modules/.bin/tsc --noEmit)"
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "Bash(npm run *)"
     ]
   }
 }

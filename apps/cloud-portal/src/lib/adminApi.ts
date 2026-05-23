@@ -1438,46 +1438,6 @@ export async function fetchAdminLicenseAuditLogs({
   return request<AdminAuditLogsResponse>(`/api/admin/licensing/audit-logs${query ? `?${query}` : ""}`);
 }
 
-export async function adminRevokeDevice(
-  deviceCode: string,
-  actorNote: string,
-  actor = "support-ui",
-  reasonCode = "manual_device_revoke",
-) {
-  return request<AdminDeviceActionResponse>(`/api/admin/licensing/devices/${encodeURIComponent(deviceCode)}/revoke`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      actor,
-      reason_code: reasonCode,
-      actor_note: actorNote,
-      reason: actorNote,
-    }),
-  });
-}
-
-export async function adminDeactivateDevice(
-  deviceCode: string,
-  actorNote: string,
-  actor = "support-ui",
-  reasonCode = "manual_device_deactivate",
-) {
-  return request<AdminDeviceActionResponse>(`/api/admin/licensing/devices/${encodeURIComponent(deviceCode)}/deactivate`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      actor,
-      reason_code: reasonCode,
-      actor_note: actorNote,
-      reason: actorNote,
-    }),
-  });
-}
-
 export async function adminReactivateDevice(
   deviceCode: string,
   actorNote: string,
@@ -1516,6 +1476,93 @@ export async function adminActivateDevice(
       reason: actorNote,
     }),
   });
+}
+
+export async function adminDeactivateDevice(
+  deviceCode: string,
+  actorNote: string,
+  actor = "support-ui",
+  reason?: string,
+  reasonCode = "manual_device_deactivate",
+) {
+  return request<AdminDeviceActionResponse>(`/api/admin/licensing/devices/${encodeURIComponent(deviceCode)}/deactivate`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      actor,
+      reason_code: reasonCode,
+      actor_note: actorNote,
+      reason: reason ?? actorNote,
+    }),
+  });
+}
+
+export async function adminRevokeDevice(
+  deviceCode: string,
+  actorNote: string,
+  actor = "support-ui",
+  reason?: string,
+  reasonCode = "manual_device_revoke",
+) {
+  return request<AdminDeviceActionResponse>(`/api/admin/licensing/devices/${encodeURIComponent(deviceCode)}/revoke`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      actor,
+      reason_code: reasonCode,
+      actor_note: actorNote,
+      reason: reason ?? actorNote,
+    }),
+  });
+}
+
+export type AdminOfflineEntitlementBatchRequest = {
+  shop_code?: string;
+  count?: number;
+  max_activations?: number;
+  ttl_days?: number;
+  allow_if_existing_batch?: boolean;
+  actor_note?: string;
+  actor?: string;
+  reason_code?: string;
+};
+
+export type AdminOfflineEntitlementBatchResponse = {
+  generated_at: string;
+  shop_id: string;
+  shop_code: string;
+  source: string;
+  source_reference: string;
+  requested_count: number;
+  generated_count: number;
+  max_activations: number;
+  ttl_days: number;
+  existing_active_batch_count: number;
+  entitlements: Array<{
+    activation_entitlement_key: string;
+    issued_at: string;
+    expires_at: string;
+    status: string;
+  }>;
+};
+
+export async function adminGenerateOfflineActivationEntitlementBatch(
+  payload: AdminOfflineEntitlementBatchRequest,
+) {
+  return request<AdminOfflineEntitlementBatchResponse>(
+    "/api/admin/licensing/offline/activation-entitlements/batch-generate",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
 export async function adminTransferDeviceSeat(
