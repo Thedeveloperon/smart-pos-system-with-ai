@@ -24,6 +24,8 @@ import {
   adminRevokeDevice,
   adminForceLicenseResync,
   adminGenerateOfflineActivationEntitlementBatch,
+  adminGenerateSignedActivationEntitlement,
+  type AdminSignedActivationGenerateResponse,
   fetchAdminLicenseAuditLogs,
   exportAdminLicenseAuditLogs,
   adminExtendDeviceGrace,
@@ -150,6 +152,16 @@ export default function AdminLicensesPanel({ shops, canManage, onRefresh }: Admi
   const [isGeneratingKeys, setIsGeneratingKeys] = useState(false);
   const [generatedKeys, setGeneratedKeys] = useState<GeneratedKey[]>([]);
   const [generatedForShop, setGeneratedForShop] = useState("");
+
+  // Signed offline key state
+  const [signedShopCode, setSignedShopCode] = useState("");
+  const [signedCount, setSignedCount] = useState(1);
+  const [signedTtlDays, setSignedTtlDays] = useState(90);
+  const [signedMaxActivations, setSignedMaxActivations] = useState(1);
+  const [signedActorNote, setSignedActorNote] = useState("");
+  const [isGeneratingSigned, setIsGeneratingSigned] = useState(false);
+  const [signedResult, setSignedResult] = useState<AdminSignedActivationGenerateResponse | null>(null);
+  const [signedCopied, setSignedCopied] = useState<boolean[]>([]);
 
   // Advanced Actions dialog state
   const [advDialog, setAdvDialog] = useState<AdvancedDialogState>({ open: false, deviceCode: "", deviceName: "", shopName: "" });
@@ -384,6 +396,46 @@ export default function AdminLicensesPanel({ shops, canManage, onRefresh }: Admi
     setGeneratedKeys((prev) => prev.map((k, i) => (i === index ? { ...k, copied: true } : k)));
     toast.success("Key copied to clipboard.");
     setTimeout(() => setGeneratedKeys((prev) => prev.map((k, i) => (i === index ? { ...k, copied: false } : k))), 2000);
+  };
+
+  const handleGenerateSignedKeys = async () => {
+    if (!signedActorNote.trim()) {
+      toast.error("Actor note is required.");
+      return;
+    }
+    if (isGeneratingSigned) return;
+    setIsGeneratingSigned(true);
+    try {
+      const result = await adminGenerateSignedActivationEntitlement({
+        shop_code: signedShopCode.trim() || undefined,
+        count: signedCount,
+        ttl_days: signedTtlDays,
+        max_activations: signedMaxActivations,
+        actor_note: signedActorNote,
+        actor: "billing-ui",
+        reason_code: "signed_activation_key_generated",
+      });
+      setSignedResult(result);
+      setSignedCopied(new Array(result.tokens.length).fill(false));
+      toast.success(`${result.count} signed key(s) generated.`);
+    } catch (err) {
+      toast.error(`Signed key generation failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    } finally {
+      setIsGeneratingSigned(false);
+    }
+  };
+
+  const handleCopySignedKey = async (index: number) => {
+    const token = signedResult?.tokens[index];
+    if (!token) return;
+    try {
+      await navigator.clipboard.writeText(token);
+    } catch {
+      // clipboard unavailable
+    }
+    setSignedCopied((prev) => prev.map((v, i) => (i === index ? true : v)));
+    toast.success("Key copied to clipboard.");
+    setTimeout(() => setSignedCopied((prev) => prev.map((v, i) => (i === index ? false : v))), 2000);
   };
 
   const handleExportAuditLogs = async (format: "csv" | "json") => {
@@ -776,6 +828,147 @@ export default function AdminLicensesPanel({ shops, canManage, onRefresh }: Admi
                     size="sm"
                     className="w-full text-muted-foreground"
                     onClick={() => setGeneratedKeys([])}
+                  >
+                    Clear Results
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Signed Offline Key generator */}
+          <div className="mt-6 grid gap-6 lg:grid-cols-2">
+            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-5">
+              <div>
+                <h3 className="text-base font-semibold">Generate Signed Offline Key</h3>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  Self-validating key (SPKS) — works even when the backend is offline or unreachable.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="signed-shop-code">Shop Code</Label>
+                  <Input
+                    id="signed-shop-code"
+                    list="admin-signed-shop-codes"
+                    value={signedShopCode}
+                    onChange={(e) => setSignedShopCode(e.target.value)}
+                    placeholder="e.g. SHOP-DOWNTOWN (leave empty for default)"
+                  />
+                  <datalist id="admin-signed-shop-codes">
+                    {shops.map((s) => (
+                      <option key={s.shop_id} value={s.shop_code}>
+                        {s.shop_name}
+                      </option>
+                    ))}
+                  </datalist>
+                </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="signed-count">Count</Label>
+                    <Input
+                      id="signed-count"
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={signedCount}
+                      onChange={(e) => setSignedCount(Math.max(1, Math.min(10, parseInt(e.target.value) || 1)))}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="signed-ttl">TTL (days)</Label>
+                    <Input
+                      id="signed-ttl"
+                      type="number"
+                      min={1}
+                      max={3650}
+                      value={signedTtlDays}
+                      onChange={(e) => setSignedTtlDays(Math.max(1, parseInt(e.target.value) || 90))}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="signed-max-act">Max Activations</Label>
+                    <Input
+                      id="signed-max-act"
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={signedMaxActivations}
+                      onChange={(e) => setSignedMaxActivations(Math.max(1, parseInt(e.target.value) || 1))}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="signed-actor-note">Actor Note <span className="text-red-500">*</span></Label>
+                  <Input
+                    id="signed-actor-note"
+                    value={signedActorNote}
+                    onChange={(e) => setSignedActorNote(e.target.value)}
+                    placeholder="e.g. Offline activation for Shop ABC"
+                  />
+                </div>
+
+                <Button
+                  type="button"
+                  variant="default"
+                  className="w-full"
+                  disabled={isGeneratingSigned}
+                  onClick={() => void handleGenerateSignedKeys()}
+                >
+                  {isGeneratingSigned ? "Generating…" : "Generate Signed Key"}
+                </Button>
+              </div>
+            </div>
+
+            {/* Signed key results */}
+            <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-4">
+              <h3 className="text-base font-semibold">Generated Signed Keys</h3>
+
+              {!signedResult ? (
+                <div className="flex h-40 items-center justify-center rounded-xl bg-slate-50 text-sm text-muted-foreground">
+                  Fill in the form and click Generate Signed Key
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-sm text-emerald-800">
+                    {signedResult.count} key(s) generated for{" "}
+                    <span className="font-semibold">{signedResult.shop_code}</span>
+                    {" · "}expires in {signedResult.ttl_days} day(s)
+                  </div>
+
+                  <div className="rounded-xl border border-border divide-y divide-border overflow-hidden">
+                    {signedResult.tokens.map((token, i) => (
+                      <div key={i} className="flex items-center justify-between gap-3 px-3 py-3 bg-white">
+                        <span className="font-mono text-xs break-all select-all">{token}</span>
+                        <button
+                          type="button"
+                          onClick={() => void handleCopySignedKey(i)}
+                          className="flex-shrink-0 flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground transition"
+                        >
+                          {signedCopied[i] ? (
+                            <>
+                              <Check className="h-3.5 w-3.5 text-emerald-600" />
+                              Copied
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="h-3.5 w-3.5" />
+                              Copy
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full text-muted-foreground"
+                    onClick={() => setSignedResult(null)}
                   >
                     Clear Results
                   </Button>

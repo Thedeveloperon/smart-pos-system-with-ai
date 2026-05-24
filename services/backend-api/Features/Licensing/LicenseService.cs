@@ -351,6 +351,7 @@ public sealed class LicenseService(
                     StatusCodes.Status403Forbidden);
 
             if (activationEntitlement is not null &&
+                activationEntitlement.Entitlement is not null &&
                 activationEntitlement.Entitlement.ShopId != shop.Id)
             {
                 throw new LicenseException(
@@ -424,7 +425,7 @@ public sealed class LicenseService(
                 StatusCodes.Status409Conflict);
         }
 
-        if (activationEntitlement is not null && requiresSeat)
+        if (activationEntitlement is not null && activationEntitlement.Entitlement is not null && requiresSeat)
         {
             ConsumeActivationEntitlement(activationEntitlement.Entitlement, now);
         }
@@ -14448,6 +14449,11 @@ public sealed class LicenseService(
             return null;
         }
 
+        if (IsSignedActivationEntitlementKey(normalizedInput))
+        {
+            return await ValidateSignedActivationEntitlementAsync(normalizedInput, now, cancellationToken);
+        }
+
         var normalizedKey = NormalizeActivationEntitlementKey(normalizedInput);
         if (string.IsNullOrWhiteSpace(normalizedKey))
         {
@@ -15588,6 +15594,151 @@ public sealed class LicenseService(
         return $"{payloadSegment}.{signatureSegment}";
     }
 
+    private static bool IsSignedActivationEntitlementKey(string? key) =>
+        key != null && key.TrimStart().StartsWith("SPKS-", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<ResolvedActivationEntitlement?> ValidateSignedActivationEntitlementAsync(
+        string rawToken, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var body = rawToken.TrimStart();
+        if (body.StartsWith("SPKS-", StringComparison.OrdinalIgnoreCase))
+            body = body.Substring(5);
+
+        var dotIndex = body.IndexOf('.');
+        if (dotIndex < 1)
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidActivationEntitlement,
+                "signed activation key format is invalid.",
+                StatusCodes.Status403Forbidden);
+
+        var payloadSegment = body[..dotIndex];
+        var signatureSegment = body[(dotIndex + 1)..];
+
+        byte[] payloadBytes;
+        SignedActivationPayload payload;
+        try
+        {
+            payloadBytes = Base64UrlDecode(payloadSegment);
+            payload = JsonSerializer.Deserialize<SignedActivationPayload>(payloadBytes, TokenSerializerOptions)
+                ?? throw new LicenseException(
+                    LicenseErrorCodes.InvalidActivationEntitlement,
+                    "signed activation key payload is invalid.",
+                    StatusCodes.Status403Forbidden);
+        }
+        catch (LicenseException) { throw; }
+        catch
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidActivationEntitlement,
+                "signed activation key payload is invalid.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        if (!string.Equals(payload.Type, "signed_activation_entitlement", StringComparison.OrdinalIgnoreCase))
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidActivationEntitlement,
+                "signed activation key type is invalid.",
+                StatusCodes.Status403Forbidden);
+
+        byte[] sigBytes;
+        try { sigBytes = Base64UrlDecode(signatureSegment); }
+        catch
+        {
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidActivationEntitlement,
+                "signed activation key signature is invalid.",
+                StatusCodes.Status403Forbidden);
+        }
+
+        if (!VerifySignature(payloadSegment, sigBytes, payload.KeyId))
+            throw new LicenseException(
+                LicenseErrorCodes.InvalidActivationEntitlement,
+                "signed activation key signature is invalid.",
+                StatusCodes.Status403Forbidden);
+
+        if (payload.ExpiresAt <= now)
+            throw new LicenseException(
+                LicenseErrorCodes.ActivationEntitlementExpired,
+                "signed activation key has expired.",
+                StatusCodes.Status403Forbidden);
+
+        var shop = await GetOrCreateShopAsync(payload.ShopCode, now, cancellationToken);
+        return new ResolvedActivationEntitlement(null, shop);
+    }
+
+    public async Task<AdminSignedActivationEntitlementGenerateResponse> GenerateSignedActivationEntitlementAsync(
+        AdminSignedActivationEntitlementGenerateRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var now = DateTimeOffset.UtcNow;
+        var overrideContext = ResolveManualOverrideContext(
+            request.Actor,
+            request.ReasonCode,
+            request.ActorNote,
+            defaultActor: "offline-licensing-admin",
+            defaultReasonCode: "signed_activation_key_generated");
+
+        var shop = await GetOrCreateShopAsync(request.ShopCode, now, cancellationToken);
+        var signingKey = ResolveActiveSigningKey();
+
+        var count = Math.Clamp(request.Count ?? 1, 1, 10);
+        var ttlDays = Math.Clamp(request.TtlDays ?? 90, 1, 3650);
+        var maxActivations = Math.Max(1, request.MaxActivations ?? 1);
+        var tokens = new List<string>(count);
+
+        for (var i = 0; i < count; i++)
+        {
+            var payload = new SignedActivationPayload
+            {
+                Type = "signed_activation_entitlement",
+                TokenId = Guid.NewGuid(),
+                ShopCode = shop.Code,
+                IssuedAt = now,
+                ExpiresAt = now.AddDays(ttlDays),
+                MaxActivations = maxActivations,
+                KeyId = signingKey.KeyId,
+                Actor = overrideContext.Actor,
+                ReasonCode = overrideContext.ReasonCode,
+            };
+            var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(payload, TokenSerializerOptions);
+            var payloadSegment = Base64UrlEncode(payloadBytes);
+            var signatureSegment = Base64UrlEncode(SignPayload(payloadSegment, signingKey.PrivateKeyPem));
+            tokens.Add($"SPKS-{payloadSegment}.{signatureSegment}");
+        }
+
+        dbContext.LicenseAuditLogs.Add(new LicenseAuditLog
+        {
+            ShopId = shop.Id,
+            Action = "signed_activation_key_generated",
+            Actor = overrideContext.Actor,
+            Reason = overrideContext.AuditReason,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                shop_code = shop.Code,
+                count,
+                ttl_days = ttlDays,
+                max_activations = maxActivations,
+                reason_code = overrideContext.ReasonCode,
+                actor_note = overrideContext.ActorNote
+            }),
+            CreatedAtUtc = now
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new AdminSignedActivationEntitlementGenerateResponse
+        {
+            GeneratedAt = now,
+            ShopCode = shop.Code,
+            Count = tokens.Count,
+            TtlDays = ttlDays,
+            MaxActivations = maxActivations,
+            Tokens = tokens,
+        };
+    }
+
     private sealed class LicenseTokenPayload
     {
         public Guid LicenseId { get; set; }
@@ -15615,6 +15766,19 @@ public sealed class LicenseService(
         public string KeyId { get; set; } = string.Empty;
         public int MaxCheckoutOperations { get; set; }
         public int MaxRefundOperations { get; set; }
+    }
+
+    private sealed class SignedActivationPayload
+    {
+        public string Type { get; set; } = "signed_activation_entitlement";
+        public Guid TokenId { get; set; }
+        public string ShopCode { get; set; } = string.Empty;
+        public DateTimeOffset IssuedAt { get; set; }
+        public DateTimeOffset ExpiresAt { get; set; }
+        public int MaxActivations { get; set; }
+        public string KeyId { get; set; } = string.Empty;
+        public string Actor { get; set; } = string.Empty;
+        public string ReasonCode { get; set; } = string.Empty;
     }
 
     private sealed class PolicySnapshotTokenPayload
@@ -15660,7 +15824,7 @@ public sealed class LicenseService(
         Shop Shop,
         string CurrentDeviceCode);
     private sealed record ResolvedActivationEntitlement(
-        CustomerActivationEntitlement Entitlement,
+        CustomerActivationEntitlement? Entitlement,
         Shop Shop);
     private sealed record ResolvedActivationEntitlementLookup(
         CustomerActivationEntitlement Entitlement,

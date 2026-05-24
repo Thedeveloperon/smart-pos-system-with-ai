@@ -1565,6 +1565,40 @@ export async function adminGenerateOfflineActivationEntitlementBatch(
   );
 }
 
+export type AdminSignedActivationGenerateRequest = {
+  shop_code?: string;
+  count?: number;
+  ttl_days?: number;
+  max_activations?: number;
+  actor?: string;
+  reason_code?: string;
+  actor_note?: string;
+};
+
+export type AdminSignedActivationGenerateResponse = {
+  generated_at: string;
+  shop_code: string;
+  count: number;
+  ttl_days: number;
+  max_activations: number;
+  tokens: string[];
+};
+
+export async function adminGenerateSignedActivationEntitlement(
+  payload: AdminSignedActivationGenerateRequest,
+) {
+  return request<AdminSignedActivationGenerateResponse>(
+    "/api/admin/licensing/offline/activation-entitlements/signed-generate",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
 export async function adminTransferDeviceSeat(
   deviceCode: string,
   targetShopCode: string,

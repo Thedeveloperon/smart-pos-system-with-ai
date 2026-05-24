@@ -1518,6 +1518,29 @@ public static class LicenseEndpoints
         .WithName("AdminGenerateOfflineActivationEntitlementBatch")
         .WithOpenApi();
 
+        admin.MapPost("/offline/activation-entitlements/signed-generate",
+            [Authorize(Policy = SmartPosPolicies.SupportOrBilling)] async (
+                AdminSignedActivationEntitlementGenerateRequest request,
+                HttpContext httpContext,
+                LicenseService licenseService,
+                CancellationToken cancellationToken) =>
+            {
+                try
+                {
+                    ValidateIdempotencyKey(httpContext);
+                    var response = await licenseService.GenerateSignedActivationEntitlementAsync(
+                        request, cancellationToken);
+                    return Results.Ok(response);
+                }
+                catch (LicenseException ex)
+                {
+                    return ToErrorResult(ex);
+                }
+            })
+            .RequireAuthorization(SmartPosPolicies.SupportOrBilling)
+            .WithName("AdminGenerateSignedActivationEntitlement")
+            .WithOpenApi();
+
         admin.MapGet("/billing/payments", [Authorize(Policy = SmartPosPolicies.SupportOrBilling)] async (
             string? search,
             string? status,

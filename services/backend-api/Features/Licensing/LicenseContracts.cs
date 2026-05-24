@@ -2717,6 +2717,51 @@ public sealed class AdminOfflineActivationEntitlementBatchGenerateResponse
     public List<CustomerActivationEntitlementResponse> Entitlements { get; set; } = [];
 }
 
+public sealed class AdminSignedActivationEntitlementGenerateRequest
+{
+    [JsonPropertyName("shop_code")]
+    public string? ShopCode { get; set; }
+
+    [JsonPropertyName("count")]
+    public int? Count { get; set; }
+
+    [JsonPropertyName("ttl_days")]
+    public int? TtlDays { get; set; }
+
+    [JsonPropertyName("max_activations")]
+    public int? MaxActivations { get; set; }
+
+    [JsonPropertyName("actor")]
+    public string? Actor { get; set; }
+
+    [JsonPropertyName("reason_code")]
+    public string? ReasonCode { get; set; }
+
+    [JsonPropertyName("actor_note")]
+    public string? ActorNote { get; set; }
+}
+
+public sealed class AdminSignedActivationEntitlementGenerateResponse
+{
+    [JsonPropertyName("generated_at")]
+    public DateTimeOffset GeneratedAt { get; set; }
+
+    [JsonPropertyName("shop_code")]
+    public string ShopCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("count")]
+    public int Count { get; set; }
+
+    [JsonPropertyName("ttl_days")]
+    public int TtlDays { get; set; }
+
+    [JsonPropertyName("max_activations")]
+    public int MaxActivations { get; set; }
+
+    [JsonPropertyName("tokens")]
+    public List<string> Tokens { get; set; } = [];
+}
+
 public sealed class AdminManualBillingPaymentRejectRequest
 {
     [JsonPropertyName("actor")]

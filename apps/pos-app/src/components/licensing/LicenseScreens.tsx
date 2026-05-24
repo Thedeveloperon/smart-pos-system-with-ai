@@ -127,7 +127,7 @@ export const LicenseActivationScreen = ({
             <Input
               value={activationEntitlementKey || ""}
               onChange={(event) => onActivationEntitlementKeyChange?.(event.target.value)}
-              placeholder="SPK-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
+              placeholder="SPK-… or SPKS-… (signed offline key)"
               disabled={isBusy}
             />
             <p className="text-xs text-muted-foreground">
@@ -247,7 +247,7 @@ export const LicenseBlockedScreen = ({
             <Input
               value={activationEntitlementKey || ""}
               onChange={(event) => onActivationEntitlementKeyChange?.(event.target.value)}
-              placeholder="SPK-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
+              placeholder="SPK-… or SPKS-… (signed offline key)"
               disabled={isBusy}
             />
             <p className="text-xs text-muted-foreground">

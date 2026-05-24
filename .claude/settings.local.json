@@ -25,7 +25,10 @@
       "Bash(grep -r \"/api/license/account/licenses\" \"c:\\\\Users\\\\User\\\\Desktop\\\\smart-pos-system-with-ai-main\\\\services\\\\backend-api\" --include=\"*.cs\" 2>nul | head -5)",
       "Bash(grep -n \"GetCustomerLicensePortalAsync\" \"c:\\\\Users\\\\User\\\\Desktop\\\\smart-pos-system-with-ai-main\\\\services\\\\backend-api\\\\Features\\\\Licensing\\\\LicenseService.cs\" 2>nul | head -5)",
       "Bash(xargs grep -l \"GetAdminShopsSnapshot\")",
-      "Bash(dotnet build *)"
+      "Bash(dotnet build *)",
+      "Bash(grep -i \"\\\\.cs$\")",
+      "Bash(xargs grep -l \"OfflineGrantTokenPayload\\\\|EmergencyCommandEnvelopePayload\")",
+      "Bash(findstr /n \"ResolveActiveSigningKeyAsync\\\\|GetServerTime\" LicenseService.cs)"
     ],
     "additionalDirectories": [
       "c:\\Users\\User\\Desktop\\smart-pos-system-with-ai-main"
