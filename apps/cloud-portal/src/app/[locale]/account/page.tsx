@@ -1424,33 +1424,44 @@ export default function AccountPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-1">
-            <div>
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
-                Your Shop Code
-              </p>
-              <div className="flex items-center gap-2 rounded-lg border bg-slate-50 px-3 py-2">
-                <span className="flex-1 font-mono text-sm font-semibold select-all">
-                  {licensePortal?.shop_code ?? "—"}
-                </span>
-                <button
-                  type="button"
-                  className="flex items-center gap-1 rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-600 hover:bg-slate-50 transition"
-                  onClick={() => {
-                    if (licensePortal?.shop_code) {
-                      void navigator.clipboard.writeText(licensePortal.shop_code).then(() => {
-                        setCommerceMessage("Shop code copied.");
-                      });
-                    }
-                  }}
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                  Copy
-                </button>
+            <div className="space-y-2">
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
+                  Shop Name
+                </p>
+                <p className="rounded-lg border bg-slate-50 px-3 py-2 text-sm font-semibold">
+                  {licensePortal?.shop_name ?? "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">
+                  Shop Code
+                </p>
+                <div className="flex items-center gap-2 rounded-lg border bg-slate-50 px-3 py-2">
+                  <span className="flex-1 font-mono text-sm font-semibold select-all">
+                    {licensePortal?.shop_code ?? "—"}
+                  </span>
+                  <button
+                    type="button"
+                    className="flex items-center gap-1 rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-600 hover:bg-slate-50 transition"
+                    onClick={() => {
+                      if (licensePortal?.shop_code) {
+                        void navigator.clipboard.writeText(licensePortal.shop_code).then(() => {
+                          setCommerceMessage("Shop code copied.");
+                        });
+                      }
+                    }}
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                    Copy
+                  </button>
+                </div>
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              Your billing admin can open <strong>Admin → Licenses → License Keys</strong> and
-              generate a key for this shop code. The key will appear on this page once issued.
+              Share the shop name and code above with your billing admin. In the admin portal, go to{" "}
+              <strong>Licenses → License Keys</strong> and enter the shop code to generate a key.
+              The key will appear on this page once issued.
             </p>
           </div>
           <DialogFooter>

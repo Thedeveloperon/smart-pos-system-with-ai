@@ -14,7 +14,20 @@
       "Bash(./node_modules/.bin/tsc --noEmit)",
       "Bash(npm run *)",
       "Bash(grep -n \"admin\\\\\\\\.MapPost.*offline\\\\|admin\\\\\\\\.MapGet\\\\|admin\\\\\\\\.MapGroup\" \"c:\\\\Users\\\\User\\\\Desktop\\\\smart-pos-system-with-ai-main\\\\services\\\\backend-api\\\\Features\\\\Licensing\\\\LicenseEndpoints.cs\")",
-      "Bash(xargs grep -l \"request.*entitlement\\\\|entitlement.*request\")"
+      "Bash(xargs grep -l \"request.*entitlement\\\\|entitlement.*request\")",
+      "Bash(dir \"c:\\\\Users\\\\User\\\\Desktop\\\\smart-pos-system-with-ai-main\\\\services\\\\backend-api\\\\Features\\\\CloudAccount\")",
+      "Bash(dir \"c:\\\\Users\\\\User\\\\Desktop\\\\smart-pos-system-with-ai-main\\\\services\\\\backend-api\\\\Features\")",
+      "Bash(dir \"c:\\\\Users\\\\User\\\\Desktop\\\\smart-pos-system-with-ai-main\\\\services\\\\backend-api\\\\Features\\\\Licensing\")",
+      "Bash(grep -r \"license-portal\" \"c:\\\\Users\\\\User\\\\Desktop\\\\smart-pos-system-with-ai-main\" 2>nul | head -5)",
+      "Bash(find \"c:\\\\Users\\\\User\\\\Desktop\\\\smart-pos-system-with-ai-main\" -name \"*account*endpoint*\" -o -name \"*Account*Endpoint*\" 2>nul | head -10)",
+      "Bash(grep -r \"license-portal\\\\|license_portal\\\\|OwnerLicense\" \"c:\\\\Users\\\\User\\\\Desktop\\\\smart-pos-system-with-ai-main\\\\services\\\\backend-api\" --include=\"*.cs\" 2>nul | head -10)",
+      "Bash(grep -r \"GetOwnerLicensePortal\\\\|license.portal\" \"c:\\\\Users\\\\User\\\\Desktop\\\\smart-pos-system-with-ai-main\" --include=\"*.cs\" --include=\"*.ts\" --include=\"*.tsx\" 2>nul | head -10)",
+      "Bash(grep -r \"/api/license/account/licenses\" \"c:\\\\Users\\\\User\\\\Desktop\\\\smart-pos-system-with-ai-main\\\\services\\\\backend-api\" --include=\"*.cs\" 2>nul | head -5)",
+      "Bash(grep -n \"GetCustomerLicensePortalAsync\" \"c:\\\\Users\\\\User\\\\Desktop\\\\smart-pos-system-with-ai-main\\\\services\\\\backend-api\\\\Features\\\\Licensing\\\\LicenseService.cs\" 2>nul | head -5)",
+      "Bash(xargs grep -l \"GetAdminShopsSnapshot\")"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\User\\Desktop\\smart-pos-system-with-ai-main"
     ]
   }
 }

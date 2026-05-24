@@ -445,6 +445,17 @@ export default function AdminLicensesPanel({ shops, canManage, onRefresh }: Admi
           </>
         )}
         <Button
+          variant="outline"
+          size="sm"
+          title={`Generate activation key for ${row.shopName}`}
+          onClick={() => {
+            setKeyShopCode(row.shopCode);
+            setActiveTab("keys");
+          }}
+        >
+          Generate Key
+        </Button>
+        <Button
           variant="ghost"
           size="sm"
           title="Advanced actions (extend grace, fraud lock, emergency)"
@@ -632,10 +643,18 @@ export default function AdminLicensesPanel({ shops, canManage, onRefresh }: Admi
                   <Label htmlFor="key-shop-code">Shop Code</Label>
                   <Input
                     id="key-shop-code"
+                    list="admin-key-shop-codes"
                     value={keyShopCode}
                     onChange={(e) => setKeyShopCode(e.target.value)}
                     placeholder="e.g. SHOP-DOWNTOWN (leave empty for default)"
                   />
+                  <datalist id="admin-key-shop-codes">
+                    {shops.map((s) => (
+                      <option key={s.shop_id} value={s.shop_code}>
+                        {s.shop_name}
+                      </option>
+                    ))}
+                  </datalist>
                 </div>
 
                 <div className="grid grid-cols-3 gap-3">
