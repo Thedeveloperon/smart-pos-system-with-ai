@@ -1439,14 +1439,15 @@ export default function AccountPage() {
                 </p>
                 <div className="flex items-center gap-2 rounded-lg border bg-slate-50 px-3 py-2">
                   <span className="flex-1 font-mono text-sm font-semibold select-all">
-                    {licensePortal?.shop_code ?? "—"}
+                    {(authSession?.shop_code ?? licensePortal?.shop_code) ?? "—"}
                   </span>
                   <button
                     type="button"
                     className="flex items-center gap-1 rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-600 hover:bg-slate-50 transition"
                     onClick={() => {
-                      if (licensePortal?.shop_code) {
-                        void navigator.clipboard.writeText(licensePortal.shop_code).then(() => {
+                      const shopCode = authSession?.shop_code ?? licensePortal?.shop_code;
+                      if (shopCode) {
+                        void navigator.clipboard.writeText(shopCode).then(() => {
                           setCommerceMessage("Shop code copied.");
                         });
                       }

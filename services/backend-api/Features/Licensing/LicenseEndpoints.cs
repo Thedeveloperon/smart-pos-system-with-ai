@@ -1497,7 +1497,7 @@ public static class LicenseEndpoints
         .WithName("AdminCreateManualBillingInvoice")
         .WithOpenApi();
 
-        admin.MapPost("/offline/activation-entitlements/batch-generate", [Authorize(Policy = SmartPosPolicies.SupportOrSecurity)] async (
+        admin.MapPost("/offline/activation-entitlements/batch-generate", [Authorize(Policy = SmartPosPolicies.SupportOrBilling)] async (
             AdminOfflineActivationEntitlementBatchGenerateRequest request,
             HttpContext httpContext,
             LicenseService licenseService,
@@ -1514,7 +1514,7 @@ public static class LicenseEndpoints
                 return ToErrorResult(ex);
             }
         })
-        .RequireAuthorization(SmartPosPolicies.SupportOrSecurity)
+        .RequireAuthorization(SmartPosPolicies.SupportOrBilling)
         .WithName("AdminGenerateOfflineActivationEntitlementBatch")
         .WithOpenApi();
 

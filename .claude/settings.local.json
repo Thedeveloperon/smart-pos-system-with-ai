@@ -24,7 +24,8 @@
       "Bash(grep -r \"GetOwnerLicensePortal\\\\|license.portal\" \"c:\\\\Users\\\\User\\\\Desktop\\\\smart-pos-system-with-ai-main\" --include=\"*.cs\" --include=\"*.ts\" --include=\"*.tsx\" 2>nul | head -10)",
       "Bash(grep -r \"/api/license/account/licenses\" \"c:\\\\Users\\\\User\\\\Desktop\\\\smart-pos-system-with-ai-main\\\\services\\\\backend-api\" --include=\"*.cs\" 2>nul | head -5)",
       "Bash(grep -n \"GetCustomerLicensePortalAsync\" \"c:\\\\Users\\\\User\\\\Desktop\\\\smart-pos-system-with-ai-main\\\\services\\\\backend-api\\\\Features\\\\Licensing\\\\LicenseService.cs\" 2>nul | head -5)",
-      "Bash(xargs grep -l \"GetAdminShopsSnapshot\")"
+      "Bash(xargs grep -l \"GetAdminShopsSnapshot\")",
+      "Bash(dotnet build *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\User\\Desktop\\smart-pos-system-with-ai-main"
