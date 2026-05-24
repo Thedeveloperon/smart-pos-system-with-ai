@@ -356,6 +356,7 @@ export default function AdminLicensesPanel({ shops, canManage, onRefresh }: Admi
         allow_if_existing_batch: keyAllowExisting,
         actor_note: keyActorNote,
         actor: "billing-ui",
+        reason_code: "activation_key_issued",
       });
       const keys: GeneratedKey[] = result.entitlements.map((e) => ({
         key: e.activation_entitlement_key,
