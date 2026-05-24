@@ -7,6 +7,7 @@ import type { LicenseStatus } from "@/lib/api";
 type LicenseActivationScreenProps = {
   error?: string | null;
   isBusy?: boolean;
+  terminalId?: string;
   activationEntitlementKey?: string;
   onActivationEntitlementKeyChange?: (value: string) => void;
   onActivate: (activationEntitlementKey?: string) => void;
@@ -42,6 +43,8 @@ const MARKETING_WEBSITE_BASE_URL = (import.meta.env.VITE_MARKETING_WEBSITE_URL |
   "",
 );
 const MARKETING_ADMIN_LOGIN_URL = `${MARKETING_WEBSITE_BASE_URL}/admin/login`;
+const CLOUD_PORTAL_BASE_URL = (import.meta.env.VITE_CLOUD_PORTAL_URL || "").trim().replace(/\/$/, "");
+const CLOUD_PORTAL_ACCOUNT_URL = CLOUD_PORTAL_BASE_URL ? `${CLOUD_PORTAL_BASE_URL}/account` : "";
 
 const formatDateTime = (value?: Date | null) => {
   if (!value) {
@@ -97,11 +100,14 @@ const formatOfflineGrantRemaining = (status: LicenseStatus) => {
 export const LicenseActivationScreen = ({
   error,
   isBusy,
+  terminalId,
   activationEntitlementKey,
   onActivationEntitlementKeyChange,
   onActivate,
   onRefresh,
 }: LicenseActivationScreenProps) => {
+  const cloudPortalAccountUrl = CLOUD_PORTAL_ACCOUNT_URL || MARKETING_ADMIN_LOGIN_URL;
+
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-md space-y-6">
@@ -155,6 +161,26 @@ export const LicenseActivationScreen = ({
             <Button variant="outline" className="rounded-xl" onClick={onRefresh} disabled={isBusy}>
               Recheck Status
             </Button>
+          </div>
+
+          <div className="border-t border-border pt-3 space-y-1.5">
+            <p className="text-xs text-muted-foreground">
+              Don&apos;t have a key?{" "}
+              <a
+                href={cloudPortalAccountUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline underline-offset-2 hover:text-foreground transition-colors"
+              >
+                Sign in to your cloud portal
+              </a>{" "}
+              to view or request your activation key.
+            </p>
+            {terminalId && (
+              <p className="text-xs text-muted-foreground font-mono">
+                Terminal ID: <span className="select-all">{terminalId}</span>
+              </p>
+            )}
           </div>
         </div>
       </div>

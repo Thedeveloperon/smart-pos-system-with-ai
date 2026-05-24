@@ -12,7 +12,9 @@
       "Bash(npx tsc *)",
       "Bash(node_modules\\\\.bin\\\\tsc --noEmit)",
       "Bash(./node_modules/.bin/tsc --noEmit)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(grep -n \"admin\\\\\\\\.MapPost.*offline\\\\|admin\\\\\\\\.MapGet\\\\|admin\\\\\\\\.MapGroup\" \"c:\\\\Users\\\\User\\\\Desktop\\\\smart-pos-system-with-ai-main\\\\services\\\\backend-api\\\\Features\\\\Licensing\\\\LicenseEndpoints.cs\")",
+      "Bash(xargs grep -l \"request.*entitlement\\\\|entitlement.*request\")"
     ]
   }
 }

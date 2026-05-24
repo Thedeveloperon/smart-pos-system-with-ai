@@ -9,6 +9,7 @@ import { LicensingProvider, useLicensing } from "@/components/licensing/Licensin
 import { LicenseActivationScreen, LicenseBlockedScreen } from "@/components/licensing/LicenseScreens";
 import SplashScreen from "@/components/ui/SplashScreen";
 import { isSuperAdminBackendRole } from "@/lib/auth";
+import { getTerminalId } from "@/lib/api";
 import AdminConsole from "./pages/AdminConsole";
 import Index from "./pages/Index.tsx";
 import InventoryManagerDashboard from "./pages/InventoryManagerDashboard.tsx";
@@ -123,6 +124,7 @@ const LicenseGate = () => {
         <LicenseActivationScreen
           error={error}
           isBusy={isActivating || isRefreshing}
+          terminalId={getTerminalId()}
           activationEntitlementKey={activationEntitlementKey}
           onActivationEntitlementKeyChange={setActivationEntitlementKey}
           onActivate={(key) => {
